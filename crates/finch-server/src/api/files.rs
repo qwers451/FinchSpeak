@@ -105,6 +105,7 @@ pub async fn upload_file_handler(
 
 /// Handler for GET /api/files/:id
 pub async fn download_file_handler(
+    _auth: AuthUser,
     Path(file_id_str): Path<String>,
     State(state): State<ArcSharedState>,
 ) -> Result<impl IntoResponse, ServerError> {

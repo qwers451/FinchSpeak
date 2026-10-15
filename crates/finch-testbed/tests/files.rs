@@ -35,7 +35,6 @@ async fn non_ascii_filename_downloads() -> anyhow::Result<()> {
 
 /// Downloading requires a valid token (AUD-014).
 #[tokio::test]
-#[ignore = "AUD-014"]
 async fn download_requires_auth() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
     let a = TestClient::register(&server, "alice").await?;
