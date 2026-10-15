@@ -1,0 +1,222 @@
+//! Multi-speaker audio mixer with `tanh()` soft-limiting and local speech tracking.
+//!
+//! - Mixes up to N participants every 20 ms.
+//! - Per-speaker volume scaling (0.0 to 2.0).
+//! - Non-linear `x.tanh()` soft limiter prevents harsh clipping when multiple people talk/shout.
+//! - Tracks speaker activity locally (250 ms timeout or silence flag triggers UI speaking border events).
+
+use std::collections::hash_map::{Entry, HashMap};
+use std::time::{Duration, Instant};
+
+use bytes::Bytes;
+use finch_protocol::media::MediaHeader;
+
+use crate::jitter::{JitterBuffer, PlayoutResult};
+use crate::resampler::FRAME_SIZE_48K;
+
+/// Timeout after which a speaker is considered silent if no packets arrive (250 ms).
+pub const SPEECH_TIMEOUT: Duration = Duration::from_millis(250);
+
+/// State for a single remote speaker.
+pub struct RemoteSpeaker {
+    pub peer_id: u32,
+    pub volume: f32,
+    pub jitter_buffer: JitterBuffer,
+    pub last_packet_time: Instant,
+    pub is_speaking: bool,
+}
+
+/// Multi-speaker audio mixer.
+pub struct AudioMixer {
+    speakers: HashMap<u32, RemoteSpeaker>,
+    scratch_buf: [f32; FRAME_SIZE_48K],
+}
+
+impl Default for AudioMixer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AudioMixer {
+    pub fn new() -> Self {
+        Self {
+            speakers: HashMap::new(),
+            scratch_buf: [0.0f32; FRAME_SIZE_48K],
+        }
+    }
+
+    /// Add or update a speaker's volume multiplier (0.0 to 2.0).
+    pub fn set_speaker_volume(&mut self, peer_id: u32, volume: f32) {
+        let clamped = volume.clamp(0.0, 2.0);
+        if let Some(speaker) = self.speakers.get_mut(&peer_id) {
+            speaker.volume = clamped;
+        }
+    }
+
+    /// Remove a speaker who left the voice channel.
+    pub fn remove_speaker(&mut self, peer_id: u32) {
+        self.speakers.remove(&peer_id);
+    }
+
+    /// Feed an incoming audio packet from the network into the appropriate speaker's jitter buffer.
+    /// Returns `Some((peer_id, speaking))` if a UI speech state transition occurred.
+    pub fn on_audio_packet(
+        &mut self,
+        header: &MediaHeader,
+        payload: Bytes,
+        now: Instant,
+    ) -> Option<(u32, bool)> {
+        let peer_id = header.sender_peer_id;
+        let is_silence = header.is_silence();
+
+        let speaker = match self.speakers.entry(peer_id) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let jitter_buffer = match JitterBuffer::new() {
+                    Ok(jb) => jb,
+                    Err(err) => {
+                        tracing::error!(
+                            peer_id,
+                            %err,
+                            "Failed to initialize JitterBuffer decoder for speaker"
+                        );
+                        return None;
+                    }
+                };
+                entry.insert(RemoteSpeaker {
+                    peer_id,
+                    volume: 1.0,
+                    jitter_buffer,
+                    last_packet_time: now,
+                    is_speaking: false,
+                })
+            }
+        };
+
+        speaker.last_packet_time = now;
+        speaker.jitter_buffer.push(header, payload, now);
+
+        if is_silence {
+            if speaker.is_speaking {
+                speaker.is_speaking = false;
+                return Some((peer_id, false));
+            }
+        } else if !speaker.is_speaking {
+            speaker.is_speaking = true;
+            return Some((peer_id, true));
+        }
+
+        None
+    }
+
+    /// Mix all remote speakers into a 960-sample 48 kHz output buffer.
+    /// Applies individual volume adjustments and `tanh()` soft-limiting.
+    /// Returns a list of speakers whose speech status changed (e.g. timed out after 250 ms).
+    pub fn mix_frame(
+        &mut self,
+        output: &mut [f32; FRAME_SIZE_48K],
+        now: Instant,
+    ) -> Vec<(u32, bool)> {
+        output.fill(0.0);
+        let mut speech_events = Vec::new();
+
+        for speaker in self.speakers.values_mut() {
+            // Check for 250 ms silence timeout
+            if speaker.is_speaking && now.saturating_duration_since(speaker.last_packet_time) > SPEECH_TIMEOUT {
+                speaker.is_speaking = false;
+                speech_events.push((speaker.peer_id, false));
+            }
+
+            // Pop next decoded 20 ms frame
+            let result = speaker.jitter_buffer.pop_frame(&mut self.scratch_buf);
+            if result == PlayoutResult::Normal || result == PlayoutResult::Concealed {
+                let vol = speaker.volume;
+                for (out_sample, &in_sample) in output.iter_mut().zip(self.scratch_buf.iter()) {
+                    *out_sample += in_sample * vol;
+                }
+            }
+        }
+
+        // Apply tanh() soft-limiting: compresses loud peaks without hard digital clipping
+        for sample in output.iter_mut() {
+            *sample = sample.tanh();
+        }
+
+        speech_events
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::opus::OpusVoiceEncoder;
+
+    #[test]
+    fn test_mixer_soft_limiting() {
+        let mut mixer = AudioMixer::new();
+        let now = Instant::now();
+
+        let mut encoder = OpusVoiceEncoder::new(64).unwrap();
+        // Loud test signal
+        let loud = [0.9f32; FRAME_SIZE_48K];
+        let opus_data = encoder.encode(&loud).unwrap();
+
+        // 3 loud speakers simultaneously
+        for peer_id in 1..=3 {
+            let header = MediaHeader::new_audio(1, peer_id, 1, 0, false, false);
+            mixer.on_audio_packet(&header, opus_data.clone(), now);
+        }
+
+        let mut out = [0.0f32; FRAME_SIZE_48K];
+        let _ = mixer.mix_frame(&mut out, now);
+
+        // Verify tanh() keeps all samples strictly within (-1.0, 1.0)
+        for &s in &out {
+            assert!(s.abs() < 1.0);
+        }
+    }
+
+    #[test]
+    fn test_on_audio_packet_speech_transitions() {
+        let mut mixer = AudioMixer::new();
+        let now = Instant::now();
+        let payload = Bytes::from_static(&[0u8; 10]);
+
+        // First packet (normal speech) triggers transition to speaking: true
+        let normal_hdr = MediaHeader::new_audio(1, 42, 1, 0, false, false);
+        let event = mixer.on_audio_packet(&normal_hdr, payload.clone(), now);
+        assert_eq!(event, Some((42, true)));
+
+        // Subsequent normal packet from same speaker does not generate transition event
+        let next_hdr = MediaHeader::new_audio(1, 42, 2, 960, false, false);
+        let event = mixer.on_audio_packet(&next_hdr, payload.clone(), now);
+        assert_eq!(event, None);
+
+        // Silence packet triggers transition to speaking: false
+        let silence_hdr = MediaHeader::new_audio(1, 42, 3, 1920, true, false);
+        let event = mixer.on_audio_packet(&silence_hdr, payload, now);
+        assert_eq!(event, Some((42, false)));
+    }
+
+    #[test]
+    fn test_speech_timeout_in_mix_frame() {
+        let mut mixer = AudioMixer::new();
+        let now = Instant::now();
+        let payload = Bytes::from_static(&[0u8; 10]);
+
+        // Start speaking
+        let normal_hdr = MediaHeader::new_audio(1, 100, 1, 0, false, false);
+        let _ = mixer.on_audio_packet(&normal_hdr, payload, now);
+
+        let mut out = [0.0f32; FRAME_SIZE_48K];
+
+        // Before 250 ms timeout: no event
+        let events = mixer.mix_frame(&mut out, now + Duration::from_millis(200));
+        assert!(events.is_empty());
+
+        // After 250 ms timeout: speaker 100 is marked silent
+        let events = mixer.mix_frame(&mut out, now + Duration::from_millis(260));
+        assert_eq!(events, vec![(100, false)]);
+    }
+}

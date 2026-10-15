@@ -1,0 +1,59 @@
+[package]
+name = "finch-server"
+description = "FinchSpeak server — QUIC SFU, REST API, and chat"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+finch-protocol = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+
+# QUIC
+quinn = { workspace = true }
+rustls = { workspace = true }
+rcgen = { workspace = true }
+ring = "0.17"
+
+# Web / REST
+axum = { version = "0.8", features = ["ws", "multipart"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+
+# Database
+sqlx = { workspace = true }
+
+# Auth
+argon2 = "0.5"
+rand_core = { version = "0.6", features = ["getrandom"] }
+jsonwebtoken = "9"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+rmp-serde = { workspace = true }
+
+# Identity
+uuid = { workspace = true }
+
+# Concurrency
+dashmap = "6"
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Bytes
+bytes = { workspace = true }
+
+# Config
+toml = "0.8"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

@@ -1,0 +1,36 @@
+[package]
+name = "finch-audio"
+description = "Audio pipeline for FinchSpeak — capture, noise suppression, Opus codec, jitter buffer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+finch-protocol = { workspace = true }
+
+# Audio I/O
+cpal = "0.15"
+
+# Resampling
+rubato = "0.16"
+
+# Opus codec
+audiopus = "0.3.0-rc.0"
+
+# Noise suppression
+nnnoiseless = "0.5"
+
+# Ring buffer for real-time audio
+ringbuf = "0.4"
+
+# Encryption (E2EE)
+chacha20poly1305 = "0.10"
+
+# Logging
+tracing = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Bytes
+bytes = { workspace = true }

@@ -1,0 +1,17 @@
+# FinchSpeak Server Configuration
+
+[server]
+host = "0.0.0.0"
+quic_port = 4433
+http_port = 8443
+
+[database]
+url = "sqlite://finchspeak.db?mode=rwc"
+
+[storage]
+upload_dir = "./data/uploads"
+max_file_size_mb = 50
+
+[auth]
+jwt_secret = "finchspeak_jwt_secret_change_in_production_32bytes_long!"
+jwt_expiration_hours = 72
