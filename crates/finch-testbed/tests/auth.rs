@@ -91,3 +91,18 @@ async fn expired_jwt_rejected() -> anyhow::Result<()> {
     let expired = token_for(&alice, &secret, now_secs() - 3600);
     assert_token_rejected(&server, expired).await
 }
+
+/// The server tells the client its QUIC port, so no port guessing is needed (AUD-028).
+#[tokio::test]
+async fn login_reports_quic_port() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    TestClient::register(&server, "alice").await?;
+    let api = ApiClient::new(&server.http_url)?;
+    let auth = api.login("alice", "password_123").await?;
+    assert_eq!(auth.quic_port, Some(server.quic_addr.port()));
+
+    let (addr, host) = finch_client_core::api::resolve_quic_addr_with_port(&server.http_url, auth.quic_port)?;
+    assert_eq!(addr, server.quic_addr);
+    assert_eq!(host, "127.0.0.1");
+    Ok(())
+}

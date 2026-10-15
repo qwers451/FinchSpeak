@@ -39,6 +39,20 @@ pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
 
     let sessions = SessionManager::new();
 
+    let quic_bind: SocketAddr = format!("{}:{}", config.server.host, config.server.quic_port)
+        .parse()
+        .context("Invalid QUIC bind address")?;
+    let (cert, key) = quic::load_or_create_cert(std::path::Path::new(&config.server.tls_dir))
+        .context("Failed to load TLS certificate")?;
+    let server_config = quic::make_server_config_with(cert, key).context("failed to create server config")?;
+    let endpoint = quinn::Endpoint::server(server_config, quic_bind)
+        .with_context(|| format!("Failed to bind QUIC endpoint on {quic_bind}"))?;
+    let quic_addr = endpoint.local_addr()?;
+    tracing::info!("QUIC server starting on udp://{quic_addr}");
+
+    // Clients learn the QUIC port from the login response.
+    config.server.quic_port = quic_addr.port();
+
     let http_bind: SocketAddr = format!("{}:{}", config.server.host, config.server.http_port)
         .parse()
         .context("Invalid HTTP bind address")?;
@@ -58,17 +72,6 @@ pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
             tracing::error!("HTTP server error: {e}");
         }
     });
-
-    let quic_bind: SocketAddr = format!("{}:{}", config.server.host, config.server.quic_port)
-        .parse()
-        .context("Invalid QUIC bind address")?;
-    let (cert, key) = quic::load_or_create_cert(std::path::Path::new(&config.server.tls_dir))
-        .context("Failed to load TLS certificate")?;
-    let server_config = quic::make_server_config_with(cert, key).context("failed to create server config")?;
-    let endpoint = quinn::Endpoint::server(server_config, quic_bind)
-        .with_context(|| format!("Failed to bind QUIC endpoint on {quic_bind}"))?;
-    let quic_addr = endpoint.local_addr()?;
-    tracing::info!("QUIC server starting on udp://{quic_addr}");
 
     let quic_endpoint = endpoint.clone();
     let jwt_secret = config.auth.jwt_secret.clone();

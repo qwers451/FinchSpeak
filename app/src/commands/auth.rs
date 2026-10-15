@@ -1,6 +1,6 @@
 //! Authentication and session management commands.
 
-use finch_client_core::api::{resolve_quic_addr, ApiClient, AuthResponse};
+use finch_client_core::api::{resolve_quic_addr_with_port, ApiClient, AuthResponse};
 use tauri::{AppHandle, State};
 use tracing::{error, info};
 
@@ -31,7 +31,7 @@ pub async fn login(
     *state.current_user.write().await = Some(auth_data.user.clone());
 
     // Connect QUIC
-    match resolve_quic_addr(&server_url) {
+    match resolve_quic_addr_with_port(&server_url, auth_data.quic_port) {
         Ok((quic_addr, hostname)) => {
             *state.server_quic_addr.write().await = Some(quic_addr);
             if let Err(e) = start_quic_session(
@@ -81,7 +81,7 @@ pub async fn register(
     *state.current_user.write().await = Some(auth_data.user.clone());
 
     // Connect QUIC
-    if let Ok((quic_addr, hostname)) = resolve_quic_addr(&server_url) {
+    if let Ok((quic_addr, hostname)) = resolve_quic_addr_with_port(&server_url, auth_data.quic_port) {
         *state.server_quic_addr.write().await = Some(quic_addr);
         if let Err(e) = start_quic_session(
             quic_addr,

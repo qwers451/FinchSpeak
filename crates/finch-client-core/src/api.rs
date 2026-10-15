@@ -24,6 +24,9 @@ pub struct UserDto {
 pub struct AuthResponse {
     pub token: String,
     pub user: UserDto,
+    /// QUIC port announced by the server (older servers do not send it).
+    #[serde(default)]
+    pub quic_port: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,6 +214,27 @@ async fn check_status(resp: reqwest::Response) -> Result<reqwest::Response, Clie
 async fn parse_json<T: DeserializeOwned>(resp: reqwest::Response) -> Result<T, ClientError> {
     let resp = check_status(resp).await?;
     Ok(resp.json().await?)
+}
+
+/// QUIC address of a server: the host of its REST URL and the port the server announced,
+/// falling back to [`resolve_quic_addr`]'s guess for servers that do not announce one.
+pub fn resolve_quic_addr_with_port(
+    server_url: &str,
+    quic_port: Option<u16>,
+) -> Result<(SocketAddr, String), ClientError> {
+    let Some(port) = quic_port else {
+        return resolve_quic_addr(server_url);
+    };
+    let url = reqwest::Url::parse(server_url).map_err(|e| ClientError::Network(e.to_string()))?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| ClientError::Network("Missing host in server_url".to_string()))?;
+    let addr = format!("{host}:{port}")
+        .to_socket_addrs()
+        .map_err(|e| ClientError::Network(e.to_string()))?
+        .next()
+        .ok_or_else(|| ClientError::Network(format!("Could not resolve host: {host}")))?;
+    Ok((addr, host.to_string()))
 }
 
 /// Derive the QUIC address of a server from its REST URL.

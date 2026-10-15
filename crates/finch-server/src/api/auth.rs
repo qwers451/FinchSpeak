@@ -175,6 +175,8 @@ pub struct LoginRequest {
 pub struct AuthResponse {
     pub token: String,
     pub user: UserDto,
+    /// UDP port of the QUIC server, so clients do not have to guess it.
+    pub quic_port: u16,
 }
 
 #[derive(Debug, Serialize)]
@@ -254,6 +256,7 @@ pub async fn register_handler(
                 .await;
 
             let response = AuthResponse {
+                quic_port: state.config.server.quic_port,
                 token,
                 user: UserDto {
                     id: user_id.to_string(),
@@ -321,6 +324,7 @@ pub async fn login_handler(
         .await;
 
     let response = AuthResponse {
+        quic_port: state.config.server.quic_port,
         token,
         user: UserDto {
             id: user_id_str,
