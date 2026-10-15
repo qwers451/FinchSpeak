@@ -51,7 +51,6 @@ async fn download_requires_auth() -> anyhow::Result<()> {
 /// Attachments arrive with the real-time message, and nobody can take over someone
 /// else's attachment (AUD-015).
 #[tokio::test]
-#[ignore = "AUD-015"]
 async fn attachments_are_delivered_and_cannot_be_stolen() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
     let mut a = TestClient::register(&server, "alice").await?;

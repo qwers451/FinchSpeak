@@ -13,7 +13,7 @@ use finch_protocol::codec::{decode_message, encode_message};
 use finch_protocol::media::{MediaHeader, MEDIA_HEADER_SIZE};
 use finch_protocol::messages::{ClientMessage, ServerMessage};
 use finch_protocol::models::{
-    Channel, ChannelMapping, ChannelType, ServerState, User, UserRole, UserStatus, VoiceState,
+    AttachmentInfo, Channel, ChannelMapping, ChannelType, ServerState, User, UserRole, UserStatus, VoiceState,
 };
 
 use crate::api::auth::verify_jwt;
@@ -425,6 +425,29 @@ pub async fn handle_connection(
     Ok(())
 }
 
+/// Attachments linked to a message, in the shape clients receive them.
+async fn linked_attachments(pool: &SqlitePool, message_id: Uuid) -> Vec<AttachmentInfo> {
+    let rows = sqlx::query_as::<_, (String, String, i64, String)>(
+        "SELECT id, filename, size_bytes, content_type FROM attachments WHERE message_id = ? ORDER BY created_at",
+    )
+    .bind(message_id.to_string())
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+    rows.into_iter()
+        .filter_map(|(id, filename, size_bytes, content_type)| {
+            let uuid = Uuid::parse_str(&id).ok()?;
+            Some(AttachmentInfo {
+                id: uuid,
+                url: format!("/api/files/{id}"),
+                filename,
+                size_bytes: size_bytes as u64,
+                content_type,
+            })
+        })
+        .collect()
+}
+
 /// Maximum length of a chat message in characters.
 const MAX_MESSAGE_CHARS: usize = 4000;
 
@@ -506,14 +529,18 @@ async fn handle_client_message(
             }
 
             if res.is_ok() {
-                // Link attachments to this message
+                // Link attachments to this message: only the uploader's own, not yet used files.
                 for att_id in &attachments {
-                    let _ = sqlx::query("UPDATE attachments SET message_id = ? WHERE id = ?")
-                        .bind(message_id.to_string())
-                        .bind(att_id.to_string())
-                        .execute(pool)
-                        .await;
+                    let _ = sqlx::query(
+                        "UPDATE attachments SET message_id = ? WHERE id = ? AND uploader_id = ? AND message_id IS NULL",
+                    )
+                    .bind(message_id.to_string())
+                    .bind(att_id.to_string())
+                    .bind(user_id.to_string())
+                    .execute(pool)
+                    .await;
                 }
+                let linked = linked_attachments(pool, message_id).await;
 
                 // Broadcast NewMessage to all connected users
                 let new_msg = ServerMessage::NewMessage {
@@ -522,7 +549,7 @@ async fn handle_client_message(
                     author_id: user_id,
                     author_name: username.to_string(),
                     content,
-                    attachments: vec![],
+                    attachments: linked,
                     timestamp: now,
                 };
                 sessions.broadcast_all(new_msg).await;
