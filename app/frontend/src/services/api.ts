@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { Channel, Message, User, AudioDevice, VoiceParticipant } from '../types';
+import type { Channel, IncomingMessage, MessageHistory, User, AudioDevice, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -56,8 +56,17 @@ export const api = {
     if (isTauri()) {
       return invoke('logout');
     }
-    browserToken = null;
-    browserUser = null;
+    try {
+      if (browserToken) {
+        const response = await fetch(`${browserServerUrl}/api/auth/logout`, {
+          method: 'POST', headers: { Authorization: `Bearer ${browserToken}` },
+        });
+        if (!response.ok && response.status !== 401) throw new Error(`Logout failed: ${response.status}`);
+      }
+    } finally {
+      browserToken = null;
+      browserUser = null;
+    }
   },
 
   getCurrentUser: async (): Promise<User | null> => {
@@ -65,6 +74,11 @@ export const api = {
       return invoke('get_current_user');
     }
     return browserUser;
+  },
+
+  getSessionSnapshot: async (): Promise<SessionSnapshot | null> => {
+    if (isTauri()) return invoke('get_session_snapshot');
+    return null;
   },
 
   trustFingerprint: async (hostname: string, fingerprint: string): Promise<void> => {
@@ -101,7 +115,7 @@ export const api = {
     return resp.json();
   },
 
-  fetchChannelMessages: async (channelId: string, before?: number, limit?: number): Promise<{ channel_id: string; messages: Message[]; has_more: boolean }> => {
+  fetchChannelMessages: async (channelId: string, before?: number, limit?: number): Promise<MessageHistory> => {
     if (isTauri()) {
       return invoke('fetch_channel_messages', { channelId, before, limit });
     }
@@ -171,9 +185,13 @@ export const api = {
   },
 
   // Event Listeners
-  onNewMessage: async (cb: (msg: Message) => void): Promise<UnlistenFn> => {
+  onSessionEvent: async <K extends keyof SessionEvents>(event: K, callback: (payload: SessionEvents[K]) => void): Promise<UnlistenFn> => {
+    if (isTauri()) return listen<SessionEvents[K]>(event, ({ payload }) => callback(payload));
+    return () => {};
+  },
+  onNewMessage: async (cb: (msg: IncomingMessage) => void): Promise<UnlistenFn> => {
     if (isTauri()) {
-      return listen('new-message', (e) => cb(e.payload as Message));
+      return listen<IncomingMessage>('new-message', (e) => cb(e.payload));
     }
     return () => {};
   },

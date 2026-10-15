@@ -7,6 +7,7 @@ import {
 } from '../stores/voiceStore';
 import { currentUser } from '../stores/authStore';
 import { api } from '../services/api';
+import { localPeerId } from '../stores/sessionStore';
 
 export function VoicePanel() {
   const handleVolumeChange = (peerId: number, vol: number) => {
@@ -36,7 +37,7 @@ export function VoicePanel() {
         </div>
 
         {/* Remote participants */}
-        <For each={voiceParticipants()}>
+        <For each={voiceParticipants().filter((participant) => participant.peer_id !== localPeerId())}>
           {(participant) => {
             const isSpeaking = () => speakingPeers().has(participant.peer_id);
             return (
@@ -45,6 +46,8 @@ export function VoicePanel() {
                   {participant.username.charAt(0).toUpperCase()}
                 </div>
                 <div class="participant-name">{participant.username}</div>
+                <Show when={participant.is_muted}><span title="Muted">🔇</span></Show>
+                <Show when={participant.is_deafened}><span title="Deafened">🎧</span></Show>
 
                 {/* Per-user volume slider */}
                 <div style={{ display: "flex", "align-items": "center", gap: "8px", width: "100%", "margin-top": "6px" }}>
@@ -54,8 +57,8 @@ export function VoicePanel() {
                     min="0"
                     max="2"
                     step="0.05"
-                    defaultValue="1.0"
-                    style={{ flex: 1, accentColor: "var(--accent-teal)" }}
+                    value="1.0"
+                    style={{ flex: 1, "accent-color": "var(--accent-teal)" }}
                     onChange={(e) => handleVolumeChange(participant.peer_id, parseFloat(e.currentTarget.value))}
                   />
                   <span style={{ "font-size": "0.75rem", color: "var(--text-dim)" }}>🔊</span>

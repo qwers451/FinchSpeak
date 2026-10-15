@@ -52,10 +52,12 @@ body {
 }
 
 /* App container */
+#root { height: 100vh; display: flex; flex-direction: column; }
 .app-layout {
   display: flex;
   width: 100vw;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -541,3 +543,8 @@ body {
   word-break: break-all;
   line-height: 1.4;
 }
+/* Session status remains visible above the app layout. */
+.status-banner { padding: 8px 16px; background: #654d12; color: #fff; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.error-banner { background: #742d36; }
+.channel-participant { padding: 4px 12px 4px 40px; font-size: .85rem; color: var(--text-muted); }
+.online-users { max-height: 180px; overflow-y: auto; }

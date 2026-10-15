@@ -1,7 +1,10 @@
 import { createSignal } from 'solid-js';
 import type { User } from '../types';
 import { api } from '../services/api';
-import { loadChannels } from './chatStore';
+import { loadChannels, resetChatState } from './chatStore';
+import { resetSessionState } from './sessionStore';
+import { setActiveVoiceChannel } from './voiceStore';
+import { setAppError } from './notificationStore';
 
 export const [currentUser, setCurrentUser] = createSignal<User | null>(null);
 export const [serverUrl, setServerUrl] = createSignal<string>('http://127.0.0.1:8443');
@@ -44,6 +47,12 @@ export async function registerUser(username: string, displayName: string, passwo
 }
 
 export async function logoutUser() {
-  await api.logout();
+  let failure: unknown;
+  try { await api.logout(); } catch (error) { failure = error; }
+  resetSessionState();
+  setActiveVoiceChannel(null);
+  resetChatState();
+  setPendingTofu(null);
   setCurrentUser(null);
+  if (failure) setAppError(String(failure));
 }

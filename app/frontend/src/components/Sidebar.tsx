@@ -3,6 +3,7 @@ import {
   channels,
   activeChannel,
   selectChannel,
+  loadChannels,
 } from '../stores/chatStore';
 import {
   activeVoiceChannel,
@@ -14,9 +15,13 @@ import {
   toggleDeafen,
   isLocalSpeaking,
   pingRtt,
+  participantsForChannel,
 } from '../stores/voiceStore';
+import { connectionStatus, onlineUsers, presence } from '../stores/sessionStore';
+import { setAppError } from '../stores/notificationStore';
 import { currentUser, logoutUser } from '../stores/authStore';
 import type { Channel } from '../types';
+import { api } from '../services/api';
 
 export function Sidebar() {
   const textChannels = () => channels().filter((c) => c.channel_type === 'text');
@@ -35,6 +40,7 @@ export function Sidebar() {
         {/* Text Channels */}
         <div class="channel-category" style={{ display: "flex", "justify-content": "space-between", "align-items": "center" }}>
           <span>Text Channels</span>
+          <Show when={currentUser()?.role === 'admin'}>
           <button
             class="icon-btn"
             style={{ "font-size": "0.9rem", padding: "2px 6px", cursor: "pointer" }}
@@ -42,13 +48,16 @@ export function Sidebar() {
             onClick={async () => {
               const name = prompt('Enter new channel name:');
               if (name && name.trim()) {
-                await api.createChannel(name.trim(), 'text');
-                await loadChannels();
+                try {
+                  await api.createChannel(name.trim(), 'text');
+                  await loadChannels();
+                } catch (error) { setAppError(String(error)); }
               }
             }}
           >
             +
           </button>
+          </Show>
         </div>
         <For each={textChannels()}>
           {(channel) => (
@@ -66,6 +75,7 @@ export function Sidebar() {
         {/* Voice Channels */}
         <div class="channel-category" style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "margin-top": "14px" }}>
           <span>Voice Channels</span>
+          <Show when={currentUser()?.role === 'admin'}>
           <button
             class="icon-btn"
             style={{ "font-size": "0.9rem", padding: "2px 6px", cursor: "pointer" }}
@@ -73,16 +83,20 @@ export function Sidebar() {
             onClick={async () => {
               const name = prompt('Enter new voice channel name:');
               if (name && name.trim()) {
-                await api.createChannel(name.trim(), 'voice');
-                await loadChannels();
+                try {
+                  await api.createChannel(name.trim(), 'voice');
+                  await loadChannels();
+                } catch (error) { setAppError(String(error)); }
               }
             }}
           >
             +
           </button>
+          </Show>
         </div>
         <For each={voiceChannels()}>
           {(channel) => (
+            <div>
             <div
               class={`channel-item ${activeVoiceChannel()?.id === channel.id ? 'active' : ''}`}
               style={{ cursor: "pointer" }}
@@ -96,7 +110,22 @@ export function Sidebar() {
               <span style={{ "font-size": "1.1rem" }}>🔊</span>
               <span>{channel.name}</span>
             </div>
+            <For each={participantsForChannel(channel.id)}>
+              {(participant) => <div class="channel-participant">
+                {participant.username}
+                <Show when={participant.is_muted}><span title="Muted"> 🔇</span></Show>
+                <Show when={participant.is_deafened}><span title="Deafened"> 🎧</span></Show>
+              </div>}
+            </For>
+            </div>
           )}
+        </For>
+      </div>
+
+      <div class="online-users">
+        <div class="channel-category">Online — {onlineUsers().length}</div>
+        <For each={onlineUsers()}>
+          {(user) => <div class="channel-participant">{user.display_name || user.username} · {presence()[user.id] ?? user.status ?? 'online'}</div>}
         </For>
       </div>
 
@@ -105,7 +134,7 @@ export function Sidebar() {
         {(channel) => (
           <div class="voice-banner">
             <div class="voice-status">
-              <span style={{ "font-size": "0.95rem" }}>● Connected</span>
+              <span style={{ "font-size": "0.95rem" }}>● {connectionStatus() === 'connected' ? 'Connected' : 'Disconnected'}</span>
               <span style={{ color: "var(--text-main)", "font-weight": "500" }}>{channel().name}</span>
               <Show when={pingRtt() !== null}>
                 <span class="ping-indicator">{pingRtt()}ms</span>

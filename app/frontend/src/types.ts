@@ -4,6 +4,7 @@ export interface User {
   display_name: string;
   role: 'admin' | 'member';
   avatar_url?: string | null;
+  status?: UserStatus;
 }
 
 export interface Channel {
@@ -25,13 +26,21 @@ export interface AttachmentInfo {
 }
 
 export interface Message {
-  message_id: string;
+  id: string;
   channel_id: string;
   author_id: string;
   author_name: string;
   content: string;
   attachments: AttachmentInfo[];
   timestamp: number;
+}
+
+export type IncomingMessage = Omit<Message, 'id'> & { message_id: string };
+export type HistoryMessage = Omit<Message, 'channel_id'>;
+export interface MessageHistory {
+  channel_id: string;
+  messages: HistoryMessage[];
+  has_more: boolean;
 }
 
 export interface VoiceParticipant {
@@ -47,4 +56,46 @@ export interface VoiceParticipant {
 export interface AudioDevice {
   name: string;
   is_default: boolean;
+}
+
+export type UserStatus = 'online' | 'idle' | 'donotdisturb' | 'offline';
+export interface SessionEvents {
+  authenticated: {
+    session_peer_id: number;
+    user_id: string;
+    channels: { id: string; short_id: number }[];
+    initial_state: {
+      channels: Channel[];
+      online_users: User[];
+      voice_states: (Omit<VoiceParticipant, 'is_muted' | 'is_deafened'> & {
+        muted: boolean; deafened: boolean; sharing_screen: boolean;
+      })[];
+    };
+  };
+  'new-message': IncomingMessage;
+  'user-speaking': { peer_id: number; is_speaking: boolean };
+  'local-speaking': boolean;
+  'ping-rtt': { rtt_ms: number };
+  'tofu-required': { hostname: string; fingerprint: string };
+  'channel-created': { channel: Channel };
+  'user-joined-voice': VoiceParticipant;
+  'user-left-voice': { user_id: string; peer_id: number; channel_id: string };
+  'user-voice-state-changed': { peer_id: number; muted: boolean; deafened: boolean };
+  'presence-update': { user_id: string; status: UserStatus };
+  'connection-lost': string;
+  reconnecting: null;
+  reconnected: null;
+  'reconnect-failed': string;
+  'server-error': { code: number; message: string };
+}
+
+export interface SessionSnapshot {
+  connected: boolean;
+  user_id: string;
+  session_peer_id: number;
+  current_voice_channel: number | null;
+  muted: boolean;
+  deafened: boolean;
+  pending_tofu: { hostname: string; fingerprint: string } | null;
+  initial_state: SessionEvents['authenticated']['initial_state'] | null;
 }

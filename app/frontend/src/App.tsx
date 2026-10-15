@@ -1,12 +1,8 @@
-import { onMount, onCleanup, Show } from 'solid-js';
-import { currentUser, setPendingTofu } from './stores/authStore';
-import { activeChannel, loadChannels, handleIncomingMessage, handleChannelCreated } from './stores/chatStore';
-import {
-  handleUserSpeaking,
-  setIsLocalSpeaking,
-  setPingRtt,
-  setVoiceParticipants,
-} from './stores/voiceStore';
+import { createSignal, onMount, onCleanup, Show } from 'solid-js';
+import { currentUser, setCurrentUser } from './stores/authStore';
+import { activeChannel, loadChannels } from './stores/chatStore';
+import { appError, setAppError, connectionStatus, connectionError } from './stores/sessionStore';
+import { subscribeSessionEvents } from './services/sessionEvents';
 import { api } from './services/api';
 import { Sidebar } from './components/Sidebar';
 import { ChatArea } from './components/ChatArea';
@@ -16,50 +12,50 @@ import { TofuModal } from './components/TofuModal';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 
 export function App() {
-  const unlisteners: UnlistenFn[] = [];
+  let unlisten: UnlistenFn | undefined;
+  let disposed = false;
+  const [eventsReady, setEventsReady] = createSignal(false);
 
   onMount(async () => {
-    // Check if user is already logged in
     try {
+      const subscriptions = await subscribeSessionEvents();
+      if (disposed) { subscriptions.dispose(); return; }
+      unlisten = subscriptions.dispose;
       const user = await api.getCurrentUser();
+      if (disposed) return;
       if (user) {
+        setCurrentUser(user);
         await loadChannels();
+        await subscriptions.refresh();
       }
-    } catch (_) {}
-
-    // Attach event listeners
-    try {
-      unlisteners.push(await api.onNewMessage(handleIncomingMessage));
-      unlisteners.push(
-        await api.onUserSpeaking((data) => handleUserSpeaking(data.peer_id, data.is_speaking))
-      );
-      unlisteners.push(await api.onLocalSpeaking((s) => setIsLocalSpeaking(s)));
-      unlisteners.push(await api.onPingRtt((data) => setPingRtt(data.rtt_ms)));
-      unlisteners.push(await api.onTofuRequired((data) => setPendingTofu(data)));
-      unlisteners.push(await api.onChannelCreated(handleChannelCreated));
-      unlisteners.push(
-        await api.onUserJoinedVoice((data) => {
-          setVoiceParticipants((prev) => {
-            if (prev.some((p) => p.peer_id === data.peer_id)) return prev;
-            return [...prev, data];
-          });
-        })
-      );
-      unlisteners.push(
-        await api.onUserLeftVoice((data) => {
-          setVoiceParticipants((prev) => prev.filter((p) => p.peer_id !== data.peer_id));
-        })
-      );
+      setEventsReady(true);
     } catch (e) {
-      console.warn('Failed to register some Tauri event listeners (browser dev mode?):', e);
+      if (!disposed) setAppError(String(e));
+    } finally {
+      if (!disposed && unlisten) setEventsReady(true);
     }
   });
 
   onCleanup(() => {
-    unlisteners.forEach((u) => u());
+    disposed = true;
+    unlisten?.();
   });
 
   return (
+    <>
+    <Show when={appError()}>
+      <div class="status-banner error-banner" role="alert">
+        <span>{appError()}</span>
+        <button class="icon-btn" aria-label="Dismiss error" onClick={() => setAppError(null)}>✕</button>
+      </div>
+    </Show>
+    <Show when={currentUser() && connectionStatus() !== 'connected'}>
+      <div class="status-banner" role="status">
+        {connectionStatus() === 'reconnecting' ? 'Переподключение…' : 'Нет соединения'}
+        <Show when={connectionError()}><span> — {connectionError()}</span></Show>
+      </div>
+    </Show>
+    <Show when={eventsReady()} fallback={<div role="status">Подключение интерфейса…</div>}>
     <div class="app-layout">
       <Show when={currentUser()} fallback={<AuthModal />}>
         <Sidebar />
@@ -79,5 +75,7 @@ export function App() {
       {/* Trust On First Use Certificate Modal */}
       <TofuModal />
     </div>
+    </Show>
+    </>
   );
 }
