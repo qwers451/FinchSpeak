@@ -1,10 +1,12 @@
-//! Voice Activity Detection (VAD) with RMS dBFS thresholding and hangover frames.
+//! Voice Activity Detection (VAD) with a speech classifier, RMS dBFS thresholding and hangover frames.
 //!
-//! When volume exceeds the user's configured dBFS threshold, frames are tagged as speech.
+//! In [`VadMode::Speech`] a frame is speech only if the neural classifier says so *and* it is
+//! above the user's dBFS threshold; in [`VadMode::Energy`] the threshold alone decides.
 //! When volume drops, 5 hangover frames (100 ms) of speech are transmitted for smooth fading,
 //! with the final packet tagged with the silence flag (`FLAG_SILENCE`).
 
 use crate::resampler::FRAME_SIZE_48K;
+use crate::speech::SpeechClassifier;
 
 /// Default VAD threshold in dBFS (-45.0 dBFS).
 pub const DEFAULT_VAD_THRESHOLD_DB: f32 = -45.0;
@@ -36,20 +38,49 @@ impl VadDecision {
     }
 }
 
-/// Voice Activity Detector using root-mean-square (RMS) energy.
+/// How the VAD decides that a frame contains speech.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VadMode {
+    /// Neural speech classifier (after noise suppression) plus the loudness threshold.
+    /// Loud non-speech such as a fan or keyboard is not transmitted.
+    #[default]
+    Speech,
+    /// Loudness threshold only. For synthetic signals (test tones, chirps) that are not speech.
+    Energy,
+}
+
+/// Voice Activity Detector: speech classifier and/or root-mean-square (RMS) energy.
 pub struct VoiceActivityDetector {
     threshold_db: f32,
     hangover_remaining: usize,
     was_speaking: bool,
+    classifier: Option<SpeechClassifier>,
 }
 
 impl VoiceActivityDetector {
-    /// Create a new VAD with the specified threshold in dBFS (e.g. -45.0).
+    /// Create a loudness-threshold VAD with the specified threshold in dBFS (e.g. -45.0).
     pub fn new(threshold_db: f32) -> Self {
+        Self::with_mode(VadMode::Energy, threshold_db)
+    }
+
+    /// Create a VAD in the given mode. If the speech classifier cannot be created the VAD
+    /// falls back to the loudness threshold instead of failing.
+    pub fn with_mode(mode: VadMode, threshold_db: f32) -> Self {
+        let classifier = match mode {
+            VadMode::Energy => None,
+            VadMode::Speech => match SpeechClassifier::new() {
+                Ok(classifier) => Some(classifier),
+                Err(error) => {
+                    tracing::error!(%error, "Speech classifier unavailable; VAD uses loudness only");
+                    None
+                }
+            },
+        };
         Self {
             threshold_db,
             hangover_remaining: 0,
             was_speaking: false,
+            classifier,
         }
     }
 
@@ -69,8 +100,13 @@ impl VoiceActivityDetector {
     /// Process a 20 ms audio frame and determine voice activity.
     pub fn process(&mut self, samples: &[f32; FRAME_SIZE_48K]) -> VadDecision {
         let level_db = Self::compute_rms_dbfs(samples);
+        // The classifier is streaming: it must see every frame, loud or not.
+        let is_speech = match &mut self.classifier {
+            Some(classifier) => classifier.is_speech(samples),
+            None => true,
+        };
 
-        if level_db >= self.threshold_db {
+        if is_speech && level_db >= self.threshold_db {
             self.was_speaking = true;
             self.hangover_remaining = HANGOVER_FRAME_COUNT;
             VadDecision::Speaking

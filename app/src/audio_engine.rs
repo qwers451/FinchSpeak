@@ -471,10 +471,12 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         }
                                     }
 
-                                    if let Some(packet) = output.packet {
+                                    if !output.packets.is_empty() {
                                         if let Ok(conn_guard) = state.quic_connection.try_read() {
                                             if let Some(conn) = &*conn_guard {
-                                                let _ = conn.send_datagram(packet);
+                                                for packet in output.packets {
+                                                    let _ = conn.send_datagram(packet);
+                                                }
                                             }
                                         }
                                     }

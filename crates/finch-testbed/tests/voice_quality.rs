@@ -3,14 +3,17 @@
 //! Thresholds come from the spec (docs/superpowers/specs/2026-10-15-audit-and-testbed-design.md)
 //! and must not be lowered without the owner's approval. Measured values go to BASELINE.md.
 
-use finch_audio::{VoiceCapture, VoiceCaptureConfig, FRAME_SIZE_48K};
+use finch_audio::{PREROLL_FRAMES, VoiceCapture, VoiceCaptureConfig, FRAME_SIZE_48K, VadMode, DEFAULT_VAD_THRESHOLD_DB};
 use finch_testbed::audio::{babble, chirp, load_speech_48k, mix_at_snr, pink_noise, white_noise, write_wav_48k};
 use finch_testbed::client::TestClient;
 use finch_testbed::metrics::{delay_samples, erle_db, power, rms_dbfs, segmental_snr_db, snr_db};
 use finch_testbed::server::TestServer;
-use finch_testbed::voice::run_voice_link;
+use finch_testbed::voice::{run_voice_link, run_voice_link_with};
 
 const SR: usize = 48_000;
+
+/// Audio sent ahead of the detected speech start (see `PREROLL_FRAMES`).
+const PREROLL_MS: u32 = PREROLL_FRAMES as u32 * 20;
 
 fn debug_wav(name: &str, samples: &[f32]) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -60,7 +63,8 @@ async fn end_to_end_latency_under_120ms() -> anyhow::Result<()> {
     input.extend_from_slice(&probe);
     input.extend(std::iter::repeat_n(0.0, SR));
 
-    let run = run_voice_link(&a, &mut b, &input, 10).await?;
+    // The chirp is a transport probe, not speech: loudness-threshold VAD.
+    let run = run_voice_link_with(&a, &mut b, &input, 10, VadMode::Energy, DEFAULT_VAD_THRESHOLD_DB).await?;
     debug_wav("latency_in", &input);
     debug_wav("latency_out", &run.output);
 
@@ -156,7 +160,6 @@ fn echo_cancelled_after_convergence() {
 }
 
 #[tokio::test]
-#[ignore = "AUD-050"]
 async fn silence_and_noise_do_not_light_speaking() -> anyhow::Result<()> {
     let (_server, a, mut b) = linked_pair().await?;
 
@@ -174,7 +177,8 @@ async fn silence_and_noise_do_not_light_speaking() -> anyhow::Result<()> {
     let non_silent = run
         .received_headers
         .iter()
-        .filter(|h| !h.is_silence() && h.timestamp < (speech_start / 48) as u32)
+        // The pre-roll sent when speech starts reaches back PREROLL_FRAMES before it.
+        .filter(|h| !h.is_silence() && h.timestamp + PREROLL_MS < (speech_start / 48) as u32)
         .count();
     let speech_lit = run.speaking_events.iter().any(|(frame, _, speaking)| {
         *speaking && *frame >= speech_start / FRAME_SIZE_48K
@@ -197,4 +201,52 @@ async fn silence_and_noise_do_not_light_speaking() -> anyhow::Result<()> {
         "real speech must reach the receiver"
     );
     Ok(())
+}
+
+/// Timestamps (ms) of every packet VoiceCapture would send for `input`, plus the VAD verdicts.
+fn transmitted(input: &[f32], mode: VadMode) -> Vec<u32> {
+    let mut capture = VoiceCapture::new(VoiceCaptureConfig { vad_mode: mode, ..VoiceCaptureConfig::default() })
+        .expect("capture pipeline");
+    let mut timestamps = Vec::new();
+    let (chunks, _) = input.as_chunks::<FRAME_SIZE_48K>();
+    for (i, chunk) in chunks.iter().enumerate() {
+        let mut frame = *chunk;
+        let out = capture.process(&mut frame, 1, (i * 20) as u32);
+        for packet in out.packets {
+            let header = finch_protocol::media::MediaHeader::from_slice(&packet[..20]).expect("header");
+            timestamps.push(header.timestamp);
+        }
+    }
+    timestamps
+}
+
+/// Mic hiss (white noise at -45 dBFS) is not transmitted. White noise at -35 dBFS, a far louder
+/// hiss than any real microphone floor, still fools the classifier on ~3% of the frames
+/// (measured, BASELINE.md); pink noise (fans, rooms) is covered at -35 dBFS above.
+#[test]
+fn white_noise_hiss_is_not_transmitted() {
+    let noise = white_noise(3 * SR, -45.0, 7);
+    assert!(transmitted(&noise, VadMode::Speech).is_empty());
+}
+
+/// The classifier opens 1-3 frames after a word starts; the pre-roll must make up for it. Both
+/// modes send a pre-roll, so the loudness detector's own detection time is its first packet plus
+/// `PREROLL_MS`; the speech classifier's stream must start no later than that.
+#[test]
+fn speech_onset_is_not_clipped() {
+    for name in ["speech_1", "speech_2", "speech_3"] {
+        let mut input = vec![0.0f32; SR];
+        input.extend(load_speech_48k(name).expect("fixture"));
+
+        let first_speech = transmitted(&input, VadMode::Speech).into_iter().next().expect("speech is sent");
+        let first_loud = transmitted(&input, VadMode::Energy).into_iter().next().expect("speech is loud");
+        let loud_detected = first_loud + PREROLL_MS;
+        eprintln!(
+            "BASELINE vad_onset {name}: speech-mode stream starts at {first_speech} ms, loudness threshold detects at {loud_detected} ms"
+        );
+        assert!(
+            first_speech <= loud_detected,
+            "{name}: the start of the utterance is clipped ({first_speech} ms > {loud_detected} ms)"
+        );
+    }
 }

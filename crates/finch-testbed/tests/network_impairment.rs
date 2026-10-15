@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use finch_audio::FRAME_SIZE_48K;
+use finch_audio::{VadMode, FRAME_SIZE_48K};
 use finch_testbed::audio::{babble, chirp};
 use finch_testbed::client::TestClient;
 use finch_testbed::metrics::delay_samples;
@@ -147,7 +147,7 @@ async fn voice_under_loss_and_jitter() -> anyhow::Result<()> {
         input[start..start + probe.len()].copy_from_slice(&probe);
     }
 
-    let run = run_voice_link_with(&a, &mut b, &input, 15, -100.0).await?;
+    let run = run_voice_link_with(&a, &mut b, &input, 15, VadMode::Energy, -100.0).await?;
 
     assert!(!run.received_headers.is_empty(), "receiver got no audio");
     let latencies = probe_latencies(&input, &run.output, &probe_starts)?;

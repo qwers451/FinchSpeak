@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use finch_audio::{AudioMixer, VoiceCapture, VoiceCaptureConfig, FRAME_SIZE_48K};
+use finch_audio::{AudioMixer, VadMode, VoiceCapture, VoiceCaptureConfig, FRAME_SIZE_48K};
 use finch_protocol::media::{MediaHeader, MediaType, MEDIA_HEADER_SIZE};
 use finch_protocol::models::ChannelType;
 
@@ -33,16 +33,19 @@ pub async fn run_voice_link(
     input: &[f32],
     tail_frames: usize,
 ) -> anyhow::Result<VoiceRun> {
-    run_voice_link_with(sender, receiver, input, tail_frames, VoiceCaptureConfig::default().vad_threshold_db).await
+    let defaults = VoiceCaptureConfig::default();
+    run_voice_link_with(sender, receiver, input, tail_frames, defaults.vad_mode, defaults.vad_threshold_db).await
 }
 
-/// Like [`run_voice_link`] with an explicit VAD threshold; a very low threshold
-/// (e.g. −100 dB) transmits every frame, isolating network effects from VAD pauses.
+/// Like [`run_voice_link`] with an explicit VAD. Synthetic probes (chirps, tones) are not speech:
+/// use [`VadMode::Energy`], and a very low threshold (e.g. −100 dB) to transmit every frame and
+/// isolate network effects from VAD pauses.
 pub async fn run_voice_link_with(
     sender: &TestClient,
     receiver: &mut TestClient,
     input: &[f32],
     tail_frames: usize,
+    vad_mode: VadMode,
     vad_threshold_db: f32,
 ) -> anyhow::Result<VoiceRun> {
     let (_, short_id) = sender.channel(ChannelType::Voice);
@@ -50,6 +53,7 @@ pub async fn run_voice_link_with(
     let mut capture = VoiceCapture::new(VoiceCaptureConfig {
         channel_short_id: short_id,
         vad_threshold_db,
+        vad_mode,
         ..VoiceCaptureConfig::default()
     })?;
     let mut mixer = AudioMixer::new();
@@ -69,7 +73,7 @@ pub async fn run_voice_link_with(
             frame[..end - start].copy_from_slice(&input[start..end]);
         }
         let out = capture.process(&mut frame, sender_peer, (frame_index * 20) as u32);
-        if let Some(packet) = out.packet {
+        for packet in out.packets {
             sender.session.send_datagram(packet)?;
             run.sent_packets += 1;
         }

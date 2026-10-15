@@ -9,7 +9,8 @@
 //! - [`resampler`] — Sample rate conversion via rubato
 //! - [`opus`] — Opus VoIP encoder/decoder with PLC
 //! - [`jitter`] — Adaptive jitter buffer with sequence rollover handling
-//! - [`vad`] — RMS dBFS Voice Activity Detection with hangover
+//! - [`vad`] — Voice Activity Detection: neural speech classifier or RMS dBFS threshold, with hangover
+//! - [`speech`] — Earshot speech classifier used by the VAD
 //! - [`mixer`] — Multi-speaker mixing with `tanh()` soft-limiter
 //! - [`capture`] — Voice capture pipeline (AEC → NS → VAD → Opus → packet)
 //! - [`reference`] — playout reference feeder for echo cancellation
@@ -25,10 +26,11 @@ pub mod noise;
 pub mod opus;
 pub mod reference;
 pub mod resampler;
+pub mod speech;
 pub mod vad;
 
 pub use aec::EchoCanceller;
-pub use capture::{CaptureOutput, VoiceCapture, VoiceCaptureConfig};
+pub use capture::{CaptureOutput, VoiceCapture, VoiceCaptureConfig, PREROLL_FRAMES};
 pub use devices::{list_input_devices, list_output_devices, AudioDeviceInfo};
 pub use jitter::{JitterBuffer, PlayoutResult};
 pub use mixer::AudioMixer;
@@ -36,4 +38,6 @@ pub use noise::NoiseSuppressor;
 pub use opus::{AudioOpusError, OpusVoiceDecoder, OpusVoiceEncoder};
 pub use reference::ReferenceFeeder;
 pub use resampler::{InputResampler, OutputResampler, FRAME_SIZE_48K, INTERNAL_SAMPLE_RATE};
-pub use vad::{VadDecision, VoiceActivityDetector};
+pub use speech::SpeechClassifier;
+pub use vad::DEFAULT_VAD_THRESHOLD_DB;
+pub use vad::{VadDecision, VadMode, VoiceActivityDetector};

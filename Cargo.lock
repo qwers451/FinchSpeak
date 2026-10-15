@@ -1559,6 +1559,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "dashmap",
+ "earshot",
  "finch-audio",
  "finch-client-core",
  "finch-protocol",

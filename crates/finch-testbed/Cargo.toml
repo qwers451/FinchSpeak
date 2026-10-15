@@ -20,6 +20,7 @@ dashmap = "6"
 tempfile = "3"
 hound = "3"
 rubato = "0.16"
+earshot = "=1.2.2"
 rand = "0.8"
 jsonwebtoken = "9"
 serde = { workspace = true }

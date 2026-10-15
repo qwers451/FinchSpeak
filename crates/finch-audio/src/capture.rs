@@ -3,6 +3,8 @@
 //! Pure processing without audio I/O, so the same code runs inside the cpal
 //! worker thread of the client and inside headless test harnesses.
 
+use std::collections::VecDeque;
+
 use bytes::{BufMut, Bytes, BytesMut};
 use finch_protocol::media::{MediaHeader, MEDIA_HEADER_SIZE};
 
@@ -10,7 +12,15 @@ use crate::aec::EchoCanceller;
 use crate::noise::NoiseSuppressor;
 use crate::opus::{AudioOpusError, OpusVoiceEncoder};
 use crate::resampler::FRAME_SIZE_48K;
-use crate::vad::{VadDecision, VoiceActivityDetector, DEFAULT_VAD_THRESHOLD_DB};
+use crate::vad::{VadDecision, VadMode, VoiceActivityDetector, DEFAULT_VAD_THRESHOLD_DB};
+
+/// Frames of audio kept from just before the VAD opens and sent first when it does.
+/// The speech classifier reacts 1-3 frames (20-60 ms) after a word starts (measured on three
+/// voices); one extra frame is kept as margin. Without this the start of every word is clipped.
+pub const PREROLL_FRAMES: usize = 4;
+
+/// Duration of one frame in the packet timestamps.
+const FRAME_MS: u32 = 20;
 
 /// Static parameters of a capture pipeline.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -21,6 +31,8 @@ pub struct VoiceCaptureConfig {
     pub bitrate_kbps: u32,
     /// VAD RMS threshold in dBFS.
     pub vad_threshold_db: f32,
+    /// How speech is detected. The default is the speech classifier.
+    pub vad_mode: VadMode,
 }
 
 impl Default for VoiceCaptureConfig {
@@ -29,6 +41,7 @@ impl Default for VoiceCaptureConfig {
             channel_short_id: 0,
             bitrate_kbps: 64,
             vad_threshold_db: DEFAULT_VAD_THRESHOLD_DB,
+            vad_mode: VadMode::default(),
         }
     }
 }
@@ -36,8 +49,9 @@ impl Default for VoiceCaptureConfig {
 /// Result of processing one 20 ms capture frame.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CaptureOutput {
-    /// Complete media datagram (20-byte header + Opus payload), if the frame is transmitted.
-    pub packet: Option<Bytes>,
+    /// Media datagrams (20-byte header + Opus payload) to send, oldest first. Usually one; when
+    /// the VAD opens, the pre-roll frames come first. Empty while silent.
+    pub packets: Vec<Bytes>,
     /// VAD decision for this frame.
     pub vad: VadDecision,
 }
@@ -50,6 +64,10 @@ pub struct VoiceCapture {
     vad: VoiceActivityDetector,
     encoder: OpusVoiceEncoder,
     seq: u16,
+    /// Last silent frames, oldest first (at most [`PREROLL_FRAMES`]).
+    preroll: VecDeque<[f32; FRAME_SIZE_48K]>,
+    /// True from the moment the VAD opens until it is back to `Silence`.
+    transmitting: bool,
 }
 
 impl VoiceCapture {
@@ -58,9 +76,11 @@ impl VoiceCapture {
             config,
             echo_canceller: EchoCanceller::new(),
             noise_suppressor: NoiseSuppressor::new(),
-            vad: VoiceActivityDetector::new(config.vad_threshold_db),
+            vad: VoiceActivityDetector::with_mode(config.vad_mode, config.vad_threshold_db),
             encoder: OpusVoiceEncoder::new(config.bitrate_kbps)?,
             seq: 0,
+            preroll: VecDeque::with_capacity(PREROLL_FRAMES),
+            transmitting: false,
         })
     }
 
@@ -88,14 +108,43 @@ impl VoiceCapture {
 
         let vad = self.vad.process(frame);
         if !vad.should_transmit() {
-            return CaptureOutput { packet: None, vad };
+            self.transmitting = false;
+            if self.preroll.len() == PREROLL_FRAMES {
+                self.preroll.pop_front();
+            }
+            self.preroll.push_back(*frame);
+            return CaptureOutput { packets: Vec::new(), vad };
         }
 
+        let mut packets = Vec::with_capacity(PREROLL_FRAMES + 1);
+        if !self.transmitting {
+            let frames: Vec<_> = self.preroll.drain(..).collect();
+            let count = frames.len() as u32;
+            for (index, old) in frames.iter().enumerate() {
+                let age = count - index as u32;
+                let timestamp = timestamp_ms.wrapping_sub(age * FRAME_MS);
+                packets.extend(self.encode_packet(old, sender_peer_id, timestamp, false));
+            }
+        }
+        self.transmitting = true;
+        packets.extend(self.encode_packet(frame, sender_peer_id, timestamp_ms, vad.is_silence_packet()));
+
+        CaptureOutput { packets, vad }
+    }
+
+    /// Opus-encode one frame into a complete media datagram; `None` if encoding fails.
+    fn encode_packet(
+        &mut self,
+        frame: &[f32; FRAME_SIZE_48K],
+        sender_peer_id: u32,
+        timestamp_ms: u32,
+        silence_flag: bool,
+    ) -> Option<Bytes> {
         let opus_bytes = match self.encoder.encode(frame) {
             Ok(bytes) => bytes,
             Err(e) => {
                 tracing::error!("Opus encoding failed: {}", e);
-                return CaptureOutput { packet: None, vad };
+                return None;
             }
         };
 
@@ -107,18 +156,14 @@ impl VoiceCapture {
             sender_peer_id,
             current_seq,
             timestamp_ms,
-            vad.is_silence_packet(),
+            silence_flag,
             false,
         );
 
         let mut packet = BytesMut::with_capacity(MEDIA_HEADER_SIZE + opus_bytes.len());
         header.write_to(&mut packet);
         packet.put_slice(&opus_bytes);
-
-        CaptureOutput {
-            packet: Some(packet.freeze()),
-            vad,
-        }
+        Some(packet.freeze())
     }
 }
 
@@ -127,7 +172,7 @@ mod tests {
     use super::*;
     use crate::opus::OpusVoiceDecoder;
     use crate::resampler::FRAME_SIZE_48K;
-    use crate::vad::VadDecision;
+    use crate::vad::{VadDecision, VadMode};
     use finch_protocol::media::{MediaHeader, MediaType, MEDIA_HEADER_SIZE};
 
     fn tone_frame(frame_index: usize) -> [f32; FRAME_SIZE_48K] {
@@ -139,9 +184,11 @@ mod tests {
         frame
     }
 
+    /// Loudness-threshold VAD: these tests exercise packet layout and hangover on a synthetic tone.
     fn capture_for_test() -> VoiceCapture {
         VoiceCapture::new(VoiceCaptureConfig {
             channel_short_id: 7,
+            vad_mode: VadMode::Energy,
             ..VoiceCaptureConfig::default()
         })
         .unwrap()
@@ -156,7 +203,7 @@ mod tests {
             let mut frame = tone_frame(i);
             let timestamp_ms = 1_000 + i as u32 * 20;
             let out = capture.process(&mut frame, 42, timestamp_ms);
-            let packet = out.packet.expect("tone frame must be transmitted");
+            let packet = out.packets.last().expect("tone frame must be transmitted").clone();
 
             assert!(packet.len() > MEDIA_HEADER_SIZE);
             let header = MediaHeader::from_slice(&packet[..MEDIA_HEADER_SIZE]).unwrap();
@@ -193,11 +240,11 @@ mod tests {
             .iter()
             .position(|o| o.vad == VadDecision::Hangover { is_last: true })
             .expect("hangover must end within 10 frames");
-        let packet = outputs[last_hangover].packet.as_ref().expect("last hangover frame is sent");
+        let packet = outputs[last_hangover].packets.last().expect("last hangover frame is sent");
         assert!(MediaHeader::from_slice(&packet[..MEDIA_HEADER_SIZE]).unwrap().is_silence());
         assert!(outputs.len() - last_hangover > 3, "silence must follow the hangover");
         for out in &outputs[last_hangover + 1..] {
-            assert!(out.packet.is_none());
+            assert!(out.packets.is_empty());
             assert_eq!(out.vad, VadDecision::Silence);
         }
     }
@@ -212,14 +259,89 @@ mod tests {
         }
         for _ in 0..10 {
             let mut frame = [0.0f32; FRAME_SIZE_48K];
-            if let Some(p) = capture.process(&mut frame, 42, 0).packet {
+            for p in capture.process(&mut frame, 42, 0).packets {
                 last_seq_before_pause = Some(MediaHeader::from_slice(&p[..MEDIA_HEADER_SIZE]).unwrap().sequence);
             }
         }
 
         let mut frame = tone_frame(100);
-        let packet = capture.process(&mut frame, 42, 0).packet.expect("speech resumes");
+        let packet = capture.process(&mut frame, 42, 0).packets.into_iter().next().expect("speech resumes");
         let seq_after = MediaHeader::from_slice(&packet[..MEDIA_HEADER_SIZE]).unwrap().sequence;
         assert_eq!(Some(seq_after.wrapping_sub(1)), last_seq_before_pause);
+    }
+
+    /// Pink noise (Paul Kellet's filter) at `rms_dbfs`, deterministic.
+    fn pink_noise(len: usize, rms_dbfs: f32) -> Vec<f32> {
+        let mut state = 7u32;
+        let mut b = [0.0f32; 7];
+        let raw: Vec<f32> = (0..len)
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let white = (state >> 8) as f32 / 8_388_608.0 - 1.0;
+                b[0] = 0.99886 * b[0] + white * 0.055_517_9;
+                b[1] = 0.99332 * b[1] + white * 0.075_075_9;
+                b[2] = 0.96900 * b[2] + white * 0.153_852;
+                b[3] = 0.86650 * b[3] + white * 0.310_485_6;
+                b[4] = 0.55000 * b[4] + white * 0.532_952_2;
+                b[5] = -0.7616 * b[5] - white * 0.016_898;
+                let out = b.iter().sum::<f32>() + white * 0.5362;
+                b[6] = white * 0.115_926;
+                out
+            })
+            .collect();
+        let power = raw.iter().map(|s| s * s).sum::<f32>() / raw.len() as f32;
+        let gain = (10f32.powf(rms_dbfs / 10.0) / power).sqrt();
+        raw.iter().map(|s| s * gain).collect()
+    }
+
+    /// A fan at -35 dBFS is loud but is not speech (AUD-050): nothing may be transmitted,
+    /// and the indicator must stay dark. (Positive control with real speech: finch-testbed.)
+    #[test]
+    fn speech_mode_does_not_transmit_loud_noise() {
+        let mut capture = VoiceCapture::new(VoiceCaptureConfig::default()).unwrap();
+        assert_eq!(VoiceCaptureConfig::default().vad_mode, VadMode::Speech);
+
+        let noise = pink_noise(3 * 48_000, -35.0);
+        let mut packets = 0;
+        let mut speaking = 0;
+        let (chunks, _) = noise.as_chunks::<FRAME_SIZE_48K>();
+        for (i, chunk) in chunks.iter().enumerate() {
+            let mut frame = *chunk;
+            let out = capture.process(&mut frame, 42, i as u32 * 20);
+            packets += out.packets.len();
+            speaking += usize::from(out.vad == VadDecision::Speaking);
+        }
+        assert_eq!(speaking, 0, "noise was classified as speech");
+        assert_eq!(packets, 0, "noise was transmitted");
+    }
+
+    /// When the gate opens, the frames just before it are sent first, so the start of a word
+    /// is not clipped by the detector's reaction time.
+    #[test]
+    fn opening_the_gate_sends_a_preroll() {
+        let mut capture = capture_for_test();
+        let silent_frames = PREROLL_FRAMES as u32 + 3;
+        for i in 0..silent_frames {
+            let mut silence = [0.0f32; FRAME_SIZE_48K];
+            assert!(capture.process(&mut silence, 42, i * 20).packets.is_empty());
+        }
+
+        let mut frame = tone_frame(0);
+        let out = capture.process(&mut frame, 42, silent_frames * 20);
+        assert_eq!(out.packets.len(), PREROLL_FRAMES + 1, "pre-roll + the frame itself");
+
+        let headers: Vec<MediaHeader> = out
+            .packets
+            .iter()
+            .map(|p| MediaHeader::from_slice(&p[..MEDIA_HEADER_SIZE]).unwrap())
+            .collect();
+        let expected_ts: Vec<u32> = (silent_frames - PREROLL_FRAMES as u32..=silent_frames).map(|k| k * 20).collect();
+        assert_eq!(headers.iter().map(|h| h.timestamp).collect::<Vec<_>>(), expected_ts);
+        assert_eq!(headers.iter().map(|h| h.sequence).collect::<Vec<_>>(), (0..=PREROLL_FRAMES as u16).collect::<Vec<_>>());
+        assert!(headers.iter().all(|h| !h.is_silence()));
+
+        // Staying open does not repeat the pre-roll.
+        let mut next = tone_frame(1);
+        assert_eq!(capture.process(&mut next, 42, (silent_frames + 1) * 20).packets.len(), 1);
     }
 }

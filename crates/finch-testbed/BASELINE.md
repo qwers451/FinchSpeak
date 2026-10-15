@@ -13,10 +13,14 @@ Debug WAVs of the last run: `target/testbed-out/`.
 | NS, pink noise: segmental SNR in → out | out ≥ in | 5.8 → 20.4 | pass | 2026-10-15 | cc0476d |
 | NS, babble (3 voices): SNR improvement | measured only (owner decision, AUD-049) | +0.0 dB (6.0 → 6.0) | info | 2026-10-15 | cc0476d |
 | NS, babble: segmental SNR in → out | measured only | 5.9 → 5.2 | info | 2026-10-15 | cc0476d |
-| AEC, echo 40 ms / −6 dB: ERLE after 2 s | ≥ 20 dB | 0.8 dB | **fail — AUD-021** | 2026-10-15 | cc0476d |
-| AEC double-talk: near-end level kept | ≥ near − 6 dB | −22.1 dBFS (near −23.3) | pass | 2026-10-15 | cc0476d |
-| VAD on pink noise −35 dBFS: speaking indicator | never lit | lit 2× | **fail — AUD-050** | 2026-10-15 | cc0476d |
-| VAD on pink noise −35 dBFS: non-silent packets | 0 | 104 | **fail — AUD-050** | 2026-10-15 | cc0476d |
+| AEC (Sonora AEC3), echo 40 ms / −6 dB, speech: ERLE after 2 s | ≥ 20 dB | 77.8 dB (was 0.8 dB with the scalar filter) | pass | 2026-10-16 | 0b7335e |
+| AEC double-talk, speech: near-end level kept | ≥ near − 6 dB | −25.8 dBFS (near −23.3, loss 2.5 dB) | pass | 2026-10-16 | 0b7335e |
+| VAD (Earshot after RNNoise), pink noise −35 dBFS: speaking indicator | never lit | 0 (was 2) | pass | 2026-10-16 | AUD-050 |
+| VAD, pink noise −35 dBFS: non-silent packets | 0 | 0 (was 104) | pass | 2026-10-16 | AUD-050 |
+| VAD, same run: real speech afterwards | indicator lit, packets delivered | lit, 140 packets | pass | 2026-10-16 | AUD-050 |
+| VAD, white noise −45 dBFS (mic hiss): packets | 0 | 0 | pass | 2026-10-16 | AUD-050 |
+| VAD, white noise −35 dBFS (far above a real mic floor): speech-positive frames | info | 3.3% (5 of 150, one run of 5) | known limit | 2026-10-16 | probe |
+| VAD onset, 3 voices: stream start vs loudness-threshold detection | ≤ 0 ms later | −40 / −20 / −60 ms (classifier lags 1–3 frames, pre-roll 4 frames) | pass | 2026-10-16 | AUD-050 |
 | Network 5% loss + 0–60 ms jitter: latency (3 runs, VAD off) | ≤ 200 ms | 96 / 136 / 76 ms | pass | 2026-10-15 | after AUD-022 |
 | Network: packets delivered by the network | — | 254–259 of 265 (~97%) | info | 2026-10-15 | after AUD-022 |
 | Network: jitter buffer depth | ≤ 6 packets | 6 / 6 / 6 | pass | 2026-10-15 | after AUD-022 |
