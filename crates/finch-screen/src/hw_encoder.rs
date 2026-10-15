@@ -6,7 +6,8 @@
 
 use bytes::Bytes;
 use openh264::encoder::{Encoder, EncoderConfig, FrameType, RateControlMode, UsageType};
-use openh264::formats::{BgraSliceU8, RgbaSliceU8, YUVBuffer, YUVSlices};
+use crate::yuv::{packed_to_i420, PixelOrder};
+use openh264::formats::YUVSlices;
 use openh264::{OpenH264API, Timestamp};
 use thiserror::Error;
 
@@ -86,6 +87,8 @@ pub struct H264VideoEncoder {
     frame_count: u64,
     force_keyframe_pending: bool,
     is_initialized: bool,
+    /// Reused I420 buffer for packed-pixel input.
+    yuv_scratch: Vec<u8>,
 }
 
 impl H264VideoEncoder {
@@ -125,6 +128,7 @@ impl H264VideoEncoder {
             frame_count: 0,
             force_keyframe_pending: false,
             is_initialized: false,
+            yuv_scratch: Vec::new(),
         })
     }
 
@@ -232,9 +236,7 @@ impl H264VideoEncoder {
             });
         }
 
-        let rgba_slice = RgbaSliceU8::new(rgba, (w, h));
-        let yuv_buffer = YUVBuffer::from_rgb_source(rgba_slice);
-        self.encode_yuv_source(&yuv_buffer)
+        self.encode_packed(rgba, PixelOrder::Rgba)
     }
 
     /// Encodes a BGRA pixel buffer of dimensions `(width, height)`.
@@ -254,9 +256,16 @@ impl H264VideoEncoder {
             });
         }
 
-        let bgra_slice = BgraSliceU8::new(bgra, (w, h));
-        let yuv_buffer = YUVBuffer::from_rgb_source(bgra_slice);
-        self.encode_yuv_source(&yuv_buffer)
+        self.encode_packed(bgra, PixelOrder::Bgra)
+    }
+
+    fn encode_packed(&mut self, packed: &[u8], order: PixelOrder) -> Result<EncodedFrame, H264EncoderError> {
+        let (w, h) = (self.config.width as usize, self.config.height as usize);
+        let mut yuv = std::mem::take(&mut self.yuv_scratch);
+        packed_to_i420(packed, w, h, order, &mut yuv);
+        let result = self.encode_frame(&yuv);
+        self.yuv_scratch = yuv;
+        result
     }
 
     /// Internal helper to encode any type implementing [`openh264::formats::YUVSource`].

@@ -11,6 +11,7 @@ pub mod audio_loopback;
 pub mod capture;
 pub mod fragmenter;
 pub mod hw_encoder;
+pub mod yuv;
 
 pub use audio_loopback::{
     list_loopback_devices, AudioLoopback, LoopbackAudioError, ResamplerConverter,

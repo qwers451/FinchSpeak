@@ -5,7 +5,7 @@
 //! Tauri app glues it to a [`Session`](crate::session::Session).
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -312,15 +312,28 @@ impl FrameSource for WindowSource {
 /// Consecutive capture failures (window closed, display off) before the share ends.
 const MAX_CAPTURE_FAILURES: u32 = 30;
 
-/// A running screen share: a capture thread that encodes and sends until stopped.
+/// The newest captured frame, handed from the capture thread to the encoder thread.
+#[derive(Default)]
+struct FrameSlot {
+    frame: Option<RawFrame>,
+    /// Set by the capture thread when it gave up.
+    failed: Option<String>,
+}
+
+type SharedSlot = Arc<(Mutex<FrameSlot>, Condvar)>;
+
+/// A running screen share: one thread captures, another encodes and sends.
+///
+/// Capture and encoding overlap, and the encoder always takes the newest frame, so a slow
+/// encoder drops frames instead of falling behind.
 pub struct ScreenSharer {
     stop: Arc<AtomicBool>,
     keyframe: Arc<AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    threads: Vec<std::thread::JoinHandle<()>>,
 }
 
 impl ScreenSharer {
-    /// Start sharing on `connection`. `on_end` runs (on the capture thread) with the reason if
+    /// Start sharing on `connection`. `on_end` runs (on the encoder thread) with the reason if
     /// the share ends by itself - capture keeps failing, the connection is gone - but not after
     /// [`stop`](Self::stop).
     pub fn start(
@@ -334,75 +347,122 @@ impl ScreenSharer {
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let keyframe = Arc::new(AtomicBool::new(true));
-        let (stop_flag, key_flag) = (stop.clone(), keyframe.clone());
+        let slot: SharedSlot = Arc::new((Mutex::new(FrameSlot::default()), Condvar::new()));
+        let mut threads = Vec::new();
 
-        let thread = std::thread::Builder::new()
-            .name("screen-share".into())
-            .spawn(move || {
-                let mut packetizer = ScreenPacketizer::new(config, channel_id, sender_peer_id);
-                let interval = Duration::from_millis(1000 / u64::from(config.fps.max(1)));
-                let started = Instant::now();
-                let mut failures = 0u32;
-                let reason = loop {
-                    if stop_flag.load(Ordering::Relaxed) {
-                        return;
-                    }
-                    let frame_start = Instant::now();
-                    if key_flag.swap(false, Ordering::Relaxed) {
-                        packetizer.request_keyframe();
-                    }
-                    match source.next_frame() {
-                        Ok(frame) => {
-                            failures = 0;
-                            let Some(max_datagram) = connection.max_datagram_size() else {
-                                break "the connection does not support datagrams".to_string();
-                            };
-                            let timestamp = started.elapsed().as_millis() as u32;
-                            match packetizer.push_frame(&frame, timestamp, max_datagram) {
-                                Ok(OutgoingVideo::KeyFrame { header, data }) => {
-                                    let connection = connection.clone();
-                                    runtime.spawn(async move {
-                                        let _ = crate::session::send_keyframe_on(&connection, &header, &data).await;
-                                    });
+        // Capture thread: as fast as the source delivers, keeping only the newest frame.
+        let (capture_stop, capture_slot) = (stop.clone(), slot.clone());
+        threads.extend(
+            std::thread::Builder::new()
+                .name("screen-capture".into())
+                .spawn(move || {
+                    let mut failures = 0u32;
+                    while !capture_stop.load(Ordering::Relaxed) {
+                        match source.next_frame() {
+                            Ok(frame) => {
+                                failures = 0;
+                                if let Ok(mut guard) = capture_slot.0.lock() {
+                                    guard.frame = Some(frame);
                                 }
-                                Ok(OutgoingVideo::Delta(datagrams)) => {
-                                    for datagram in datagrams {
-                                        if let Err(e) = connection.send_datagram(datagram) {
-                                            if connection.close_reason().is_some() {
-                                                break;
-                                            }
-                                            // Congested or oversized: viewers need a new key frame.
-                                            tracing::debug!("screen share datagram dropped: {e}");
-                                            packetizer.request_keyframe();
+                                capture_slot.1.notify_one();
+                            }
+                            Err(e) => {
+                                failures += 1;
+                                if failures >= MAX_CAPTURE_FAILURES {
+                                    if let Ok(mut guard) = capture_slot.0.lock() {
+                                        guard.failed = Some(format!("screen capture keeps failing: {e}"));
+                                    }
+                                    capture_slot.1.notify_one();
+                                    return;
+                                }
+                                std::thread::sleep(Duration::from_millis(33));
+                            }
+                        }
+                    }
+                })
+                .ok(),
+        );
+
+        // Encoder thread: paced to the frame rate.
+        let (stop_flag, key_flag) = (stop.clone(), keyframe.clone());
+        threads.extend(
+            std::thread::Builder::new()
+                .name("screen-encode".into())
+                .spawn(move || {
+                    let mut packetizer = ScreenPacketizer::new(config, channel_id, sender_peer_id);
+                    let interval = Duration::from_millis(1000 / u64::from(config.fps.max(1)));
+                    let started = Instant::now();
+                    let reason = loop {
+                        if stop_flag.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        let frame_start = Instant::now();
+                        let frame = {
+                            let Ok(mut guard) = slot.0.lock() else {
+                                break "internal error".to_string();
+                            };
+                            while guard.frame.is_none() && guard.failed.is_none() {
+                                if stop_flag.load(Ordering::Relaxed) {
+                                    return;
+                                }
+                                guard = match slot.1.wait_timeout(guard, Duration::from_millis(100)) {
+                                    Ok((guard, _)) => guard,
+                                    Err(_) => return,
+                                };
+                            }
+                            match (guard.frame.take(), guard.failed.take()) {
+                                (Some(frame), _) => frame,
+                                (None, Some(reason)) => break reason,
+                                (None, None) => continue,
+                            }
+                        };
+                        if key_flag.swap(false, Ordering::Relaxed) {
+                            packetizer.request_keyframe();
+                        }
+                        let Some(max_datagram) = connection.max_datagram_size() else {
+                            break "the connection does not support datagrams".to_string();
+                        };
+                        let timestamp = started.elapsed().as_millis() as u32;
+                        match packetizer.push_frame(&frame, timestamp, max_datagram) {
+                            Ok(OutgoingVideo::KeyFrame { header, data }) => {
+                                let connection = connection.clone();
+                                runtime.spawn(async move {
+                                    let _ = crate::session::send_keyframe_on(&connection, &header, &data).await;
+                                });
+                            }
+                            Ok(OutgoingVideo::Delta(datagrams)) => {
+                                for datagram in datagrams {
+                                    if let Err(e) = connection.send_datagram(datagram) {
+                                        if connection.close_reason().is_some() {
                                             break;
                                         }
+                                        // Congested or oversized: viewers need a new key frame.
+                                        tracing::debug!("screen share datagram dropped: {e}");
+                                        packetizer.request_keyframe();
+                                        break;
                                     }
                                 }
-                                Ok(OutgoingVideo::Dropped) => {}
-                                Err(e) => break e.to_string(),
                             }
+                            Ok(OutgoingVideo::Dropped) => {}
+                            Err(e) => break e.to_string(),
                         }
-                        Err(e) => {
-                            failures += 1;
-                            if failures >= MAX_CAPTURE_FAILURES {
-                                break format!("screen capture keeps failing: {e}");
-                            }
+                        if connection.close_reason().is_some() {
+                            break "connection closed".to_string();
                         }
+                        if let Some(rest) = interval.checked_sub(frame_start.elapsed()) {
+                            std::thread::sleep(rest);
+                        }
+                    };
+                    // Tell the capture thread to stop too, then report.
+                    let ended_by_stop = stop_flag.swap(true, Ordering::Relaxed);
+                    if !ended_by_stop {
+                        on_end(reason);
                     }
-                    if connection.close_reason().is_some() {
-                        break "connection closed".to_string();
-                    }
-                    if let Some(rest) = interval.checked_sub(frame_start.elapsed()) {
-                        std::thread::sleep(rest);
-                    }
-                };
-                if !stop_flag.load(Ordering::Relaxed) {
-                    on_end(reason);
-                }
-            })
-            .ok();
+                })
+                .ok(),
+        );
 
-        Self { stop, keyframe, thread }
+        Self { stop, keyframe, threads }
     }
 
     /// A viewer needs a key frame.
@@ -410,14 +470,15 @@ impl ScreenSharer {
         self.keyframe.store(true, Ordering::Relaxed);
     }
 
+    /// True while the share is active; false once it has ended or been stopped.
     pub fn is_running(&self) -> bool {
-        self.thread.as_ref().is_some_and(|t| !t.is_finished())
+        !self.stop.load(Ordering::Relaxed) && self.threads.iter().all(|t| !t.is_finished())
     }
 
-    /// Stop sharing and wait for the capture thread.
+    /// Stop sharing and wait for both threads.
     pub fn stop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        if let Some(thread) = self.thread.take() {
+        for thread in self.threads.drain(..) {
             let _ = thread.join();
         }
     }
