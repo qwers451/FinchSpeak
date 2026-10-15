@@ -425,6 +425,17 @@ pub async fn handle_connection(
     Ok(())
 }
 
+/// Maximum length of a chat message in characters.
+const MAX_MESSAGE_CHARS: usize = 4000;
+
+/// Send an error to one client without holding any session guard across the `.await`.
+async fn send_error(sessions: &SessionManager, peer_id: u32, code: u16, message: String) {
+    let tx = sessions.sessions.get(&peer_id).map(|s| s.control_tx.clone());
+    if let Some(tx) = tx {
+        let _ = tx.send(ServerMessage::Error { code, message }).await;
+    }
+}
+
 /// Handle a single incoming ClientMessage on the Control Stream.
 async fn handle_client_message(
     msg: ClientMessage,
@@ -448,6 +459,28 @@ async fn handle_client_message(
             content,
             attachments,
         } => {
+            let content = content.trim().to_string();
+            if content.is_empty() || content.chars().count() > MAX_MESSAGE_CHARS {
+                send_error(
+                    sessions,
+                    peer_id,
+                    400,
+                    format!("Message must be 1..={MAX_MESSAGE_CHARS} characters"),
+                )
+                .await;
+                return;
+            }
+            let channel_type: Option<String> =
+                sqlx::query_scalar("SELECT channel_type FROM channels WHERE id = ?")
+                    .bind(channel_id.to_string())
+                    .fetch_optional(pool)
+                    .await
+                    .unwrap_or(None);
+            if channel_type.as_deref() != Some("text") {
+                send_error(sessions, peer_id, 400, "Unknown text channel".to_string()).await;
+                return;
+            }
+
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -466,6 +499,11 @@ async fn handle_client_message(
             .bind(now)
             .execute(pool)
             .await;
+
+            if let Err(e) = &res {
+                tracing::error!("Failed to store message from peer {peer_id}: {e}");
+                send_error(sessions, peer_id, 500, "Message could not be saved".to_string()).await;
+            }
 
             if res.is_ok() {
                 // Link attachments to this message

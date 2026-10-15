@@ -97,3 +97,32 @@ async fn file_over_limit_rejected() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+/// Messages to a non-text or unknown channel, empty or oversized ones are rejected with an
+/// error to the sender and never broadcast (AUD-016).
+#[tokio::test]
+async fn invalid_messages_are_rejected_with_error() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let mut a = TestClient::register(&server, "alice").await?;
+    let mut b = TestClient::register(&server, "bob").await?;
+    let (voice_id, _) = a.channel(ChannelType::Voice);
+    let (text_id, _) = a.channel(ChannelType::Text);
+
+    let cases = [
+        (voice_id, "to a voice channel".to_string()),
+        (uuid::Uuid::new_v4(), "to nowhere".to_string()),
+        (text_id, "   ".to_string()),
+        (text_id, "x".repeat(4001)),
+    ];
+    for (channel_id, content) in cases {
+        a.send(ClientMessage::SendMessage { channel_id, content, attachments: vec![] }).await?;
+        a.expect_control(WAIT, |m| match m {
+            ServerMessage::Error { code: 400, .. } => Some(()),
+            _ => None,
+        })
+        .await?;
+    }
+    b.expect_no_control(Duration::from_millis(300), |m| matches!(m, ServerMessage::NewMessage { .. }))
+        .await?;
+    Ok(())
+}
