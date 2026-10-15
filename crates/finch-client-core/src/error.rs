@@ -48,6 +48,18 @@ pub enum ClientError {
 
 impl From<reqwest::Error> for ClientError {
     fn from(e: reqwest::Error) -> Self {
-        Self::Network(e.to_string())
+        Self::Network(error_chain(&e))
     }
+}
+
+/// `error: cause: root cause` — reqwest's own Display stops at "error sending request".
+fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
 }

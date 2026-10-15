@@ -20,6 +20,9 @@ ring = "0.17"
 # Web / REST
 axum = { version = "0.8", features = ["ws", "multipart"] }
 tower-http = { version = "0.6", features = ["cors", "fs"] }
+# TLS for the REST listener (ring only: no aws-lc / CMake)
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+hyper-util = { version = "0.1", features = ["server-auto", "server-graceful", "service", "tokio"] }
 
 # Database
 sqlx = { workspace = true }
@@ -57,3 +60,5 @@ toml = "0.8"
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+# launch_test talks to the TLS REST listener
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

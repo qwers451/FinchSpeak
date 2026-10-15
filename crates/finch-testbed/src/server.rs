@@ -1,7 +1,10 @@
 //! In-process FinchSpeak server on ephemeral ports with an on-disk temporary database.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
+use dashmap::DashMap;
+use finch_client_core::api::ApiClient;
 use finch_server::config::ServerConfig;
 use finch_server::launch::{launch, RunningServer};
 use tempfile::TempDir;
@@ -10,8 +13,12 @@ use tempfile::TempDir;
 pub const TEST_MAX_FILE_SIZE_MB: usize = 1;
 
 pub struct TestServer {
+    /// `https://127.0.0.1:<port>` — the REST listener is TLS-only.
     pub http_url: String,
     pub quic_addr: SocketAddr,
+    /// SHA-256 fingerprint clients pin for this server (stable across restarts).
+    pub certificate_fingerprint: String,
+    pins: Arc<DashMap<String, String>>,
     config: ServerConfig,
     running: Option<RunningServer>,
     _dir: TempDir,
@@ -48,13 +55,29 @@ impl TestServer {
         config.server.http_port = running.http_addr.port();
         config.server.quic_port = running.quic_addr.port();
 
+        let certificate_fingerprint = running.certificate_fingerprint.clone();
+        let pins = Arc::new(DashMap::new());
+        pins.insert("127.0.0.1".to_string(), certificate_fingerprint.clone());
+
         Ok(Self {
-            http_url: format!("http://{}", running.http_addr),
+            http_url: format!("https://{}", running.http_addr),
             quic_addr: running.quic_addr,
+            certificate_fingerprint,
+            pins,
             config,
             running: Some(running),
             _dir: dir,
         })
+    }
+
+    /// REST client that already trusts this server's certificate (as after the user confirmed it).
+    pub fn api(&self) -> anyhow::Result<ApiClient> {
+        Ok(ApiClient::with_tofu(&self.http_url, self.pins.clone())?)
+    }
+
+    /// REST client with an empty pin store: the first request reports `UntrustedServer`.
+    pub fn api_without_pin(&self) -> anyhow::Result<ApiClient> {
+        Ok(ApiClient::with_tofu(&self.http_url, Arc::new(DashMap::new()))?)
     }
 
     /// JWT secret the server signs tokens with.

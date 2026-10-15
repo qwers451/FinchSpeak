@@ -2,7 +2,6 @@
 
 use std::time::Duration;
 
-use finch_client_core::api::ApiClient;
 use finch_client_core::error::ClientError;
 use finch_protocol::messages::{ClientMessage, ServerMessage};
 use finch_protocol::models::ChannelType;
@@ -40,7 +39,7 @@ async fn download_requires_auth() -> anyhow::Result<()> {
     let a = TestClient::register(&server, "alice").await?;
     let info = a.api.upload_file("secret.txt", b"secret".to_vec(), "text/plain").await?;
 
-    let anonymous = ApiClient::new(&server.http_url)?;
+    let anonymous = server.api()?;
     match anonymous.download_file(info.id).await {
         Err(ClientError::Http { status, .. }) => assert_eq!(status, 401),
         other => panic!("expected 401 without a token, got {other:?}"),

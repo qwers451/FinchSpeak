@@ -6,6 +6,7 @@ pub mod api;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod https;
 pub mod launch;
 pub mod quic;
 pub mod session;

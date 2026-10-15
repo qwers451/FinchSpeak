@@ -7,12 +7,26 @@ use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
+use bytes::BytesMut;
 use finch_protocol::models::AttachmentInfo;
 use tokio::fs;
 use uuid::Uuid;
 
 use crate::api::auth::{ArcSharedState, AuthUser};
 use crate::error::ServerError;
+
+/// Room for multipart boundaries and headers on top of the file itself.
+const MULTIPART_OVERHEAD_BYTES: usize = 64 * 1024;
+
+/// How much of an oversized upload is read and discarded so the client can receive the 413.
+fn drain_cap(max_bytes: usize) -> usize {
+    max_bytes.saturating_mul(4).max(16 * 1024 * 1024)
+}
+
+/// Request body limit of the upload route: the drain cap plus multipart framing.
+pub fn upload_body_limit(max_file_size_mb: usize) -> usize {
+    drain_cap(max_file_size_mb * 1024 * 1024) + MULTIPART_OVERHEAD_BYTES
+}
 
 /// Handler for POST /api/files/upload
 pub async fn upload_file_handler(
@@ -29,7 +43,7 @@ pub async fn upload_file_handler(
 
     let max_bytes = state.config.storage.max_file_size_mb * 1024 * 1024;
 
-    if let Some(field) = multipart
+    if let Some(mut field) = multipart
         .next_field()
         .await
         .map_err(|e| ServerError::BadRequest(e.to_string()))?
@@ -44,17 +58,32 @@ pub async fn upload_file_handler(
             .unwrap_or("application/octet-stream")
             .to_string();
 
-        let data = field
-            .bytes()
+        // Read the whole upload even when it is too large (up to `drain_cap`): answering 413 and
+        // closing while the client is still sending makes it see a connection reset instead of
+        // the response. Only up to `max_bytes` is kept in memory.
+        let drain_cap = drain_cap(max_bytes);
+        let mut data = BytesMut::new();
+        let mut received = 0usize;
+        while let Some(chunk) = field
+            .chunk()
             .await
-            .map_err(|e| ServerError::BadRequest(e.to_string()))?;
+            .map_err(|e| ServerError::BadRequest(e.to_string()))?
+        {
+            received += chunk.len();
+            if received <= max_bytes {
+                data.extend_from_slice(&chunk);
+            } else if received > drain_cap {
+                break;
+            }
+        }
 
-        if data.len() > max_bytes {
+        if received > max_bytes {
             return Err(ServerError::FileUpload(format!(
                 "File exceeds maximum allowed size of {} MB",
                 state.config.storage.max_file_size_mb
             )));
         }
+        let data = data.freeze();
 
         let attachment_id = Uuid::new_v4();
         let extension = PathBuf::from(&filename)

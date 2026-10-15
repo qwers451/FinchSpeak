@@ -79,7 +79,7 @@ impl TestClient {
         username: &str,
         quic_addr: SocketAddr,
     ) -> anyhow::Result<Self> {
-        let mut api = ApiClient::new(&server.http_url)?;
+        let mut api = server.api()?;
         let auth = api.register(username, TEST_PASSWORD, username).await?;
         api.set_token(auth.token.clone());
         let (session, events) = connect_to(quic_addr, &auth.token).await?;

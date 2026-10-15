@@ -1,7 +1,8 @@
 //! Authentication and session management commands.
 
 use finch_client_core::api::{resolve_quic_addr_with_port, ApiClient, AuthResponse};
-use tauri::{AppHandle, State};
+use finch_client_core::error::ClientError;
+use tauri::{AppHandle, Emitter, State};
 use tracing::{error, info};
 
 use crate::connection::start_quic_session;
@@ -49,6 +50,37 @@ pub async fn get_session_snapshot(state: State<'_, AppState>) -> Result<Option<S
     }))
 }
 
+/// REST client for `server_url` whose certificate has been confirmed by the user.
+///
+/// The TLS handshake is completed (without credentials) *before* any password is sent: an
+/// unknown server raises `tofu-required` for the confirmation dialog, a changed certificate
+/// is refused outright.
+async fn trusted_api(
+    server_url: &str,
+    state: &AppState,
+    app_handle: &AppHandle,
+) -> Result<ApiClient, String> {
+    let api = ApiClient::with_tofu(server_url, state.saved_fingerprints.clone())
+        .map_err(|e| format!("Invalid server address: {e}"))?;
+    match api.verify_trust().await {
+        Ok(()) => Ok(api),
+        Err(ClientError::UntrustedServer { hostname, fingerprint }) => {
+            *state.pending_fingerprint.write().await = Some((hostname.clone(), fingerprint.clone()));
+            let _ = app_handle.emit(
+                "tofu-required",
+                serde_json::json!({ "hostname": hostname, "fingerprint": fingerprint }),
+            );
+            Err(format!(
+                "Server certificate of {hostname} is not trusted yet - confirm its fingerprint and sign in again"
+            ))
+        }
+        Err(ClientError::FingerprintMismatch { hostname, .. }) => Err(format!(
+            "The certificate of {hostname} changed since you trusted it. Someone may be intercepting              the connection; do not sign in unless the server administrator confirms the change."
+        )),
+        Err(e) => Err(format!("Cannot reach the server: {e}")),
+    }
+}
+
 #[tauri::command]
 pub async fn login(
     server_url: String,
@@ -59,7 +91,7 @@ pub async fn login(
 ) -> Result<UserDto, String> {
     info!("Logging in to {} as {}", server_url, username);
 
-    let mut api = ApiClient::new(&server_url).map_err(|e| format!("Network request failed: {}", e))?;
+    let mut api = trusted_api(&server_url, &state, &app_handle).await?;
     let auth_data: AuthResponse = api
         .login(&username, &password)
         .await
@@ -86,7 +118,7 @@ pub async fn login(
             .await
             {
                 error!("QUIC connection failed: {}", e);
-                return Err(format!("Logged in via HTTP, but QUIC connection failed: {}", e));
+                return Err(format!("Signed in, but the QUIC connection failed: {}", e));
             }
         }
         Err(e) => {
@@ -109,7 +141,7 @@ pub async fn register(
 ) -> Result<UserDto, String> {
     info!("Registering to {} as {}", server_url, username);
 
-    let mut api = ApiClient::new(&server_url).map_err(|e| format!("Network request failed: {}", e))?;
+    let mut api = trusted_api(&server_url, &state, &app_handle).await?;
     let auth_data: AuthResponse = api
         .register(&username, &password, &display_name)
         .await
@@ -135,7 +167,7 @@ pub async fn register(
         .await
         {
             error!("QUIC connection failed: {}", e);
-            return Err(format!("Registered via HTTP, but QUIC connection failed: {}", e));
+            return Err(format!("Registered, but the QUIC connection failed: {}", e));
         }
     }
 

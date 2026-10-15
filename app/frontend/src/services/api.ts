@@ -5,7 +5,7 @@ import type { Channel, IncomingMessage, MessageHistory, User, AudioDevice, Voice
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 let browserToken: string | null = null;
-let browserServerUrl = 'http://127.0.0.1:8443';
+let browserServerUrl = 'https://127.0.0.1:8443';
 let browserUser: User | null = null;
 
 export const api = {

@@ -17,12 +17,9 @@ use crate::config::ServerConfig;
 use crate::session::SessionManager;
 
 /// Build the Axum router for the FinchSpeak REST API.
-/// Room for multipart boundaries and headers on top of the file itself.
-const MULTIPART_OVERHEAD_BYTES: usize = 64 * 1024;
-
 pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionManager) -> Router {
     // axum caps request bodies at 2 MB by default; uploads follow the configured limit instead.
-    let upload_limit = config.storage.max_file_size_mb * 1024 * 1024 + MULTIPART_OVERHEAD_BYTES;
+    let upload_limit = files::upload_body_limit(config.storage.max_file_size_mb);
     let shared_state = ArcSharedState { pool, config, sessions };
 
     let cors = CorsLayer::new()

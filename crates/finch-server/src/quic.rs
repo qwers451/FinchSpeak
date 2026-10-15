@@ -87,17 +87,21 @@ pub fn make_server_config_with(
     transport_config.datagram_send_buffer_size(2 * 1024 * 1024);
     server_config.transport_config(Arc::new(transport_config));
 
-    // Log SHA-256 fingerprint for TOFU
-    let fingerprint = ring::digest::digest(&ring::digest::SHA256, cert.as_ref());
-    let hex: String = fingerprint
+    tracing::info!("TLS certificate fingerprint (SHA-256): {}", certificate_fingerprint(&cert));
+
+    Ok(server_config)
+}
+
+/// SHA-256 fingerprint of a certificate as upper-case hex pairs separated by `:`.
+///
+/// This is the exact format clients pin (TOFU), shared by QUIC and the REST listener.
+pub fn certificate_fingerprint(cert: &rustls::pki_types::CertificateDer<'_>) -> String {
+    ring::digest::digest(&ring::digest::SHA256, cert.as_ref())
         .as_ref()
         .iter()
         .map(|b| format!("{b:02X}"))
         .collect::<Vec<_>>()
-        .join(":");
-    tracing::info!("TLS certificate fingerprint (SHA-256): {hex}");
-
-    Ok(server_config)
+        .join(":")
 }
 
 /// Run the QUIC server accept loop on an already bound endpoint.

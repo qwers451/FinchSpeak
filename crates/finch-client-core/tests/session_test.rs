@@ -34,8 +34,11 @@ async fn start_server() -> anyhow::Result<RunningServer> {
     launch(config).await
 }
 
+/// REST client that trusts this server's certificate (as after the user confirmed it).
 fn api_for(server: &RunningServer) -> anyhow::Result<ApiClient> {
-    Ok(ApiClient::new(&format!("http://{}", server.http_addr))?)
+    let pins = Arc::new(DashMap::new());
+    pins.insert("127.0.0.1".to_string(), server.certificate_fingerprint.clone());
+    Ok(ApiClient::with_tofu(&format!("https://{}", server.http_addr), pins)?)
 }
 
 async fn connect_with(

@@ -7,7 +7,7 @@ import { setActiveVoiceChannel } from './voiceStore';
 import { setAppError } from './notificationStore';
 
 export const [currentUser, setCurrentUser] = createSignal<User | null>(null);
-export const [serverUrl, setServerUrl] = createSignal<string>('http://127.0.0.1:8443');
+export const [serverUrl, setServerUrl] = createSignal<string>('https://127.0.0.1:8443');
 export const [authLoading, setAuthLoading] = createSignal<boolean>(false);
 export const [authError, setAuthError] = createSignal<string | null>(null);
 

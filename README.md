@@ -187,7 +187,9 @@ cargo run -p finch-server
 
 По умолчанию сервер открывает:
 * **QUIC (UDP)**: `0.0.0.0:4433` (управляющий поток Stream 0 + медиа-датаграммы / Uni-Streams).
-* **HTTP/REST (TCP)**: `0.0.0.0:8443` (регистрация, вход, загрузка файлов).
+* **HTTPS/REST (TCP)**: `0.0.0.0:8443` (регистрация, вход, загрузка файлов). Только TLS — открытого HTTP нет; сертификат тот же, что у QUIC.
+* **TLS-сертификат**: самоподписанный, создаётся при первом запуске в `./data/tls` и дальше не меняется. При первом входе клиент показывает его отпечаток SHA-256 — сверьте с отпечатком в логе сервера и подтвердите; после этого пароль отправляется только на сервер с этим сертификатом.
+* **Секрет JWT**: если `auth.jwt_secret` не задан, при первом запуске генерируется случайный и хранится в `./data/jwt_secret`.
 * **База данных SQLite**: `finchspeak.db` (автоматическое применение миграций при первом запуске).
 * **Каталог вложений**: `./data/uploads`.
 
@@ -196,7 +198,8 @@ cargo run -p finch-server
 [server]
 host = "0.0.0.0"
 quic_port = 4433
-http_port = 8443
+http_port = 8443          # HTTPS REST
+tls_dir = "./data/tls"    # постоянный сертификат (cert.der, key.der)
 
 [database]
 url = "sqlite://finchspeak.db?mode=rwc"
@@ -206,7 +209,9 @@ upload_dir = "./data/uploads"
 max_file_size_mb = 50
 
 [auth]
-jwt_secret = "finchspeak_jwt_secret_change_in_production_32bytes_long!"
+# jwt_secret не задан: сервер сам создаст случайный в jwt_secret_file.
+# Свой секрет можно задать строкой jwt_secret = "..." (длинная случайная строка).
+jwt_secret_file = "./data/jwt_secret"
 jwt_expiration_hours = 72
 ```
 

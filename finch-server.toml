@@ -3,7 +3,8 @@
 [server]
 host = "0.0.0.0"
 quic_port = 4433
-http_port = 8443
+http_port = 8443          # HTTPS REST (TLS only)
+tls_dir = "./data/tls"    # persistent certificate; clients pin its fingerprint
 
 [database]
 url = "sqlite://finchspeak.db?mode=rwc"
@@ -13,5 +14,6 @@ upload_dir = "./data/uploads"
 max_file_size_mb = 50
 
 [auth]
-jwt_secret = "finchspeak_jwt_secret_change_in_production_32bytes_long!"
+# No jwt_secret here: a random one is generated on first start and kept in jwt_secret_file.
+jwt_secret_file = "./data/jwt_secret"
 jwt_expiration_hours = 72

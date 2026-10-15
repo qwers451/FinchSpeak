@@ -11,7 +11,7 @@ use finch_server::launch::launch;
 use finch_testbed::client::connect_to;
 
 /// Start a server on a dedicated current-thread runtime; returns (http_url, quic_addr).
-fn start_isolated_server(dir: &std::path::Path) -> anyhow::Result<(String, SocketAddr)> {
+fn start_isolated_server(dir: &std::path::Path) -> anyhow::Result<(ApiClient, SocketAddr)> {
     let mut config = ServerConfig::default();
     config.server.host = "127.0.0.1".to_string();
     config.server.http_port = 0;
@@ -29,7 +29,7 @@ fn start_isolated_server(dir: &std::path::Path) -> anyhow::Result<(String, Socke
         rt.block_on(async move {
             match launch(config).await {
                 Ok(server) => {
-                    let _ = tx.send(Ok((format!("http://{}", server.http_addr), server.quic_addr)));
+                    let _ = tx.send(Ok((format!("https://{}", server.http_addr), server.certificate_fingerprint.clone(), server.quic_addr)));
                     std::future::pending::<()>().await;
                 }
                 Err(e) => {
@@ -38,7 +38,10 @@ fn start_isolated_server(dir: &std::path::Path) -> anyhow::Result<(String, Socke
             }
         });
     });
-    rx.recv_timeout(Duration::from_secs(10))?
+    let (url, fingerprint, quic_addr) = rx.recv_timeout(Duration::from_secs(10))??;
+    let pins = std::sync::Arc::new(dashmap::DashMap::new());
+    pins.insert("127.0.0.1".to_string(), fingerprint);
+    Ok((ApiClient::with_tofu(&url, pins)?, quic_addr))
 }
 
 /// A client that floods pings and never reads the replies, then disconnects, must not
@@ -46,9 +49,8 @@ fn start_isolated_server(dir: &std::path::Path) -> anyhow::Result<(String, Socke
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn server_survives_client_that_never_reads() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
-    let (http_url, quic_addr) = start_isolated_server(dir.path())?;
+    let (api, quic_addr) = start_isolated_server(dir.path())?;
 
-    let api = ApiClient::new(&http_url)?;
     let token = api.register("slowpoke", "password_123", "slowpoke").await?.token;
     let (session, events) = connect_to(quic_addr, &token).await?;
 
@@ -80,8 +82,7 @@ async fn server_survives_client_that_never_reads() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stalled_client_does_not_block_chat_for_others() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
-    let (http_url, quic_addr) = start_isolated_server(dir.path())?;
-    let api = ApiClient::new(&http_url)?;
+    let (api, quic_addr) = start_isolated_server(dir.path())?;
 
     let stalled = api.register("stalled", "password_123", "stalled").await?.token;
     let (stalled_session, _stalled_events) = connect_to(quic_addr, &stalled).await?;

@@ -9,13 +9,17 @@ use tokio::task::JoinHandle;
 use crate::api::create_router;
 use crate::config::ServerConfig;
 use crate::db::init_db;
+use crate::https;
 use crate::quic;
 use crate::session::SessionManager;
 
 /// A running FinchSpeak server (REST + QUIC) with its bound addresses.
 pub struct RunningServer {
+    /// Address of the HTTPS REST listener.
     pub http_addr: SocketAddr,
     pub quic_addr: SocketAddr,
+    /// SHA-256 fingerprint of the certificate used by both REST and QUIC (what clients pin).
+    pub certificate_fingerprint: String,
     endpoint: quinn::Endpoint,
     http_shutdown: Option<oneshot::Sender<()>>,
     http_task: Option<JoinHandle<()>>,
@@ -44,6 +48,8 @@ pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
         .context("Invalid QUIC bind address")?;
     let (cert, key) = quic::load_or_create_cert(std::path::Path::new(&config.server.tls_dir))
         .context("Failed to load TLS certificate")?;
+    let certificate_fingerprint = quic::certificate_fingerprint(&cert);
+    let https_config = https::make_tls_config(cert.clone(), key.clone_key())?;
     let server_config = quic::make_server_config_with(cert, key).context("failed to create server config")?;
     let endpoint = quinn::Endpoint::server(server_config, quic_bind)
         .with_context(|| format!("Failed to bind QUIC endpoint on {quic_bind}"))?;
@@ -60,18 +66,11 @@ pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
         .await
         .with_context(|| format!("Failed to bind HTTP listener on {http_bind}"))?;
     let http_addr = listener.local_addr()?;
-    tracing::info!("Axum REST API listening on http://{http_addr}");
+    tracing::info!("REST API listening on https://{http_addr} (certificate {certificate_fingerprint})");
 
     let app = create_router(pool.clone(), config.clone(), sessions.clone());
     let (http_shutdown, http_shutdown_rx) = oneshot::channel::<()>();
-    let http_task = tokio::spawn(async move {
-        let shutdown = async {
-            let _ = http_shutdown_rx.await;
-        };
-        if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown).await {
-            tracing::error!("HTTP server error: {e}");
-        }
-    });
+    let http_task = tokio::spawn(https::serve(listener, https_config, app, http_shutdown_rx));
 
     let quic_endpoint = endpoint.clone();
     let jwt_secret = config.auth.jwt_secret.clone();
@@ -84,6 +83,7 @@ pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
     Ok(RunningServer {
         http_addr,
         quic_addr,
+        certificate_fingerprint,
         endpoint,
         http_shutdown: Some(http_shutdown),
         http_task: Some(http_task),

@@ -1,6 +1,5 @@
 //! Account scenarios: registration, login, JWT validation on REST and QUIC.
 
-use finch_client_core::api::ApiClient;
 use finch_client_core::error::ClientError;
 use finch_testbed::client::{connect_with_token, TestClient};
 use finch_testbed::server::TestServer;
@@ -36,7 +35,7 @@ fn token_for(client: &TestClient, secret: &str, exp: usize) -> String {
 }
 
 async fn assert_token_rejected(server: &TestServer, token: String) -> anyhow::Result<()> {
-    let mut api = ApiClient::new(&server.http_url)?;
+    let mut api = server.api()?;
     api.set_token(token.clone());
     match api.me().await {
         Err(ClientError::Http { status, .. }) => assert_eq!(status, 401),
@@ -56,7 +55,7 @@ async fn register_and_login() -> anyhow::Result<()> {
     let alice = TestClient::register(&server, "alice").await?;
     assert_eq!(alice.user.username, "alice");
 
-    let api = ApiClient::new(&server.http_url)?;
+    let api = server.api()?;
     let auth = api.login("alice", "password_123").await?;
     assert_eq!(auth.user.id, alice.user.id);
     Ok(())
@@ -67,7 +66,7 @@ async fn wrong_password_is_401() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
     TestClient::register(&server, "alice").await?;
 
-    let api = ApiClient::new(&server.http_url)?;
+    let api = server.api()?;
     match api.login("alice", "wrong_password").await {
         Err(ClientError::Http { status, .. }) => assert_eq!(status, 401),
         other => panic!("expected HTTP 401, got {other:?}"),
@@ -97,7 +96,7 @@ async fn expired_jwt_rejected() -> anyhow::Result<()> {
 async fn login_reports_quic_port() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
     TestClient::register(&server, "alice").await?;
-    let api = ApiClient::new(&server.http_url)?;
+    let api = server.api()?;
     let auth = api.login("alice", "password_123").await?;
     assert_eq!(auth.quic_port, Some(server.quic_addr.port()));
 

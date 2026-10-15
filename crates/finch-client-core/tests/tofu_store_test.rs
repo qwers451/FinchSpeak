@@ -22,7 +22,9 @@ async fn start_server() -> anyhow::Result<(RunningServer, String)> {
     config.storage.upload_dir = dir.join("uploads").to_string_lossy().to_string();
     config.auth.jwt_secret = "tofu-store-test-secret-0123456789".to_string();
     let server = launch(config).await?;
-    let api = ApiClient::new(&format!("http://{}", server.http_addr))?;
+    let pins = Arc::new(DashMap::new());
+    pins.insert("127.0.0.1".to_string(), server.certificate_fingerprint.clone());
+    let api = ApiClient::with_tofu(&format!("https://{}", server.http_addr), pins)?;
     let token = api.register("alice", "password_123", "Alice").await?.token;
     Ok((server, token))
 }

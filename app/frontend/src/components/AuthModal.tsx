@@ -57,7 +57,7 @@ export function AuthModal() {
               class="form-input"
               value={serverUrl()}
               onInput={(e) => setServerUrl(e.currentTarget.value)}
-              placeholder="http://127.0.0.1:8443"
+              placeholder="https://127.0.0.1:8443"
               required
             />
           </div>
