@@ -160,7 +160,8 @@ mod tests {
     #[test]
     #[ignore = "AUD-048"]
     fn test_input_resampler_preserves_duration() {
-        for rate in [16_000u32, 44_100] {
+        let mut failures = Vec::new();
+        for rate in [16_000u32, 44_100, 96_000] {
             let mut resampler = InputResampler::new(rate).unwrap();
             let total_in = rate as usize; // one second
             let mut consumed = 0;
@@ -174,10 +175,38 @@ mod tests {
                 produced += FRAME_SIZE_48K;
             }
             let expected = consumed * 48_000 / rate as usize;
-            assert!(
-                produced.abs_diff(expected) <= FRAME_SIZE_48K,
-                "{rate} Hz: consumed {consumed} input samples, produced {produced}, expected {expected}"
-            );
+            if produced.abs_diff(expected) > FRAME_SIZE_48K {
+                failures.push(format!(
+                    "{rate} Hz: consumed {consumed} input samples, produced {produced}, expected {expected}"
+                ));
+            }
         }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// 50 frames of 960 samples at 48 kHz must play for one second at any device rate.
+    #[test]
+    #[ignore = "AUD-051"]
+    fn test_output_resampler_preserves_duration() {
+        let mut failures = Vec::new();
+        for rate in [16_000u32, 44_100, 96_000] {
+            let mut resampler = OutputResampler::new(rate).unwrap();
+            let input = [0.1f32; FRAME_SIZE_48K];
+            let mut produced = 0;
+            let mut errors = 0;
+            for _ in 0..50 {
+                match resampler.process(&input) {
+                    Ok(out) => produced += out.len(),
+                    Err(_) => errors += 1,
+                }
+            }
+            let expected = rate as usize;
+            if errors > 0 || produced.abs_diff(expected) > expected / 50 {
+                failures.push(format!(
+                    "{rate} Hz: 1 s of audio produced {produced} samples (expected {expected}), {errors} errors"
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
     }
 }

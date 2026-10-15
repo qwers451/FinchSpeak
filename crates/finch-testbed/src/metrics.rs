@@ -43,22 +43,36 @@ pub fn segmental_snr_db(x: &[f32], clean: &[f32], noise_floor: f64) -> f32 {
     (values.iter().sum::<f64>() / values.len() as f64) as f32
 }
 
+/// Minimum normalized cross-correlation for a lag to count as a match.
+pub const MIN_DELAY_CORRELATION: f64 = 0.3;
+
 /// Lag (in samples) of `reference` inside `recorded` by maximum cross-correlation.
-pub fn delay_samples(reference: &[f32], recorded: &[f32], max_lag: usize) -> usize {
-    let mut best_lag = 0;
-    let mut best = f64::MIN;
+///
+/// Returns `None` when the best normalized correlation is below
+/// [`MIN_DELAY_CORRELATION`] — e.g. `recorded` is silent or unrelated noise.
+pub fn delay_samples(reference: &[f32], recorded: &[f32], max_lag: usize) -> Option<usize> {
+    let ref_energy: f64 = reference.iter().map(|&r| r as f64 * r as f64).sum();
+    if ref_energy <= 0.0 {
+        return None;
+    }
+    let mut best: Option<(usize, f64)> = None;
     for lag in 0..=max_lag.min(recorded.len()) {
+        let window = &recorded[lag..(lag + reference.len()).min(recorded.len())];
+        let window_energy: f64 = window.iter().map(|&x| x as f64 * x as f64).sum();
+        if window_energy <= 0.0 {
+            continue;
+        }
         let corr: f64 = reference
             .iter()
-            .zip(recorded.iter().skip(lag))
+            .zip(window)
             .map(|(&r, &x)| r as f64 * x as f64)
             .sum();
-        if corr > best {
-            best = corr;
-            best_lag = lag;
+        let normalized = corr / (ref_energy * window_energy).sqrt();
+        if best.is_none_or(|(_, b)| normalized > b) {
+            best = Some((lag, normalized));
         }
     }
-    best_lag
+    best.filter(|&(_, c)| c >= MIN_DELAY_CORRELATION).map(|(lag, _)| lag)
 }
 
 /// Echo return loss enhancement: `10·log10(P(echo_in) / P(residual_out))`.
@@ -96,7 +110,21 @@ mod tests {
         let mut recorded = vec![0.0f32; 2_400];
         recorded.extend_from_slice(&reference);
         recorded.extend(std::iter::repeat_n(0.0, 2_400));
-        assert_eq!(delay_samples(&reference, &recorded, 10_000), 2_400);
+        assert_eq!(delay_samples(&reference, &recorded, 10_000), Some(2_400));
+    }
+
+    #[test]
+    fn delay_not_found_in_silence() {
+        let reference = chirp(4_800, 300.0, 3_000.0);
+        let recorded = vec![0.0f32; 20_000];
+        assert_eq!(delay_samples(&reference, &recorded, 10_000), None);
+    }
+
+    #[test]
+    fn delay_not_found_in_unrelated_noise() {
+        let reference = chirp(4_800, 300.0, 3_000.0);
+        let recorded = white_noise(20_000, -20.0, 5);
+        assert_eq!(delay_samples(&reference, &recorded, 10_000), None);
     }
 
     #[test]

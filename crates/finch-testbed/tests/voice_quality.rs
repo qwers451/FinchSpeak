@@ -65,8 +65,10 @@ async fn end_to_end_latency_under_120ms() -> anyhow::Result<()> {
     debug_wav("latency_out", &run.output);
 
     let probe_end = SR / 5 + SR / 10;
-    let latency_ms =
-        delay_samples(&input[..probe_end], &run.output[..probe_end + SR / 2], SR / 4) as f32 * 1000.0 / SR as f32;
+    assert!(!run.received_headers.is_empty(), "receiver got no audio");
+    let latency = delay_samples(&input[..probe_end], &run.output[..probe_end + SR / 2], SR / 4)
+        .ok_or_else(|| anyhow::anyhow!("probe not found in receiver output"))?;
+    let latency_ms = latency as f32 * 1000.0 / SR as f32;
     eprintln!("BASELINE end_to_end_latency_ms = {latency_ms:.1}");
     assert!(latency_ms <= 120.0, "latency {latency_ms:.1} ms > 120 ms");
     Ok(())

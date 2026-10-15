@@ -18,8 +18,8 @@ pub struct RunningServer {
     pub quic_addr: SocketAddr,
     endpoint: quinn::Endpoint,
     http_shutdown: Option<oneshot::Sender<()>>,
-    http_task: JoinHandle<()>,
-    quic_task: JoinHandle<()>,
+    http_task: Option<JoinHandle<()>>,
+    quic_task: Option<JoinHandle<()>>,
 }
 
 /// Initialize the database and start the REST and QUIC servers.
@@ -76,20 +76,25 @@ pub async fn launch(config: ServerConfig) -> Result<RunningServer> {
         quic_addr,
         endpoint,
         http_shutdown: Some(http_shutdown),
-        http_task,
-        quic_task,
+        http_task: Some(http_task),
+        quic_task: Some(quic_task),
     })
 }
 
 impl RunningServer {
     /// Resolves when either the REST or the QUIC server task exits on its own.
     pub async fn wait_for_exit(&mut self) {
-        tokio::select! {
-            res = &mut self.http_task => {
-                tracing::error!("HTTP server exited unexpectedly: {res:?}");
-            }
-            res = &mut self.quic_task => {
-                tracing::error!("QUIC server exited unexpectedly: {res:?}");
+        // If one server is already gone there is nothing left to wait for.
+        if let (Some(http), Some(quic)) = (&mut self.http_task, &mut self.quic_task) {
+            tokio::select! {
+                res = http => {
+                    tracing::error!("HTTP server exited unexpectedly: {res:?}");
+                    self.http_task = None;
+                }
+                res = quic => {
+                    tracing::error!("QUIC server exited unexpectedly: {res:?}");
+                    self.quic_task = None;
+                }
             }
         }
     }
@@ -100,8 +105,12 @@ impl RunningServer {
         if let Some(tx) = self.http_shutdown.take() {
             let _ = tx.send(());
         }
-        let _ = (&mut self.http_task).await;
-        let _ = (&mut self.quic_task).await;
+        if let Some(task) = self.http_task.take() {
+            let _ = task.await;
+        }
+        if let Some(task) = self.quic_task.take() {
+            let _ = task.await;
+        }
         self.endpoint.wait_idle().await;
     }
 }

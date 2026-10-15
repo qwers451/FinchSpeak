@@ -7,7 +7,7 @@ use bytes::{BufMut, BytesMut};
 use dashmap::DashMap;
 use finch_client_core::api::ApiClient;
 use finch_client_core::error::ClientError;
-use finch_client_core::session::{connect, ConnectParams, Session, SessionEvent};
+use finch_client_core::session::{connect, ConnectParams, Session, SessionEvent, EVENT_QUEUE_CAPACITY};
 use finch_protocol::media::MediaHeader;
 use finch_protocol::messages::{ClientMessage, ServerMessage};
 use finch_protocol::models::ChannelType;
@@ -169,12 +169,30 @@ async fn control_events_survive_datagram_flood() -> anyhow::Result<()> {
         })
         .await?;
 
-    let content = wait_control(&mut b_events, |m| match m {
-        ServerMessage::NewMessage { content, .. } if content == "after flood" => Some(content.clone()),
-        _ => None,
-    })
-    .await?;
-    assert_eq!(content, "after flood");
+    // Drain B: count queued datagrams until the control message shows up.
+    let mut datagrams_before_message = 0usize;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let event = tokio::time::timeout_at(deadline, b_events.recv())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("event stream closed"))?;
+        match event {
+            SessionEvent::Datagram(_) => datagrams_before_message += 1,
+            SessionEvent::Control(ServerMessage::NewMessage { content, .. }) if content == "after flood" => break,
+            _ => {}
+        }
+    }
+
+    // The queue filled up (so datagrams were dropped, not blocked on) and the
+    // control message still arrived.
+    assert!(
+        datagrams_before_message >= EVENT_QUEUE_CAPACITY / 2,
+        "queue never filled: only {datagrams_before_message} datagrams queued"
+    );
+    assert!(
+        datagrams_before_message <= EVENT_QUEUE_CAPACITY + 16,
+        "{datagrams_before_message} datagrams queued, more than the queue holds"
+    );
 
     server.shutdown().await;
     Ok(())

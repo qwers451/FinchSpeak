@@ -82,7 +82,9 @@ async fn voice_under_loss_and_jitter() -> anyhow::Result<()> {
 
     let run = run_voice_link(&a, &mut b, &input, 15).await?;
 
-    let latency = delay_samples(&input[..speech_start], &run.output[..speech_start + SR / 2], SR / 4);
+    assert!(!run.received_headers.is_empty(), "receiver got no audio");
+    let latency = delay_samples(&input[..speech_start], &run.output[..speech_start + SR], SR)
+        .ok_or_else(|| anyhow::anyhow!("probe not found in receiver output"))?;
     let latency_ms = latency as f32 * 1000.0 / SR as f32;
     let longest_gap = longest_silent_run(
         &run.output,
