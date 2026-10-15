@@ -51,7 +51,6 @@ async fn client_reconnects_after_server_restart() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "AUD-008"]
 async fn abrupt_disconnect_cleans_presence() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
     let mut a = TestClient::register(&server, "alice").await?;

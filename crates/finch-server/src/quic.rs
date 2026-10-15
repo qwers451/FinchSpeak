@@ -398,7 +398,21 @@ pub async fn handle_connection(
 
     // Cleanup upon disconnect
     control_writer_task.abort();
+    let left_voice = sessions
+        .sessions
+        .get(&peer_id)
+        .and_then(|s| s.current_voice_channel)
+        .and_then(|short_id| sessions.short_to_channel.get(&short_id).map(|c| *c));
     sessions.unregister_session(peer_id);
+    if let Some(channel_id) = left_voice {
+        sessions
+            .broadcast_all(ServerMessage::UserLeftVoice {
+                user_id,
+                peer_id,
+                channel_id,
+            })
+            .await;
+    }
     sessions
         .broadcast_all(ServerMessage::PresenceUpdate {
             user_id,
