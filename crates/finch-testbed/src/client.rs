@@ -4,11 +4,12 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use dashmap::DashMap;
 use finch_client_core::api::{ApiClient, UserDto};
 use finch_client_core::error::ClientError;
 use finch_client_core::session::{connect, ConnectParams, Session, SessionEvent};
+use finch_protocol::media::MediaHeader;
 use finch_protocol::messages::{ClientMessage, ServerMessage};
 use finch_protocol::models::ChannelType;
 use tokio::sync::mpsc;
@@ -29,6 +30,15 @@ pub struct TestClient {
     events: mpsc::Receiver<SessionEvent>,
     datagrams: VecDeque<Bytes>,
     recent: VecDeque<String>,
+}
+
+/// Build an audio datagram with a zero-filled payload of `payload_len` bytes.
+pub fn audio_datagram(channel_short_id: u32, sender_peer_id: u32, seq: u16, payload_len: usize) -> Bytes {
+    let header = MediaHeader::new_audio(channel_short_id, sender_peer_id, seq, seq as u32 * 20, false, false);
+    let mut packet = BytesMut::with_capacity(20 + payload_len);
+    header.write_to(&mut packet);
+    packet.put_bytes(0, payload_len);
+    packet.freeze()
 }
 
 /// Open a QUIC session with an arbitrary token (fresh TOFU store).
@@ -84,6 +94,19 @@ impl TestClient {
             .send(msg)
             .await
             .map_err(|_| anyhow::anyhow!("control channel closed"))
+    }
+
+    /// Join the first voice channel and wait until the server confirms it.
+    pub async fn join_voice(&mut self) -> anyhow::Result<(Uuid, u32)> {
+        let (channel_id, short_id) = self.channel(ChannelType::Voice);
+        self.send(ClientMessage::JoinVoice { channel_id }).await?;
+        let me = self.session.session_peer_id;
+        self.expect_control(Duration::from_secs(2), |m| match m {
+            ServerMessage::UserJoinedVoice { peer_id, .. } if *peer_id == me => Some(()),
+            _ => None,
+        })
+        .await?;
+        Ok((channel_id, short_id))
     }
 
     /// Wait for a control message matching `pred`; other control messages are skipped,
@@ -148,6 +171,21 @@ impl TestClient {
             self.store(event);
         }
         self.datagrams.drain(..).collect()
+    }
+
+    /// Wait up to `timeout` for the next media datagram.
+    pub async fn wait_datagram(&mut self, timeout: Duration) -> anyhow::Result<Bytes> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if let Some(d) = self.datagrams.pop_front() {
+                return Ok(d);
+            }
+            match tokio::time::timeout_at(deadline, self.events.recv()).await {
+                Ok(Some(event)) => self.store(event),
+                Ok(None) => anyhow::bail!("session event stream closed"),
+                Err(_) => anyhow::bail!("timeout after {timeout:?} waiting for a datagram"),
+            }
+        }
     }
 
     /// First channel of `kind` from the server state received at authentication.
