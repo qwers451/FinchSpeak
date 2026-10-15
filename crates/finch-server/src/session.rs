@@ -162,26 +162,39 @@ impl SessionManager {
 
     /// Broadcast a Control Stream message to all connected sessions.
     pub async fn broadcast_all(&self, msg: ServerMessage) {
-        let senders: Vec<_> = self.sessions.iter().map(|entry| entry.value().control_tx.clone()).collect();
-        for tx in senders {
-            let _ = tx.send(msg.clone()).await;
-        }
+        let targets: Vec<_> = self
+            .sessions
+            .iter()
+            .map(|entry| (*entry.key(), entry.value().control_tx.clone(), entry.value().connection.clone()))
+            .collect();
+        deliver(targets, &msg);
     }
 
-    /// Broadcast a Control Stream message to participants of a voice room.
     pub async fn broadcast_voice(&self, short_id: u32, msg: ServerMessage, exclude_peer_id: Option<u32>) {
-        let senders: Vec<_> = if let Some(room) = self.voice_rooms.get(&short_id) {
+        let targets: Vec<_> = if let Some(room) = self.voice_rooms.get(&short_id) {
             room.participants
                 .iter()
                 .filter(|&&peer_id| Some(peer_id) != exclude_peer_id)
-                .filter_map(|&peer_id| self.sessions.get(&peer_id).map(|s| s.control_tx.clone()))
+                .filter_map(|&peer_id| {
+                    self.sessions
+                        .get(&peer_id)
+                        .map(|s| (peer_id, s.control_tx.clone(), s.connection.clone()))
+                })
                 .collect()
         } else {
             Vec::new()
         };
+        deliver(targets, &msg);
+    }
+}
 
-        for tx in senders {
-            let _ = tx.send(msg.clone()).await;
+/// Queue `msg` for every target without waiting. A client whose control queue is full is not
+/// keeping up; it is disconnected instead of stalling delivery to everyone else.
+fn deliver(targets: Vec<(u32, Sender<ServerMessage>, quinn::Connection)>, msg: &ServerMessage) {
+    for (peer_id, tx, connection) in targets {
+        if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = tx.try_send(msg.clone()) {
+            tracing::warn!("Control queue of peer {peer_id} is full; disconnecting the slow client");
+            connection.close(0u32.into(), b"control queue overflow");
         }
     }
 }

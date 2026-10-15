@@ -74,3 +74,56 @@ async fn server_survives_client_that_never_reads() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("server stopped responding after the slow client left"))??;
     Ok(())
 }
+
+/// One client with a full control queue must not delay broadcasts to everyone else
+/// (AUD-007: `broadcast_all` awaited each client in turn).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stalled_client_does_not_block_chat_for_others() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let (http_url, quic_addr) = start_isolated_server(dir.path())?;
+    let api = ApiClient::new(&http_url)?;
+
+    let stalled = api.register("stalled", "password_123", "stalled").await?.token;
+    let (stalled_session, _stalled_events) = connect_to(quic_addr, &stalled).await?;
+    for i in 0..60_000u64 {
+        if stalled_session.control_tx.send(ClientMessage::Ping { timestamp: i }).await.is_err() {
+            break;
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let alice = api.register("alice", "password_123", "alice").await?.token;
+    let bob = api.register("bob", "password_123", "bob").await?.token;
+    let (a, _a_events) = connect_to(quic_addr, &alice).await?;
+    let (_b, mut b_events) = connect_to(quic_addr, &bob).await?;
+    let text_id = a
+        .initial_state
+        .channels
+        .iter()
+        .find(|c| c.channel_type == finch_protocol::models::ChannelType::Text)
+        .map(|c| c.id)
+        .ok_or_else(|| anyhow::anyhow!("no text channel"))?;
+
+    a.control_tx
+        .send(ClientMessage::SendMessage {
+            channel_id: text_id,
+            content: "still alive".to_string(),
+            attachments: vec![],
+        })
+        .await?;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let event = tokio::time::timeout_at(deadline, b_events.recv())
+            .await
+            .map_err(|_| anyhow::anyhow!("bob did not get the message while another client was stalled"))?
+            .ok_or_else(|| anyhow::anyhow!("bob's session closed"))?;
+        if let finch_client_core::session::SessionEvent::Control(
+            finch_protocol::messages::ServerMessage::NewMessage { content, .. },
+        ) = event
+            && content == "still alive"
+        {
+            return Ok(());
+        }
+    }
+}
