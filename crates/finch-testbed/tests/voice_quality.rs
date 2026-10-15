@@ -74,7 +74,8 @@ async fn end_to_end_latency_under_120ms() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn check_noise_suppression(kind: &str, noise: Vec<f32>) {
+/// `enforce`: apply the spec thresholds (stationary noise only, owner decision on AUD-049).
+fn check_noise_suppression(kind: &str, noise: Vec<f32>, enforce: bool) {
     let speech = load_speech_48k("speech_1").expect("fixture");
     let lead = SR;
     let noisy_speech = mix_at_snr(&speech, &noise[lead..lead + speech.len()], 5.0);
@@ -96,6 +97,9 @@ fn check_noise_suppression(kind: &str, noise: Vec<f32>) {
         "BASELINE ns_{kind}: snr_in = {snr_in:.1} dB, snr_out = {snr_out:.1} dB, improvement = {:.1} dB, segsnr_in = {seg_in:.1}, segsnr_out = {seg_out:.1}",
         snr_out - snr_in
     );
+    if !enforce {
+        return;
+    }
     assert!(snr_out - snr_in >= 10.0, "{kind}: SNR improvement {:.1} dB < 10 dB", snr_out - snr_in);
     assert!(seg_out >= seg_in, "{kind}: segmental SNR fell from {seg_in:.1} to {seg_out:.1}");
 }
@@ -104,18 +108,19 @@ const NS_LEN: usize = SR + 6 * SR;
 
 #[test]
 fn noise_suppression_improves_snr_white() {
-    check_noise_suppression("white", white_noise(NS_LEN, -30.0, 42));
+    check_noise_suppression("white", white_noise(NS_LEN, -30.0, 42), true);
 }
 
 #[test]
 fn noise_suppression_improves_snr_pink() {
-    check_noise_suppression("pink", pink_noise(NS_LEN, -30.0, 42));
+    check_noise_suppression("pink", pink_noise(NS_LEN, -30.0, 42), true);
 }
 
+/// Measured only: RNNoise does not suppress competing speech, and the owner limited the
+/// SNR threshold to stationary noise (AUD-049). The value goes to BASELINE.md.
 #[test]
-#[ignore = "AUD-049"]
-fn noise_suppression_improves_snr_babble() {
-    check_noise_suppression("babble", babble(NS_LEN, -30.0, 42).expect("fixtures"));
+fn noise_suppression_babble_measured() {
+    check_noise_suppression("babble", babble(NS_LEN, -30.0, 42).expect("fixtures"), false);
 }
 
 #[test]

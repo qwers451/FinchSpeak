@@ -11,8 +11,8 @@ Debug WAVs of the last run: `target/testbed-out/`.
 | NS, white noise: segmental SNR in → out | out ≥ in | 5.7 → 26.9 | pass | 2026-10-15 | cc0476d |
 | NS, pink noise: SNR improvement | ≥ 10 dB | +15.7 dB (5.2 → 20.9) | pass | 2026-10-15 | cc0476d |
 | NS, pink noise: segmental SNR in → out | out ≥ in | 5.8 → 20.4 | pass | 2026-10-15 | cc0476d |
-| NS, babble (3 voices): SNR improvement | ≥ 10 dB | +0.0 dB (6.0 → 6.0) | **fail — AUD-049** | 2026-10-15 | cc0476d |
-| NS, babble: segmental SNR in → out | out ≥ in | 5.9 → 5.2 | **fail — AUD-049** | 2026-10-15 | cc0476d |
+| NS, babble (3 voices): SNR improvement | measured only (owner decision, AUD-049) | +0.0 dB (6.0 → 6.0) | info | 2026-10-15 | cc0476d |
+| NS, babble: segmental SNR in → out | measured only | 5.9 → 5.2 | info | 2026-10-15 | cc0476d |
 | AEC, echo 40 ms / −6 dB: ERLE after 2 s | ≥ 20 dB | 0.8 dB | **fail — AUD-021** | 2026-10-15 | cc0476d |
 | AEC double-talk: near-end level kept | ≥ near − 6 dB | −22.1 dBFS (near −23.3) | pass | 2026-10-15 | cc0476d |
 | VAD on pink noise −35 dBFS: speaking indicator | never lit | lit 2× | **fail — AUD-050** | 2026-10-15 | cc0476d |

@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/Rust-2024_Edition-orange.svg" alt="Rust 2024" />
   <img src="https://img.shields.io/badge/Transport-QUIC%20%2F%20quinn-blue.svg" alt="QUIC Transport" />
   <img src="https://img.shields.io/badge/Frontend-Tauri%20v2%20%2B%20SolidJS-cyan.svg" alt="Tauri v2 + SolidJS" />
-  <img src="https://img.shields.io/badge/Security-E2EE%20ChaCha20--Poly1305-green.svg" alt="E2EE Security" />
+  <img src="https://img.shields.io/badge/Security-TLS%201.3%20QUIC-green.svg" alt="TLS 1.3 QUIC" />
   <img src="https://img.shields.io/badge/Audio-Opus%20%2F%20cpal%20%2F%20AEC-purple.svg" alt="Audio Pipeline" />
   <img src="https://img.shields.io/badge/Video-H.264%20WebCodecs-red.svg" alt="Video WebCodecs" />
 </p>
@@ -24,7 +24,7 @@
 * **Десктопный клиент**: Легковесная оболочка **Tauri v2** с реактивным интерфейсом на **SolidJS** и **TypeScript** (сборщик **Vite**).
 * **Аудио-подсистема**: Захват звука через **cpal** на нативной частоте ОС, lock-free буферизация на **ringbuf**, полифазный ресемплинг в 48 кГц моно через **rubato**, эхоподавление (AEC3), нейросетевое шумоподавление (**nnnoiseless** RNNoise), локальный VAD и сжатие в **Opus** (20 мс фреймы).
 * **Демонстрация экрана**: Захват экрана и окон с помощью **xcap**, сжатие в **H.264** (**OpenH264**), захват системного аудио (**audio_loopback** WASAPI/PipeWire) в Opus stereo 96 кбит/с, передача NAL напрямую в браузерный **WebCodecs API (`VideoDecoder`)** с аппаратной отрисовкой на Canvas.
-* **Безопасность**: Сквозное шифрование (E2EE) медиа-трафика на основе **ChaCha20-Poly1305** с валидацией 20-байтного заголовка в качестве AAD, TLS 1.3 с самоподписанными сертификатами Ed25519 и проверкой отпечатков TOFU (Trust On First Use).
+* **Безопасность**: весь трафик QUIC (голос, экран, чат) шифруется TLS 1.3 между клиентом и вашим сервером; сертификат сервера самоподписанный, клиент проверяет его отпечаток (TOFU, Trust On First Use). Сквозного шифрования (E2EE) нет: сервер, которым вы владеете, технически может видеть медиа-трафик.
 
 ---
 
@@ -129,11 +129,9 @@ graph TD
 * **Прямой рендеринг без накладных расходов**: Сжатые NAL-юниты передаются из Rust в интерфейс через высокоскоростной бинарный канал `tauri::ipc::Channel` прямо в браузерный аппаратный декодер **WebCodecs API (`VideoDecoder`)** с выводом на `<canvas>`. В проекте **не используются** локальный HTTP-сервер, генерация fMP4 и программные WASM/JS декодеры.
 * **Звук экрана**: Аудио захватывается через петлевой интерфейс (`audio_loopback`) и кодируется в Opus stereo 96 кбит/с (`MediaType::ScreenAudio`).
 
-### 7. Сквозное шифрование (E2EE) и аутентификация TOFU
-* Все медиа-данные комнаты могут шифроваться 256-битным ключом с помощью алгоритма **ChaCha20-Poly1305**.
-* Открытым остается только 20-байтный `MediaHeader`, который передается в шифратор как **AAD (Additional Authenticated Data)**. Любая модификация заголовка на сервере или в канале приводит к ошибке аутентификации.
-* Уникальный 12-байтный Nonce формируется функцией `e2ee_nonce()`:
-  `sender_peer_id (4Б) + timestamp (4Б) + sequence (2Б) + frame_id (2Б)`.
+### 7. Шифрование транспорта и аутентификация TOFU
+* Голос, демонстрация экрана и управляющие сообщения идут по QUIC с TLS 1.3 — шифрование между клиентом и сервером.
+* Сквозного шифрования (E2EE) клиент не выполняет: FinchSpeak рассчитан на self-hosted сервер, которому доверяют участники. В `finch-protocol` остаются примитивы ChaCha20-Poly1305 (`encrypt_media_payload`, `decrypt_media_payload`) на будущее.
 * При первом подключении к серверу клиент валидирует Ed25519 SHA-256 fingerprint сертификата через диалог TOFU (Trust On First Use).
 
 ### 8. Надежность и стандарты кода
