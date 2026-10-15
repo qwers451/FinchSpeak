@@ -79,8 +79,18 @@ impl TestClient {
         username: &str,
         quic_addr: SocketAddr,
     ) -> anyhow::Result<Self> {
+        Self::register_as(server, username, username, quic_addr).await
+    }
+
+    /// Register `username` with a separate display name.
+    pub async fn register_as(
+        server: &TestServer,
+        username: &str,
+        display_name: &str,
+        quic_addr: SocketAddr,
+    ) -> anyhow::Result<Self> {
         let mut api = server.api()?;
-        let auth = api.register(username, TEST_PASSWORD, username).await?;
+        let auth = api.register(username, TEST_PASSWORD, display_name).await?;
         api.set_token(auth.token.clone());
         let (session, events) = connect_to(quic_addr, &auth.token).await?;
         Ok(Self {

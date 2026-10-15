@@ -222,6 +222,13 @@ pub async fn handle_connection(
 
     let user_id = Uuid::parse_str(&claims.sub)?;
     let peer_id = sessions.allocate_peer_id();
+    // What other people see next to this user: the display name, the login if there is none.
+    let shown_name = sqlx::query_scalar::<_, String>("SELECT display_name FROM users WHERE id = ?")
+        .bind(&claims.sub)
+        .fetch_optional(&pool)
+        .await?
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| claims.username.clone());
 
     // 4. Setup outbound channel for Control Stream messages
     let (control_tx, mut control_rx) = mpsc::channel::<ServerMessage>(128);
@@ -248,7 +255,7 @@ pub async fn handle_connection(
         token_id: claims.jti.clone(),
         peer_id,
         user_id,
-        username: claims.username.clone(),
+        username: shown_name.clone(),
         role: claims.role.clone(),
         current_voice_channel: None,
         muted: false,
@@ -289,7 +296,7 @@ pub async fn handle_connection(
     // Inbound control reader
     let pool_reader = pool.clone();
     let sessions_reader = sessions.clone();
-    let username_reader = claims.username.clone();
+    let username_reader = shown_name;
 
     let control_reader_task = tokio::spawn(async move {
         loop {

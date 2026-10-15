@@ -15,6 +15,7 @@ pub struct ClientSession {
     pub token_id: String,
     pub peer_id: u32,
     pub user_id: Uuid,
+    /// The name shown to other users (display name, or the login when none is set).
     pub username: String,
     pub role: String,
     pub current_voice_channel: Option<u32>,
