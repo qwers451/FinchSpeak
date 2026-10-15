@@ -12,6 +12,7 @@
 //! - [`vad`] — RMS dBFS Voice Activity Detection with hangover
 //! - [`mixer`] — Multi-speaker mixing with `tanh()` soft-limiter
 //! - [`capture`] — Voice capture pipeline (AEC → NS → VAD → Opus → packet)
+//! - [`reference`] — playout reference feeder for echo cancellation
 //! - [`aec`] — Acoustic Echo Cancellation with reference ring buffer
 //! - [`noise`] — Neural network noise suppression based on `nnnoiseless`
 
@@ -22,6 +23,7 @@ pub mod jitter;
 pub mod mixer;
 pub mod noise;
 pub mod opus;
+pub mod reference;
 pub mod resampler;
 pub mod vad;
 
@@ -32,5 +34,6 @@ pub use jitter::{JitterBuffer, PlayoutResult};
 pub use mixer::AudioMixer;
 pub use noise::NoiseSuppressor;
 pub use opus::{AudioOpusError, OpusVoiceDecoder, OpusVoiceEncoder};
+pub use reference::ReferenceFeeder;
 pub use resampler::{InputResampler, OutputResampler, FRAME_SIZE_48K, INTERNAL_SAMPLE_RATE};
 pub use vad::{VadDecision, VoiceActivityDetector};

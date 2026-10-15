@@ -13,17 +13,21 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Stream;
 use finch_audio::{
-    AudioMixer, InputResampler, OutputResampler, VadDecision, VoiceCapture, VoiceCaptureConfig, FRAME_SIZE_48K,
+    AudioMixer, InputResampler, OutputResampler, ReferenceFeeder, VadDecision, VoiceCapture,
+    VoiceCaptureConfig, FRAME_SIZE_48K,
 };
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::HeapRb;
 use tauri::Emitter;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::state::AppState;
 
 /// Capacity of lock-free ring buffers (16384 samples ~ 341 ms at 48 kHz).
 const RING_BUFFER_CAPACITY: usize = 16384;
+
+/// If the playout reference ring is this close to full, the output callback has started dropping samples.
+const REFERENCE_OVERFLOW_MARGIN: usize = 256;
 
 /// Errors that can occur in the audio engine.
 #[derive(Debug, thiserror::Error)]
@@ -174,6 +178,12 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 let playback_rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
                 let (mut playback_prod, mut playback_cons) = playback_rb.split();
 
+                // What the speakers actually played, for echo cancellation: the output callback
+                // copies every sample it plays into this lock-free ring.
+                let reference_rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
+                let (mut reference_prod, mut reference_cons) = reference_rb.split();
+                let mut reference_feeder: Option<ReferenceFeeder> = None;
+
                 let mut playback_stream: Option<Stream> = None;
                 let mut output_resampler: Option<OutputResampler> = None;
                 let mut output_sample_rate = 48000u32;
@@ -182,6 +192,13 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     match device.default_output_config() {
                         Ok(config) => {
                             output_sample_rate = config.sample_rate().0;
+                            reference_feeder = match ReferenceFeeder::new(output_sample_rate) {
+                                Ok(feeder) => Some(feeder),
+                                Err(e) => {
+                                    error!("Echo cancellation reference disabled: {}", e);
+                                    None
+                                }
+                            };
                             let channels = config.channels() as usize;
                             let is_deafened_ref = state.is_deafened.clone();
 
@@ -202,10 +219,14 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     }
                                     if is_deafened_ref.load(Ordering::Relaxed) {
                                         data.fill(0.0);
+                                        for _ in 0..data.len() / channels {
+                                            let _ = reference_prod.try_push(0.0);
+                                        }
                                         return;
                                     }
                                     for chunk in data.chunks_mut(channels) {
                                         let sample = playback_cons.try_pop().unwrap_or(0.0);
+                                        let _ = reference_prod.try_push(sample);
                                         for out_ch in chunk.iter_mut() {
                                             *out_ch = sample;
                                         }
@@ -338,7 +359,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         Err(std::sync::mpsc::TryRecvError::Empty) => {}
                     }
 
-                    // A. Playback processing (mixer -> AEC reference -> OutputResampler -> playback_prod)
+                    // A. Playback processing (mixer -> OutputResampler -> playback_prod)
                     if playback_stream.is_some() {
                         if let Some(resampler) = &mut output_resampler {
                             while playback_prod.occupied_len() < target_playback_headroom
@@ -357,10 +378,6 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     );
                                 }
 
-                                if let Some(capture) = &mut voice_capture {
-                                    capture.push_playback_reference(&playback_frame_48k);
-                                }
-
                                 match resampler.process(&playback_frame_48k) {
                                     Ok(resampled) => {
                                         for &sample in &resampled {
@@ -375,6 +392,26 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    // A2. Echo cancellation reference: what the speakers actually played.
+                    if let (Some(feeder), Some(capture)) = (&mut reference_feeder, &mut voice_capture) {
+                        if reference_cons.occupied_len() >= RING_BUFFER_CAPACITY - REFERENCE_OVERFLOW_MARGIN {
+                            // The callback outran us and dropped samples: the stream is no longer
+                            // contiguous, so forget the echo path instead of learning a wrong one.
+                            warn!("Playout reference overflow; resetting echo canceller");
+                            reference_cons.clear();
+                            feeder.clear();
+                            capture.reset_echo_canceller();
+                        }
+                        let mut played = [0.0f32; 1024];
+                        loop {
+                            let n = reference_cons.pop_slice(&mut played);
+                            if n == 0 {
+                                break;
+                            }
+                            feeder.push(&played[..n], |frame| capture.push_playback_reference(frame));
                         }
                     }
 

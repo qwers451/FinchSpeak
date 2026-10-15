@@ -64,6 +64,11 @@ impl VoiceCapture {
         })
     }
 
+    /// Forget the echo path (reference stream interrupted, device changed).
+    pub fn reset_echo_canceller(&mut self) {
+        self.echo_canceller.reset();
+    }
+
     /// Feed the 48 kHz frame that is being sent to the speakers (AEC far-end reference).
     pub fn push_playback_reference(&mut self, frame: &[f32; FRAME_SIZE_48K]) {
         self.echo_canceller.push_reference(frame);
