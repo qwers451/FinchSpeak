@@ -19,6 +19,9 @@ pub const MIN_BUFFER_PACKETS: usize = 2;
 /// Maximum jitter buffer delay (6 packets = 120 ms).
 pub const MAX_BUFFER_PACKETS: usize = 6;
 
+/// Packets allowed above the target depth before the oldest are skipped.
+const CATCH_UP_SLACK_PACKETS: usize = 1;
+
 /// Result of popping an audio frame from the jitter buffer.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PlayoutResult {
@@ -180,6 +183,20 @@ impl JitterBuffer {
             self.priming = false;
             self.conceal_while_priming = false;
         }
+
+        // A burst (the pre-roll of a new talk spurt, a network stall that cleared) leaves more
+        // queued than the target; playing it all out would keep every later packet that much
+        // later for good. Skip the oldest and stay close to the target.
+        let limit = self.target_packets + CATCH_UP_SLACK_PACKETS;
+        let mut skipped = false;
+        while self.queue.len() > limit {
+            self.queue.pop_first();
+            skipped = true;
+        }
+        if skipped && let Some(&oldest) = self.queue.keys().next() {
+            self.next_playout_seq = Some(oldest);
+        }
+        let playout_seq = self.next_playout_seq.unwrap_or(playout_seq);
 
         // Underrun: nothing queued at all means playout is ahead of the network, not that the
         // packet was lost. Hold position and re-buffer to the current target instead.
@@ -392,5 +409,31 @@ mod tests {
             buffer.pop_frame(&mut out);
         }
         assert!(buffer.loss_rate() < 0.05, "loss rate {:.2} with no real losses", buffer.loss_rate());
+    }
+
+    /// A burst of old packets (the pre-roll of a talk spurt) must not leave the stream a few
+    /// frames later than necessary for the rest of the spurt.
+    #[test]
+    fn test_burst_does_not_add_standing_latency() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let mut out = [0.0f32; FRAME_SIZE_48K];
+
+        for seq in 0..5u16 {
+            push_seq(&mut buffer, seq, false, &payload);
+        }
+        // From now on one packet arrives and one is played every 20 ms.
+        let mut deepest_after_settling = 0;
+        for seq in 5..45u16 {
+            buffer.pop_frame(&mut out);
+            push_seq(&mut buffer, seq, false, &payload);
+            if seq > 15 {
+                deepest_after_settling = deepest_after_settling.max(buffer.buffered_len());
+            }
+        }
+        assert!(
+            deepest_after_settling <= 3,
+            "{deepest_after_settling} packets still queued: the burst became permanent latency"
+        );
     }
 }

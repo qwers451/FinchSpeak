@@ -28,6 +28,7 @@ Debug WAVs of the last run: `target/testbed-out/`.
 | Network: longest run of silent frames during speech | ≤ 3 | 0 / 0 / 0 | pass | 2026-10-15 | after AUD-022 |
 | Screen share 1080p, per frame (release, this PC): convert + encode | info | 62 ms before, 31 ms after (own parallel I420 converter); capture 23 ms runs in parallel | improved | 2026-10-16 | screen FPS |
 | Screen share 1080p, viewer FPS in the app (two clients, one PC) | ≥ 25 | 16 before, 30 after | pass | 2026-10-16 | screen FPS |
+| End-to-end latency, Energy VAD with pre-roll (after AUD-050 pre-roll burst) | ≤ 120 ms | 116–136 ms before the catch-up fix, 76.4 ms after (5 runs) | fixed | 2026-10-16 | jitter catch-up |
 | (before AUD-022 fix) jitter buffer depth / loss | — | 20–68 packets / 17–35% | historical | 2026-10-15 | 27dcb0f |
 
 Network results vary between runs (real-time scheduling); three runs are recorded.
