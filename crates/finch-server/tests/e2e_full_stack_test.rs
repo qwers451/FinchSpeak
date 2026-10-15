@@ -273,7 +273,7 @@ async fn test_full_system_autotest() -> anyhow::Result<()> {
     }).await?;
     assert_eq!(ch_id_alice, general_uuid);
     assert_eq!(content_alice, test_content);
-    assert_eq!(author_alice, "alice");
+    assert_eq!(author_alice, "Alice"); // the display name, not the login
 
     let (ch_id_admin, content_admin, author_admin) = wait_for_message("Admin Recv NewMessage", &mut admin_recv, &mut admin_buf, |msg| {
         if let ServerMessage::NewMessage { channel_id, content, author_name, .. } = msg {
@@ -284,7 +284,7 @@ async fn test_full_system_autotest() -> anyhow::Result<()> {
     }).await?;
     assert_eq!(ch_id_admin, general_uuid);
     assert_eq!(content_admin, test_content);
-    assert_eq!(author_admin, "alice");
+    assert_eq!(author_admin, "Alice");
 
     // ─── 9. Verify Message History via REST ──────────────────────────────────
     let req = Request::builder()
