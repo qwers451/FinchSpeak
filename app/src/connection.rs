@@ -1,5 +1,5 @@
 //! QUIC session wiring: forwards `finch-client-core` session events to Tauri events,
-//! the audio mixer and the screen-share frame assembler, and reconnects after a drop.
+//! the audio mixer and the screen-share viewer, and reconnects after a drop.
 
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
@@ -27,6 +27,8 @@ async fn supersede_session(state: &AppState) -> u64 {
     }
     *state.control_tx.write().await = None;
     state.audio_engine.lock().await.stop();
+    state.stop_screen_share();
+    state.stop_watching().await;
     *state.current_voice_channel.write().await = None;
     generation
 }
@@ -67,6 +69,7 @@ pub async fn start_quic_session(
     *state.last_connect.write().await = Some(params);
     let connection = session.connection.clone();
     activate_session(&session, &state, &app_handle).await;
+    tokio::spawn(screen_viewer_ticker(state.clone(), generation));
     tokio::spawn(run_session(events, state, app_handle, generation));
     Ok(connection)
 }
@@ -119,18 +122,25 @@ async fn forward_events(
     while let Some(event) = events.recv().await {
         if state.session_generation.load(Ordering::SeqCst) != generation { return None; }
         match event {
+            SessionEvent::Control(ServerMessage::KeyframeRequested) => {
+                // A viewer needs a new key frame of the screen we are sharing.
+                if let Ok(slot) = state.screen_sharer.lock() {
+                    if let Some(sharer) = slot.as_ref() {
+                        sharer.request_keyframe();
+                    }
+                }
+            }
             SessionEvent::Control(msg) => emit_control(msg, app_handle),
             SessionEvent::Datagram(bytes) => route_datagram(bytes, state, app_handle).await,
+            SessionEvent::UniStreamStarted { header } => {
+                if header.media_type == MediaType::VideoKey && is_watching(state, &header) {
+                    state.screen_viewer.lock().await.keyframe_stream_started(Instant::now());
+                }
+            }
             SessionEvent::UniStream { header, payload } => {
-                if header.media_type == MediaType::VideoKey {
-                    let mut asm = state.assembler.lock().await;
-                    let frame = asm.on_keyframe_received(header.frame_id, header.timestamp, payload);
-                    if let Some(ch) = &*state.video_channel.read().await {
-                        let _ = ch.send(VideoChunkPayload {
-                            is_key: true,
-                            data: frame.data.to_vec(),
-                        });
-                    }
+                if header.media_type == MediaType::VideoKey && is_watching(state, &header) {
+                    let frame = state.screen_viewer.lock().await.on_keyframe(&header, payload, Instant::now());
+                    send_video(state, true, frame.data).await;
                 }
             }
             SessionEvent::ConnectionLost(reason) => return Some(reason),
@@ -356,7 +366,7 @@ fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
     }
 }
 
-/// Route an incoming media datagram (Audio → mixer, VideoDelta → frame assembler).
+/// Route an incoming media datagram (Audio → mixer, VideoDelta → screen viewer).
 async fn route_datagram(bytes: Bytes, state: &AppState, app_handle: &tauri::AppHandle) {
     if bytes.len() < MEDIA_HEADER_SIZE {
         return;
@@ -384,18 +394,54 @@ async fn route_datagram(bytes: Bytes, state: &AppState, app_handle: &tauri::AppH
                 }
             }
         }
-        MediaType::VideoDelta => {
-            let mut asm = state.assembler.lock().await;
-            if let Some(frame) = asm.push_fragment(&header, payload, Instant::now()) {
-                if let Some(ch) = &*state.video_channel.read().await {
-                    let _ = ch.send(VideoChunkPayload {
-                        is_key: false,
-                        data: frame.data.to_vec(),
-                    });
-                }
+        MediaType::VideoDelta if is_watching(state, &header) => {
+            let frame = state.screen_viewer.lock().await.on_delta_fragment(&header, payload, Instant::now());
+            if let Some(frame) = frame {
+                send_video(state, false, frame.data).await;
             }
         }
         _ => {}
+    }
+}
+
+/// Only media from the sharer we subscribed to is shown.
+fn is_watching(state: &AppState, header: &MediaHeader) -> bool {
+    let peer = state.viewing_peer.load(Ordering::SeqCst);
+    peer != 0 && header.sender_peer_id == peer
+}
+
+async fn send_video(state: &AppState, is_key: bool, data: Bytes) {
+    if let Some(channel) = &*state.video_channel.read().await {
+        let _ = channel.send(VideoChunkPayload { is_key, data: data.to_vec() });
+    }
+}
+
+/// While watching a screen share: drop incomplete frames and ask the sharer for a key frame
+/// whenever the picture cannot be decoded (a new viewer, a lost packet).
+async fn screen_viewer_ticker(state: AppState, generation: u64) {
+    let mut interval = tokio::time::interval(Duration::from_millis(50));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        interval.tick().await;
+        if state.session_generation.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        let peer = state.viewing_peer.load(Ordering::SeqCst);
+        if peer == 0 {
+            continue;
+        }
+        let now = Instant::now();
+        let ask = {
+            let mut viewer = state.screen_viewer.lock().await;
+            viewer.tick(now);
+            viewer.take_keyframe_request(now)
+        };
+        if ask {
+            let tx = state.control_tx.read().await.clone();
+            if let Some(tx) = tx {
+                let _ = tx.send(ClientMessage::RequestKeyframe { target_peer_id: peer }).await;
+            }
+        }
     }
 }
 
@@ -416,6 +462,43 @@ mod tests {
             .await.expect("superseded QUIC session must close explicitly");
         assert!(state.quic_connection.read().await.is_none());
         assert!(state.control_tx.read().await.is_none());
+        Ok(())
+    }
+
+    struct SolidSource;
+
+    impl finch_client_core::screen::FrameSource for SolidSource {
+        fn next_frame(&mut self) -> Result<finch_screen::RawFrame, String> {
+            Ok(finch_screen::RawFrame::new(
+                64,
+                64,
+                finch_screen::PixelFormat::Bgra,
+                Bytes::from(vec![90u8; 64 * 64 * 4]),
+            ))
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn aud018_replacing_session_stops_screen_share_and_viewing() -> anyhow::Result<()> {
+        let server = TestServer::start().await?;
+        let client = TestClient::register(&server, "alice").await?;
+        let state = AppState::new();
+        let sharer = finch_client_core::screen::ScreenSharer::start(
+            client.session.connection.clone(),
+            tokio::runtime::Handle::current(),
+            1,
+            client.session.session_peer_id,
+            finch_client_core::screen::ShareConfig::default(),
+            Box::new(SolidSource),
+            |_| {},
+        );
+        *state.screen_sharer.lock().unwrap() = Some(sharer);
+        state.viewing_peer.store(7, Ordering::SeqCst);
+
+        supersede_session(&state).await;
+
+        assert!(state.screen_sharer.lock().unwrap().is_none(), "the capture thread must be stopped");
+        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 0);
         Ok(())
     }
 }

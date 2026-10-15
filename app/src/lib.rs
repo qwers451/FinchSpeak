@@ -90,6 +90,9 @@ pub fn run() {
             commands::screen::subscribe_screen_share,
             commands::screen::unsubscribe_screen_share,
             commands::screen::request_idr_keyframe,
+            commands::screen::list_screen_sources,
+            commands::screen::start_screen_share,
+            commands::screen::stop_screen_share,
         ])
         .run(tauri::generate_context!())
     {

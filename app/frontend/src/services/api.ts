@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { Channel, IncomingMessage, MessageHistory, User, AudioDevices, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
+import type { Channel, IncomingMessage, MessageHistory, ScreenSources, User, AudioDevices, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -182,6 +182,38 @@ export const api = {
   setAudioDevices: async (input: string | null, output: string | null): Promise<void> => {
     if (isTauri()) {
       return invoke('set_audio_devices', { input, output });
+    }
+  },
+
+  // Screen sharing
+  listScreenSources: async (): Promise<ScreenSources> => {
+    if (isTauri()) {
+      return invoke('list_screen_sources');
+    }
+    return { monitors: [], windows: [] };
+  },
+
+  startScreenShare: async (kind: 'monitor' | 'window', id: number): Promise<void> => {
+    if (isTauri()) {
+      return invoke('start_screen_share', { kind, id });
+    }
+  },
+
+  stopScreenShare: async (): Promise<void> => {
+    if (isTauri()) {
+      return invoke('stop_screen_share');
+    }
+  },
+
+  subscribeScreenShare: async (targetUserId: string, targetPeerId: number): Promise<void> => {
+    if (isTauri()) {
+      return invoke('subscribe_screen_share', { targetUserId, targetPeerId });
+    }
+  },
+
+  unsubscribeScreenShare: async (targetUserId: string): Promise<void> => {
+    if (isTauri()) {
+      return invoke('unsubscribe_screen_share', { targetUserId });
     }
   },
 

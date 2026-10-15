@@ -11,7 +11,7 @@ use finch_client_core::session::ConnectParams;
 pub use finch_client_core::api::UserDto;
 use finch_audio::AudioMixer;
 use finch_protocol::messages::ClientMessage;
-use finch_screen::FrameAssembler;
+use finch_client_core::screen::{ScreenSharer, ScreenViewer};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex, RwLock};
 
@@ -57,7 +57,12 @@ pub struct AppState {
     pub is_muted: Arc<AtomicBool>,
     pub is_deafened: Arc<AtomicBool>,
     pub mixer: Arc<Mutex<AudioMixer>>,
-    pub assembler: Arc<Mutex<FrameAssembler>>,
+    /// Receiving side of the screen share being watched (at most one at a time).
+    pub screen_viewer: Arc<Mutex<ScreenViewer>>,
+    /// Session peer id of the sharer being watched; 0 = not watching.
+    pub viewing_peer: Arc<AtomicU32>,
+    /// Our own running screen share, if any.
+    pub screen_sharer: Arc<std::sync::Mutex<Option<ScreenSharer>>>,
     /// TOFU verified fingerprints: hostname -> SHA-256 hex string
     pub saved_fingerprints: Arc<DashMap<String, String>>,
     /// Parameters of the current QUIC session, reused to reconnect after a drop.
@@ -82,6 +87,24 @@ impl Default for AppState {
 }
 
 impl AppState {
+    /// Stop our screen share if one is running. Returns whether there was one.
+    pub fn stop_screen_share(&self) -> bool {
+        let sharer = self.screen_sharer.lock().ok().and_then(|mut slot| slot.take());
+        match sharer {
+            Some(mut sharer) => {
+                sharer.stop();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Forget the screen share we were watching.
+    pub async fn stop_watching(&self) {
+        self.viewing_peer.store(0, std::sync::atomic::Ordering::SeqCst);
+        *self.screen_viewer.lock().await = ScreenViewer::new();
+    }
+
     pub fn new() -> Self {
         Self {
             api: Arc::new(RwLock::new(None)),
@@ -96,7 +119,9 @@ impl AppState {
             is_muted: Arc::new(AtomicBool::new(false)),
             is_deafened: Arc::new(AtomicBool::new(false)),
             mixer: Arc::new(Mutex::new(AudioMixer::new())),
-            assembler: Arc::new(Mutex::new(FrameAssembler::new())),
+            screen_viewer: Arc::new(Mutex::new(ScreenViewer::new())),
+            viewing_peer: Arc::new(AtomicU32::new(0)),
+            screen_sharer: Arc::new(std::sync::Mutex::new(None)),
             saved_fingerprints: Arc::new(DashMap::new()),
             known_servers_path: Arc::new(RwLock::new(None)),
             last_connect: Arc::new(RwLock::new(None)),

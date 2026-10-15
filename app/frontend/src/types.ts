@@ -53,6 +53,35 @@ export interface VoiceParticipant {
   is_muted?: boolean;
   is_deafened?: boolean;
   is_speaking?: boolean;
+  /** Currently sharing their screen. */
+  is_sharing?: boolean;
+}
+
+export interface MonitorSource {
+  id: number;
+  name: string;
+  width: number;
+  height: number;
+  is_primary: boolean;
+}
+
+export interface WindowSource {
+  id: number;
+  title: string;
+  app_name: string;
+  width: number;
+  height: number;
+}
+
+export interface ScreenSources {
+  monitors: MonitorSource[];
+  windows: WindowSource[];
+}
+
+/** What the user is watching. */
+export interface WatchedShare {
+  user_id: string;
+  peer_id: number;
 }
 
 export interface AudioDevice {
@@ -69,7 +98,7 @@ export interface SessionEvents {
     initial_state: {
       channels: Channel[];
       online_users: User[];
-      voice_states: (Omit<VoiceParticipant, 'is_muted' | 'is_deafened'> & {
+      voice_states: (Omit<VoiceParticipant, 'is_muted' | 'is_deafened' | 'is_sharing'> & {
         muted: boolean; deafened: boolean; sharing_screen: boolean;
       })[];
     };
@@ -84,6 +113,10 @@ export interface SessionEvents {
   'user-joined-voice': VoiceParticipant;
   'user-left-voice': { user_id: string; peer_id: number; channel_id: string };
   'user-voice-state-changed': { peer_id: number; muted: boolean; deafened: boolean };
+  'screen-share-started': { user_id: string; peer_id: number; width: number; height: number; fps: number };
+  'screen-share-stopped': { peer_id: number };
+  /** Our own share ended by itself (capture failed, window closed). */
+  'screen-share-ended': string;
   'presence-update': { user_id: string; status: UserStatus };
   'connection-lost': string;
   reconnecting: null;

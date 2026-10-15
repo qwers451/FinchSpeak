@@ -9,6 +9,9 @@ import { currentUser } from '../stores/authStore';
 import { api } from '../services/api';
 import { localPeerId } from '../stores/sessionStore';
 import { DeviceSettings } from './DeviceSettings';
+import { ScreenSharePicker } from './ScreenSharePicker';
+import { ScreenViewer } from './ScreenViewer';
+import { stopWatching, watchShare, watching } from '../stores/screenStore';
 
 export function VoicePanel() {
   const handleVolumeChange = (peerId: number, vol: number) => {
@@ -26,6 +29,16 @@ export function VoicePanel() {
       </div>
 
       <DeviceSettings />
+      <ScreenSharePicker />
+
+      <Show when={watching()}>
+        {(share) => (
+          <div class="screen-viewer-frame">
+            <ScreenViewer peerId={share().peer_id} />
+            <button type="button" class="screen-viewer-close" onClick={() => void stopWatching()}>Stop watching</button>
+          </div>
+        )}
+      </Show>
 
       {/* Participant Grid */}
       <div class="voice-grid">
@@ -51,6 +64,16 @@ export function VoicePanel() {
                 <div class="participant-name">{participant.username}</div>
                 <Show when={participant.is_muted}><span title="Muted">🔇</span></Show>
                 <Show when={participant.is_deafened}><span title="Deafened">🎧</span></Show>
+                <Show when={participant.is_sharing}>
+                  <button
+                    type="button"
+                    class="watch-share"
+                    disabled={watching()?.peer_id === participant.peer_id}
+                    onClick={() => void watchShare(participant.user_id, participant.peer_id)}
+                  >
+                    {watching()?.peer_id === participant.peer_id ? 'Watching' : '🖥 Watch screen'}
+                  </button>
+                </Show>
 
                 {/* Per-user volume slider */}
                 <div style={{ display: "flex", "align-items": "center", gap: "8px", width: "100%", "margin-top": "6px" }}>

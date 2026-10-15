@@ -1,11 +1,147 @@
 //! Screen sharing control and WebCodecs channel registration.
 
+use std::sync::atomic::Ordering;
+
+use finch_client_core::screen::{FrameSource, MonitorSource, ScreenSharer, ScreenViewer, ShareConfig, WindowSource};
 use finch_protocol::messages::ClientMessage;
-use tauri::State;
+use finch_protocol::models::VideoCodec;
+use finch_screen::{list_monitors, list_windows, MAX_HEIGHT, MAX_WIDTH};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, State};
 use tracing::info;
 use uuid::Uuid;
 
 use crate::state::{AppState, VideoChunkPayload};
+
+const SHARE_FPS: u8 = 30;
+
+#[derive(Serialize)]
+pub struct MonitorDto {
+    pub id: u32,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub is_primary: bool,
+}
+
+#[derive(Serialize)]
+pub struct WindowDto {
+    pub id: u32,
+    pub title: String,
+    pub app_name: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Serialize)]
+pub struct ScreenSourcesDto {
+    pub monitors: Vec<MonitorDto>,
+    pub windows: Vec<WindowDto>,
+}
+
+/// Monitors and windows that can be shared.
+#[tauri::command]
+pub async fn list_screen_sources() -> Result<ScreenSourcesDto, String> {
+    tokio::task::spawn_blocking(|| {
+        let monitors = list_monitors()
+            .map_err(|e| format!("Could not list monitors: {e}"))?
+            .into_iter()
+            .map(|m| MonitorDto { id: m.id, name: m.name, width: m.width, height: m.height, is_primary: m.is_primary })
+            .collect();
+        // Window listing can fail on its own (e.g. no permission); monitors still work.
+        let windows = list_windows()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|w| !w.is_minimized && w.width > 0 && w.height > 0 && !w.title.is_empty())
+            .map(|w| WindowDto { id: w.id, title: w.title, app_name: w.app_name, width: w.width, height: w.height })
+            .collect();
+        Ok(ScreenSourcesDto { monitors, windows })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Start sharing a monitor (`kind` = "monitor") or a window (`kind` = "window") in the current
+/// voice channel.
+#[tauri::command]
+pub async fn start_screen_share(
+    kind: String,
+    id: u32,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let short_id = (*state.current_voice_channel.read().await)
+        .ok_or_else(|| "Join a voice channel before sharing your screen".to_string())?;
+    let tx = state.control_tx.read().await.clone().ok_or_else(|| "Not connected via QUIC".to_string())?;
+    let connection = state.quic_connection.read().await.clone().ok_or_else(|| "Not connected via QUIC".to_string())?;
+    if state.screen_sharer.lock().map_err(|_| "screen share state poisoned".to_string())?.is_some() {
+        return Err("You are already sharing your screen".into());
+    }
+
+    let mut source: Box<dyn FrameSource> = match kind.as_str() {
+        "monitor" => Box::new(MonitorSource(id as usize)),
+        "window" => Box::new(WindowSource(id)),
+        other => return Err(format!("Unknown screen source kind: {other}")),
+    };
+    // Capture one frame first: it proves capture works and gives the size to announce.
+    let (source, width, height) = tokio::task::spawn_blocking(move || {
+        let frame = source.next_frame()?;
+        Ok::<_, String>((source, frame.width, frame.height))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("Could not capture the screen: {e}"))?;
+    if width > MAX_WIDTH || height > MAX_HEIGHT {
+        return Err(format!(
+            "This screen is {width}x{height}; sharing supports up to {MAX_WIDTH}x{MAX_HEIGHT}. Share a window or a smaller monitor."
+        ));
+    }
+
+    tx.send(ClientMessage::StartScreenShare { codec: VideoCodec::H264, width: width & !1, height: height & !1, fps: SHARE_FPS })
+        .await
+        .map_err(|e| format!("Failed to announce the screen share: {e}"))?;
+
+    let runtime = tokio::runtime::Handle::current();
+    let on_end = {
+        let state = (*state).clone();
+        let runtime = runtime.clone();
+        move |reason: String| {
+            // Runs on the capture thread: finish on the runtime (joining that thread from itself
+            // would deadlock).
+            runtime.spawn(async move {
+                if state.stop_screen_share() {
+                    if let Some(tx) = state.control_tx.read().await.clone() {
+                        let _ = tx.send(ClientMessage::StopScreenShare).await;
+                    }
+                    let _ = app_handle.emit("screen-share-ended", reason);
+                }
+            });
+        }
+    };
+    let sharer = ScreenSharer::start(
+        connection,
+        runtime,
+        short_id,
+        state.session_peer_id.load(Ordering::SeqCst),
+        ShareConfig { fps: SHARE_FPS, bitrate_bps: None },
+        source,
+        on_end,
+    );
+    *state.screen_sharer.lock().map_err(|_| "screen share state poisoned".to_string())? = Some(sharer);
+    info!("Started sharing {kind} {id} ({width}x{height})");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stop_screen_share(state: State<'_, AppState>) -> Result<(), String> {
+    if state.stop_screen_share() {
+        if let Some(tx) = state.control_tx.read().await.clone() {
+            let _ = tx.send(ClientMessage::StopScreenShare).await;
+        }
+        info!("Stopped sharing the screen");
+    }
+    Ok(())
+}
 
 #[tauri::command]
 pub async fn register_video_channel(
@@ -20,6 +156,7 @@ pub async fn register_video_channel(
 #[tauri::command]
 pub async fn subscribe_screen_share(
     target_user_id: String,
+    target_peer_id: u32,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let target_uuid = Uuid::parse_str(&target_user_id)
@@ -27,6 +164,10 @@ pub async fn subscribe_screen_share(
 
     let tx_opt = state.control_tx.read().await.clone();
     let tx = tx_opt.ok_or_else(|| "Not connected via QUIC".to_string())?;
+
+    // A fresh viewer: it starts by asking the sharer for a key frame.
+    *state.screen_viewer.lock().await = ScreenViewer::new();
+    state.viewing_peer.store(target_peer_id, Ordering::SeqCst);
 
     tx.send(ClientMessage::SubscribeScreenShare {
         target_user_id: target_uuid,
@@ -48,6 +189,8 @@ pub async fn unsubscribe_screen_share(
 
     let tx_opt = state.control_tx.read().await.clone();
     let tx = tx_opt.ok_or_else(|| "Not connected via QUIC".to_string())?;
+
+    state.stop_watching().await;
 
     tx.send(ClientMessage::UnsubscribeScreenShare {
         target_user_id: target_uuid,

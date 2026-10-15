@@ -22,7 +22,7 @@ pub use capture::{
     capture_monitor, capture_window, list_monitors, list_windows, MonitorInfo, PixelFormat,
     RawFrame, ScreenCaptureError, ScreenCapturer, WindowInfo,
 };
-pub use fragmenter::{slice_p_frame, AssembledFrame, FrameAssembler, DELTA_FRAME_TIMEOUT};
+pub use fragmenter::{slice_p_frame, slice_p_frame_with_chunk, AssembledFrame, FrameAssembler, DELTA_FRAME_TIMEOUT};
 pub use hw_encoder::{
     EncodedFrame, H264EncoderError, H264VideoEncoder, VideoEncoderConfig, MAX_HEIGHT, MAX_WIDTH,
 };

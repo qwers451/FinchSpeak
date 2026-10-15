@@ -58,6 +58,9 @@ pub enum SessionEvent {
     Control(ServerMessage),
     /// Raw media datagram (20-byte header + payload).
     Datagram(Bytes),
+    /// A uni-directional stream (video key frame) was opened; its body is still being read.
+    /// Delta frames received from now on may depend on it.
+    UniStreamStarted { header: MediaHeader },
     /// Media received on a uni-directional stream (video keyframes).
     UniStream { header: MediaHeader, payload: Bytes },
     /// The control stream ended; the session is unusable.
@@ -71,6 +74,26 @@ impl Session {
             .send_datagram(packet)
             .map_err(|e| ClientError::Quic(e.to_string()))
     }
+
+    /// Largest datagram the connection currently accepts (None if datagrams are unsupported).
+    pub fn max_datagram_size(&self) -> Option<usize> {
+        self.connection.max_datagram_size()
+    }
+
+    /// Send a video key frame (header + body) on its own uni-directional stream.
+    pub async fn send_keyframe(&self, header: &MediaHeader, data: &[u8]) -> Result<(), ClientError> {
+        send_keyframe_on(&self.connection, header, data).await
+    }
+}
+
+/// Send a video key frame (header + body) on its own uni-directional stream of `connection`.
+pub async fn send_keyframe_on(connection: &Connection, header: &MediaHeader, data: &[u8]) -> Result<(), ClientError> {
+    let quic = |e: &dyn std::fmt::Display| ClientError::Quic(e.to_string());
+    let mut stream = connection.open_uni().await.map_err(|e| quic(&e))?;
+    stream.write_all(&header.to_bytes()).await.map_err(|e| quic(&e))?;
+    stream.write_all(data).await.map_err(|e| quic(&e))?;
+    stream.finish().map_err(|e| quic(&e))?;
+    Ok(())
 }
 
 /// Connect, authenticate with `params.token`, and start the session I/O tasks.
@@ -266,30 +289,31 @@ pub async fn connect(
         }
     });
 
-    // Task 5: Incoming Uni-Streams (VideoKey frames)
+    // Task 5: Incoming Uni-Streams (VideoKey frames). Each stream is read on its own task so a
+    // stalled sender cannot hold up the next key frame.
     let conn_uni = connection.clone();
     let uni_events = event_tx;
     tokio::spawn(async move {
         loop {
             match conn_uni.accept_uni().await {
                 Ok(mut recv) => {
-                    let mut hdr_bytes = [0u8; MEDIA_HEADER_SIZE];
-                    if recv.read_exact(&mut hdr_bytes).await.is_err() {
-                        continue;
-                    }
-                    let header = match MediaHeader::from_slice(&hdr_bytes) {
-                        Ok(h) => h,
-                        Err(_) => continue,
-                    };
-                    if let Ok(payload) = recv.read_to_end(MAX_KEYFRAME_BYTES).await {
-                        let event = SessionEvent::UniStream {
-                            header,
-                            payload: Bytes::from(payload),
-                        };
-                        if uni_events.send(event).await.is_err() {
-                            break;
+                    let events = uni_events.clone();
+                    tokio::spawn(async move {
+                        let mut hdr_bytes = [0u8; MEDIA_HEADER_SIZE];
+                        if recv.read_exact(&mut hdr_bytes).await.is_err() {
+                            return;
                         }
-                    }
+                        let Ok(header) = MediaHeader::from_slice(&hdr_bytes) else {
+                            return;
+                        };
+                        if events.send(SessionEvent::UniStreamStarted { header }).await.is_err() {
+                            return;
+                        }
+                        if let Ok(payload) = recv.read_to_end(MAX_KEYFRAME_BYTES).await {
+                            let event = SessionEvent::UniStream { header, payload: Bytes::from(payload) };
+                            let _ = events.send(event).await;
+                        }
+                    });
                 }
                 Err(e) => {
                     debug!("Uni-stream receiver ended: {}", e);

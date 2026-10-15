@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 finch-protocol = { workspace = true }
+finch-screen = { workspace = true }
 
 # Async & QUIC
 tokio = { workspace = true }
@@ -36,3 +37,4 @@ thiserror = { workspace = true }
 finch-server = { path = "../finch-server" }
 anyhow = { workspace = true }
 rcgen = { workspace = true }
+openh264 = "0.6"

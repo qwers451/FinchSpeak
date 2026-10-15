@@ -2,6 +2,7 @@ import { createSignal } from 'solid-js';
 import type { AudioDevice, Channel, VoiceParticipant } from '../types';
 import { api } from '../services/api';
 import { setAppError } from './notificationStore';
+import { resetScreenState } from './screenState';
 
 export const [activeVoiceChannel, setActiveVoiceChannel] = createSignal<Channel | null>(null);
 export const [isMuted, setIsMuted] = createSignal<boolean>(false);
@@ -96,6 +97,7 @@ export async function joinVoice(channel: Channel) {
 export async function leaveVoice() {
   try {
     await api.leaveVoiceChannel();
+    resetScreenState();
     setActiveVoiceChannel(null);
     setSpeakingPeers(new Set<number>());
   } catch (err) {

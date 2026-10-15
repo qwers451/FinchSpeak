@@ -24,6 +24,9 @@ pub struct AssembledFrame {
 }
 
 /// Slices an encoded H.264 P-frame into datagram-sized media packets.
+///
+/// Returns no packets for an empty frame or one that needs more than 255 fragments (the
+/// header's fragment count is a `u8`); use [`slice_p_frame_with_chunk`] to tell them apart.
 pub fn slice_p_frame(
     channel_id: u32,
     sender_peer_id: u32,
@@ -33,12 +36,42 @@ pub fn slice_p_frame(
     frame_data: &[u8],
     is_e2ee: bool,
 ) -> Vec<MediaPacket> {
+    slice_p_frame_with_chunk(
+        channel_id,
+        sender_peer_id,
+        sequence_start,
+        frame_id,
+        timestamp,
+        frame_data,
+        is_e2ee,
+        MAX_DATAGRAM_PAYLOAD,
+    )
+    .unwrap_or_default()
+}
+
+/// Like [`slice_p_frame`] with a caller-chosen payload size per datagram.
+///
+/// `None` when the frame would need more than 255 fragments (or `chunk_size` is zero), so the
+/// fragment count in the header can never silently wrap.
+#[allow(clippy::too_many_arguments)]
+pub fn slice_p_frame_with_chunk(
+    channel_id: u32,
+    sender_peer_id: u32,
+    sequence_start: u16,
+    frame_id: u16,
+    timestamp: u32,
+    frame_data: &[u8],
+    is_e2ee: bool,
+    chunk_size: usize,
+) -> Option<Vec<MediaPacket>> {
+    if chunk_size == 0 {
+        return None;
+    }
     if frame_data.is_empty() {
-        return Vec::new();
+        return Some(Vec::new());
     }
 
-    let chunk_size = MAX_DATAGRAM_PAYLOAD;
-    let total_fragments = frame_data.len().div_ceil(chunk_size) as u8;
+    let total_fragments = u8::try_from(frame_data.len().div_ceil(chunk_size)).ok()?;
     let mut packets = Vec::with_capacity(total_fragments as usize);
 
     for (i, chunk) in frame_data.chunks(chunk_size).enumerate() {
@@ -57,7 +90,7 @@ pub fn slice_p_frame(
         packets.push(MediaPacket::new(header, Bytes::copy_from_slice(chunk)));
     }
 
-    packets
+    Some(packets)
 }
 
 /// State for a frame currently being assembled on the receiver.

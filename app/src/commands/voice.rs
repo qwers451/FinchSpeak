@@ -62,6 +62,9 @@ pub async fn leave_voice_channel(state: State<'_, AppState>) -> Result<(), Strin
     }
 
     state.audio_engine.lock().await.stop();
+    // The server also ends the share on leave; this stops the capture thread.
+    state.stop_screen_share();
+    state.stop_watching().await;
     *state.current_voice_channel.write().await = None;
 
     info!("Left voice channel");

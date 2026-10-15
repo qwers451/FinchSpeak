@@ -1,86 +1,102 @@
 import { onMount, onCleanup, createSignal } from 'solid-js';
-import { Channel } from '@tauri-apps/api/core';
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 
 interface VideoChunkPayload {
   is_key: boolean;
   data: number[];
 }
 
-export function ScreenViewer() {
+// Constrained Baseline, level 5.1: OpenH264 picks the real level itself and the SPS in the
+// stream is authoritative, but a low level here makes some decoders refuse 1080p and above.
+const CODEC = 'avc1.42C033';
+
+export function ScreenViewer(props: { peerId: number }) {
   let canvasRef: HTMLCanvasElement | undefined;
   let decoder: VideoDecoder | null = null;
+  let closed = false;
+  /** Deltas are useless until a key frame has been given to the decoder (start, or after an error). */
+  let waitingForKey = true;
   const [fps, setFps] = createSignal<number>(0);
+  const [unsupported, setUnsupported] = createSignal(false);
   let frameCounter = 0;
   let lastFpsTime = performance.now();
+  let microTimestamp = 0;
+
+  const askForKeyFrame = () => {
+    invoke('request_idr_keyframe', { targetPeerId: props.peerId }).catch(console.error);
+  };
+
+  const createDecoder = () => {
+    const ctx = canvasRef?.getContext('2d');
+    if (!ctx) return;
+    decoder = new VideoDecoder({
+      output: (frame: VideoFrame) => {
+        if (canvasRef) {
+          canvasRef.width = frame.displayWidth;
+          canvasRef.height = frame.displayHeight;
+          ctx.drawImage(frame, 0, 0, frame.displayWidth, frame.displayHeight);
+        }
+        frame.close();
+
+        frameCounter++;
+        const now = performance.now();
+        if (now - lastFpsTime >= 1000) {
+          setFps(Math.round((frameCounter * 1000) / (now - lastFpsTime)));
+          frameCounter = 0;
+          lastFpsTime = now;
+        }
+      },
+      error: (e: unknown) => {
+        // A broken stream closes the decoder for good: start over and ask for a key frame.
+        console.error('WebCodecs VideoDecoder error:', e);
+        if (closed) return;
+        waitingForKey = true;
+        createDecoder();
+        askForKeyFrame();
+      },
+    });
+    decoder.configure({ codec: CODEC, optimizeForLatency: true });
+  };
 
   onMount(() => {
     if (!canvasRef) return;
-    const ctx = canvasRef.getContext('2d');
-    if (!ctx) return;
-
-    if (typeof (window as any).VideoDecoder === 'undefined') {
+    if (typeof (window as unknown as { VideoDecoder?: unknown }).VideoDecoder === 'undefined') {
       console.warn('WebCodecs VideoDecoder API not supported in this Webview');
+      setUnsupported(true);
       return;
     }
 
     try {
-      decoder = new VideoDecoder({
-        output: (frame: VideoFrame) => {
-          if (canvasRef) {
-            canvasRef.width = frame.displayWidth;
-            canvasRef.height = frame.displayHeight;
-            ctx.drawImage(frame, 0, 0, frame.displayWidth, frame.displayHeight);
-          }
-          frame.close();
+      createDecoder();
 
-          frameCounter++;
-          const now = performance.now();
-          if (now - lastFpsTime >= 1000) {
-            setFps(Math.round((frameCounter * 1000) / (now - lastFpsTime)));
-            frameCounter = 0;
-            lastFpsTime = now;
-          }
-        },
-        error: (e: any) => {
-          console.error('WebCodecs VideoDecoder error:', e);
-        },
-      });
-
-      decoder.configure({
-        codec: 'avc1.42E01E', // Baseline profile level 3.0
-        optimizeForLatency: true,
-      });
-
-      // Setup Tauri IPC Channel for NAL fragments
       const onFrameChannel = new Channel<VideoChunkPayload>();
-      let microTimestamp = 0;
-
       onFrameChannel.onmessage = (payload: VideoChunkPayload) => {
         if (!decoder || decoder.state !== 'configured') return;
-
+        if (waitingForKey && !payload.is_key) return;
         try {
-          const chunkData = new Uint8Array(payload.data);
-          const chunk = new EncodedVideoChunk({
+          decoder.decode(new EncodedVideoChunk({
             type: payload.is_key ? 'key' : 'delta',
             timestamp: microTimestamp,
-            data: chunkData,
-          });
-          microTimestamp += 16666; // ~60 fps
-          decoder.decode(chunk);
+            data: new Uint8Array(payload.data),
+          }));
+          waitingForKey = false;
+          microTimestamp += 33333; // ~30 fps; only has to increase
         } catch (err) {
           console.error('Failed to decode video chunk:', err);
+          waitingForKey = true;
+          askForKeyFrame();
         }
       };
 
-      // Register the channel with Rust backend
       invoke('register_video_channel', { onFrame: onFrameChannel }).catch(console.error);
     } catch (err) {
       console.error('Failed to initialize VideoDecoder:', err);
+      setUnsupported(true);
     }
   });
 
   onCleanup(() => {
+    closed = true;
     if (decoder && decoder.state !== 'closed') {
       decoder.close();
     }
@@ -100,7 +116,7 @@ export function ScreenViewer() {
         "font-size": "0.78rem",
         "font-family": "monospace"
       }}>
-        GPU WebCodecs {fps()} FPS
+        {unsupported() ? 'Video playback is not supported here' : `${fps()} FPS`}
       </div>
     </div>
   );

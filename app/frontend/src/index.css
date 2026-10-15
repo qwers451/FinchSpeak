@@ -576,3 +576,52 @@ body {
   padding: 6px 8px;
   font: inherit;
 }
+
+.screen-share-picker {
+  position: relative;
+  padding: 8px 16px;
+}
+
+.screen-share-picker .danger {
+  background: var(--danger, #c0392b);
+  color: #fff;
+}
+
+.screen-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--bg-secondary, #1e1f22);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px;
+}
+
+.screen-source-list button {
+  text-align: left;
+}
+
+.screen-source-empty {
+  color: var(--text-dim);
+  padding: 6px;
+}
+
+.screen-viewer-frame {
+  position: relative;
+  flex: 1;
+  min-height: 240px;
+  margin: 0 16px 8px;
+}
+
+.screen-viewer-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+.watch-share {
+  margin-top: 6px;
+}

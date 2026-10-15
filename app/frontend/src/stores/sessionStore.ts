@@ -4,6 +4,8 @@ import { setPendingTofu } from './tofuStore';
 import { activeChannel, channels, handleChannelCreated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
 import { handleUserSpeaking, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
+import { resetScreenState, setWatching, watching } from './screenState';
+import { screenHandlers } from './screenStore';
 export { appError, setAppError } from './notificationStore';
 
 export const [connectionStatus, setConnectionStatus] = createSignal<'connected' | 'disconnected' | 'reconnecting' | 'failed'>('disconnected');
@@ -25,6 +27,7 @@ export function resetSessionState() {
   setSpeakingPeers(new Set<number>());
   setIsLocalSpeaking(false);
   setPingRtt(null);
+  resetScreenState();
   setAppError(null);
 }
 
@@ -35,8 +38,8 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     setChannels(data.initial_state.channels);
     setKnownUsers(data.initial_state.online_users);
     setPresence(Object.fromEntries(data.initial_state.online_users.map((user) => [user.id, user.status ?? 'online'])));
-    setVoiceParticipants(data.initial_state.voice_states.map(({ muted, deafened, ...participant }) => ({
-      ...participant, is_muted: muted, is_deafened: deafened,
+    setVoiceParticipants(data.initial_state.voice_states.map(({ muted, deafened, sharing_screen, ...participant }) => ({
+      ...participant, is_muted: muted, is_deafened: deafened, is_sharing: sharing_screen,
     })));
     setConnectionStatus('connected');
     setConnectionError(null);
@@ -54,9 +57,11 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'user-left-voice': (data) => {
     setVoiceParticipants((previous) => previous.filter((participant) => participant.peer_id !== data.peer_id || participant.channel_id !== data.channel_id));
     handleUserSpeaking(data.peer_id, false);
+    if (watching()?.peer_id === data.peer_id) setWatching(null);
   },
   'user-voice-state-changed': (data) => setVoiceParticipants((previous) => previous.map((participant) =>
     participant.peer_id === data.peer_id ? { ...participant, is_muted: data.muted, is_deafened: data.deafened } : participant)),
+  ...screenHandlers,
   'presence-update': (data) => setPresence((previous) => ({ ...previous, [data.user_id]: data.status })),
   'connection-lost': (reason) => {
     setConnectionStatus('disconnected');
@@ -65,6 +70,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     setSpeakingPeers(new Set<number>());
     setIsLocalSpeaking(false);
     setPingRtt(null);
+    resetScreenState();
   },
   reconnecting: () => setConnectionStatus('reconnecting'),
   reconnected: () => {
