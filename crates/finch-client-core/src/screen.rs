@@ -12,7 +12,7 @@ use bytes::Bytes;
 use finch_protocol::media::{MediaHeader, MAX_KEYFRAME_BYTES, MEDIA_HEADER_SIZE};
 use finch_screen::{
     slice_p_frame_with_chunk, AssembledFrame, FrameAssembler, H264EncoderError, H264VideoEncoder,
-    PixelFormat, RawFrame, VideoEncoderConfig, DELTA_FRAME_TIMEOUT,
+    PixelFormat, RawFrame, VideoEncoderConfig, DELTA_FRAME_TIMEOUT, MAX_HEIGHT, MAX_WIDTH,
 };
 use thiserror::Error;
 
@@ -93,8 +93,8 @@ impl ScreenPacketizer {
         timestamp: u32,
         max_datagram: usize,
     ) -> Result<OutgoingVideo, ScreenError> {
-        // H.264 4:2:0 needs even dimensions.
-        let (w, h) = (frame.width & !1, frame.height & !1);
+        // H.264 4:2:0 needs even dimensions, and the encoder has an upper limit.
+        let (w, h) = encoded_size(frame.width, frame.height);
         if w == 0 || h == 0 {
             return Err(ScreenError::FrameTooSmall(frame.width, frame.height));
         }
@@ -118,7 +118,7 @@ impl ScreenPacketizer {
             encoder.force_keyframe();
         }
 
-        let encoded = encoder.encode_bgra(&crop_to_bgra(frame, w, h))?;
+        let encoded = encoder.encode_bgra(&fit_to_bgra(frame, w, h))?;
 
         if encoded.is_keyframe {
             if encoded.data.len() > MAX_KEYFRAME_BYTES {
@@ -166,8 +166,20 @@ impl ScreenPacketizer {
     }
 }
 
-/// BGRA pixels of the top-left `w`x`h` part of `frame`.
-fn crop_to_bgra(frame: &RawFrame, w: u32, h: u32) -> Vec<u8> {
+/// The picture size sent for a `width`x`height` screen: even, and scaled down (keeping the
+/// shape) when it is larger than the encoder supports.
+pub fn encoded_size(width: u32, height: u32) -> (u32, u32) {
+    if width <= MAX_WIDTH && height <= MAX_HEIGHT {
+        return (width & !1, height & !1);
+    }
+    let scale = (f64::from(MAX_WIDTH) / f64::from(width)).min(f64::from(MAX_HEIGHT) / f64::from(height));
+    let fit = |side: u32, limit: u32| (((f64::from(side) * scale) as u32) & !1).min(limit);
+    (fit(width, MAX_WIDTH), fit(height, MAX_HEIGHT))
+}
+
+/// BGRA pixels of `frame` as a `w`x`h` picture: cropped by a pixel for odd sizes, scaled
+/// (nearest neighbour) when `encoded_size` shrank it.
+fn fit_to_bgra(frame: &RawFrame, w: u32, h: u32) -> Vec<u8> {
     let bgra = match frame.format {
         PixelFormat::Bgra => frame.data.to_vec(),
         PixelFormat::Rgba => frame.to_bgra(),
@@ -175,10 +187,23 @@ fn crop_to_bgra(frame: &RawFrame, w: u32, h: u32) -> Vec<u8> {
     if (w, h) == (frame.width, frame.height) {
         return bgra;
     }
-    let (src_stride, row) = (frame.width as usize * 4, w as usize * 4);
-    let mut out = Vec::with_capacity(row * h as usize);
-    for y in 0..h as usize {
-        out.extend_from_slice(&bgra[y * src_stride..y * src_stride + row]);
+    let (src_w, src_h) = (frame.width as usize, frame.height as usize);
+    let (w, h) = (w as usize, h as usize);
+    // Same size class (odd crop): copy rows. Otherwise map each output pixel to a source pixel.
+    if w <= src_w && h <= src_h && src_w - w <= 1 && src_h - h <= 1 {
+        let mut out = Vec::with_capacity(w * h * 4);
+        for y in 0..h {
+            out.extend_from_slice(&bgra[y * src_w * 4..(y * src_w + w) * 4]);
+        }
+        return out;
+    }
+    let x_map: Vec<usize> = (0..w).map(|x| (x * src_w / w) * 4).collect();
+    let mut out = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        let row = &bgra[(y * src_h / h) * src_w * 4..][..src_w * 4];
+        for &sx in &x_map {
+            out.extend_from_slice(&row[sx..sx + 4]);
+        }
     }
     out
 }

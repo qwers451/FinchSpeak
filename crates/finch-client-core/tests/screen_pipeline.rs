@@ -301,3 +301,40 @@ fn video_survives_a_lost_frame_through_a_keyframe() {
     }
     assert!(decoded_after_recovery >= 3, "the stream never recovered after the loss");
 }
+
+// ---- frames larger than the encoder supports -------------------------------------------------
+
+#[test]
+fn a_frame_beyond_4k_is_scaled_down_keeping_its_shape() {
+    let mut p = packetizer();
+    let out = p.push_frame(&test_frame(4400, 1800, 0), 0, MAX_DATAGRAM_SIZE).unwrap();
+    assert!(is_key(&out));
+    let (w, h) = p.dimensions().expect("encoder running");
+    assert!(w <= 3840 && h <= 2160, "{w}x{h} is still too big");
+    assert!(w % 2 == 0 && h % 2 == 0, "{w}x{h} must be even");
+    let (aspect_in, aspect_out) = (4400.0 / 1800.0, f64::from(w) / f64::from(h));
+    assert!((aspect_in - aspect_out).abs() < 0.01, "aspect {aspect_out} vs {aspect_in}");
+}
+
+#[test]
+fn a_scaled_frame_decodes_and_resembles_the_source() {
+    let mut p = packetizer();
+    let source = test_frame(3900, 2200, 0);
+    let OutgoingVideo::KeyFrame { header, data } = p.push_frame(&source, 0, MAX_DATAGRAM_SIZE).unwrap() else {
+        panic!("key frame expected")
+    };
+    let _ = header;
+    let (w, h) = p.dimensions().unwrap();
+    let mut decoder = Decoder::new().unwrap();
+    let yuv = decoder.decode(&data).unwrap().expect("a picture");
+    assert_eq!(yuv.dimensions(), (w as usize, h as usize));
+    let mut rgb = vec![0u8; (w * h * 3) as usize];
+    yuv.write_rgb8(&mut rgb);
+    // The picture is a smooth gradient: the centre pixel must match the source's centre.
+    let centre = ((h / 2 * w + w / 2) * 3) as usize;
+    let src_centre = &source.to_bgra()[((2200 / 2 * 3900 + 3900 / 2) * 4) as usize..][..4];
+    let expected = [src_centre[2], src_centre[1], src_centre[0]];
+    for c in 0..3 {
+        assert!(rgb[centre + c].abs_diff(expected[c]) < 25, "channel {c}: {} vs {}", rgb[centre + c], expected[c]);
+    }
+}

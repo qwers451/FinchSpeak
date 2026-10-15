@@ -2,10 +2,10 @@
 
 use std::sync::atomic::Ordering;
 
-use finch_client_core::screen::{FrameSource, MonitorSource, ScreenSharer, ScreenViewer, ShareConfig, WindowSource};
+use finch_client_core::screen::{encoded_size, FrameSource, MonitorSource, ScreenSharer, ScreenViewer, ShareConfig, WindowSource};
 use finch_protocol::messages::ClientMessage;
 use finch_protocol::models::VideoCodec;
-use finch_screen::{list_monitors, list_windows, MAX_HEIGHT, MAX_WIDTH};
+use finch_screen::{list_monitors, list_windows};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tracing::info;
@@ -91,13 +91,10 @@ pub async fn start_screen_share(
     .await
     .map_err(|e| e.to_string())?
     .map_err(|e| format!("Could not capture the screen: {e}"))?;
-    if width > MAX_WIDTH || height > MAX_HEIGHT {
-        return Err(format!(
-            "This screen is {width}x{height}; sharing supports up to {MAX_WIDTH}x{MAX_HEIGHT}. Share a window or a smaller monitor."
-        ));
-    }
+    // Screens beyond 4K are scaled down before encoding; announce the size viewers will get.
+    let (width, height) = encoded_size(width, height);
 
-    tx.send(ClientMessage::StartScreenShare { codec: VideoCodec::H264, width: width & !1, height: height & !1, fps: SHARE_FPS })
+    tx.send(ClientMessage::StartScreenShare { codec: VideoCodec::H264, width, height, fps: SHARE_FPS })
         .await
         .map_err(|e| format!("Failed to announce the screen share: {e}"))?;
 
