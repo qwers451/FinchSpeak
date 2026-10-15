@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
 use finch_protocol::codec::{decode_message, encode_message, CodecError};
-use finch_protocol::media::{MediaHeader, MEDIA_HEADER_SIZE};
+use finch_protocol::media::{MediaHeader, MAX_KEYFRAME_BYTES, MEDIA_HEADER_SIZE};
 use finch_protocol::messages::{ClientMessage, ServerMessage};
 use finch_protocol::models::{ChannelMapping, ServerState};
 use quinn::{Connection, Endpoint};
@@ -25,8 +25,6 @@ use crate::tofu::{create_client_config_with, TofuIssue, TofuIssueSlot};
 /// Capacity of the session event queue.
 pub const EVENT_QUEUE_CAPACITY: usize = 1024;
 
-/// Maximum size of a keyframe received on a uni-directional stream.
-const MAX_UNI_STREAM_BYTES: usize = 10 * 1024 * 1024;
 
 /// Interval between keep-alive pings on the control stream.
 const PING_INTERVAL: Duration = Duration::from_secs(4);
@@ -283,7 +281,7 @@ pub async fn connect(
                         Ok(h) => h,
                         Err(_) => continue,
                     };
-                    if let Ok(payload) = recv.read_to_end(MAX_UNI_STREAM_BYTES).await {
+                    if let Ok(payload) = recv.read_to_end(MAX_KEYFRAME_BYTES).await {
                         let event = SessionEvent::UniStream {
                             header,
                             payload: Bytes::from(payload),

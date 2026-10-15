@@ -110,3 +110,52 @@ async fn outsider_cannot_subscribe_to_screen() -> anyhow::Result<()> {
     assert!(outsider.drain_datagrams().is_empty(), "outsider received the screen stream");
     Ok(())
 }
+
+async fn send_keyframe(a: &TestClient, voice_short: u32, frame_id: u16, size: usize) -> anyhow::Result<()> {
+    let header = MediaHeader::new_video_key(voice_short, a.session.session_peer_id, 0, 1000, frame_id, false);
+    let mut uni = a.session.connection.open_uni().await?;
+    uni.write_all(&header.to_bytes()).await?;
+    uni.write_all(&vec![(frame_id % 251) as u8; size]).await?;
+    uni.finish()?;
+    Ok(())
+}
+
+async fn next_keyframe(viewer: &mut TestClient, timeout: Duration) -> anyhow::Result<(MediaHeader, usize)> {
+    loop {
+        if let SessionEvent::UniStream { header, payload } = viewer.next_event(timeout).await? {
+            return Ok((header, payload.len()));
+        }
+    }
+}
+
+/// A 1080p IDR is several MB; the server must forward it (AUD-035: it used to cut at 1 MB while
+/// the client accepts 10 MB).
+#[tokio::test]
+async fn large_keyframe_is_forwarded() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let (a, mut b, voice_short) = streamer_and_viewer(&server).await?;
+
+    send_keyframe(&a, voice_short, 1, 3 * 1024 * 1024).await?;
+    let (header, len) = next_keyframe(&mut b, Duration::from_secs(5)).await?;
+    assert_eq!((header.frame_id, len), (1, 3 * 1024 * 1024));
+    Ok(())
+}
+
+/// Keyframe streams are read independently: one that never finishes must not hold up the next
+/// (AUD-035: they used to be read one at a time).
+#[tokio::test]
+async fn stalled_keyframe_stream_does_not_block_the_next() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let (a, mut b, voice_short) = streamer_and_viewer(&server).await?;
+
+    let stalled_header = MediaHeader::new_video_key(voice_short, a.session.session_peer_id, 0, 1000, 1, false);
+    let mut stalled = a.session.connection.open_uni().await?;
+    stalled.write_all(&stalled_header.to_bytes()).await?;
+    stalled.write_all(&[1u8; 100]).await?; // never finished
+
+    send_keyframe(&a, voice_short, 2, 64 * 1024).await?;
+    let (header, len) = next_keyframe(&mut b, WAIT).await?;
+    assert_eq!((header.frame_id, len), (2, 64 * 1024));
+    drop(stalled);
+    Ok(())
+}

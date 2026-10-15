@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use finch_protocol::codec::{decode_message, encode_message};
-use finch_protocol::media::{MediaHeader, MEDIA_HEADER_SIZE};
+use finch_protocol::media::{MediaHeader, MAX_KEYFRAME_BYTES, MEDIA_HEADER_SIZE};
 use finch_protocol::messages::{ClientMessage, ServerMessage};
 use finch_protocol::models::{
     AttachmentInfo, ChannelMapping, UserStatus,
@@ -329,18 +329,27 @@ pub async fn handle_connection(
         }
     });
 
-    // Uni-Stream forwarder
+    // Uni-Stream forwarder: every key frame stream is read on its own task, so one that never
+    // finishes cannot hold up the next. At most KEYFRAME_READERS are read at once per connection
+    // (bounding memory to KEYFRAME_READERS x MAX_KEYFRAME_BYTES) and each gets a deadline.
     let uni_task = tokio::spawn(async move {
+        let readers = Arc::new(tokio::sync::Semaphore::new(KEYFRAME_READERS));
         while let Ok(mut recv) = conn_uni.accept_uni().await {
-            let mut hdr_bytes = [0u8; MEDIA_HEADER_SIZE];
-            if recv.read_exact(&mut hdr_bytes).await.is_ok()
-                && let Ok(hdr) = MediaHeader::from_slice(&hdr_bytes)
-                && let Ok(payload) = recv.read_to_end(1024 * 1024).await
-            {
-                sfu_uni
-                    .route_uni_keyframe(hdr.channel_id, peer_id, &hdr, Bytes::from(payload))
-                    .await;
-            }
+            let sfu = sfu_uni.clone();
+            let readers = readers.clone();
+            tokio::spawn(async move {
+                let Ok(_permit) = readers.acquire_owned().await else { return };
+                match tokio::time::timeout(KEYFRAME_READ_TIMEOUT, read_keyframe(&mut recv)).await {
+                    Ok(Some((hdr, payload))) => {
+                        sfu.route_uni_keyframe(hdr.channel_id, peer_id, &hdr, payload).await;
+                    }
+                    Ok(None) => tracing::debug!("Peer {peer_id}: malformed or oversized key frame stream"),
+                    Err(_) => {
+                        tracing::warn!("Peer {peer_id}: key frame stream stalled; abandoning it");
+                        let _ = recv.stop(0u32.into());
+                    }
+                }
+            });
         }
     });
 
@@ -403,6 +412,21 @@ async fn linked_attachments(pool: &SqlitePool, message_id: Uuid) -> Vec<Attachme
             })
         })
         .collect()
+}
+
+/// Key frame streams read concurrently per connection.
+const KEYFRAME_READERS: usize = 4;
+
+/// A key frame stream must complete within this time.
+const KEYFRAME_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Read one key frame stream: media header, then the payload up to `MAX_KEYFRAME_BYTES`.
+async fn read_keyframe(recv: &mut quinn::RecvStream) -> Option<(MediaHeader, Bytes)> {
+    let mut hdr_bytes = [0u8; MEDIA_HEADER_SIZE];
+    recv.read_exact(&mut hdr_bytes).await.ok()?;
+    let header = MediaHeader::from_slice(&hdr_bytes).ok()?;
+    let payload = recv.read_to_end(MAX_KEYFRAME_BYTES).await.ok()?;
+    Some((header, Bytes::from(payload)))
 }
 
 /// Maximum length of a chat message in characters.

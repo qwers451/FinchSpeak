@@ -19,6 +19,10 @@ pub const MAX_DATAGRAM_PAYLOAD: usize = 1160;
 /// Maximum total datagram size. Guaranteed not to exceed IPv6 minimum MTU.
 pub const MAX_DATAGRAM_SIZE: usize = MEDIA_HEADER_SIZE + MAX_DATAGRAM_PAYLOAD; // 1180
 
+/// Largest key frame (IDR, sent on a unidirectional stream) that is forwarded: a 1080p IDR is a
+/// few MB. Server and client use the same limit, so a frame is never accepted on one side only.
+pub const MAX_KEYFRAME_BYTES: usize = 10 * 1024 * 1024;
+
 /// Bit 0 of `flags`: indicates the last voice packet before silence (hangover end).
 pub const FLAG_SILENCE: u8 = 0x01;
 
