@@ -13,7 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Stream;
 use finch_audio::{
-    InputResampler, OutputResampler, VadDecision, VoiceCapture, VoiceCaptureConfig, FRAME_SIZE_48K,
+    AudioMixer, InputResampler, OutputResampler, VadDecision, VoiceCapture, VoiceCaptureConfig, FRAME_SIZE_48K,
 };
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::HeapRb;
@@ -127,6 +127,19 @@ impl Drop for AudioEngine {
         self.is_running.store(false, Ordering::SeqCst);
         let _ = self.cmd_tx.send(AudioCommand::Stop);
     }
+}
+
+/// Mix the next 20 ms playback frame.
+///
+/// Runs on the audio worker thread (a plain OS thread, not a cpal callback and not inside
+/// the Tokio runtime), so it may wait briefly while the network task pushes a packet;
+/// skipping the frame instead would insert 20 ms of silence (a click).
+fn mix_next_frame(
+    mixer: &tokio::sync::Mutex<AudioMixer>,
+    frame: &mut [f32; FRAME_SIZE_48K],
+    now: Instant,
+) -> Vec<(u32, bool)> {
+    mixer.blocking_lock().mix_frame(frame, now)
 }
 
 /// Dedicated OS thread function managing cpal streams, DSP, and lock-free ring buffers.
@@ -331,12 +344,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             while playback_prod.occupied_len() < target_playback_headroom
                                 && playback_prod.vacant_len() >= target_output_chunk
                             {
-                                let speech_events = if let Ok(mut mixer) = state.mixer.try_lock() {
-                                    mixer.mix_frame(&mut playback_frame_48k, Instant::now())
-                                } else {
-                                    playback_frame_48k.fill(0.0);
-                                    Vec::new()
-                                };
+                                let speech_events =
+                                    mix_next_frame(&state.mixer, &mut playback_frame_48k, Instant::now());
 
                                 for (peer_id, speaking) in speech_events {
                                     let _ = app_handle.emit(
@@ -488,5 +497,41 @@ mod tests {
         }
 
         assert_eq!(cons.occupied_len(), 0);
+    }
+
+    /// A briefly busy mixer (the network task is pushing a packet) must delay the frame,
+    /// not replace it with silence (AUD-023).
+    #[test]
+    fn test_mixer_contention_does_not_insert_silence() {
+        use finch_audio::OpusVoiceEncoder;
+        use finch_protocol::media::MediaHeader;
+
+        let mixer = std::sync::Arc::new(tokio::sync::Mutex::new(AudioMixer::new()));
+        let now = Instant::now();
+        let payload = OpusVoiceEncoder::new(64).unwrap().encode(&[0.3f32; FRAME_SIZE_48K]).unwrap();
+        {
+            let mut m = mixer.blocking_lock();
+            for seq in 0..4u16 {
+                let header = MediaHeader::new_audio(1, 7, seq, seq as u32 * 20, false, false);
+                m.on_audio_packet(&header, payload.clone(), now);
+            }
+            let mut warmup = [0.0f32; FRAME_SIZE_48K];
+            m.mix_frame(&mut warmup, now);
+        }
+
+        // Another thread holds the mixer for 30 ms, like the datagram task does.
+        let holder = mixer.clone();
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let _guard = holder.blocking_lock();
+            let _ = locked_tx.send(());
+            std::thread::sleep(Duration::from_millis(30));
+        });
+        locked_rx.recv().unwrap();
+
+        let mut frame = [0.0f32; FRAME_SIZE_48K];
+        mix_next_frame(&mixer, &mut frame, now);
+        handle.join().unwrap();
+        assert!(frame.iter().any(|&s| s != 0.0), "a silent frame was inserted while the mixer was busy");
     }
 }
