@@ -70,6 +70,8 @@ graph TD
 | [`crates/finch-server`](crates/finch-server) | **Серверное ядро и SFU**: Прием QUIC-соединений, веерная рассылка датаграмм по комнатам с принудительной перезаписью `sender_peer_id`, REST API для регистрации, авторизации и загрузки файлов. **Строго изолирован**: зависит только от `finch-protocol` и сетевых библиотек, зависимости от `finch-audio` и `finch-screen` запрещены. |
 | [`crates/finch-audio`](crates/finch-audio) | **Аудио-движок**: Двунаправленный звуковой тракт на `cpal`, связь с Tokio через lock-free `ringbuf`, ресемплеры `rubato`, программное и аппаратное эхоподавление (AEC), подавитель шума `nnnoiseless`, кодек `audiopus`, адаптивный Jitter Buffer с монотонным u64 счетчиком и синтезом PLC, микшер с soft-limiting `tanh` и локальным детектором речи. |
 | [`crates/finch-screen`](crates/finch-screen) | **Подсистема захвата экрана**: Захват окон и дисплеев через `xcap`, YUV420p конвертер, H.264 энкодер `openh264`, фрагментатор дельта-кадров по 1160 байт, захват системного звука через loopback (WASAPI/PipeWire) с Opus stereo кодированием. |
+| [`crates/finch-client-core`](crates/finch-client-core) | **Ядро клиента без UI**: QUIC-сессия (аутентификация, управляющий поток, датаграммы, uni-стримы как события), проверка сертификата TOFU, REST-клиент. Используется приложением и тестовым стендом. |
+| [`crates/finch-testbed`](crates/finch-testbed) | **Тестовый стенд** (не публикуется): настоящий сервер в процессе, headless-клиенты, голосовые метрики (задержка, шумоподавление, эхо, VAD), UDP-прокси с потерями и джиттером. |
 | [`app`](app) | **Десктопное приложение Tauri v2**: Управление сессиями, соединение с сервером по QUIC, мост бинарного канала `tauri::ipc::Channel` для передачи видеопотока в WebCodecs `VideoDecoder`, реактивный фронтенд на SolidJS. |
 
 ---
@@ -248,11 +250,24 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo check --workspace --all-targets
 ```
 
+Тестовый стенд — настоящий сервер и headless-клиенты: аккаунт, чат, файлы, голосовая сигнализация, экран, E2EE на уровне протокола, устойчивость, качество голоса, плохая сеть:
+```bash
+cargo test -p finch-testbed
+```
+
+Тесты, помеченные `#[ignore = "AUD-NNN"]`, воспроизводят известные проблемы из [отчёта аудита](docs/audit/2026-10-audit-report.md); прогнать их вместе с метриками:
+```bash
+cargo test -p finch-testbed -- --include-ignored --nocapture
+```
+
+Измеренные значения голосовых метрик — в [crates/finch-testbed/BASELINE.md](crates/finch-testbed/BASELINE.md) (строки `BASELINE` в выводе), отладочные WAV последнего прогона — в `target/testbed-out/`. Ручная проверка на реальных устройствах — [docs/audit/manual-voice-checklist.md](docs/audit/manual-voice-checklist.md).
+
 ---
 
 ## 📂 Дополнительная документация
 
 * **[Генеральный план архитектуры (plan.md)](plan.md)** — Подробное техническое описание всех этапов, форматов кадров, математики джиттер-буфера и спецификаций протокола.
+* **[Отчёт аудита (docs/audit/2026-10-audit-report.md)](docs/audit/2026-10-audit-report.md)** — Найденные проблемы, их уровни и план исправлений.
 * **[Отслеживание прогресса реализации (PROGRESS.md)](PROGRESS.md)** — Детализированный чек-лист реализованных этапов, статус юнит-тестов и метрики качества кода.
 
 ---
