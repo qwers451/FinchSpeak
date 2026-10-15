@@ -52,3 +52,11 @@ finch-protocol = { path = "crates/finch-protocol" }
 finch-audio = { path = "crates/finch-audio" }
 finch-screen = { path = "crates/finch-screen" }
 finch-client-core = { path = "crates/finch-client-core" }
+
+# Full debug info made target/ 86 GB (29 GB of PDBs for ~35 test executables that each link the
+# whole stack). Line tables keep backtraces readable; dependencies need no debug info at all.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
