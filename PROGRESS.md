@@ -28,7 +28,7 @@
   - **Требование 10**: Ключевые кадры видео (IDR) идут через однонаправленные стримы QUIC, а дельта-кадры режутся на фрагменты по 1160 байт и идут через датаграммы. Во время чтения ключевого стрима декодирование дельта-кадров блокируется.
   - **Требование 11**: Перед завершением задачи запущены `cargo check`, `cargo test` и `cargo clippy`, а также сборка фронтенда `npm run build`. Все проверки пройдены без ошибок.
 - **Метрики качества**:
-  - `cargo test --workspace`: 69 тестов успешно пройдено (23 `finch-audio`, 18 `finch-protocol`, 18 `finch-screen`, 5 `finch-server`, 2 `finch-app`, 1 `api_test`, 1 `load_test`, 1 `quic_poc_test`) с кодом 0.
+  - `cargo test --workspace`: 70 тестов успешно пройдено (23 `finch-audio`, 18 `finch-protocol`, 18 `finch-screen`, 5 `finch-server`, 2 `finch-app`, 1 `api_test`, 1 `load_test`, 1 `quic_poc_test`, 1 `e2e_full_stack_test`) с кодом 0.
   - `cargo clippy --workspace --all-targets -- -D warnings`: 0 warnings, абсолютно чистый результат.
   - `cargo check --workspace --all-targets`: успешная компиляция всех крейтов без ошибок.
   - `npm run build`: чистая и мгновенная сборка клиентского фронтенда SolidJS/Vite (0 ошибок, сгенерированы оптимизированные бандлы).

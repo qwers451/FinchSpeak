@@ -33,11 +33,28 @@ export function Sidebar() {
       {/* Channel Navigation */}
       <div class="channel-list">
         {/* Text Channels */}
-        <div class="channel-category">Text Channels</div>
+        <div class="channel-category" style={{ display: "flex", "justify-content": "space-between", "align-items": "center" }}>
+          <span>Text Channels</span>
+          <button
+            class="icon-btn"
+            style={{ "font-size": "0.9rem", padding: "2px 6px", cursor: "pointer" }}
+            title="Create Text Channel"
+            onClick={async () => {
+              const name = prompt('Enter new channel name:');
+              if (name && name.trim()) {
+                await api.createChannel(name.trim(), 'text');
+                await loadChannels();
+              }
+            }}
+          >
+            +
+          </button>
+        </div>
         <For each={textChannels()}>
           {(channel) => (
             <div
               class={`channel-item ${activeChannel()?.id === channel.id ? 'active' : ''}`}
+              style={{ cursor: "pointer" }}
               onClick={() => selectChannel(channel)}
             >
               <span style={{ "font-size": "1.1rem", color: "var(--text-dim)" }}>#</span>
@@ -47,11 +64,28 @@ export function Sidebar() {
         </For>
 
         {/* Voice Channels */}
-        <div class="channel-category" style={{ "margin-top": "14px" }}>Voice Channels</div>
+        <div class="channel-category" style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "margin-top": "14px" }}>
+          <span>Voice Channels</span>
+          <button
+            class="icon-btn"
+            style={{ "font-size": "0.9rem", padding: "2px 6px", cursor: "pointer" }}
+            title="Create Voice Channel"
+            onClick={async () => {
+              const name = prompt('Enter new voice channel name:');
+              if (name && name.trim()) {
+                await api.createChannel(name.trim(), 'voice');
+                await loadChannels();
+              }
+            }}
+          >
+            +
+          </button>
+        </div>
         <For each={voiceChannels()}>
           {(channel) => (
             <div
               class={`channel-item ${activeVoiceChannel()?.id === channel.id ? 'active' : ''}`}
+              style={{ cursor: "pointer" }}
               onClick={() => {
                 selectChannel(channel);
                 if (activeVoiceChannel()?.id !== channel.id) {

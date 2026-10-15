@@ -61,8 +61,16 @@ export function App() {
     <div class="app-layout">
       <Show when={currentUser()} fallback={<AuthModal />}>
         <Sidebar />
-        <Show when={activeChannel()?.channel_type === 'text'} fallback={<VoicePanel />}>
-          <ChatArea />
+        <Show when={activeChannel()} fallback={
+          <div style={{ flex: 1, display: "flex", "align-items": "center", "justify-content": "center", "flex-direction": "column", gap: "16px", background: "var(--bg-main)", color: "var(--text-muted)" }}>
+            <div style={{ "font-size": "3rem" }}>💬</div>
+            <h2 style={{ color: "var(--text-main)", "font-weight": "600" }}>Welcome to FinchSpeak</h2>
+            <p style={{ "font-size": "0.95rem" }}>Select a channel in the sidebar to start chatting or talking.</p>
+          </div>
+        }>
+          <Show when={activeChannel()?.channel_type === 'text'} fallback={<VoicePanel />}>
+            <ChatArea />
+          </Show>
         </Show>
       </Show>
 

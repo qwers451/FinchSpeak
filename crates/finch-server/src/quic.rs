@@ -450,16 +450,20 @@ async fn handle_client_message(
                     username: username.to_string(),
                     channel_id,
                 };
-                sessions.broadcast_voice(*short_id, event, None).await;
+                sessions.broadcast_all(event).await;
             }
         }
 
         ClientMessage::LeaveVoice => {
-            if let Some(session) = sessions.sessions.get(&peer_id)
-                && let Some(short_id) = session.current_voice_channel
-                && let Some(c_uuid) = sessions.short_to_channel.get(&short_id)
-            {
-                let c_id = *c_uuid;
+            let voice_info = if let Some(session) = sessions.sessions.get(&peer_id) {
+                session.current_voice_channel.and_then(|short_id| {
+                    sessions.short_to_channel.get(&short_id).map(|c_uuid| (short_id, *c_uuid))
+                })
+            } else {
+                None
+            };
+
+            if let Some((short_id, c_id)) = voice_info {
                 sessions.leave_voice(peer_id, short_id);
 
                 let event = ServerMessage::UserLeftVoice {
@@ -467,22 +471,26 @@ async fn handle_client_message(
                     peer_id,
                     channel_id: c_id,
                 };
-                sessions.broadcast_voice(short_id, event, None).await;
+                sessions.broadcast_all(event).await;
             }
         }
 
         ClientMessage::UpdateVoiceState { muted, deafened } => {
-            if let Some(mut session) = sessions.sessions.get_mut(&peer_id) {
+            let updated = if let Some(mut session) = sessions.sessions.get_mut(&peer_id) {
                 session.muted = muted;
                 session.deafened = deafened;
-                if let Some(short_id) = session.current_voice_channel {
-                    let event = ServerMessage::UserVoiceStateChanged {
-                        peer_id,
-                        muted,
-                        deafened,
-                    };
-                    sessions.broadcast_voice(short_id, event, Some(peer_id)).await;
-                }
+                true
+            } else {
+                false
+            };
+
+            if updated {
+                let event = ServerMessage::UserVoiceStateChanged {
+                    peer_id,
+                    muted,
+                    deafened,
+                };
+                sessions.broadcast_all(event).await;
             }
         }
 
@@ -492,9 +500,8 @@ async fn handle_client_message(
             height,
             fps,
         } => {
-            if let Some(session) = sessions.sessions.get(&peer_id)
-                && let Some(short_id) = session.current_voice_channel
-            {
+            let short_id = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
+            if let Some(short_id) = short_id {
                 let event = ServerMessage::ScreenShareStarted {
                     user_id,
                     peer_id,
@@ -508,17 +515,17 @@ async fn handle_client_message(
         }
 
         ClientMessage::StopScreenShare => {
-            if let Some(session) = sessions.sessions.get(&peer_id)
-                && let Some(short_id) = session.current_voice_channel
-            {
+            let short_id = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
+            if let Some(short_id) = short_id {
                 let event = ServerMessage::ScreenShareStopped { peer_id };
                 sessions.broadcast_voice(short_id, event, Some(peer_id)).await;
             }
         }
 
         ClientMessage::SubscribeScreenShare { target_user_id } => {
-            if let Some(target_peer) = sessions.user_to_peer.get(&target_user_id) {
-                sessions.subscribe_screen(peer_id, *target_peer);
+            let target_peer = sessions.user_to_peer.get(&target_user_id).map(|p| *p);
+            if let Some(target_peer) = target_peer {
+                sessions.subscribe_screen(peer_id, target_peer);
             }
         }
 

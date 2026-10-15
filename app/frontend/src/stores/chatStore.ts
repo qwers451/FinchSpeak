@@ -40,6 +40,17 @@ export async function selectChannel(channel: Channel) {
 export async function sendMessage(content: string, attachments?: string[]) {
   const current = activeChannel();
   if (!current || !content.trim()) return;
+  const user = currentUser();
+  const optimisticMsg: Message = {
+    id: `local-${Date.now()}`,
+    channel_id: current.id,
+    author_id: user?.id || 'me',
+    author_name: user?.display_name || user?.username || 'You',
+    content: content.trim(),
+    attachments: [],
+    timestamp: Math.floor(Date.now() / 1000),
+  };
+  setMessages((prev) => [...prev, optimisticMsg]);
   try {
     await api.sendTextMessage(current.id, content.trim(), attachments);
   } catch (err) {
@@ -50,6 +61,10 @@ export async function sendMessage(content: string, attachments?: string[]) {
 export function handleIncomingMessage(msg: Message) {
   const current = activeChannel();
   if (current && msg.channel_id === current.id) {
-    setMessages((prev) => [...prev, msg]);
+    setMessages((prev) => {
+      // replace optimistic message if matches or append
+      const filtered = prev.filter((m) => !(m.id.startsWith('local-') && m.content === msg.content));
+      return [...filtered, msg];
+    });
   }
 }

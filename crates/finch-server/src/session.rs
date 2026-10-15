@@ -96,14 +96,29 @@ impl SessionManager {
         }
     }
 
+    /// Remove peer from voice room state without touching sessions map.
+    fn remove_peer_from_voice_room(&self, peer_id: u32, short_id: u32) {
+        if let Some(mut room) = self.voice_rooms.get_mut(&short_id) {
+            room.participants.remove(&peer_id);
+            room.screen_subscribers.remove(&peer_id);
+            for viewers in room.screen_subscribers.values_mut() {
+                viewers.remove(&peer_id);
+            }
+        }
+    }
+
     /// Join a voice room by short_id.
     pub fn join_voice(&self, peer_id: u32, short_id: u32) {
-        if let Some(mut session) = self.sessions.get_mut(&peer_id) {
-            // Leave old voice room if any
-            if let Some(old_short) = session.current_voice_channel {
-                self.leave_voice(peer_id, old_short);
-            }
+        let old_short = if let Some(mut session) = self.sessions.get_mut(&peer_id) {
+            let old = session.current_voice_channel;
             session.current_voice_channel = Some(short_id);
+            old
+        } else {
+            None
+        };
+
+        if let Some(old) = old_short {
+            self.remove_peer_from_voice_room(peer_id, old);
         }
 
         let mut room = self.voice_rooms.entry(short_id).or_default();
@@ -118,19 +133,13 @@ impl SessionManager {
             session.current_voice_channel = None;
         }
 
-        if let Some(mut room) = self.voice_rooms.get_mut(&short_id) {
-            room.participants.remove(&peer_id);
-            room.screen_subscribers.remove(&peer_id);
-            for viewers in room.screen_subscribers.values_mut() {
-                viewers.remove(&peer_id);
-            }
-        }
+        self.remove_peer_from_voice_room(peer_id, short_id);
     }
 
     /// Subscribe viewer to streamer's screen share.
     pub fn subscribe_screen(&self, viewer_peer_id: u32, streamer_peer_id: u32) {
-        if let Some(session) = self.sessions.get(&streamer_peer_id)
-            && let Some(short_id) = session.current_voice_channel
+        let short_id = self.sessions.get(&streamer_peer_id).and_then(|s| s.current_voice_channel);
+        if let Some(short_id) = short_id
             && let Some(mut room) = self.voice_rooms.get_mut(&short_id)
         {
             room.screen_subscribers
@@ -142,8 +151,8 @@ impl SessionManager {
 
     /// Unsubscribe viewer from streamer's screen share.
     pub fn unsubscribe_screen(&self, viewer_peer_id: u32, streamer_peer_id: u32) {
-        if let Some(session) = self.sessions.get(&streamer_peer_id)
-            && let Some(short_id) = session.current_voice_channel
+        let short_id = self.sessions.get(&streamer_peer_id).and_then(|s| s.current_voice_channel);
+        if let Some(short_id) = short_id
             && let Some(mut room) = self.voice_rooms.get_mut(&short_id)
             && let Some(viewers) = room.screen_subscribers.get_mut(&streamer_peer_id)
         {
@@ -153,21 +162,26 @@ impl SessionManager {
 
     /// Broadcast a Control Stream message to all connected sessions.
     pub async fn broadcast_all(&self, msg: ServerMessage) {
-        for entry in self.sessions.iter() {
-            let _ = entry.value().control_tx.send(msg.clone()).await;
+        let senders: Vec<_> = self.sessions.iter().map(|entry| entry.value().control_tx.clone()).collect();
+        for tx in senders {
+            let _ = tx.send(msg.clone()).await;
         }
     }
 
     /// Broadcast a Control Stream message to participants of a voice room.
     pub async fn broadcast_voice(&self, short_id: u32, msg: ServerMessage, exclude_peer_id: Option<u32>) {
-        if let Some(room) = self.voice_rooms.get(&short_id) {
-            for &peer_id in &room.participants {
-                if Some(peer_id) != exclude_peer_id
-                    && let Some(session) = self.sessions.get(&peer_id)
-                {
-                    let _ = session.control_tx.send(msg.clone()).await;
-                }
-            }
+        let senders: Vec<_> = if let Some(room) = self.voice_rooms.get(&short_id) {
+            room.participants
+                .iter()
+                .filter(|&&peer_id| Some(peer_id) != exclude_peer_id)
+                .filter_map(|&peer_id| self.sessions.get(&peer_id).map(|s| s.control_tx.clone()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        for tx in senders {
+            let _ = tx.send(msg.clone()).await;
         }
     }
 }
