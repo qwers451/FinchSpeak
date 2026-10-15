@@ -13,6 +13,8 @@ use crate::error::ServerError;
 #[derive(Debug, Deserialize)]
 pub struct HistoryQuery {
     pub before: Option<i64>,
+    /// Cursor: only messages older than this message id (UUID v7, time-ordered).
+    pub before_id: Option<String>,
     pub limit: Option<u32>,
 }
 
@@ -39,11 +41,14 @@ pub async fn channel_messages_handler(
          FROM messages m
          JOIN users u ON m.author_id = u.id
          WHERE m.channel_id = ? AND m.created_at < ?
-         ORDER BY m.created_at DESC
+           AND (? IS NULL OR m.id < ?)
+         ORDER BY m.created_at DESC, m.id DESC
          LIMIT ?"
     )
     .bind(&channel_id_str)
     .bind(before)
+    .bind(&query.before_id)
+    .bind(&query.before_id)
     .bind(limit + 1) // +1 to check has_more
     .fetch_all(&state.pool)
     .await?;

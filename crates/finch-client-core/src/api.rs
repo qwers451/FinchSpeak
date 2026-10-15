@@ -146,6 +146,21 @@ impl ApiClient {
         parse_json(req.send().await?).await
     }
 
+    /// Page backwards through history: messages older than `before_id` (newest page when `None`).
+    pub async fn fetch_messages_page(
+        &self,
+        channel_id: Uuid,
+        before_id: Option<Uuid>,
+        limit: u32,
+    ) -> Result<MessagesHistoryDto, ClientError> {
+        let mut path = format!("/api/channels/{channel_id}/messages?limit={limit}");
+        if let Some(id) = before_id {
+            path.push_str(&format!("&before_id={id}"));
+        }
+        let req = self.authorized(self.http.get(self.url(&path)));
+        parse_json(req.send().await?).await
+    }
+
     pub async fn upload_file(
         &self,
         filename: &str,

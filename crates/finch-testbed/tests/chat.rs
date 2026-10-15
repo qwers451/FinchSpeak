@@ -42,7 +42,6 @@ async fn message_broadcast_to_all() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "AUD-011"]
 async fn history_persisted_in_order() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
     let mut a = TestClient::register(&server, "alice").await?;
@@ -124,5 +123,35 @@ async fn invalid_messages_are_rejected_with_error() -> anyhow::Result<()> {
     }
     b.expect_no_control(Duration::from_millis(300), |m| matches!(m, ServerMessage::NewMessage { .. }))
         .await?;
+    Ok(())
+}
+
+/// Paging back with the oldest message id as cursor returns every message exactly once,
+/// even when they share a timestamp second (AUD-011).
+#[tokio::test]
+async fn history_pages_by_message_id() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let mut a = TestClient::register(&server, "alice").await?;
+    let (text_id, _) = a.channel(ChannelType::Text);
+    for content in ["first", "second", "third"] {
+        a.send(ClientMessage::SendMessage { channel_id: text_id, content: content.to_string(), attachments: vec![] })
+            .await?;
+        a.expect_control(WAIT, |m| match m {
+            ServerMessage::NewMessage { content: c, .. } if c == content => Some(()),
+            _ => None,
+        })
+        .await?;
+    }
+
+    let page1 = a.api.fetch_messages_page(text_id, None, 2).await?;
+    assert!(page1.has_more);
+    let contents: Vec<&str> = page1.messages.iter().map(|m| m.content.as_str()).collect();
+    assert_eq!(contents, ["second", "third"]);
+
+    let oldest = page1.messages[0].id;
+    let page2 = a.api.fetch_messages_page(text_id, Some(oldest), 2).await?;
+    assert!(!page2.has_more);
+    let contents: Vec<&str> = page2.messages.iter().map(|m| m.content.as_str()).collect();
+    assert_eq!(contents, ["first"]);
     Ok(())
 }
