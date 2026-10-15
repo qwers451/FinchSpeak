@@ -313,3 +313,44 @@ pub async fn connect(
         event_rx,
     ))
 }
+
+/// Retry delays for [`reconnect_with_backoff`]: doubling from `initial` up to `max`.
+#[derive(Debug, Clone, Copy)]
+pub struct Backoff {
+    pub initial: Duration,
+    pub max: Duration,
+}
+
+impl Default for Backoff {
+    fn default() -> Self {
+        Self {
+            initial: Duration::from_secs(1),
+            max: Duration::from_secs(30),
+        }
+    }
+}
+
+/// Keep trying to [`connect`] until it succeeds. Errors that a retry cannot fix
+/// (rejected token, unknown or changed server certificate) are returned immediately.
+pub async fn reconnect_with_backoff(
+    params: ConnectParams,
+    fingerprints: Arc<DashMap<String, String>>,
+    backoff: Backoff,
+) -> Result<(Session, mpsc::Receiver<SessionEvent>), ClientError> {
+    let mut delay = backoff.initial;
+    loop {
+        match connect(params.clone(), fingerprints.clone()).await {
+            Ok(connected) => return Ok(connected),
+            Err(
+                e @ (ClientError::AuthRejected { .. }
+                | ClientError::UntrustedServer { .. }
+                | ClientError::FingerprintMismatch { .. }),
+            ) => return Err(e),
+            Err(e) => {
+                info!("Reconnect to {} failed ({e}); retrying in {delay:?}", params.quic_addr);
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(backoff.max);
+            }
+        }
+    }
+}

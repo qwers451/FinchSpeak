@@ -1,23 +1,25 @@
 //! QUIC session wiring: forwards `finch-client-core` session events to Tauri events,
-//! the audio mixer and the screen-share frame assembler.
+//! the audio mixer and the screen-share frame assembler, and reconnects after a drop.
 
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use finch_client_core::error::ClientError;
-use finch_client_core::session::{connect, ConnectParams, SessionEvent};
+use finch_client_core::session::{
+    connect, reconnect_with_backoff, Backoff, ConnectParams, Session, SessionEvent,
+};
 use finch_protocol::media::{MediaHeader, MediaType, MEDIA_HEADER_SIZE};
-use finch_protocol::messages::ServerMessage;
+use finch_protocol::messages::{ClientMessage, ServerMessage};
 use quinn::Connection;
 use tauri::Emitter;
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::state::{AppState, VideoChunkPayload};
 
-/// Establish QUIC connection and spawn the event forwarding loop.
+/// Establish QUIC connection and spawn the session loop.
 pub async fn start_quic_session(
     server_addr: SocketAddr,
     hostname: &str,
@@ -25,16 +27,14 @@ pub async fn start_quic_session(
     state: AppState,
     app_handle: tauri::AppHandle,
 ) -> anyhow::Result<Connection> {
-    let connected = connect(
-        ConnectParams {
-            quic_addr: server_addr,
-            hostname: hostname.to_string(),
-            token,
-            require_known_fingerprint: true,
-        },
-        state.saved_fingerprints.clone(),
-    )
-    .await;
+    let params = ConnectParams {
+        quic_addr: server_addr,
+        hostname: hostname.to_string(),
+        token,
+        require_known_fingerprint: true,
+    };
+    state.session_generation.fetch_add(1, Ordering::SeqCst);
+    let connected = connect(params.clone(), state.saved_fingerprints.clone()).await;
     let (session, events) = match connected {
         Ok(ok) => ok,
         Err(ClientError::UntrustedServer { hostname, fingerprint }) => {
@@ -48,6 +48,15 @@ pub async fn start_quic_session(
         Err(e) => return Err(e.into()),
     };
 
+    *state.last_connect.write().await = Some(params);
+    let connection = session.connection.clone();
+    activate_session(&session, &state, &app_handle).await;
+    tokio::spawn(run_session(events, state, app_handle));
+    Ok(connection)
+}
+
+/// Make `session` the active one in the app state and tell the UI.
+async fn activate_session(session: &Session, state: &AppState, app_handle: &tauri::AppHandle) {
     state
         .session_peer_id
         .store(session.session_peer_id, Ordering::SeqCst);
@@ -60,24 +69,38 @@ pub async fn start_quic_session(
             "initial_state": session.initial_state
         }),
     );
-
     *state.control_tx.write().await = Some(session.control_tx.clone());
     *state.quic_connection.write().await = Some(session.connection.clone());
-
-    tokio::spawn(forward_events(events, state, app_handle));
-
-    Ok(session.connection)
 }
 
-async fn forward_events(
+/// Forward session events; after a drop, reconnect and continue with the new session.
+async fn run_session(
     mut events: mpsc::Receiver<SessionEvent>,
     state: AppState,
     app_handle: tauri::AppHandle,
 ) {
+    loop {
+        let Some(reason) = forward_events(&mut events, &state, &app_handle).await else {
+            return;
+        };
+        let _ = app_handle.emit("connection-lost", reason);
+        match reconnect(&state, &app_handle).await {
+            Some(new_events) => events = new_events,
+            None => return,
+        }
+    }
+}
+
+/// Forward events until the connection is lost (returns the reason) or the stream ends.
+async fn forward_events(
+    events: &mut mpsc::Receiver<SessionEvent>,
+    state: &AppState,
+    app_handle: &tauri::AppHandle,
+) -> Option<String> {
     while let Some(event) = events.recv().await {
         match event {
-            SessionEvent::Control(msg) => emit_control(msg, &app_handle),
-            SessionEvent::Datagram(bytes) => route_datagram(bytes, &state, &app_handle).await,
+            SessionEvent::Control(msg) => emit_control(msg, app_handle),
+            SessionEvent::Datagram(bytes) => route_datagram(bytes, state, app_handle).await,
             SessionEvent::UniStream { header, payload } => {
                 if header.media_type == MediaType::VideoKey {
                     let mut asm = state.assembler.lock().await;
@@ -90,9 +113,58 @@ async fn forward_events(
                     }
                 }
             }
-            SessionEvent::ConnectionLost(reason) => {
-                let _ = app_handle.emit("connection-lost", reason);
+            SessionEvent::ConnectionLost(reason) => return Some(reason),
+        }
+    }
+    None
+}
+
+/// Reconnect with backoff and rejoin the voice channel the user was in. Returns `None`
+/// when the user logged out or in again meanwhile, or when retrying cannot help.
+async fn reconnect(
+    state: &AppState,
+    app_handle: &tauri::AppHandle,
+) -> Option<mpsc::Receiver<SessionEvent>> {
+    let generation = state.session_generation.load(Ordering::SeqCst);
+    let params = state.last_connect.read().await.clone()?;
+    let _ = app_handle.emit("reconnecting", ());
+
+    let superseded = async {
+        while state.session_generation.load(Ordering::SeqCst) == generation {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    };
+    let result = tokio::select! {
+        r = reconnect_with_backoff(params, state.saved_fingerprints.clone(), Backoff::default()) => r,
+        _ = superseded => {
+            info!("Reconnect cancelled: session was replaced or logged out");
+            return None;
+        }
+    };
+
+    match result {
+        Ok((session, events)) => {
+            let voice_channel = (*state.current_voice_channel.read().await).and_then(|short_id| {
+                session
+                    .channels
+                    .iter()
+                    .find(|c| c.short_id == short_id)
+                    .map(|c| c.id)
+            });
+            activate_session(&session, state, app_handle).await;
+            if let Some(channel_id) = voice_channel {
+                let _ = session
+                    .control_tx
+                    .send(ClientMessage::JoinVoice { channel_id })
+                    .await;
             }
+            let _ = app_handle.emit("reconnected", ());
+            Some(events)
+        }
+        Err(e) => {
+            warn!("Giving up reconnecting: {e}");
+            let _ = app_handle.emit("reconnect-failed", e.to_string());
+            None
         }
     }
 }

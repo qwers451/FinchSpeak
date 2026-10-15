@@ -102,6 +102,11 @@ pub async fn register(
 
 #[tauri::command]
 pub async fn logout(state: State<'_, AppState>) -> Result<(), String> {
+    // Stop any reconnect loop before the connection is closed.
+    state
+        .session_generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    *state.last_connect.write().await = None;
     state.audio_engine.lock().await.stop();
 
     if let Some(conn) = state.quic_connection.write().await.take() {

@@ -116,3 +116,54 @@ async fn server_survives_failed_handshake() -> anyhow::Result<()> {
     tokio::time::timeout(Duration::from_secs(5), TestClient::register(&server, "alice")).await??;
     Ok(())
 }
+
+/// While the server is down the client keeps retrying and gets back in once it returns (AUD-025).
+#[tokio::test]
+async fn client_reconnects_automatically_when_server_returns() -> anyhow::Result<()> {
+    use finch_client_core::session::{reconnect_with_backoff, Backoff, ConnectParams};
+
+    let mut server = TestServer::start().await?;
+    let a = TestClient::register(&server, "alice").await?;
+    let token = a.api.token().unwrap_or_default().to_string();
+    let quic_addr = server.quic_addr;
+
+    server.stop().await;
+    let params = ConnectParams {
+        quic_addr,
+        hostname: "localhost".to_string(),
+        token,
+        require_known_fingerprint: false,
+    };
+    let backoff = Backoff { initial: Duration::from_millis(200), max: Duration::from_millis(800) };
+    let reconnecting = tokio::spawn(reconnect_with_backoff(params, Arc::new(DashMap::new()), backoff));
+
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(!reconnecting.is_finished(), "must keep retrying while the server is down");
+    server.restart().await?;
+
+    let (session, _events) = tokio::time::timeout(Duration::from_secs(5), reconnecting).await???;
+    assert_ne!(session.session_peer_id, 0);
+    Ok(())
+}
+
+/// Retrying cannot fix a rejected token; reconnecting gives up immediately (AUD-025).
+#[tokio::test]
+async fn reconnect_stops_on_rejected_token() -> anyhow::Result<()> {
+    use finch_client_core::error::ClientError;
+    use finch_client_core::session::{reconnect_with_backoff, Backoff, ConnectParams};
+
+    let server = TestServer::start().await?;
+    let params = ConnectParams {
+        quic_addr: server.quic_addr,
+        hostname: "localhost".to_string(),
+        token: "garbage".to_string(),
+        require_known_fingerprint: false,
+    };
+    let result = tokio::time::timeout(
+        Duration::from_secs(3),
+        reconnect_with_backoff(params, Arc::new(DashMap::new()), Backoff::default()),
+    )
+    .await?;
+    assert!(matches!(result, Err(ClientError::AuthRejected { .. })), "got {:?}", result.map(|_| ()));
+    Ok(())
+}

@@ -2,11 +2,12 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::sync::Arc;
 
 use dashmap::DashMap;
 use finch_client_core::api::ApiClient;
+use finch_client_core::session::ConnectParams;
 pub use finch_client_core::api::UserDto;
 use finch_audio::AudioMixer;
 use finch_protocol::messages::ClientMessage;
@@ -44,6 +45,10 @@ pub struct AppState {
     pub assembler: Arc<Mutex<FrameAssembler>>,
     /// TOFU verified fingerprints: hostname -> SHA-256 hex string
     pub saved_fingerprints: Arc<DashMap<String, String>>,
+    /// Parameters of the current QUIC session, reused to reconnect after a drop.
+    pub last_connect: Arc<RwLock<Option<ConnectParams>>>,
+    /// Bumped on every login and logout; a reconnect loop stops when it changes.
+    pub session_generation: Arc<AtomicU64>,
     /// File with pinned server fingerprints (set at startup from the app data dir).
     pub known_servers_path: Arc<RwLock<Option<PathBuf>>>,
     /// Pending TOFU fingerprint to be accepted: (hostname, fingerprint)
@@ -77,6 +82,8 @@ impl AppState {
             assembler: Arc::new(Mutex::new(FrameAssembler::new())),
             saved_fingerprints: Arc::new(DashMap::new()),
             known_servers_path: Arc::new(RwLock::new(None)),
+            last_connect: Arc::new(RwLock::new(None)),
+            session_generation: Arc::new(AtomicU64::new(0)),
             pending_fingerprint: Arc::new(RwLock::new(None)),
             video_channel: Arc::new(RwLock::new(None)),
             audio_engine: Arc::new(Mutex::new(crate::audio_engine::AudioEngine::new())),
