@@ -186,6 +186,35 @@ impl ApiClient {
         parse_json(self.send(req).await?).await
     }
 
+    /// Admin: rename a channel and/or change its topic.
+    pub async fn update_channel(
+        &self,
+        channel_id: Uuid,
+        name: Option<&str>,
+        topic: Option<&str>,
+    ) -> Result<ChannelInfoDto, ClientError> {
+        let req = self
+            .authorized(self.http.patch(self.url(&format!("/api/channels/{channel_id}"))))
+            .json(&serde_json::json!({ "name": name, "topic": topic }));
+        parse_json(self.send(req).await?).await
+    }
+
+    /// Admin: delete a channel with its messages (people in a voice channel are sent out).
+    pub async fn delete_channel(&self, channel_id: Uuid) -> Result<(), ClientError> {
+        let req = self.authorized(self.http.delete(self.url(&format!("/api/channels/{channel_id}"))));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
+    /// Admin: set the order of all channels.
+    pub async fn reorder_channels(&self, channel_ids: &[Uuid]) -> Result<(), ClientError> {
+        let req = self
+            .authorized(self.http.put(self.url("/api/channels/order")))
+            .json(&serde_json::json!({ "channel_ids": channel_ids }));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
     /// Admin: all members with role, ban and online state.
     pub async fn admin_users(&self) -> Result<Vec<AdminUserDto>, ClientError> {
         let req = self.authorized(self.http.get(self.url("/api/admin/users")));

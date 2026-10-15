@@ -1,8 +1,8 @@
 import { createSignal } from 'solid-js';
 import type { SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
 import { setPendingTofu } from './tofuStore';
-import { activeChannel, channels, handleChannelCreated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
-import { handleUserSpeaking, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
+import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
+import { activeVoiceChannel, handleUserSpeaking, leaveVoice, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
 import { resetScreenState, resetScreenStateOnDisconnect, setWatching, watching } from './screenState';
 import { screenHandlers } from './screenStore';
@@ -57,6 +57,11 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'ping-rtt': (data) => setPingRtt(data.rtt_ms),
   'tofu-required': setPendingTofu,
   'channel-created': ({ channel }) => handleChannelCreated(channel),
+  'channel-updated': ({ channel }) => handleChannelUpdated(channel),
+  'channel-deleted': ({ channel_id }) => {
+    handleChannelDeleted(channel_id);
+    if (activeVoiceChannel()?.id === channel_id) void leaveVoice();
+  },
   'user-joined-voice': (data) => setVoiceParticipants((previous) => [
     ...previous.filter((participant) => participant.peer_id !== data.peer_id), data,
   ]),

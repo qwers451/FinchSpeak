@@ -662,3 +662,7 @@ body {
 .admin-table th, .admin-table td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border-color); font-size: 0.85rem; }
 
 .admin-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.channel-admin { margin-left: auto; display: none; gap: 2px; }
+.channel-item:hover .channel-admin { display: inline-flex; }
+.channel-admin button { padding: 0 4px; font-size: 0.75rem; }

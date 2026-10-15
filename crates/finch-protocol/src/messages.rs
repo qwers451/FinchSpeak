@@ -185,6 +185,16 @@ pub enum ServerMessage {
         channel: Channel,
     },
 
+    /// A channel was renamed, got a new topic or position.
+    ChannelUpdated {
+        channel: Channel,
+    },
+
+    /// A channel was deleted; people in it have already been sent out.
+    ChannelDeleted {
+        channel_id: Uuid,
+    },
+
     /// A user's online presence changed.
     PresenceUpdate {
         user_id: Uuid,

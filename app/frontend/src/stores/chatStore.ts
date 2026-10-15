@@ -47,6 +47,23 @@ export function handleChannelCreated(channel: Channel) {
   );
 }
 
+export function handleChannelUpdated(channel: Channel) {
+  setChannels((prev) => prev.map((c) => (c.id === channel.id ? channel : c)).sort((a, b) => a.position - b.position));
+  if (activeChannel()?.id === channel.id) setActiveChannel(channel);
+}
+
+/** A channel was deleted: drop it, and leave it if it was open. */
+export function handleChannelDeleted(channelId: string) {
+  setChannels((prev) => prev.filter((c) => c.id !== channelId));
+  if (activeChannel()?.id === channelId) {
+    setMessages([]);
+    receivedMessageIds.clear();
+    const next = channels().find((c) => c.channel_type === 'text') ?? null;
+    if (next) void selectChannel(next);
+    else setActiveChannel(null);
+  }
+}
+
 export async function selectChannel(channel: Channel) {
   const request = ++historyRequest;
   if (activeChannel()?.id !== channel.id) {

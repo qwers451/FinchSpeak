@@ -160,6 +160,31 @@ impl SessionManager {
         self.remove_peer_from_voice_room(peer_id, short_id);
     }
 
+    /// Take everyone out of the voice room of `short_id` and forget the room.
+    /// Returns who was in it: `(peer_id, user_id, was_sharing_screen)`.
+    pub fn close_voice_room(&self, short_id: u32) -> Vec<(u32, Uuid, bool)> {
+        let participants: Vec<u32> = self
+            .voice_rooms
+            .get(&short_id)
+            .map(|room| room.participants.iter().copied().collect())
+            .unwrap_or_default();
+        let mut evicted = Vec::new();
+        for peer_id in participants {
+            let info = self.sessions.get_mut(&peer_id).map(|mut session| {
+                session.current_voice_channel = None;
+                (session.user_id, std::mem::replace(&mut session.sharing_screen, false))
+            });
+            if let Some((user_id, was_sharing)) = info {
+                evicted.push((peer_id, user_id, was_sharing));
+            }
+        }
+        self.voice_rooms.remove(&short_id);
+        if let Some((_, channel_id)) = self.short_to_channel.remove(&short_id) {
+            self.channel_to_short.remove(&channel_id);
+        }
+        evicted
+    }
+
     /// Subscribe viewer to streamer's screen share.
     /// Subscribe a viewer to a streamer's screen; only members of the same voice room may watch.
     pub fn subscribe_screen(&self, viewer_peer_id: u32, streamer_peer_id: u32) {

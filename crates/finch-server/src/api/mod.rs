@@ -48,6 +48,11 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         // Channels routes
         .route("/api/channels", get(channels::list_channels_handler))
         .route("/api/channels", post(channels::create_channel_handler))
+        .route("/api/channels/order", axum::routing::put(channels::reorder_channels_handler))
+        .route(
+            "/api/channels/{id}",
+            axum::routing::patch(channels::update_channel_handler).delete(channels::delete_channel_handler),
+        )
         // Messages history routes
         .route(
             "/api/channels/{channel_id}/messages",

@@ -37,6 +37,14 @@ pub async fn channel_messages_handler(
     let limit = query.limit.unwrap_or(50).clamp(1, 100) as i64;
     let before = query.before.unwrap_or(i64::MAX);
 
+    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM channels WHERE id = ?")
+        .bind(&channel_id_str)
+        .fetch_one(&state.pool)
+        .await?;
+    if exists == 0 {
+        return Err(ServerError::NotFound("No such channel".into()));
+    }
+
     // Fetch messages with author display_name
     let mut rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<i64>, i64, Option<String>)>(
         "SELECT m.id, m.author_id, u.display_name, m.content, m.reply_to_id, m.edited_at, m.created_at, m.client_msg_id

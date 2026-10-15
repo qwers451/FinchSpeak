@@ -353,6 +353,12 @@ fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
         ServerMessage::ChannelCreated { channel } => {
             let _ = app_handle.emit("channel-created", serde_json::json!({ "channel": channel }));
         }
+        ServerMessage::ChannelUpdated { channel } => {
+            let _ = app_handle.emit("channel-updated", serde_json::json!({ "channel": channel }));
+        }
+        ServerMessage::ChannelDeleted { channel_id } => {
+            let _ = app_handle.emit("channel-deleted", serde_json::json!({ "channel_id": channel_id }));
+        }
         ServerMessage::KeyframeRequested => {
             let _ = app_handle.emit("keyframe-requested", ());
         }

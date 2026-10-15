@@ -237,6 +237,24 @@ export const api = {
     }
   },
 
+  updateChannel: async (channelId: string, name?: string, topic?: string): Promise<void> => {
+    if (isTauri()) {
+      return invoke('update_channel', { channelId, name: name ?? null, topic: topic ?? null });
+    }
+  },
+
+  deleteChannel: async (channelId: string): Promise<void> => {
+    if (isTauri()) {
+      return invoke('delete_channel', { channelId });
+    }
+  },
+
+  reorderChannels: async (channelIds: string[]): Promise<void> => {
+    if (isTauri()) {
+      return invoke('reorder_channels', { channelIds });
+    }
+  },
+
   // Screen sharing
   listScreenSources: async (): Promise<ScreenSources> => {
     if (isTauri()) {

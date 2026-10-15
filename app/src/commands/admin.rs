@@ -57,3 +57,29 @@ pub async fn ban_user(user_id: String, state: State<'_, AppState>) -> Result<(),
 pub async fn unban_user(user_id: String, state: State<'_, AppState>) -> Result<(), String> {
     api(&state).await?.unban_user(parse_user(&user_id)?).await.map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn update_channel(
+    channel_id: String,
+    name: Option<String>,
+    topic: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    api(&state)
+        .await?
+        .update_channel(parse_user(&channel_id)?, name.as_deref(), topic.as_deref())
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_channel(channel_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    api(&state).await?.delete_channel(parse_user(&channel_id)?).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn reorder_channels(channel_ids: Vec<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let ids = channel_ids.iter().map(|id| parse_user(id)).collect::<Result<Vec<_>, _>>()?;
+    api(&state).await?.reorder_channels(&ids).await.map_err(|e| e.to_string())
+}

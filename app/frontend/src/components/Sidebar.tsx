@@ -23,6 +23,25 @@ import { setAppError } from '../stores/notificationStore';
 import { currentUser, logoutUser } from '../stores/authStore';
 import type { Channel } from '../types';
 import { api } from '../services/api';
+import { moveChannel, removeChannel, renameChannel } from '../stores/channelAdminStore';
+
+/** Rename / move / delete buttons, shown to admins next to a channel. */
+function ChannelAdminButtons(props: { channel: Channel }) {
+  const stop = (action: () => void) => (event: MouseEvent) => {
+    event.stopPropagation();
+    action();
+  };
+  return (
+    <Show when={currentUser()?.role === 'admin'}>
+      <span class="channel-admin">
+        <button type="button" title="Move up" onClick={stop(() => void moveChannel(props.channel, -1))}>↑</button>
+        <button type="button" title="Move down" onClick={stop(() => void moveChannel(props.channel, 1))}>↓</button>
+        <button type="button" title="Rename" onClick={stop(() => { const name = prompt('New name:', props.channel.name); if (name) void renameChannel(props.channel, name); })}>✎</button>
+        <button type="button" title="Delete" onClick={stop(() => { if (confirm(`Delete #${props.channel.name} and all its messages?`)) void removeChannel(props.channel); })}>🗑</button>
+      </span>
+    </Show>
+  );
+}
 
 export function Sidebar() {
   const textChannels = () => channels().filter((c) => c.channel_type === 'text');
@@ -69,6 +88,7 @@ export function Sidebar() {
             >
               <span style={{ "font-size": "1.1rem", color: "var(--text-dim)" }}>#</span>
               <span>{channel.name}</span>
+              <ChannelAdminButtons channel={channel} />
             </div>
           )}
         </For>
@@ -110,6 +130,7 @@ export function Sidebar() {
             >
               <span style={{ "font-size": "1.1rem" }}>🔊</span>
               <span>{channel.name}</span>
+              <ChannelAdminButtons channel={channel} />
             </div>
             <For each={participantsForChannel(channel.id)}>
               {(participant) => <div class="channel-participant">

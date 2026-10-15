@@ -129,6 +129,8 @@ export interface SessionEvents {
   'channel-created': { channel: Channel };
   'user-joined-voice': VoiceParticipant;
   'user-left-voice': { user_id: string; peer_id: number; channel_id: string };
+  'channel-updated': { channel: Channel };
+  'channel-deleted': { channel_id: string };
   'user-voice-state-changed': { peer_id: number; muted: boolean; deafened: boolean };
   'screen-share-started': { user_id: string; peer_id: number; width: number; height: number; fps: number };
   'screen-share-stopped': { peer_id: number };

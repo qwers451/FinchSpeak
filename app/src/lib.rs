@@ -94,6 +94,9 @@ pub fn run() {
             commands::admin::kick_user,
             commands::admin::ban_user,
             commands::admin::unban_user,
+            commands::admin::update_channel,
+            commands::admin::delete_channel,
+            commands::admin::reorder_channels,
             // Screen
             commands::screen::register_video_channel,
             commands::screen::subscribe_screen_share,
