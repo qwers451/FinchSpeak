@@ -7,6 +7,48 @@ use tracing::{error, info};
 use crate::connection::start_quic_session;
 use crate::state::{AppState, UserDto};
 
+#[derive(serde::Serialize)]
+pub struct PendingFingerprint {
+    hostname: String,
+    fingerprint: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct SessionSnapshot {
+    connected: bool,
+    user_id: String,
+    session_peer_id: u32,
+    current_voice_channel: Option<u32>,
+    muted: bool,
+    deafened: bool,
+    pending_tofu: Option<PendingFingerprint>,
+    initial_state: Option<finch_protocol::models::ServerState>,
+}
+
+#[tauri::command]
+pub async fn get_session_snapshot(state: State<'_, AppState>) -> Result<Option<SessionSnapshot>, String> {
+    use std::sync::atomic::Ordering;
+    let generation = state.session_generation.load(Ordering::SeqCst);
+    let Some(user) = state.current_user.read().await.clone() else { return Ok(None); };
+    let connected = state.quic_connection.read().await.as_ref().is_some_and(|connection| connection.close_reason().is_none());
+    let api = state.api.read().await.clone();
+    let initial_state = if connected {
+        let api = api.ok_or_else(|| "Connected session has no REST client".to_string())?;
+        Some(api.server_state().await.map_err(|error| error.to_string())?)
+    } else { None };
+    if state.session_generation.load(Ordering::SeqCst) != generation { return Ok(None); }
+    let pending_tofu = state.pending_fingerprint.read().await.clone()
+        .map(|(hostname, fingerprint)| PendingFingerprint { hostname, fingerprint });
+    Ok(Some(SessionSnapshot {
+        connected, user_id: user.id,
+        session_peer_id: state.session_peer_id.load(Ordering::SeqCst),
+        current_voice_channel: *state.current_voice_channel.read().await,
+        muted: state.is_muted.load(Ordering::SeqCst),
+        deafened: state.is_deafened.load(Ordering::SeqCst),
+        pending_tofu, initial_state,
+    }))
+}
+
 #[tauri::command]
 pub async fn login(
     server_url: String,
@@ -109,6 +151,12 @@ pub async fn logout(state: State<'_, AppState>) -> Result<(), String> {
     *state.last_connect.write().await = None;
     state.audio_engine.lock().await.stop();
 
+    let api = state.api.read().await.clone();
+    let revoke_error = match api {
+        Some(api) => api.logout().await.err(),
+        None => None,
+    };
+
     if let Some(conn) = state.quic_connection.write().await.take() {
         conn.close(0u32.into(), b"logout");
     }
@@ -119,7 +167,10 @@ pub async fn logout(state: State<'_, AppState>) -> Result<(), String> {
     *state.current_voice_channel.write().await = None;
 
     info!("Logged out successfully");
-    Ok(())
+    match revoke_error {
+        Some(error) => Err(format!("Logged out locally, but could not revoke server token: {error}")),
+        None => Ok(()),
+    }
 }
 
 #[tauri::command]

@@ -6,7 +6,7 @@ use std::time::Duration;
 use dashmap::DashMap;
 use finch_client_core::tofu::TofuVerifier;
 use finch_protocol::messages::{ClientMessage, ServerMessage};
-use finch_protocol::models::ChannelType;
+use finch_protocol::models::{ChannelType, UserStatus};
 use finch_testbed::client::TestClient;
 use finch_testbed::server::TestServer;
 use quinn::crypto::rustls::QuicClientConfig;
@@ -79,7 +79,9 @@ async fn server_responsive_after_abrupt_disconnect() -> anyhow::Result<()> {
     let a_user = a.session.user_id;
     a.session.connection.close(0u32.into(), b"gone");
     b.expect_control(Duration::from_secs(20), |m| match m {
-        ServerMessage::PresenceUpdate { user_id, .. } if *user_id == a_user => Some(()),
+        ServerMessage::PresenceUpdate { user_id, status: UserStatus::Offline } if *user_id == a_user => {
+            Some(())
+        }
         _ => None,
     })
     .await?;

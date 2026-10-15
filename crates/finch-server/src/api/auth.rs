@@ -33,6 +33,7 @@ pub struct Claims {
 /// Extractor for authenticated routes.
 #[derive(Debug, Clone)]
 pub struct AuthUser {
+    pub session_id: String,
     pub user_id: Uuid,
     pub username: String,
     pub role: String,
@@ -58,11 +59,12 @@ where
         }
 
         let token = &auth_header["Bearer ".len()..];
-        let claims = verify_jwt(token, &shared.config.auth.jwt_secret)?;
+        let claims = verify_active_jwt(token, &shared.config.auth.jwt_secret, &shared.pool).await?;
 
         let user_id = Uuid::parse_str(&claims.sub).map_err(|_| ServerError::Unauthorized)?;
 
         Ok(AuthUser {
+            session_id: claims.jti,
             user_id,
             username: claims.username,
             role: claims.role,
@@ -156,6 +158,31 @@ pub fn verify_jwt(token: &str, secret: &str) -> Result<Claims, ServerError> {
     Ok(token_data.claims)
 }
 
+/// A signed JWT is usable only while its server-side session and account still exist.
+pub async fn verify_active_jwt(token: &str, secret: &str, pool: &SqlitePool) -> Result<Claims, ServerError> {
+    let mut claims = verify_jwt(token, secret)?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default().as_secs() as i64;
+    let account = sqlx::query_as::<_, (String, String)>(
+        "SELECT u.username, u.role FROM sessions s JOIN users u ON u.id = s.user_id
+         WHERE s.id = ? AND s.user_id = ? AND s.expires_at > ?",
+    ).bind(&claims.jti).bind(&claims.sub).bind(now).fetch_optional(pool).await?
+        .ok_or(ServerError::Unauthorized)?;
+    claims.username = account.0;
+    claims.role = account.1;
+    Ok(claims)
+}
+
+pub async fn logout_handler(auth: AuthUser, State(state): State<ArcSharedState>) -> Result<StatusCode, ServerError> {
+    sqlx::query("DELETE FROM sessions WHERE id = ? AND user_id = ?")
+        .bind(&auth.session_id).bind(auth.user_id.to_string()).execute(&state.pool).await?;
+    let connections: Vec<_> = state.sessions.sessions.iter()
+        .filter(|session| session.token_id == auth.session_id)
+        .map(|session| session.connection.clone()).collect();
+    for connection in connections { connection.close(0u32.into(), b"token revoked"); }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // ─── API DTOs & Handlers ────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -216,44 +243,39 @@ pub async fn register_handler(
         .unwrap_or_default()
         .as_secs() as i64;
 
-    // Check if first user, make admin
-    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
-        .fetch_one(&state.pool)
-        .await?;
-    let role = if user_count == 0 { "admin" } else { "member" };
-
-    let res = sqlx::query(
+    // SQLite serializes the write and the role decision as one statement.
+    let res = sqlx::query_scalar::<_, String>(
         "INSERT INTO users (id, username, display_name, password_hash, role, status, created_at)
-         VALUES (?, ?, ?, ?, ?, 'offline', ?)"
+         VALUES (?, ?, ?, ?, CASE WHEN NOT EXISTS (SELECT 1 FROM users) THEN 'admin' ELSE 'member' END, 'offline', ?)
+         RETURNING role"
     )
     .bind(user_id.to_string())
     .bind(&username)
     .bind(&display_name)
     .bind(&password_hash)
-    .bind(role)
     .bind(now)
-    .execute(&state.pool)
+    .fetch_one(&state.pool)
     .await;
 
     match res {
-        Ok(_) => {
+        Ok(role) => {
             let (token, jti) = issue_jwt(
                 &user_id,
                 &username,
-                role,
+                &role,
                 &state.config.auth.jwt_secret,
                 state.config.auth.jwt_expiration_hours,
             )?;
 
             // Store session
             let exp = now + (state.config.auth.jwt_expiration_hours * 3600);
-            let _ = sqlx::query("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
+            sqlx::query("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
                 .bind(jti)
                 .bind(user_id.to_string())
                 .bind(exp)
                 .bind(now)
                 .execute(&state.pool)
-                .await;
+                .await?;
 
             let response = AuthResponse {
                 quic_port: state.config.server.quic_port,
@@ -315,13 +337,13 @@ pub async fn login_handler(
         .as_secs() as i64;
     let exp = now + (state.config.auth.jwt_expiration_hours * 3600);
 
-    let _ = sqlx::query("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
+    sqlx::query("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
         .bind(jti)
         .bind(&user_id_str)
         .bind(exp)
         .bind(now)
         .execute(&state.pool)
-        .await;
+        .await?;
 
     let response = AuthResponse {
         quic_port: state.config.server.quic_port,

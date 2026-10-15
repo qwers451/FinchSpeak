@@ -15,6 +15,8 @@ app/frontend/node_modules/
 dist/
 app/frontend/dist/
 .vite/
+.npm-cache/
+.toolchains/
 
 # Database files (SQLite)
 *.db

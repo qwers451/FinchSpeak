@@ -13,10 +13,10 @@ use finch_protocol::codec::{decode_message, encode_message};
 use finch_protocol::media::{MediaHeader, MEDIA_HEADER_SIZE};
 use finch_protocol::messages::{ClientMessage, ServerMessage};
 use finch_protocol::models::{
-    AttachmentInfo, Channel, ChannelMapping, ChannelType, ServerState, User, UserRole, UserStatus, VoiceState,
+    AttachmentInfo, ChannelMapping, UserStatus,
 };
 
-use crate::api::auth::verify_jwt;
+use crate::api::auth::verify_active_jwt;
 use crate::session::{ClientSession, SessionManager};
 use crate::sfu::SfuRouter;
 
@@ -204,7 +204,7 @@ pub async fn handle_connection(
     };
 
     // 3. Verify JWT
-    let claims = match verify_jwt(&auth_msg, &jwt_secret) {
+    let claims = match verify_active_jwt(&auth_msg, &jwt_secret, &pool).await {
         Ok(c) => c,
         Err(_) => {
             let err = ServerMessage::Error {
@@ -223,73 +223,12 @@ pub async fn handle_connection(
     let (control_tx, mut control_rx) = mpsc::channel::<ServerMessage>(128);
 
     // 5. Build Initial Server State
-    let channels_db = sqlx::query_as::<_, (String, i64, String, String, i64, Option<String>, i64)>(
-        "SELECT id, short_id, name, channel_type, position, topic, bitrate_kbps FROM channels ORDER BY position ASC"
-    )
-    .fetch_all(&pool)
-    .await?;
-
-    let mut channels = Vec::new();
+    let initial_state = crate::api::state::server_state(&pool, &sessions).await?;
     let mut channel_mappings = Vec::new();
-
-    for (c_id, short_id, name, c_type, pos, topic, bitrate) in channels_db {
-        if let Ok(c_uuid) = Uuid::parse_str(&c_id) {
-            let c_enum = if c_type == "voice" {
-                ChannelType::Voice
-            } else {
-                ChannelType::Text
-            };
-            channels.push(Channel {
-                id: c_uuid,
-                short_id: short_id as u32,
-                name,
-                channel_type: c_enum,
-                topic,
-                position: pos as i32,
-                bitrate_kbps: bitrate as u32,
-            });
-            channel_mappings.push(ChannelMapping {
-                id: c_uuid,
-                short_id: short_id as u32,
-            });
-            sessions.register_channel(c_uuid, short_id as u32);
-        }
+    for channel in &initial_state.channels {
+        channel_mappings.push(ChannelMapping { id: channel.id, short_id: channel.short_id });
+        sessions.register_channel(channel.id, channel.short_id);
     }
-
-    let mut online_users = Vec::new();
-    let mut voice_states = Vec::new();
-
-    for entry in sessions.sessions.iter() {
-        let s = entry.value();
-        online_users.push(User {
-            id: s.user_id,
-            username: s.username.clone(),
-            display_name: s.username.clone(),
-            avatar_url: None,
-            status: UserStatus::Online,
-            role: if s.role == "admin" { UserRole::Admin } else { UserRole::Member },
-        });
-
-        if let Some(short_id) = s.current_voice_channel
-            && let Some(c_uuid) = sessions.short_to_channel.get(&short_id)
-        {
-            voice_states.push(VoiceState {
-                user_id: s.user_id,
-                peer_id: s.peer_id,
-                username: s.username.clone(),
-                channel_id: *c_uuid,
-                muted: s.muted,
-                deafened: s.deafened,
-                sharing_screen: false,
-            });
-        }
-    }
-
-    let initial_state = ServerState {
-        channels,
-        online_users,
-        voice_states,
-    };
 
     // 6. Send Authenticated response
     let auth_ack = ServerMessage::Authenticated {
@@ -302,6 +241,7 @@ pub async fn handle_connection(
 
     // 7. Register session and broadcast PresenceUpdate
     let session = ClientSession {
+        token_id: claims.jti.clone(),
         peer_id,
         user_id,
         username: claims.username.clone(),
@@ -424,12 +364,14 @@ pub async fn handle_connection(
             })
             .await;
     }
-    sessions
-        .broadcast_all(ServerMessage::PresenceUpdate {
-            user_id,
-            status: UserStatus::Offline,
-        })
-        .await;
+    if !sessions.user_to_peer.contains_key(&user_id) {
+        sessions
+            .broadcast_all(ServerMessage::PresenceUpdate {
+                user_id,
+                status: UserStatus::Offline,
+            })
+            .await;
+    }
 
     tracing::info!("User '{}' ({user_id}) session {peer_id} disconnected", claims.username);
 

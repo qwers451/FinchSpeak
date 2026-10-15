@@ -115,13 +115,15 @@ impl RunningServer {
         if let Some(tx) = self.http_shutdown.take() {
             let _ = tx.send(());
         }
-        if let Some(task) = self.http_task.take() {
-            let _ = task.await;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        for mut task in [self.http_task.take(), self.quic_task.take()].into_iter().flatten() {
+            if tokio::time::timeout_at(deadline, &mut task).await.is_err() {
+                tracing::warn!("Server graceful drain timed out; aborting its task");
+                task.abort();
+                let _ = task.await;
+            }
         }
-        if let Some(task) = self.quic_task.take() {
-            let _ = task.await;
-        }
-        self.endpoint.wait_idle().await;
+        let _ = tokio::time::timeout_at(deadline, self.endpoint.wait_idle()).await;
     }
 }
 
@@ -156,5 +158,14 @@ mod tests {
 
         let joined = tokio::spawn(server.shutdown()).await;
         assert!(joined.is_ok(), "shutdown panicked: {joined:?}");
+    }
+
+    #[tokio::test]
+    async fn shutdown_bounds_a_stalled_graceful_drain() {
+        let mut server = launch(ephemeral_config()).await.unwrap();
+        server.http_task.take().unwrap().abort();
+        server.http_task = Some(tokio::spawn(std::future::pending()));
+        tokio::time::timeout(std::time::Duration::from_secs(6), server.shutdown())
+            .await.expect("shutdown must stop even if HTTP graceful drain never finishes");
     }
 }

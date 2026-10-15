@@ -4,6 +4,7 @@ pub mod auth;
 pub mod channels;
 pub mod files;
 pub mod messages;
+pub mod state;
 
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
@@ -33,7 +34,9 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         // Auth routes
         .route("/api/auth/register", post(auth::register_handler))
         .route("/api/auth/login", post(auth::login_handler))
+        .route("/api/auth/logout", post(auth::logout_handler))
         .route("/api/auth/me", get(auth::me_handler))
+        .route("/api/state", get(state::state_handler))
         // Channels routes
         .route("/api/channels", get(channels::list_channels_handler))
         .route("/api/channels", post(channels::create_channel_handler))

@@ -27,3 +27,6 @@ quinn = { workspace = true }
 rustls = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

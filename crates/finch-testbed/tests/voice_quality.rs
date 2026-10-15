@@ -163,15 +163,39 @@ async fn silence_and_noise_do_not_light_speaking() -> anyhow::Result<()> {
 
     let mut input = vec![0.0f32; 3 * SR];
     input.extend(pink_noise(3 * SR, -35.0, 7));
+    let speech_start = input.len();
+    input.extend(load_speech_48k("speech_1")?);
 
     let run = run_voice_link(&a, &mut b, &input, 10).await?;
-    let lit: Vec<_> = run.speaking_events.iter().filter(|(_, _, speaking)| *speaking).collect();
-    let non_silent = run.received_headers.iter().filter(|h| !h.is_silence()).count();
+    let lit: Vec<_> = run
+        .speaking_events
+        .iter()
+        .filter(|(frame, _, speaking)| *speaking && *frame < speech_start / FRAME_SIZE_48K)
+        .collect();
+    let non_silent = run
+        .received_headers
+        .iter()
+        .filter(|h| !h.is_silence() && h.timestamp < (speech_start / 48) as u32)
+        .count();
+    let speech_lit = run.speaking_events.iter().any(|(frame, _, speaking)| {
+        *speaking && *frame >= speech_start / FRAME_SIZE_48K
+    });
+    let speech_packets = run.received_headers.iter().filter(|h| {
+        !h.is_silence() && h.timestamp >= (speech_start / 48) as u32
+    }).count();
     eprintln!(
-        "BASELINE vad_noise: speaking_events_on = {}, non_silent_packets = {non_silent}",
+        "BASELINE vad_noise: speaking_events_on = {}, non_silent_packets = {non_silent}, speech_lit = {speech_lit}, speech_packets = {speech_packets}",
         lit.len()
     );
     assert!(lit.is_empty(), "speaking indicator lit on noise: {lit:?}");
     assert_eq!(non_silent, 0, "non-silent packets sent for noise only");
+    assert!(
+        speech_lit,
+        "real speech must light the receiver's speaking indicator"
+    );
+    assert!(
+        speech_packets > 0,
+        "real speech must reach the receiver"
+    );
     Ok(())
 }

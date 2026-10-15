@@ -209,7 +209,11 @@ async fn test_full_sfu_load_and_screen_share_suite() -> anyhow::Result<()> {
     for i in 0..CLIENT_COUNT {
         let user_id = Uuid::new_v4();
         let username = format!("user_{i:02}");
-        let (jwt_token, _) = issue_jwt(&user_id, &username, "member", &jwt_secret, 24)?;
+        sqlx::query("INSERT INTO users (id, username, display_name, password_hash, created_at) VALUES (?, ?, ?, '', 0)")
+            .bind(user_id.to_string()).bind(&username).bind(&username).execute(&pool).await?;
+        let (jwt_token, jti) = issue_jwt(&user_id, &username, "member", &jwt_secret, 24)?;
+        sqlx::query("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, strftime('%s', 'now') + 86400, 0)")
+            .bind(jti).bind(user_id.to_string()).execute(&pool).await?;
 
         let client_config = make_client_config()?;
         let mut client_endpoint = quinn::Endpoint::client("127.0.0.1:0".parse()?)?;

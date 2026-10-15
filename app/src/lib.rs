@@ -70,6 +70,7 @@ pub fn run() {
             commands::auth::register,
             commands::auth::logout,
             commands::auth::get_current_user,
+            commands::auth::get_session_snapshot,
             commands::auth::trust_fingerprint,
             // Chat
             commands::chat::list_channels,

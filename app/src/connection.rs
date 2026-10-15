@@ -19,6 +19,18 @@ use tracing::{info, warn};
 
 use crate::state::{AppState, VideoChunkPayload};
 
+async fn supersede_session(state: &AppState) -> u64 {
+    let generation = state.session_generation.fetch_add(1, Ordering::SeqCst) + 1;
+    *state.last_connect.write().await = None;
+    if let Some(connection) = state.quic_connection.write().await.take() {
+        connection.close(0u32.into(), b"session replaced");
+    }
+    *state.control_tx.write().await = None;
+    state.audio_engine.lock().await.stop();
+    *state.current_voice_channel.write().await = None;
+    generation
+}
+
 /// Establish QUIC connection and spawn the session loop.
 pub async fn start_quic_session(
     server_addr: SocketAddr,
@@ -33,8 +45,12 @@ pub async fn start_quic_session(
         token,
         require_known_fingerprint: true,
     };
-    state.session_generation.fetch_add(1, Ordering::SeqCst);
+    let generation = supersede_session(&state).await;
     let connected = connect(params.clone(), state.saved_fingerprints.clone()).await;
+    if state.session_generation.load(Ordering::SeqCst) != generation {
+        if let Ok((session, _)) = &connected { session.connection.close(0u32.into(), b"session replaced"); }
+        anyhow::bail!("Session was replaced while connecting");
+    }
     let (session, events) = match connected {
         Ok(ok) => ok,
         Err(ClientError::UntrustedServer { hostname, fingerprint }) => {
@@ -51,7 +67,7 @@ pub async fn start_quic_session(
     *state.last_connect.write().await = Some(params);
     let connection = session.connection.clone();
     activate_session(&session, &state, &app_handle).await;
-    tokio::spawn(run_session(events, state, app_handle));
+    tokio::spawn(run_session(events, state, app_handle, generation));
     Ok(connection)
 }
 
@@ -60,6 +76,8 @@ async fn activate_session(session: &Session, state: &AppState, app_handle: &taur
     state
         .session_peer_id
         .store(session.session_peer_id, Ordering::SeqCst);
+    *state.control_tx.write().await = Some(session.control_tx.clone());
+    *state.quic_connection.write().await = Some(session.connection.clone());
     let _ = app_handle.emit(
         "authenticated",
         serde_json::json!({
@@ -69,8 +87,6 @@ async fn activate_session(session: &Session, state: &AppState, app_handle: &taur
             "initial_state": session.initial_state
         }),
     );
-    *state.control_tx.write().await = Some(session.control_tx.clone());
-    *state.quic_connection.write().await = Some(session.connection.clone());
 }
 
 /// Forward session events; after a drop, reconnect and continue with the new session.
@@ -78,13 +94,15 @@ async fn run_session(
     mut events: mpsc::Receiver<SessionEvent>,
     state: AppState,
     app_handle: tauri::AppHandle,
+    generation: u64,
 ) {
     loop {
-        let Some(reason) = forward_events(&mut events, &state, &app_handle).await else {
+        let Some(reason) = forward_events(&mut events, &state, &app_handle, generation).await else {
             return;
         };
+        if state.session_generation.load(Ordering::SeqCst) != generation { return; }
         let _ = app_handle.emit("connection-lost", reason);
-        match reconnect(&state, &app_handle).await {
+        match reconnect(&state, &app_handle, generation).await {
             Some(new_events) => events = new_events,
             None => return,
         }
@@ -96,8 +114,10 @@ async fn forward_events(
     events: &mut mpsc::Receiver<SessionEvent>,
     state: &AppState,
     app_handle: &tauri::AppHandle,
+    generation: u64,
 ) -> Option<String> {
     while let Some(event) = events.recv().await {
+        if state.session_generation.load(Ordering::SeqCst) != generation { return None; }
         match event {
             SessionEvent::Control(msg) => emit_control(msg, app_handle),
             SessionEvent::Datagram(bytes) => route_datagram(bytes, state, app_handle).await,
@@ -124,8 +144,9 @@ async fn forward_events(
 async fn reconnect(
     state: &AppState,
     app_handle: &tauri::AppHandle,
+    generation: u64,
 ) -> Option<mpsc::Receiver<SessionEvent>> {
-    let generation = state.session_generation.load(Ordering::SeqCst);
+    if state.session_generation.load(Ordering::SeqCst) != generation { return None; }
     let params = state.last_connect.read().await.clone()?;
     let _ = app_handle.emit("reconnecting", ());
 
@@ -144,6 +165,10 @@ async fn reconnect(
 
     match result {
         Ok((session, events)) => {
+            if state.session_generation.load(Ordering::SeqCst) != generation {
+                session.connection.close(0u32.into(), b"session replaced");
+                return None;
+            }
             let voice_channel = (*state.current_voice_channel.read().await).and_then(|short_id| {
                 session
                     .channels
@@ -157,6 +182,10 @@ async fn reconnect(
                     .control_tx
                     .send(ClientMessage::JoinVoice { channel_id })
                     .await;
+                let _ = session.control_tx.send(ClientMessage::UpdateVoiceState {
+                    muted: state.is_muted.load(Ordering::SeqCst),
+                    deafened: state.is_deafened.load(Ordering::SeqCst),
+                }).await;
             }
             let _ = app_handle.emit("reconnected", ());
             Some(events)
@@ -351,5 +380,26 @@ async fn route_datagram(bytes: Bytes, state: &AppState, app_handle: &tauri::AppH
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use finch_testbed::{client::TestClient, server::TestServer};
+
+    #[tokio::test]
+    async fn aud031_replacing_session_closes_previous_quic_connection() -> anyhow::Result<()> {
+        let server = TestServer::start().await?;
+        let client = TestClient::register(&server, "alice").await?;
+        let state = AppState::new();
+        *state.quic_connection.write().await = Some(client.session.connection.clone());
+        *state.control_tx.write().await = Some(client.session.control_tx.clone());
+        supersede_session(&state).await;
+        tokio::time::timeout(Duration::from_millis(500), client.session.connection.closed())
+            .await.expect("superseded QUIC session must close explicitly");
+        assert!(state.quic_connection.read().await.is_none());
+        assert!(state.control_tx.read().await.is_none());
+        Ok(())
     }
 }

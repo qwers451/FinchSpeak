@@ -1,5 +1,7 @@
 //! Chat messages history REST endpoints.
 
+use std::collections::HashMap;
+
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use axum::Json;
@@ -36,7 +38,7 @@ pub async fn channel_messages_handler(
     let before = query.before.unwrap_or(i64::MAX);
 
     // Fetch messages with author display_name
-    let rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<i64>, i64)>(
+    let mut rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<i64>, i64)>(
         "SELECT m.id, m.author_id, u.display_name, m.content, m.reply_to_id, m.edited_at, m.created_at
          FROM messages m
          JOIN users u ON m.author_id = u.id
@@ -54,35 +56,47 @@ pub async fn channel_messages_handler(
     .await?;
 
     let has_more = rows.len() > limit as usize;
+    rows.truncate(limit as usize);
     let mut messages: Vec<HistoryMessage> = Vec::with_capacity(rows.len());
+    let mut attachments_by_message: HashMap<String, Vec<AttachmentInfo>> = HashMap::new();
 
-    for row in rows.into_iter().take(limit as usize) {
-        let (id_str, author_id_str, author_name, content, _reply_to_id, edited_at, timestamp) = row;
+    if !rows.is_empty() {
+        // Load only the selected page, excluding the has_more lookahead row.
+        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "SELECT message_id, id, filename, size_bytes, content_type FROM attachments WHERE message_id IN (",
+        );
+        let mut ids = query.separated(", ");
+        for row in &rows {
+            ids.push_bind(&row.0);
+        }
+        ids.push_unseparated(")");
+        // Preserve the insertion order of the previous per-message table scans.
+        query.push(" ORDER BY rowid");
+        let attach_rows = query
+            .build_query_as::<(String, String, String, i64, String)>()
+            .fetch_all(&state.pool)
+            .await?;
 
-        let msg_id = Uuid::parse_str(&id_str).unwrap_or_default();
-        let author_id = Uuid::parse_str(&author_id_str).unwrap_or_default();
-
-        // Fetch attachments for this message
-        let attach_rows = sqlx::query_as::<_, (String, String, i64, String)>(
-            "SELECT id, filename, size_bytes, content_type FROM attachments WHERE message_id = ?"
-        )
-        .bind(&id_str)
-        .fetch_all(&state.pool)
-        .await?;
-
-        let attachments: Vec<AttachmentInfo> = attach_rows
-            .into_iter()
-            .map(|(att_id, filename, size_bytes, content_type)| {
-                let id = Uuid::parse_str(&att_id).unwrap_or_default();
-                AttachmentInfo {
-                    id,
+        for (message_id, att_id, filename, size_bytes, content_type) in attach_rows {
+            attachments_by_message
+                .entry(message_id)
+                .or_default()
+                .push(AttachmentInfo {
+                    id: Uuid::parse_str(&att_id).unwrap_or_default(),
                     url: format!("/api/files/{att_id}"),
                     filename,
                     size_bytes: size_bytes as u64,
                     content_type,
-                }
-            })
-            .collect();
+                });
+        }
+    }
+
+    for row in rows {
+        let (id_str, author_id_str, author_name, content, _reply_to_id, edited_at, timestamp) = row;
+
+        let msg_id = Uuid::parse_str(&id_str).unwrap_or_default();
+        let author_id = Uuid::parse_str(&author_id_str).unwrap_or_default();
+        let attachments = attachments_by_message.remove(&id_str).unwrap_or_default();
 
         messages.push(HistoryMessage {
             id: msg_id,

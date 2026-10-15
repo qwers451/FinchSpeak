@@ -96,7 +96,11 @@ async fn test_quic_poc_full_suite() -> anyhow::Result<()> {
     let jwt_secret = "test_super_secret_jwt_key_stage1_32bytes".to_string();
 
     let test_user_id = Uuid::new_v4();
-    let (jwt_token, _) = issue_jwt(&test_user_id, "testuser", "member", &jwt_secret, 24)?;
+    sqlx::query("INSERT INTO users (id, username, display_name, password_hash, created_at) VALUES (?, 'testuser', 'Test User', '', 0)")
+        .bind(test_user_id.to_string()).execute(&pool).await?;
+    let (jwt_token, jti) = issue_jwt(&test_user_id, "testuser", "member", &jwt_secret, 24)?;
+    sqlx::query("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, strftime('%s', 'now') + 86400, 0)")
+        .bind(jti).bind(test_user_id.to_string()).execute(&pool).await?;
 
     // ─── 2. Start Server on ephemeral port ──────────────────────────────────
     let server_config = quic::make_server_config()?;

@@ -18,6 +18,76 @@ use finch_server::api::create_router;
 use finch_server::config::ServerConfig;
 use finch_server::db::init_db;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn aud038_concurrent_first_registrations_create_one_admin() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool.clone(), ServerConfig::default(), finch_server::session::SessionManager::new());
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(8));
+    let mut tasks = Vec::new();
+    for index in 0..8 {
+        let app = app.clone();
+        let barrier = barrier.clone();
+        tasks.push(tokio::spawn(async move {
+            barrier.wait().await;
+            let request = Request::builder().method("POST").uri("/api/auth/register")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "username": format!("user{index}"), "password": "password_123" }).to_string())).unwrap();
+            app.oneshot(request).await.unwrap().status()
+        }));
+    }
+    for task in tasks { assert_eq!(task.await?, StatusCode::CREATED); }
+    let admins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetch_one(&pool).await?;
+    assert_eq!(admins, 1, "exactly one concurrent registration must become admin");
+    Ok(())
+}
+
+#[tokio::test]
+async fn aud039_deleted_session_rejects_its_still_signed_token() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool.clone(), ServerConfig::default(), finch_server::session::SessionManager::new());
+    let request = Request::builder().method("POST").uri("/api/auth/register")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({"username":"alice", "password":"password_123"}).to_string()))?;
+    let response = app.clone().oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = response.into_body().collect().await?.to_bytes();
+    let auth: Value = serde_json::from_slice(&body)?;
+    let token = auth["token"].as_str().unwrap();
+    sqlx::query("DELETE FROM sessions").execute(&pool).await?;
+    let request = Request::builder().uri("/api/auth/me")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())?;
+    assert_eq!(app.oneshot(request).await?.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn aud039_logout_revokes_only_the_requested_token() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool, ServerConfig::default(), finch_server::session::SessionManager::new());
+    let mut tokens = Vec::new();
+    for path in ["/api/auth/register", "/api/auth/login"] {
+        let request = Request::builder().method("POST").uri(path)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"username":"alice", "password":"password_123"}).to_string()))?;
+        let response = app.clone().oneshot(request).await?;
+        assert!(response.status().is_success());
+        let body = response.into_body().collect().await?.to_bytes();
+        tokens.push(serde_json::from_slice::<Value>(&body)?["token"].as_str().unwrap().to_string());
+    }
+    let request = Request::builder().method("POST").uri("/api/auth/logout")
+        .header(header::AUTHORIZATION, format!("Bearer {}", tokens[0]))
+        .body(Body::empty())?;
+    assert_eq!(app.clone().oneshot(request).await?.status(), StatusCode::NO_CONTENT);
+    for (token, status) in tokens.iter().zip([StatusCode::UNAUTHORIZED, StatusCode::OK]) {
+        let request = Request::builder().uri("/api/auth/me")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())?;
+        assert_eq!(app.clone().oneshot(request).await?.status(), status);
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_full_api_lifecycle() -> anyhow::Result<()> {
     let pool = init_db("sqlite::memory:").await?;

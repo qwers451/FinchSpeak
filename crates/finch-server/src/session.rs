@@ -12,6 +12,7 @@ use uuid::Uuid;
 /// A connected client session.
 #[derive(Clone)]
 pub struct ClientSession {
+    pub token_id: String,
     pub peer_id: u32,
     pub user_id: Uuid,
     pub username: String,
@@ -89,7 +90,19 @@ impl SessionManager {
     /// Unregister a session upon disconnection.
     pub fn unregister_session(&self, peer_id: u32) {
         if let Some((_, session)) = self.sessions.remove(&peer_id) {
-            self.user_to_peer.remove(&session.user_id);
+            if let dashmap::mapref::entry::Entry::Occupied(mut entry) = self.user_to_peer.entry(session.user_id)
+                && *entry.get() == peer_id
+            {
+                let remaining = self.sessions.iter()
+                    .filter(|active| active.user_id == session.user_id)
+                    .map(|active| active.peer_id)
+                    .max();
+                if let Some(remaining) = remaining {
+                    entry.insert(remaining);
+                } else {
+                    entry.remove();
+                }
+            }
             if let Some(short_id) = session.current_voice_channel {
                 self.leave_voice(peer_id, short_id);
             }
@@ -210,6 +223,57 @@ fn deliver(targets: Vec<(u32, Sender<ServerMessage>, quinn::Connection)>, msg: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn connection_pair() -> (quinn::Endpoint, quinn::Endpoint, quinn::Connection, quinn::Connection) {
+        let (cert, key) = crate::quic::generate_self_signed_cert().unwrap();
+        let config = crate::quic::make_server_config_with(cert.clone(), key).unwrap();
+        let server = quinn::Endpoint::server(config, "127.0.0.1:0".parse().unwrap()).unwrap();
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(cert).unwrap();
+        let mut tls = rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth();
+        tls.alpn_protocols = vec![b"finchspeak/0.1".to_vec()];
+        let crypto = quinn::crypto::rustls::QuicClientConfig::try_from(tls).unwrap();
+        let mut client = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        client.set_default_client_config(quinn::ClientConfig::new(Arc::new(crypto)));
+        let outgoing = client.connect(server.local_addr().unwrap(), "localhost").unwrap();
+        let incoming = async { server.accept().await.unwrap().await.unwrap() };
+        let (client_conn, server_conn) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::join!(outgoing, incoming)
+        }).await.expect("local QUIC handshake timed out");
+        (server, client, server_conn, client_conn.unwrap())
+    }
+
+    async fn registered_twice() -> (SessionManager, Uuid, quinn::Endpoint, quinn::Endpoint, quinn::Connection) {
+        let (server, client, connection, remote) = connection_pair().await;
+        let manager = SessionManager::new();
+        let user_id = Uuid::new_v4();
+        for peer_id in [1001, 1002] {
+            let (control_tx, _) = tokio::sync::mpsc::channel(8);
+            manager.register_session(ClientSession {
+                token_id: String::new(),
+                peer_id, user_id, username: "alice".into(), role: "member".into(),
+                current_voice_channel: None, muted: false, deafened: false,
+                connection: connection.clone(), control_tx,
+            });
+        }
+        (manager, user_id, server, client, remote)
+    }
+
+    #[tokio::test]
+    async fn aud030_older_disconnect_preserves_newer_mapping() {
+        let (manager, user, _server, _client, _remote) = registered_twice().await;
+        manager.unregister_session(1001);
+        assert_eq!(manager.user_to_peer.get(&user).map(|peer| *peer), Some(1002));
+    }
+
+    #[tokio::test]
+    async fn aud030_newer_disconnect_restores_remaining_session() {
+        let (manager, user, _server, _client, _remote) = registered_twice().await;
+        manager.unregister_session(1002);
+        assert_eq!(manager.user_to_peer.get(&user).map(|peer| *peer), Some(1001));
+        manager.unregister_session(1001);
+        assert!(!manager.user_to_peer.contains_key(&user));
+    }
 
     #[test]
     fn test_peer_id_allocation() {
