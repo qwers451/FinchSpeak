@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use quinn::crypto::rustls::QuicServerConfig;
 use sqlx::SqlitePool;
@@ -33,9 +33,41 @@ pub fn generate_self_signed_cert() -> Result<(rustls::pki_types::CertificateDer<
     Ok((cert_der, key_der))
 }
 
-/// Build a quinn server config with TLS 1.3 and transport settings.
+/// Load the server certificate and key from `dir` (`cert.der`, `key.der`), creating and
+/// storing a new self-signed pair on first start so the TOFU fingerprint stays stable.
+pub fn load_or_create_cert(
+    dir: &std::path::Path,
+) -> Result<(rustls::pki_types::CertificateDer<'static>, rustls::pki_types::PrivateKeyDer<'static>)> {
+    let cert_path = dir.join("cert.der");
+    let key_path = dir.join("key.der");
+
+    if cert_path.exists() && key_path.exists() {
+        let cert = std::fs::read(&cert_path).with_context(|| format!("Failed to read {cert_path:?}"))?;
+        let key = std::fs::read(&key_path).with_context(|| format!("Failed to read {key_path:?}"))?;
+        let key = rustls::pki_types::PrivateKeyDer::try_from(key)
+            .map_err(|e| anyhow::anyhow!("failed to parse private key {key_path:?}: {e}"))?;
+        return Ok((rustls::pki_types::CertificateDer::from(cert), key));
+    }
+
+    let (cert, key) = generate_self_signed_cert()?;
+    std::fs::create_dir_all(dir).with_context(|| format!("Failed to create {dir:?}"))?;
+    std::fs::write(&cert_path, cert.as_ref()).with_context(|| format!("Failed to write {cert_path:?}"))?;
+    std::fs::write(&key_path, key.secret_der()).with_context(|| format!("Failed to write {key_path:?}"))?;
+    tracing::info!("Generated a new TLS certificate in {dir:?}");
+    Ok((cert, key))
+}
+
+/// Build a quinn server config with a fresh self-signed certificate (tests).
 pub fn make_server_config() -> Result<quinn::ServerConfig> {
     let (cert, key) = generate_self_signed_cert()?;
+    make_server_config_with(cert, key)
+}
+
+/// Build a quinn server config with TLS 1.3 and transport settings.
+pub fn make_server_config_with(
+    cert: rustls::pki_types::CertificateDer<'static>,
+    key: rustls::pki_types::PrivateKeyDer<'static>,
+) -> Result<quinn::ServerConfig> {
 
     let mut tls_config = rustls::ServerConfig::builder()
         .with_no_client_auth()
@@ -548,5 +580,21 @@ async fn handle_client_message(
         }
 
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The certificate must survive restarts, otherwise every client's pinned
+    /// fingerprint breaks on each server start (AUD-005).
+    #[test]
+    fn certificate_is_persisted_across_restarts() {
+        let dir = std::env::temp_dir().join(format!("finch-tls-{}", Uuid::new_v4()));
+        let (cert_first, _) = load_or_create_cert(&dir).unwrap();
+        let (cert_second, _) = load_or_create_cert(&dir).unwrap();
+        assert_eq!(cert_first.as_ref(), cert_second.as_ref());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

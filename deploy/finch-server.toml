@@ -2,6 +2,8 @@
 host = "0.0.0.0"
 quic_port = 4433
 http_port = 8443
+# Persistent TLS certificate (keeps the fingerprint clients pinned).
+tls_dir = "/app/data/tls"
 
 [database]
 url = "sqlite:///app/data/finchspeak.db?mode=rwc"

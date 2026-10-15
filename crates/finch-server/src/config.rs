@@ -28,6 +28,9 @@ pub struct NetworkConfig {
     pub quic_port: u16,
     #[serde(default = "default_http_port")]
     pub http_port: u16,
+    /// Directory with the persistent TLS certificate and key (`cert.der`, `key.der`).
+    #[serde(default = "default_tls_dir")]
+    pub tls_dir: String,
 }
 
 impl Default for NetworkConfig {
@@ -36,6 +39,7 @@ impl Default for NetworkConfig {
             host: default_host(),
             quic_port: default_quic_port(),
             http_port: default_http_port(),
+            tls_dir: default_tls_dir(),
         }
     }
 }
@@ -50,6 +54,10 @@ fn default_quic_port() -> u16 {
 
 fn default_http_port() -> u16 {
     8443
+}
+
+fn default_tls_dir() -> String {
+    "./data/tls".to_string()
 }
 
 /// Database settings.

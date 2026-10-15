@@ -62,7 +62,9 @@ pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
     let quic_bind: SocketAddr = format!("{}:{}", config.server.host, config.server.quic_port)
         .parse()
         .context("Invalid QUIC bind address")?;
-    let server_config = quic::make_server_config().context("failed to create server config")?;
+    let (cert, key) = quic::load_or_create_cert(std::path::Path::new(&config.server.tls_dir))
+        .context("Failed to load TLS certificate")?;
+    let server_config = quic::make_server_config_with(cert, key).context("failed to create server config")?;
     let endpoint = quinn::Endpoint::server(server_config, quic_bind)
         .with_context(|| format!("Failed to bind QUIC endpoint on {quic_bind}"))?;
     let quic_addr = endpoint.local_addr()?;
@@ -131,6 +133,10 @@ mod tests {
         config.server.quic_port = 0;
         config.database.url = "sqlite::memory:".to_string();
         config.auth.jwt_secret = "launch-unit-test-secret-0123456789".to_string();
+        config.server.tls_dir = std::env::temp_dir()
+            .join(format!("finch-tls-{}", uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string();
         config
     }
 
