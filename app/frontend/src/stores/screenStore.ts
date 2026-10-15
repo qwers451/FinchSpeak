@@ -6,6 +6,9 @@ import { setVoiceParticipants } from './voiceStore';
 
 export { isSharing, screenSources, watching } from './screenState';
 
+/** Mixer key of the sound of a peer's shared screen (matches `screen_audio_key` in Rust). */
+export const screenAudioKey = (peerId: number) => peerId + 0x4000_0000;
+
 export async function loadScreenSources() {
   try {
     setScreenSources(await api.listScreenSources());
@@ -14,9 +17,9 @@ export async function loadScreenSources() {
   }
 }
 
-export async function startSharing(kind: 'monitor' | 'window', id: number) {
+export async function startSharing(kind: 'monitor' | 'window', id: number, withAudio = false) {
   try {
-    await api.startScreenShare(kind, id);
+    await api.startScreenShare(kind, id, withAudio);
     setIsSharing(true);
   } catch (err) {
     setAppError(String(err));
@@ -60,7 +63,7 @@ const markSharing = (peerId: number, sharing: boolean) =>
     participant.peer_id === peerId ? { ...participant, is_sharing: sharing } : participant));
 
 export const screenHandlers: Pick<{ [K in keyof SessionEvents]: (payload: SessionEvents[K]) => void },
-  'screen-share-started' | 'screen-share-stopped' | 'screen-share-ended'> = {
+  'screen-share-started' | 'screen-share-stopped' | 'screen-share-ended' | 'screen-audio-failed'> = {
   'screen-share-started': (data) => {
     markSharing(data.peer_id, true);
     // The share we watch restarted, perhaps under a new peer id: keep following it.
@@ -70,6 +73,7 @@ export const screenHandlers: Pick<{ [K in keyof SessionEvents]: (payload: Sessio
     markSharing(data.peer_id, false);
     if (watching()?.peer_id === data.peer_id) setWatching(null);
   },
+  'screen-audio-failed': (reason) => setAppError(`Screen sound is not shared: ${reason}`),
   'screen-share-ended': (reason) => {
     setIsSharing(false);
     setAppError(`Screen sharing stopped: ${reason}`);

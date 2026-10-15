@@ -403,6 +403,11 @@ async fn route_datagram(bytes: Bytes, state: &AppState, app_handle: &tauri::AppH
                 }
             }
         }
+        MediaType::ScreenAudio if is_watching(state, &header) => {
+            if !state.is_deafened.load(Ordering::Relaxed) {
+                state.mixer.lock().await.on_screen_audio_packet(&header, payload, Instant::now());
+            }
+        }
         MediaType::VideoDelta if is_watching(state, &header) => {
             let frame = state.screen_viewer.lock().await.on_delta_fragment(&header, payload, Instant::now());
             if let Some(frame) = frame {

@@ -10,7 +10,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use finch_protocol::media::{MediaHeader, MAX_KEYFRAME_BYTES, MEDIA_HEADER_SIZE};
+use finch_protocol::media::{MediaHeader, MediaPacket, MAX_KEYFRAME_BYTES, MEDIA_HEADER_SIZE};
 use finch_screen::{
     slice_p_frame_with_chunk, AssembledFrame, FrameAssembler, H264EncoderError, H264VideoEncoder,
     PixelFormat, RawFrame, VideoEncoderConfig, DELTA_FRAME_TIMEOUT, MAX_HEIGHT, MAX_WIDTH,
@@ -590,6 +590,111 @@ impl ScreenSharer {
 }
 
 impl Drop for ScreenSharer {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+
+// ---- screen sound ---------------------------------------------------------------------------
+
+/// What a source of screen-sound packets reports when polled.
+pub enum AudioPoll {
+    Packet(MediaPacket),
+    /// Nothing yet.
+    Idle,
+    /// The source ended.
+    Closed,
+}
+
+/// Where encoded `ScreenAudio` packets come from: the loopback capturer, or a test channel.
+pub trait AudioPacketSource {
+    fn poll(&mut self, timeout: Duration) -> AudioPoll;
+}
+
+impl AudioPacketSource for std::sync::mpsc::Receiver<MediaPacket> {
+    fn poll(&mut self, timeout: Duration) -> AudioPoll {
+        match self.recv_timeout(timeout) {
+            Ok(packet) => AudioPoll::Packet(packet),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => AudioPoll::Idle,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => AudioPoll::Closed,
+        }
+    }
+}
+
+impl AudioPacketSource for finch_screen::ScreenAudioCapturer {
+    fn poll(&mut self, timeout: Duration) -> AudioPoll {
+        match self.receiver().recv_timeout(timeout) {
+            Ok(packet) => AudioPoll::Packet(packet),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => AudioPoll::Idle,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => AudioPoll::Closed,
+        }
+    }
+}
+
+/// Sends the sound of a shared screen to the viewers as datagrams, until stopped.
+pub struct ScreenAudioForwarder {
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ScreenAudioForwarder {
+    /// Start forwarding. `make_source` runs on the new thread (the loopback capturer must live
+    /// on the thread that created it); its error is returned here.
+    pub fn start(
+        connection: quinn::Connection,
+        make_source: impl FnOnce() -> Result<Box<dyn AudioPacketSource>, String> + Send + 'static,
+    ) -> Result<Self, String> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_flag = stop.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
+        let thread = std::thread::Builder::new()
+            .name("screen-audio-send".into())
+            .spawn(move || {
+                let mut source = match make_source() {
+                    Ok(source) => {
+                        let _ = ready_tx.send(Ok(()));
+                        source
+                    }
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(e));
+                        return;
+                    }
+                };
+                while !stop_flag.load(Ordering::Relaxed) {
+                    match source.poll(Duration::from_millis(50)) {
+                        AudioPoll::Packet(packet) => {
+                            // A dropped packet is a short glitch; the stream carries on.
+                            let _ = connection.send_datagram(packet.encode());
+                        }
+                        AudioPoll::Idle => {}
+                        AudioPoll::Closed => return,
+                    }
+                    if connection.close_reason().is_some() {
+                        return;
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        match ready_rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(Ok(())) => Ok(Self { stop, thread: Some(thread) }),
+            Ok(Err(e)) => Err(e),
+            Err(_) => {
+                stop.store(true, Ordering::Relaxed);
+                Err("screen sound capture did not start in time".into())
+            }
+        }
+    }
+
+    pub fn stop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl Drop for ScreenAudioForwarder {
     fn drop(&mut self) {
         self.stop();
     }

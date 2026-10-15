@@ -117,6 +117,8 @@ export interface SessionEvents {
   'screen-share-stopped': { peer_id: number };
   /** Our own share ended by itself (capture failed, window closed). */
   'screen-share-ended': string;
+  /** The sound of the shared screen could not be captured; the picture still goes out. */
+  'screen-audio-failed': string;
   'presence-update': { user_id: string; status: UserStatus };
   'connection-lost': string;
   reconnecting: null;

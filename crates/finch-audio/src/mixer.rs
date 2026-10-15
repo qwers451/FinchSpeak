@@ -17,6 +17,14 @@ use crate::resampler::FRAME_SIZE_48K;
 /// Timeout after which a speaker is considered silent if no packets arrive (250 ms).
 pub const SPEECH_TIMEOUT: Duration = Duration::from_millis(250);
 
+/// Mixer key of the screen-share sound of `peer_id`: separate from the person's voice so it gets
+/// its own volume and never counts as speech.
+pub const fn screen_audio_key(peer_id: u32) -> u32 {
+    peer_id | SCREEN_AUDIO_FLAG
+}
+
+const SCREEN_AUDIO_FLAG: u32 = 0x4000_0000;
+
 /// State for a single remote speaker.
 pub struct RemoteSpeaker {
     pub peer_id: u32,
@@ -124,6 +132,16 @@ impl AudioMixer {
         None
     }
 
+    /// Feed a `ScreenAudio` packet (stereo Opus; decoded to mono) into the screen channel of its
+    /// sender. Never reports speech.
+    pub fn on_screen_audio_packet(&mut self, header: &MediaHeader, payload: Bytes, now: Instant) -> Option<(u32, bool)> {
+        let mut as_voice = *header;
+        as_voice.media_type = finch_protocol::media::MediaType::Audio;
+        as_voice.sender_peer_id = screen_audio_key(header.sender_peer_id);
+        self.on_audio_packet(&as_voice, payload, now);
+        None
+    }
+
     /// Mix all remote speakers into a 960-sample 48 kHz output buffer.
     /// Applies individual volume adjustments and `tanh()` soft-limiting.
     /// Returns a list of speakers whose speech status changed (e.g. timed out after 250 ms).
@@ -139,7 +157,9 @@ impl AudioMixer {
             // Check for 250 ms silence timeout
             if speaker.is_speaking && now.saturating_duration_since(speaker.last_packet_time) > SPEECH_TIMEOUT {
                 speaker.is_speaking = false;
-                speech_events.push((speaker.peer_id, false));
+                if speaker.peer_id & SCREEN_AUDIO_FLAG == 0 {
+                    speech_events.push((speaker.peer_id, false));
+                }
             }
 
             // Pop next decoded 20 ms frame

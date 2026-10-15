@@ -11,7 +11,7 @@ import { localPeerId } from '../stores/sessionStore';
 import { DeviceSettings } from './DeviceSettings';
 import { ScreenSharePicker } from './ScreenSharePicker';
 import { ScreenViewer } from './ScreenViewer';
-import { stopWatching, watchShare, watching } from '../stores/screenStore';
+import { screenAudioKey, stopWatching, watchShare, watching } from '../stores/screenStore';
 
 export function VoicePanel() {
   const handleVolumeChange = (peerId: number, vol: number) => {
@@ -35,6 +35,13 @@ export function VoicePanel() {
         {(share) => (
           <div class="screen-viewer-frame">
             <ScreenViewer peerId={share().peer_id} />
+            <label class="screen-volume" title="Volume of the shared screen's sound">
+              🔊
+              <input
+                type="range" min="0" max="2" step="0.05" value="1"
+                onInput={(event) => api.setSpeakerVolume(screenAudioKey(share().peer_id), parseFloat(event.currentTarget.value))}
+              />
+            </label>
             <button type="button" class="screen-viewer-close" onClick={() => void stopWatching()}>Stop watching</button>
           </div>
         )}

@@ -2,10 +2,10 @@
 
 use std::sync::atomic::Ordering;
 
-use finch_client_core::screen::{encoded_size, FrameSource, MonitorSource, ScreenSharer, ScreenViewer, ShareConfig, WindowSource};
+use finch_client_core::screen::{encoded_size, AudioPacketSource, ScreenAudioForwarder, FrameSource, MonitorSource, ScreenSharer, ScreenViewer, ShareConfig, WindowSource};
 use finch_protocol::messages::ClientMessage;
 use finch_protocol::models::VideoCodec;
-use finch_screen::{list_monitors, list_windows};
+use finch_screen::{list_monitors, list_windows, ScreenAudioCapturer, ScreenAudioConfig};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tracing::info;
@@ -67,6 +67,7 @@ pub async fn list_screen_sources() -> Result<ScreenSourcesDto, String> {
 pub async fn start_screen_share(
     kind: String,
     id: u32,
+    with_audio: Option<bool>,
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -98,6 +99,7 @@ pub async fn start_screen_share(
         .await
         .map_err(|e| format!("Failed to announce the screen share: {e}"))?;
 
+    let audio_app_handle = app_handle.clone();
     let runtime = tokio::runtime::Handle::current();
     let on_end = {
         let state = (*state).clone();
@@ -125,6 +127,31 @@ pub async fn start_screen_share(
         on_end,
     );
     *state.screen_sharer.lock().map_err(|_| "screen share state poisoned".to_string())? = Some(sharer);
+
+    if with_audio.unwrap_or(false) {
+        // Best effort: the picture is already going out, so a failure here is only reported.
+        let (channel_id, sender_peer_id) = (short_id, state.session_peer_id.load(Ordering::SeqCst));
+        let connection = state.quic_connection.read().await.clone();
+        let started = connection.map(|connection| {
+            ScreenAudioForwarder::start(connection, move || {
+                let config = ScreenAudioConfig { channel_id, sender_peer_id, ..ScreenAudioConfig::default() };
+                ScreenAudioCapturer::start(config)
+                    .map(|capturer| Box::new(capturer) as Box<dyn AudioPacketSource>)
+                    .map_err(|e| e.to_string())
+            })
+        });
+        match started {
+            Some(Ok(forwarder)) => {
+                if let Ok(mut slot) = state.screen_audio.lock() {
+                    *slot = Some(forwarder);
+                }
+            }
+            Some(Err(e)) => {
+                let _ = audio_app_handle.emit("screen-audio-failed", e);
+            }
+            None => {}
+        }
+    }
     info!("Started sharing {kind} {id} ({width}x{height})");
     Ok(())
 }

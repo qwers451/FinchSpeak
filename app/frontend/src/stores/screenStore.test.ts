@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../services/api';
 import { appError, setAppError } from './notificationStore';
-import { isSharing, loadScreenSources, screenSources, startSharing, stopSharing, stopWatching, watchShare, watching } from './screenStore';
+import { isSharing, loadScreenSources, screenAudioKey, screenSources, startSharing, stopSharing, stopWatching, watchShare, watching } from './screenStore';
 import { sessionHandlers, resetSessionState } from './sessionStore';
 import { allVoiceParticipants, setVoiceParticipants } from './voiceStore';
 
@@ -126,4 +126,19 @@ it('AUD-018 the snapshot tells a late joiner who is already sharing', () => {
     voice_states: [{ user_id: 'alice', peer_id: 20, username: 'alice', channel_id: 'room', muted: false, deafened: false, sharing_screen: true }],
   } });
   expect(allVoiceParticipants()[0].is_sharing).toBe(true);
+});
+
+it('AUD-018 the screen sound is requested only when asked for, and failures are shown', async () => {
+  const start = vi.spyOn(api, 'startScreenShare').mockResolvedValue();
+  await startSharing('monitor', 1);
+  expect(start).toHaveBeenLastCalledWith('monitor', 1, false);
+  await startSharing('monitor', 1, true);
+  expect(start).toHaveBeenLastCalledWith('monitor', 1, true);
+  sessionHandlers['screen-audio-failed']('no output device');
+  expect(appError()).toContain('no output device');
+});
+
+it('AUD-018 the screen sound has its own volume key, apart from the voice', () => {
+  expect(screenAudioKey(7)).toBe(7 + 0x40000000);
+  expect(screenAudioKey(7)).not.toBe(7);
 });

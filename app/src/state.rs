@@ -11,7 +11,7 @@ use finch_client_core::session::ConnectParams;
 pub use finch_client_core::api::UserDto;
 use finch_audio::AudioMixer;
 use finch_protocol::messages::ClientMessage;
-use finch_client_core::screen::{ScreenSharer, ScreenViewer};
+use finch_client_core::screen::{ScreenAudioForwarder, ScreenSharer, ScreenViewer};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex, RwLock};
 
@@ -65,6 +65,8 @@ pub struct AppState {
     pub viewing_user: Arc<RwLock<Option<uuid::Uuid>>>,
     /// Our own running screen share, if any.
     pub screen_sharer: Arc<std::sync::Mutex<Option<ScreenSharer>>>,
+    /// The sound of our shared screen, when we chose to share it.
+    pub screen_audio: Arc<std::sync::Mutex<Option<ScreenAudioForwarder>>>,
     /// TOFU verified fingerprints: hostname -> SHA-256 hex string
     pub saved_fingerprints: Arc<DashMap<String, String>>,
     /// Parameters of the current QUIC session, reused to reconnect after a drop.
@@ -91,6 +93,10 @@ impl Default for AppState {
 impl AppState {
     /// Stop our screen share if one is running. Returns whether there was one.
     pub fn stop_screen_share(&self) -> bool {
+        let audio = self.screen_audio.lock().ok().and_then(|mut slot| slot.take());
+        if let Some(mut audio) = audio {
+            audio.stop();
+        }
         let sharer = self.screen_sharer.lock().ok().and_then(|mut slot| slot.take());
         match sharer {
             Some(mut sharer) => {
@@ -126,6 +132,7 @@ impl AppState {
             viewing_peer: Arc::new(AtomicU32::new(0)),
             viewing_user: Arc::new(RwLock::new(None)),
             screen_sharer: Arc::new(std::sync::Mutex::new(None)),
+            screen_audio: Arc::new(std::sync::Mutex::new(None)),
             saved_fingerprints: Arc::new(DashMap::new()),
             known_servers_path: Arc::new(RwLock::new(None)),
             last_connect: Arc::new(RwLock::new(None)),

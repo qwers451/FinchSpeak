@@ -36,7 +36,7 @@ pub use devices::{
     AudioDeviceInfo, DeviceChoice,
 };
 pub use jitter::{JitterBuffer, PlayoutResult};
-pub use mixer::AudioMixer;
+pub use mixer::{screen_audio_key, AudioMixer};
 pub use noise::NoiseSuppressor;
 pub use opus::{AudioOpusError, OpusVoiceDecoder, OpusVoiceEncoder};
 pub use reference::ReferenceFeeder;

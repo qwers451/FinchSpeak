@@ -4,6 +4,7 @@ import { isSharing, loadScreenSources, screenSources, startSharing, stopSharing 
 /** "Share screen" button: pick a monitor or a window, or stop the current share. */
 export function ScreenSharePicker() {
   const [open, setOpen] = createSignal(false);
+  const [withAudio, setWithAudio] = createSignal(false);
 
   const toggle = async () => {
     if (isSharing()) {
@@ -16,7 +17,7 @@ export function ScreenSharePicker() {
 
   const share = async (kind: 'monitor' | 'window', id: number) => {
     setOpen(false);
-    await startSharing(kind, id);
+    await startSharing(kind, id, withAudio());
   };
 
   return (
@@ -26,6 +27,16 @@ export function ScreenSharePicker() {
       </button>
       <Show when={open() && !isSharing()}>
         <div class="screen-source-list" role="listbox" aria-label="Screen to share">
+          <label class="screen-audio-option">
+            <input type="checkbox" checked={withAudio()} onChange={(event) => setWithAudio(event.currentTarget.checked)} />
+            Share system sound too
+          </label>
+          <Show when={withAudio()}>
+            <small class="screen-audio-note">
+              Everything your speakers play is sent, including other people's voices: they will hear
+              themselves with a delay.
+            </small>
+          </Show>
           <For each={screenSources().monitors}>
             {(monitor) => (
               <button type="button" role="option" onClick={() => void share('monitor', monitor.id)}>

@@ -625,3 +625,28 @@ body {
 .watch-share {
   margin-top: 6px;
 }
+
+.screen-audio-option {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 6px;
+}
+
+.screen-audio-note {
+  color: var(--text-dim);
+  padding: 0 6px 4px;
+}
+
+.screen-volume {
+  position: absolute;
+  top: 12px;
+  right: 130px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
