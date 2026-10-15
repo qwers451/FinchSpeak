@@ -5,10 +5,14 @@
 //!
 //! ## Modules
 //!
+//! - [`audio`] — test signals, speech fixtures, WAV I/O
+//! - [`metrics`] — SNR, segmental SNR, delay and ERLE measurements
 //! - [`server`] — in-process server on ephemeral ports with a temporary database
 //! - [`client`] — headless client with event helpers
 
+pub mod audio;
 pub mod client;
+pub mod metrics;
 pub mod server;
 
 /// Enable `RUST_LOG`-controlled logging for bench runs (idempotent).

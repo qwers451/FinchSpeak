@@ -154,4 +154,30 @@ mod tests {
         let out = resampler.process(&input).unwrap();
         assert!(!out.is_empty());
     }
+
+    /// Every input sample must end up in the output: N input samples at `rate`
+    /// produce N * 48000 / rate output samples (within one frame).
+    #[test]
+    #[ignore = "AUD-048"]
+    fn test_input_resampler_preserves_duration() {
+        for rate in [16_000u32, 44_100] {
+            let mut resampler = InputResampler::new(rate).unwrap();
+            let total_in = rate as usize; // one second
+            let mut consumed = 0;
+            let mut produced = 0;
+            let mut out = [0.0f32; FRAME_SIZE_48K];
+            while consumed + resampler.input_frames_needed() <= total_in {
+                let needed = resampler.input_frames_needed();
+                let input = vec![0.1f32; needed];
+                resampler.process(&input, &mut out).unwrap();
+                consumed += needed;
+                produced += FRAME_SIZE_48K;
+            }
+            let expected = consumed * 48_000 / rate as usize;
+            assert!(
+                produced.abs_diff(expected) <= FRAME_SIZE_48K,
+                "{rate} Hz: consumed {consumed} input samples, produced {produced}, expected {expected}"
+            );
+        }
+    }
 }
