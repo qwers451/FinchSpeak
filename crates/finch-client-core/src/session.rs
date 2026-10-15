@@ -188,27 +188,34 @@ pub async fn connect(
 
     // Task 2: Incoming Control Stream Receiver
     let control_events = event_tx.clone();
+    let reader_conn = connection.clone();
     tokio::spawn(async move {
         let mut chunk_buf = vec![0u8; 4096];
         loop {
-            match recv_stream.read(&mut chunk_buf).await {
-                Ok(Some(n)) => {
-                    frame_buf.extend_from_slice(&chunk_buf[..n]);
-                    loop {
-                        match decode_message::<ServerMessage>(&mut frame_buf) {
-                            Ok(msg) => {
-                                if control_events.send(SessionEvent::Control(msg)).await.is_err() {
-                                    return;
-                                }
-                            }
-                            Err(CodecError::Incomplete { .. }) => break,
-                            Err(e) => {
-                                error!("Decode error on control stream: {}", e);
-                                break;
-                            }
+            // Decode everything already buffered first: frames may have arrived in the same
+            // read as the `Authenticated` response.
+            loop {
+                match decode_message::<ServerMessage>(&mut frame_buf) {
+                    Ok(msg) => {
+                        if control_events.send(SessionEvent::Control(msg)).await.is_err() {
+                            return;
                         }
                     }
+                    Err(CodecError::Incomplete { .. }) => break,
+                    Err(e) => {
+                        // The stream is out of sync; every later frame would be garbage.
+                        error!("Decode error on control stream: {}", e);
+                        reader_conn.close(0u32.into(), b"control stream corrupt");
+                        let _ = control_events
+                            .send(SessionEvent::ConnectionLost(format!("Corrupt control stream: {e}")))
+                            .await;
+                        return;
+                    }
                 }
+            }
+
+            match recv_stream.read(&mut chunk_buf).await {
+                Ok(Some(n)) => frame_buf.extend_from_slice(&chunk_buf[..n]),
                 Ok(None) => {
                     info!("Control stream reached EOF");
                     let _ = control_events
