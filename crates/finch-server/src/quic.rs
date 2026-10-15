@@ -1,9 +1,8 @@
 //! QUIC listener, connection lifecycle, signaling stream, and media routing.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bytes::{Bytes, BytesMut};
 use quinn::crypto::rustls::QuicServerConfig;
 use sqlx::SqlitePool;
@@ -69,16 +68,13 @@ pub fn make_server_config() -> Result<quinn::ServerConfig> {
     Ok(server_config)
 }
 
-/// Run the QUIC server endpoint.
+/// Run the QUIC server accept loop on an already bound endpoint.
 pub async fn run_server(
-    addr: SocketAddr,
+    endpoint: quinn::Endpoint,
     pool: SqlitePool,
     sessions: SessionManager,
     jwt_secret: String,
 ) -> Result<()> {
-    let server_config = make_server_config().context("failed to create server config")?;
-    let endpoint = quinn::Endpoint::server(server_config, addr)?;
-
     // Cache database channels into SessionManager
     sync_channels_from_db(&pool, &sessions).await?;
 
