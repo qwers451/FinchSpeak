@@ -59,6 +59,20 @@ impl AudioMixer {
         self.speakers.remove(&peer_id);
     }
 
+    /// Largest playout queue length across all remote speakers.
+    pub fn max_buffered_packets(&self) -> usize {
+        self.speakers
+            .values()
+            .map(|s| s.jitter_buffer.buffered_len())
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Packet loss rate observed for a speaker, if that speaker is known.
+    pub fn loss_rate(&self, peer_id: u32) -> Option<f64> {
+        self.speakers.get(&peer_id).map(|s| s.jitter_buffer.loss_rate())
+    }
+
     /// Feed an incoming audio packet from the network into the appropriate speaker's jitter buffer.
     /// Returns `Some((peer_id, speaking))` if a UI speech state transition occurred.
     pub fn on_audio_packet(
@@ -218,5 +232,30 @@ mod tests {
         // After 250 ms timeout: speaker 100 is marked silent
         let events = mixer.mix_frame(&mut out, now + Duration::from_millis(260));
         assert_eq!(events, vec![(100, false)]);
+    }
+
+    #[test]
+    fn test_buffer_and_loss_accessors() {
+        let mut mixer = AudioMixer::new();
+        let now = Instant::now();
+        let mut encoder = OpusVoiceEncoder::new(64).unwrap();
+        let payload = encoder.encode(&[0.1f32; FRAME_SIZE_48K]).unwrap();
+
+        assert_eq!(mixer.max_buffered_packets(), 0);
+        assert_eq!(mixer.loss_rate(7), None);
+
+        // Sequences 1, 2, 4 queued for peer 7; 3 is missing.
+        for seq in [1u16, 2, 4] {
+            let header = MediaHeader::new_audio(1, 7, seq, seq as u32 * 960, false, false);
+            mixer.on_audio_packet(&header, payload.clone(), now);
+        }
+        assert_eq!(mixer.max_buffered_packets(), 3);
+
+        let mut out = [0.0f32; FRAME_SIZE_48K];
+        for _ in 0..4 {
+            let _ = mixer.mix_frame(&mut out, now);
+        }
+        let loss = mixer.loss_rate(7).unwrap();
+        assert!(loss > 0.0 && loss < 1.0, "loss rate {loss}");
     }
 }

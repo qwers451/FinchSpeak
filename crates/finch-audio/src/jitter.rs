@@ -187,6 +187,11 @@ impl JitterBuffer {
         }
     }
 
+    /// Number of packets currently waiting in the playout queue.
+    pub fn buffered_len(&self) -> usize {
+        self.queue.len()
+    }
+
     /// Current loss percentage (0.0 to 1.0).
     pub fn loss_rate(&self) -> f64 {
         if self.total_expected == 0 {
