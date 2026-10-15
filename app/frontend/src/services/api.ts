@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { Channel, IncomingMessage, MessageHistory, User, AudioDevice, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
+import type { Channel, IncomingMessage, MessageHistory, User, AudioDevices, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -171,11 +171,18 @@ export const api = {
     }
   },
 
-  getAudioDevices: async (): Promise<{ inputs: AudioDevice[]; outputs: AudioDevice[] }> => {
+  getAudioDevices: async (): Promise<AudioDevices> => {
     if (isTauri()) {
       return invoke('get_audio_devices');
     }
-    return { inputs: [], outputs: [] };
+    return { inputs: [], outputs: [], selected_input: null, selected_output: null };
+  },
+
+  /** Choose microphone and speakers (null = system default); reopens the streams if in a call. */
+  setAudioDevices: async (input: string | null, output: string | null): Promise<void> => {
+    if (isTauri()) {
+      return invoke('set_audio_devices', { input, output });
+    }
   },
 
   setSpeakerVolume: async (peerId: number, volume: number): Promise<void> => {

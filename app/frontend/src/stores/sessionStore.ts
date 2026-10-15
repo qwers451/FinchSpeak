@@ -74,6 +74,10 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   },
   'reconnect-failed': (reason) => { setConnectionStatus('failed'); setConnectionError(reason); },
   'server-error': (error) => setAppError(`${error.code}: ${error.message}`),
+  'audio-device-lost': () => setAppError('An audio device was disconnected; reopening the audio devices...'),
+  'audio-device-failed': () => setAppError('The audio devices keep failing. Check them, then rejoin the voice channel.'),
+  'audio-device-fallback': ({ kind, wanted }) =>
+    setAppError(`"${wanted}" is not available; using the system default ${kind} device instead.`),
 };
 
 export function restoreSessionSnapshot(snapshot: SessionSnapshot) {

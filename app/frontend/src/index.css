@@ -548,3 +548,31 @@ body {
 .error-banner { background: #742d36; }
 .channel-participant { padding: 4px 12px 4px 40px; font-size: .85rem; color: var(--text-muted); }
 .online-users { max-height: 180px; overflow-y: auto; }
+
+/* Audio device pickers */
+.device-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.device-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+  flex: 1;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.device-field select {
+  background: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+}

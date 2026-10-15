@@ -31,7 +31,10 @@ pub mod vad;
 
 pub use aec::EchoCanceller;
 pub use capture::{CaptureOutput, VoiceCapture, VoiceCaptureConfig, PREROLL_FRAMES};
-pub use devices::{list_input_devices, list_output_devices, AudioDeviceInfo};
+pub use devices::{
+    list_input_devices, list_output_devices, open_input_device, open_output_device, resolve_device_choice,
+    AudioDeviceInfo, DeviceChoice,
+};
 pub use jitter::{JitterBuffer, PlayoutResult};
 pub use mixer::AudioMixer;
 pub use noise::NoiseSuppressor;

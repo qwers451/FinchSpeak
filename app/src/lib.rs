@@ -83,6 +83,7 @@ pub fn run() {
             commands::voice::leave_voice_channel,
             commands::voice::set_voice_state,
             commands::voice::get_audio_devices,
+            commands::voice::set_audio_devices,
             commands::voice::set_speaker_volume,
             // Screen
             commands::screen::register_video_channel,

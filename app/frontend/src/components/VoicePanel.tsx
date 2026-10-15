@@ -8,6 +8,7 @@ import {
 import { currentUser } from '../stores/authStore';
 import { api } from '../services/api';
 import { localPeerId } from '../stores/sessionStore';
+import { DeviceSettings } from './DeviceSettings';
 
 export function VoicePanel() {
   const handleVolumeChange = (peerId: number, vol: number) => {
@@ -23,6 +24,8 @@ export function VoicePanel() {
           <span>{activeVoiceChannel()?.name || 'Voice Room'}</span>
         </div>
       </div>
+
+      <DeviceSettings />
 
       {/* Participant Grid */}
       <div class="voice-grid">

@@ -8,7 +8,7 @@ use tauri::{AppHandle, State};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::state::AppState;
+use crate::state::{AppState, AudioDeviceSelection};
 
 #[derive(serde::Serialize)]
 pub struct AudioDeviceDto {
@@ -20,6 +20,9 @@ pub struct AudioDeviceDto {
 pub struct AudioDevicesDto {
     pub inputs: Vec<AudioDeviceDto>,
     pub outputs: Vec<AudioDeviceDto>,
+    /// What the user picked; `null` = system default.
+    pub selected_input: Option<String>,
+    pub selected_output: Option<String>,
 }
 
 #[tauri::command]
@@ -86,7 +89,7 @@ pub async fn set_voice_state(
 }
 
 #[tauri::command]
-pub async fn get_audio_devices() -> Result<AudioDevicesDto, String> {
+pub async fn get_audio_devices(state: State<'_, AppState>) -> Result<AudioDevicesDto, String> {
     let inputs = list_input_devices()
         .map_err(|e| format!("Failed to query inputs: {}", e))?
         .into_iter()
@@ -105,7 +108,46 @@ pub async fn get_audio_devices() -> Result<AudioDevicesDto, String> {
         })
         .collect();
 
-    Ok(AudioDevicesDto { inputs, outputs })
+    let selection = state.audio_devices.read().map(|s| s.clone()).unwrap_or_default();
+    Ok(AudioDevicesDto {
+        inputs,
+        outputs,
+        selected_input: selection.input,
+        selected_output: selection.output,
+    })
+}
+
+/// Choose the microphone and speakers (`None` = system default). Takes effect immediately: if
+/// the user is in a voice channel the audio streams are reopened on the new devices.
+#[tauri::command]
+pub async fn set_audio_devices(
+    input: Option<String>,
+    output: Option<String>,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let selection = AudioDeviceSelection::new(input, output);
+    {
+        let mut current = state
+            .audio_devices
+            .write()
+            .map_err(|_| "Audio device settings are unavailable".to_string())?;
+        if *current == selection {
+            return Ok(());
+        }
+        *current = selection;
+    }
+
+    let channel = *state.current_voice_channel.read().await;
+    if let Some(short_id) = channel {
+        state
+            .audio_engine
+            .lock()
+            .await
+            .start(short_id, (*state).clone(), app_handle)
+            .map_err(|e| format!("Failed to reopen audio devices: {}", e))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

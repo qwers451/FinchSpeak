@@ -21,6 +21,21 @@ pub struct VideoChunkPayload {
     pub data: Vec<u8>,
 }
 
+/// Audio devices the user picked; `None` means the system default.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioDeviceSelection {
+    pub input: Option<String>,
+    pub output: Option<String>,
+}
+
+impl AudioDeviceSelection {
+    /// Build a selection; an empty name (an unset dropdown) means the default device.
+    pub fn new(input: Option<String>, output: Option<String>) -> Self {
+        let clean = |name: Option<String>| name.filter(|n| !n.trim().is_empty());
+        Self { input: clean(input), output: clean(output) }
+    }
+}
+
 pub struct AudioEngineHandle {
     pub is_running: Arc<AtomicBool>,
     pub is_muted: Arc<AtomicBool>,
@@ -56,6 +71,8 @@ pub struct AppState {
     /// Screen video channel to WebCodecs in Webview
     pub video_channel: Arc<RwLock<Option<tauri::ipc::Channel<VideoChunkPayload>>>>,
     pub audio_engine: Arc<Mutex<crate::audio_engine::AudioEngine>>,
+    /// Read by the audio worker thread when it opens devices, hence a std lock.
+    pub audio_devices: Arc<std::sync::RwLock<AudioDeviceSelection>>,
 }
 
 impl Default for AppState {
@@ -87,6 +104,21 @@ impl AppState {
             pending_fingerprint: Arc::new(RwLock::new(None)),
             video_channel: Arc::new(RwLock::new(None)),
             audio_engine: Arc::new(Mutex::new(crate::audio_engine::AudioEngine::new())),
+            audio_devices: Arc::new(std::sync::RwLock::new(AudioDeviceSelection::default())),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_empty_device_names_mean_default() {
+        let selection = AudioDeviceSelection::new(Some("".into()), Some("  ".into()));
+        assert_eq!(selection, AudioDeviceSelection::default());
+        let picked = AudioDeviceSelection::new(Some("Headset".into()), None);
+        assert_eq!(picked.input.as_deref(), Some("Headset"));
+        assert_eq!(picked.output, None);
     }
 }

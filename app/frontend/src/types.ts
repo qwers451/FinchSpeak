@@ -90,6 +90,17 @@ export interface SessionEvents {
   reconnected: null;
   'reconnect-failed': string;
   'server-error': { code: number; message: string };
+  'audio-device-lost': null;
+  'audio-device-failed': null;
+  'audio-device-fallback': { kind: 'input' | 'output'; wanted: string };
+}
+
+export interface AudioDevices {
+  inputs: AudioDevice[];
+  outputs: AudioDevice[];
+  /** What the backend uses; null = system default. */
+  selected_input: string | null;
+  selected_output: string | null;
 }
 
 export interface SessionSnapshot {

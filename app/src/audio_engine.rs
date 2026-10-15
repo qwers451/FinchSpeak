@@ -10,16 +10,20 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::Stream;
 use finch_audio::{
-    AudioMixer, InputResampler, OutputResampler, ReferenceFeeder, VadDecision, VoiceCapture,
+    open_input_device, open_output_device, AudioMixer, DeviceChoice, InputResampler, OutputResampler, ReferenceFeeder, VadDecision, VoiceCapture,
     VoiceCaptureConfig, FRAME_SIZE_48K,
 };
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::HeapRb;
 use tauri::Emitter;
 use tracing::{error, info, warn};
+
+/// More restarts than this inside `RESTART_WINDOW` means the devices keep failing: stop trying.
+const MAX_DEVICE_RESTARTS: usize = 5;
+const RESTART_WINDOW: Duration = Duration::from_secs(10);
 
 use crate::state::AppState;
 
@@ -146,9 +150,21 @@ fn mix_next_frame(
     mixer.blocking_lock().mix_frame(frame, now)
 }
 
+/// Tell the UI when the chosen device was not available and the default is used instead.
+fn report_fallback(kind: &str, choice: &DeviceChoice, app_handle: &tauri::AppHandle) {
+    if let DeviceChoice::FellBack { wanted } = choice {
+        warn!("Chosen {} device {:?} is not available; using the default", kind, wanted);
+        let _ = app_handle.emit(
+            "audio-device-fallback",
+            serde_json::json!({ "kind": kind, "wanted": wanted }),
+        );
+    }
+}
+
 /// Dedicated OS thread function managing cpal streams, DSP, and lock-free ring buffers.
 fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
     let mut pending_cmd: Option<AudioCommand> = None;
+    let mut restart_times: std::collections::VecDeque<Instant> = std::collections::VecDeque::new();
 
     loop {
         let cmd = match pending_cmd.take() {
@@ -172,7 +188,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 is_running.store(true, Ordering::SeqCst);
                 info!("Starting audio worker streams for channel {}", channel_id);
 
-                let host = cpal::default_host();
+                let selection = state.audio_devices.read().map(|s| s.clone()).unwrap_or_default();
+                // Set from cpal's error callbacks when a stream dies (e.g. the headset is unplugged).
+                let stream_failed = Arc::new(AtomicBool::new(false));
 
                 // 1. Output (Playback) Ring Buffer & cpal Stream
                 let playback_rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
@@ -188,7 +206,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 let mut output_resampler: Option<OutputResampler> = None;
                 let mut output_sample_rate = 48000u32;
 
-                if let Some(device) = host.default_output_device() {
+                let (output_device, output_choice) = open_output_device(selection.output.as_deref());
+                report_fallback("output", &output_choice, &app_handle);
+                if let Some(device) = output_device {
                     match device.default_output_config() {
                         Ok(config) => {
                             output_sample_rate = config.sample_rate().0;
@@ -210,7 +230,11 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                 }
                             };
 
-                            let err_fn = |err| error!("Audio output error: {}", err);
+                            let failed = stream_failed.clone();
+                            let err_fn = move |err| {
+                                error!("Audio output error: {}", err);
+                                failed.store(true, Ordering::SeqCst);
+                            };
                             let stream_res = device.build_output_stream(
                                 &config.into(),
                                 move |data: &mut [f32], _| {
@@ -264,7 +288,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 let mut capture_stream: Option<Stream> = None;
                 let mut input_resampler: Option<InputResampler> = None;
 
-                if let Some(device) = host.default_input_device() {
+                let (input_device, input_choice) = open_input_device(selection.input.as_deref());
+                report_fallback("input", &input_choice, &app_handle);
+                if let Some(device) = input_device {
                     match device.default_input_config() {
                         Ok(config) => {
                             let sample_rate = config.sample_rate().0;
@@ -278,7 +304,11 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                 }
                             };
 
-                            let err_fn = |err| error!("Audio input error: {}", err);
+                            let failed = stream_failed.clone();
+                            let err_fn = move |err| {
+                                error!("Audio input error: {}", err);
+                                failed.store(true, Ordering::SeqCst);
+                            };
                             let stream_res = device.build_input_stream(
                                 &config.into(),
                                 move |data: &[f32], _| {
@@ -357,6 +387,29 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             return;
                         }
                         Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    }
+
+                    // A0. A device stream died (headset unplugged, driver reset): reopen the devices,
+                    // falling back to the defaults, instead of leaving the call silent.
+                    if stream_failed.swap(false, Ordering::SeqCst) {
+                        let now = Instant::now();
+                        restart_times.retain(|t| now.duration_since(*t) < RESTART_WINDOW);
+                        restart_times.push_back(now);
+                        if restart_times.len() > MAX_DEVICE_RESTARTS {
+                            error!("Audio devices keep failing; stopping audio");
+                            let _ = app_handle.emit("audio-device-failed", ());
+                            is_running.store(false, Ordering::SeqCst);
+                            break;
+                        }
+                        warn!("Audio stream failed; reopening the audio devices");
+                        let _ = app_handle.emit("audio-device-lost", ());
+                        std::thread::sleep(Duration::from_millis(500));
+                        pending_cmd = Some(AudioCommand::Start {
+                            channel_id,
+                            state: state.clone(),
+                            app_handle: app_handle.clone(),
+                        });
+                        break;
                     }
 
                     // A. Playback processing (mixer -> OutputResampler -> playback_prod)
