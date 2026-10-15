@@ -15,6 +15,8 @@ pub struct VoiceRun {
     pub output: Vec<f32>,
     /// `(frame index, peer id, speaking)` transitions reported by the receiver's mixer.
     pub speaking_events: Vec<(usize, u32, bool)>,
+    /// Audio datagrams the sender transmitted.
+    pub sent_packets: usize,
     /// Headers of all audio datagrams the receiver got.
     pub received_headers: Vec<MediaHeader>,
     /// Largest jitter buffer depth seen during the run.
@@ -56,6 +58,7 @@ pub async fn run_voice_link(
         let out = capture.process(&mut frame, sender_peer, (frame_index * 20) as u32);
         if let Some(packet) = out.packet {
             sender.session.send_datagram(packet)?;
+            run.sent_packets += 1;
         }
 
         let now = Instant::now();

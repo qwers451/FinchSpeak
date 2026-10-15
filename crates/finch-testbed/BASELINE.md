@@ -17,5 +17,12 @@ Debug WAVs of the last run: `target/testbed-out/`.
 | AEC double-talk: near-end level kept | ≥ near − 6 dB | −22.1 dBFS (near −23.3) | pass | 2026-10-15 | cc0476d |
 | VAD on pink noise −35 dBFS: speaking indicator | never lit | lit 2× | **fail — AUD-050** | 2026-10-15 | cc0476d |
 | VAD on pink noise −35 dBFS: non-silent packets | 0 | 104 | **fail — AUD-050** | 2026-10-15 | cc0476d |
+| Network 5% loss + 0–60 ms jitter: latency (3 runs) | ≤ 200 ms | 116 / 156 / 196 ms | pass (close to limit) | 2026-10-15 | — |
+| Network: packets delivered by the network | — | 237–239 of 247 (~96%) | info | 2026-10-15 | — |
+| Network: jitter buffer depth | ≤ 6 packets | 20 / 21 / 68 | **fail — AUD-022** | 2026-10-15 | — |
+| Network: jitter-buffer loss rate (late packets counted as lost) | — | 17–35% | **fail — AUD-022** | 2026-10-15 | — |
+| Network: longest run of silent frames during speech | ≤ 3 | 0 / 0 / 3 | pass | 2026-10-15 | — |
+
+Network results vary between runs (real-time scheduling); three runs are recorded.
 
 Speech fixtures are TTS-synthesized (see `fixtures/ATTRIBUTION.md`); real recordings may score slightly lower.

@@ -1,6 +1,7 @@
 //! Headless FinchSpeak client built on `finch-client-core`.
 
 use std::collections::VecDeque;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -46,9 +47,16 @@ pub async fn connect_with_token(
     server: &TestServer,
     token: &str,
 ) -> Result<(Session, mpsc::Receiver<SessionEvent>), ClientError> {
+    connect_to(server.quic_addr, token).await
+}
+
+async fn connect_to(
+    quic_addr: SocketAddr,
+    token: &str,
+) -> Result<(Session, mpsc::Receiver<SessionEvent>), ClientError> {
     connect(
         ConnectParams {
-            quic_addr: server.quic_addr,
+            quic_addr,
             hostname: "localhost".to_string(),
             token: token.to_string(),
         },
@@ -60,10 +68,19 @@ pub async fn connect_with_token(
 impl TestClient {
     /// Register `username` (display name = username) and open a QUIC session.
     pub async fn register(server: &TestServer, username: &str) -> anyhow::Result<Self> {
+        Self::register_via(server, username, server.quic_addr).await
+    }
+
+    /// Like [`Self::register`], but the QUIC session goes to `quic_addr` (e.g. an impairment proxy).
+    pub async fn register_via(
+        server: &TestServer,
+        username: &str,
+        quic_addr: SocketAddr,
+    ) -> anyhow::Result<Self> {
         let mut api = ApiClient::new(&server.http_url)?;
         let auth = api.register(username, TEST_PASSWORD, username).await?;
         api.set_token(auth.token.clone());
-        let (session, events) = connect_with_token(server, &auth.token).await?;
+        let (session, events) = connect_to(quic_addr, &auth.token).await?;
         Ok(Self {
             api,
             session,

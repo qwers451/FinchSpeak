@@ -7,6 +7,7 @@
 //!
 //! - [`audio`] — test signals, speech fixtures, WAV I/O
 //! - [`metrics`] — SNR, segmental SNR, delay and ERLE measurements
+//! - [`netem`] — UDP proxy with packet loss, jitter and reordering
 //! - [`server`] — in-process server on ephemeral ports with a temporary database
 //! - [`voice`] — real-time voice link through the SFU
 //! - [`client`] — headless client with event helpers
@@ -14,6 +15,7 @@
 pub mod audio;
 pub mod client;
 pub mod metrics;
+pub mod netem;
 pub mod server;
 pub mod voice;
 
