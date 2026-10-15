@@ -43,13 +43,15 @@ FinchSpeak — self-hosted аналог Discord для своей компани
 
 | Модуль | Назначение | Зависимости |
 |---|---|---|
-| `finch-audio::VoicePipeline` | Чистая обработка голоса без I/O: `capture(&[f32; 960]) -> Option<пакет>` (48 кГц моно, 20 мс), `receive(датаграмма)`, `render(&mut [f32])`. Держит AEC, NS, VAD, Opus, jitter buffer, микшер и E2EE. | `finch-audio`, `finch-protocol` |
+| `finch-audio::VoicePipeline` | Чистая обработка голоса без I/O: `capture(&[f32; 960]) -> Option<пакет>` (48 кГц моно, 20 мс), `receive(датаграмма)`, `render(&mut [f32])`. Держит AEC, NS, VAD, Opus, jitter buffer и микшер; место для E2EE предусмотрено (см. ниже). | `finch-audio`, `finch-protocol` |
 | `app/src/audio_engine.rs` | Тонкая обёртка: `cpal` + `ringbuf` + ресемплинг вокруг `VoicePipeline`. Требования 7 и 8 сохраняются. | `cpal`, `VoicePipeline` |
 | `crates/finch-client-core` | QUIC-сессия, TOFU, REST-клиент, Control Stream. События отдаются через `tokio::sync::mpsc`, без `AppHandle`. Им пользуется и приложение, и стенд. | `finch-protocol`, `quinn`, `rustls`, `reqwest` |
 | `app/src/connection.rs`, `app/src/commands/*` | Перевод событий `finch-client-core` в события Tauri. | `finch-client-core`, `tauri` |
 | `crates/finch-testbed` | Только интеграционные тесты: поднимает настоящий `finch-server` в процессе (временная SQLite, свободный порт) и N headless-клиентов на `finch-client-core` + `VoicePipeline`. | `finch-server`, `finch-client-core`, `finch-audio` |
 
 Изоляция из требования 4 сохраняется: `finch-server` не зависит ни от `finch-audio`, ни от `finch-client-core`. От всех них зависит только `finch-testbed`, а это dev-крейт.
+
+**Известная находка до аудита (кандидат в AUD-001):** клиент (`app/src`) не вызывает E2EE ни для голоса, ни для экрана. ChaCha20-Poly1305 есть только в `finch-protocol::e2ee` и в его тестах, хотя PROGRESS.md (этап 5) утверждает обратное. Рефакторинг E2EE не добавляет: `VoicePipeline` лишь получает необязательный ключ комнаты. Подключение шифрования и обмен ключом — это исправление фазы 3, если пользователь даст ему приоритет. До этого сценарий E2EE в стенде помечен `#[ignore = "AUD-001"]`.
 
 Для каждого шага рефакторинга верно: существующие 70 тестов остаются зелёными, а поведение приложения не меняется. Проверяем это ручным запуском после рефакторинга.
 
