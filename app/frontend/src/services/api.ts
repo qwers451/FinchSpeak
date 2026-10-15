@@ -206,6 +206,13 @@ export const api = {
     return () => {};
   },
 
+  onTofuRequired: async (cb: (data: { hostname: string; fingerprint: string }) => void): Promise<UnlistenFn> => {
+    if (isTauri()) {
+      return listen('tofu-required', (e) => cb(e.payload as any));
+    }
+    return () => {};
+  },
+
   onPingRtt: async (cb: (data: { rtt_ms: number }) => void): Promise<UnlistenFn> => {
     if (isTauri()) {
       return listen('ping-rtt', (e) => cb(e.payload as any));

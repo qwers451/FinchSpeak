@@ -29,6 +29,18 @@ pub enum ClientError {
     #[error("Unexpected message: {0}")]
     UnexpectedMessage(String),
 
+    /// First contact with a server whose fingerprint the user has not confirmed yet.
+    #[error("Unknown server {hostname}: confirm certificate fingerprint {fingerprint}")]
+    UntrustedServer { hostname: String, fingerprint: String },
+
+    /// The server certificate differs from the pinned one.
+    #[error("Certificate of {hostname} changed: expected {expected}, got {actual}")]
+    FingerprintMismatch {
+        hostname: String,
+        expected: String,
+        actual: String,
+    },
+
     /// The session is closed.
     #[error("Session closed")]
     Closed,

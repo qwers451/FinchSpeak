@@ -5,7 +5,7 @@
 //! control messages, keyframe streams and disconnects are never dropped.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::{Bytes, BytesMut};
@@ -20,7 +20,7 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use crate::error::ClientError;
-use crate::tofu::create_client_config;
+use crate::tofu::{create_client_config_with, TofuIssue, TofuIssueSlot};
 
 /// Capacity of the session event queue.
 pub const EVENT_QUEUE_CAPACITY: usize = 1024;
@@ -37,6 +37,9 @@ pub struct ConnectParams {
     pub quic_addr: SocketAddr,
     pub hostname: String,
     pub token: String,
+    /// Reject servers whose fingerprint is not pinned yet (the UI asks the user) instead of
+    /// pinning the first fingerprint seen.
+    pub require_known_fingerprint: bool,
 }
 
 /// An authenticated QUIC session.
@@ -77,18 +80,41 @@ pub async fn connect(
     params: ConnectParams,
     fingerprints: Arc<DashMap<String, String>>,
 ) -> Result<(Session, mpsc::Receiver<SessionEvent>), ClientError> {
-    let client_config = create_client_config(&params.hostname, fingerprints)?;
+    let issue: TofuIssueSlot = Arc::new(Mutex::new(None));
+    let client_config = create_client_config_with(
+        &params.hostname,
+        fingerprints,
+        params.require_known_fingerprint,
+        issue.clone(),
+    )?;
 
     let mut endpoint = Endpoint::client(SocketAddr::from(([0, 0, 0, 0], 0)))
         .map_err(|e| ClientError::Quic(e.to_string()))?;
     endpoint.set_default_client_config(client_config);
 
     info!("Connecting via QUIC to {} ({})", params.quic_addr, params.hostname);
-    let connection = endpoint
+    let connection = match endpoint
         .connect(params.quic_addr, &params.hostname)
         .map_err(|e| ClientError::Quic(e.to_string()))?
         .await
-        .map_err(|e| ClientError::Quic(e.to_string()))?;
+    {
+        Ok(c) => c,
+        Err(e) => {
+            let reported = issue.lock().ok().and_then(|mut slot| slot.take());
+            return Err(match reported {
+                Some(TofuIssue::Unknown { fingerprint }) => ClientError::UntrustedServer {
+                    hostname: params.hostname,
+                    fingerprint,
+                },
+                Some(TofuIssue::Mismatch { expected, actual }) => ClientError::FingerprintMismatch {
+                    hostname: params.hostname,
+                    expected,
+                    actual,
+                },
+                None => ClientError::Quic(e.to_string()),
+            });
+        }
+    };
     info!("QUIC TLS handshake completed successfully");
 
     // Open bi-stream for Control Stream

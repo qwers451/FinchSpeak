@@ -59,6 +59,7 @@ async fn connect_to(
             quic_addr,
             hostname: "localhost".to_string(),
             token: token.to_string(),
+            require_known_fingerprint: false,
         },
         Arc::new(DashMap::new()),
     )

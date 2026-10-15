@@ -1,5 +1,5 @@
 import { Show } from 'solid-js';
-import { pendingTofu, setPendingTofu } from '../stores/authStore';
+import { pendingTofu, setPendingTofu, setAuthError } from '../stores/authStore';
 import { api } from '../services/api';
 
 export function TofuModal() {
@@ -8,6 +8,7 @@ export function TofuModal() {
     if (data) {
       await api.trustFingerprint(data.hostname, data.fingerprint);
       setPendingTofu(null);
+      setAuthError('Server certificate trusted. Sign in again to connect.');
     }
   };
 
@@ -37,7 +38,7 @@ export function TofuModal() {
                 Cancel
               </button>
               <button class="btn-primary" style={{ flex: 1 }} onClick={handleConfirm}>
-                Trust & Connect
+                Trust
               </button>
             </div>
           </div>

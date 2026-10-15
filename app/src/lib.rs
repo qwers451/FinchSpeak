@@ -9,6 +9,27 @@ pub mod state;
 use state::AppState;
 use tauri::Manager;
 
+/// Load pinned server fingerprints from `<app data dir>/known_servers.txt`.
+fn load_known_servers(app: &tauri::App) {
+    let state = app.state::<AppState>();
+    let path = match app.path().app_data_dir() {
+        Ok(dir) => dir.join("known_servers.txt"),
+        Err(e) => {
+            tracing::error!("No app data dir, server fingerprints will not persist: {e}");
+            return;
+        }
+    };
+    match finch_client_core::tofu::load_fingerprints(&path) {
+        Ok(known) => {
+            for (host, fingerprint) in known {
+                state.saved_fingerprints.insert(host, fingerprint);
+            }
+        }
+        Err(e) => tracing::error!("Failed to read {path:?}: {e}"),
+    }
+    *state.known_servers_path.blocking_write() = Some(path);
+}
+
 pub fn run() {
     // Initialize tracing subscriber
     let _ = tracing_subscriber::fmt()
@@ -26,6 +47,7 @@ pub fn run() {
         .manage(state)
         .setup(|app| {
             tracing::info!("Tauri setup initialized");
+            load_known_servers(app);
             if let Some(window) = app.get_webview_window("main") {
                 tracing::info!("Main window found, ensuring show and focus");
                 let _ = window.show();

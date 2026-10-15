@@ -6,6 +6,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
+use finch_client_core::error::ClientError;
 use finch_client_core::session::{connect, ConnectParams, SessionEvent};
 use finch_protocol::media::{MediaHeader, MediaType, MEDIA_HEADER_SIZE};
 use finch_protocol::messages::ServerMessage;
@@ -24,15 +25,28 @@ pub async fn start_quic_session(
     state: AppState,
     app_handle: tauri::AppHandle,
 ) -> anyhow::Result<Connection> {
-    let (session, events) = connect(
+    let connected = connect(
         ConnectParams {
             quic_addr: server_addr,
             hostname: hostname.to_string(),
             token,
+            require_known_fingerprint: true,
         },
         state.saved_fingerprints.clone(),
     )
-    .await?;
+    .await;
+    let (session, events) = match connected {
+        Ok(ok) => ok,
+        Err(ClientError::UntrustedServer { hostname, fingerprint }) => {
+            *state.pending_fingerprint.write().await = Some((hostname.clone(), fingerprint.clone()));
+            let _ = app_handle.emit(
+                "tofu-required",
+                serde_json::json!({ "hostname": hostname, "fingerprint": fingerprint }),
+            );
+            anyhow::bail!("server certificate for {hostname} is not trusted yet — confirm its fingerprint and sign in again");
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     state
         .session_peer_id

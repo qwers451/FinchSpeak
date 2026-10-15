@@ -1,6 +1,7 @@
 //! Client application state shared across Tauri commands.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::Arc;
 
@@ -43,6 +44,8 @@ pub struct AppState {
     pub assembler: Arc<Mutex<FrameAssembler>>,
     /// TOFU verified fingerprints: hostname -> SHA-256 hex string
     pub saved_fingerprints: Arc<DashMap<String, String>>,
+    /// File with pinned server fingerprints (set at startup from the app data dir).
+    pub known_servers_path: Arc<RwLock<Option<PathBuf>>>,
     /// Pending TOFU fingerprint to be accepted: (hostname, fingerprint)
     pub pending_fingerprint: Arc<RwLock<Option<(String, String)>>>,
     /// Screen video channel to WebCodecs in Webview
@@ -73,6 +76,7 @@ impl AppState {
             mixer: Arc::new(Mutex::new(AudioMixer::new())),
             assembler: Arc::new(Mutex::new(FrameAssembler::new())),
             saved_fingerprints: Arc::new(DashMap::new()),
+            known_servers_path: Arc::new(RwLock::new(None)),
             pending_fingerprint: Arc::new(RwLock::new(None)),
             video_channel: Arc::new(RwLock::new(None)),
             audio_engine: Arc::new(Mutex::new(crate::audio_engine::AudioEngine::new())),

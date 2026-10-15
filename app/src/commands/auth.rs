@@ -129,5 +129,10 @@ pub async fn trust_fingerprint(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     state.saved_fingerprints.insert(hostname, fingerprint);
+    *state.pending_fingerprint.write().await = None;
+    if let Some(path) = &*state.known_servers_path.read().await {
+        finch_client_core::tofu::save_fingerprints(path, &state.saved_fingerprints)
+            .map_err(|e| format!("Failed to save server fingerprint: {}", e))?;
+    }
     Ok(())
 }
