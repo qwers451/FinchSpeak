@@ -4,6 +4,7 @@
 //! Everything here is synchronous and network-free so it can be tested without a server; the
 //! Tauri app glues it to a [`Session`](crate::session::Session).
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -68,11 +69,76 @@ pub struct ScreenPacketizer {
     encoder: Option<H264VideoEncoder>,
     sequence: u16,
     force_key: bool,
+    /// Current target rate (`None` until the first frame says how big the picture is).
+    bitrate_bps: Option<u32>,
+    /// Rate the share started with; recovery never goes above it.
+    start_bitrate_bps: Option<u32>,
+    /// When viewers recently reported losses (ms on the share's clock).
+    losses_ms: VecDeque<u32>,
+    /// When the rate last changed or the last loss happened.
+    last_event_ms: u32,
 }
+
+/// This many reports within [`LOSS_WINDOW_MS`] lower the bitrate.
+const LOSSES_TO_DEGRADE: usize = 3;
+const LOSS_WINDOW_MS: u32 = 10_000;
+/// Calm for this long raises the bitrate again.
+const CALM_BEFORE_RECOVERY_MS: u32 = 30_000;
+const MIN_BITRATE_BPS: u32 = 500_000;
 
 impl ScreenPacketizer {
     pub fn new(config: ShareConfig, channel_id: u32, sender_peer_id: u32) -> Self {
-        Self { config, channel_id, sender_peer_id, encoder: None, sequence: 0, force_key: false }
+        Self {
+            config,
+            channel_id,
+            sender_peer_id,
+            encoder: None,
+            sequence: 0,
+            force_key: false,
+            bitrate_bps: config.bitrate_bps,
+            start_bitrate_bps: config.bitrate_bps,
+            losses_ms: VecDeque::new(),
+            last_event_ms: 0,
+        }
+    }
+
+    /// The bitrate the encoder is currently asked for.
+    pub fn bitrate_bps(&self) -> Option<u32> {
+        self.bitrate_bps
+    }
+
+    /// A viewer reported that it lost part of the stream (`at_ms` on the share's clock).
+    /// Repeated reports mean the link cannot carry the bitrate: lower it.
+    pub fn report_loss(&mut self, at_ms: u32) {
+        self.losses_ms.push_back(at_ms);
+        self.last_event_ms = at_ms;
+        while self.losses_ms.front().is_some_and(|&t| at_ms.wrapping_sub(t) > LOSS_WINDOW_MS) {
+            self.losses_ms.pop_front();
+        }
+        if self.losses_ms.len() >= LOSSES_TO_DEGRADE {
+            self.losses_ms.clear();
+            if let Some(rate) = self.bitrate_bps {
+                self.set_bitrate((rate / 4 * 3).max(MIN_BITRATE_BPS));
+            }
+        }
+    }
+
+    fn set_bitrate(&mut self, rate: u32) {
+        if self.bitrate_bps != Some(rate) {
+            self.bitrate_bps = Some(rate);
+            // A new rate means a new encoder, which starts with a key frame.
+            self.encoder = None;
+        }
+    }
+
+    fn maybe_recover(&mut self, now_ms: u32) {
+        let (Some(rate), Some(start)) = (self.bitrate_bps, self.start_bitrate_bps) else {
+            return;
+        };
+        if rate < start && now_ms.wrapping_sub(self.last_event_ms) >= CALM_BEFORE_RECOVERY_MS {
+            self.last_event_ms = now_ms;
+            self.set_bitrate((rate / 4 * 5).min(start));
+        }
     }
 
     /// The (even) picture size currently being encoded.
@@ -98,11 +164,18 @@ impl ScreenPacketizer {
         if w == 0 || h == 0 {
             return Err(ScreenError::FrameTooSmall(frame.width, frame.height));
         }
-        if self.dimensions() != Some((w, h)) {
-            let bitrate = self
-                .config
-                .bitrate_bps
-                .unwrap_or_else(|| default_bitrate(w, h, self.config.fps));
+        self.maybe_recover(timestamp);
+        if self.dimensions() != Some((w, h)) || self.encoder.is_none() {
+            let bitrate = match self.bitrate_bps {
+                Some(rate) => rate,
+                None => {
+                    // Start from a rate suited to the picture size.
+                    let rate = default_bitrate(w, h, self.config.fps);
+                    self.bitrate_bps = Some(rate);
+                    self.start_bitrate_bps = Some(rate);
+                    rate
+                }
+            };
             self.encoder = Some(H264VideoEncoder::with_config(VideoEncoderConfig {
                 width: w,
                 height: h,
@@ -354,6 +427,7 @@ type SharedSlot = Arc<(Mutex<FrameSlot>, Condvar)>;
 pub struct ScreenSharer {
     stop: Arc<AtomicBool>,
     keyframe: Arc<AtomicBool>,
+    loss: Arc<AtomicBool>,
     threads: Vec<std::thread::JoinHandle<()>>,
 }
 
@@ -372,6 +446,7 @@ impl ScreenSharer {
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let keyframe = Arc::new(AtomicBool::new(true));
+        let loss = Arc::new(AtomicBool::new(false));
         let slot: SharedSlot = Arc::new((Mutex::new(FrameSlot::default()), Condvar::new()));
         let mut threads = Vec::new();
 
@@ -409,7 +484,7 @@ impl ScreenSharer {
         );
 
         // Encoder thread: paced to the frame rate.
-        let (stop_flag, key_flag) = (stop.clone(), keyframe.clone());
+        let (stop_flag, key_flag, loss_flag) = (stop.clone(), keyframe.clone(), loss.clone());
         threads.extend(
             std::thread::Builder::new()
                 .name("screen-encode".into())
@@ -448,6 +523,9 @@ impl ScreenSharer {
                             break "the connection does not support datagrams".to_string();
                         };
                         let timestamp = started.elapsed().as_millis() as u32;
+                        if loss_flag.swap(false, Ordering::Relaxed) {
+                            packetizer.report_loss(timestamp);
+                        }
                         match packetizer.push_frame(&frame, timestamp, max_datagram) {
                             Ok(OutgoingVideo::KeyFrame { header, data }) => {
                                 let connection = connection.clone();
@@ -487,12 +565,14 @@ impl ScreenSharer {
                 .ok(),
         );
 
-        Self { stop, keyframe, threads }
+        Self { stop, keyframe, loss, threads }
     }
 
-    /// A viewer needs a key frame.
+    /// A viewer lost part of the stream and needs a key frame. Repeated requests also lower
+    /// the bitrate.
     pub fn request_keyframe(&self) {
         self.keyframe.store(true, Ordering::Relaxed);
+        self.loss.store(true, Ordering::Relaxed);
     }
 
     /// True while the share is active; false once it has ended or been stopped.

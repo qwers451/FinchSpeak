@@ -338,3 +338,70 @@ fn a_scaled_frame_decodes_and_resembles_the_source() {
         assert!(rgb[centre + c].abs_diff(expected[c]) < 25, "channel {c}: {} vs {}", rgb[centre + c], expected[c]);
     }
 }
+
+// ---- bitrate follows the losses viewers report -----------------------------------------------
+
+fn start_rate() -> u32 {
+    4_000_000
+}
+
+fn warmed_up() -> ScreenPacketizer {
+    let mut p = packetizer();
+    p.push_frame(&test_frame(320, 180, 0), 0, MAX_DATAGRAM_SIZE).unwrap();
+    p
+}
+
+#[test]
+fn repeated_losses_lower_the_bitrate_and_restart_with_a_keyframe() {
+    let mut p = warmed_up();
+    assert_eq!(p.bitrate_bps(), Some(start_rate()));
+    for at in [1_000, 2_000, 3_000] {
+        p.report_loss(at);
+    }
+    let out = p.push_frame(&test_frame(320, 180, 1), 3_100, MAX_DATAGRAM_SIZE).unwrap();
+    assert_eq!(p.bitrate_bps(), Some(start_rate() / 4 * 3));
+    assert!(is_key(&out), "the new rate needs a new key frame");
+}
+
+#[test]
+fn occasional_losses_do_not_change_the_bitrate() {
+    let mut p = warmed_up();
+    for at in [1_000, 20_000, 40_000, 60_000] {
+        p.report_loss(at);
+        p.push_frame(&test_frame(320, 180, 1), at + 10, MAX_DATAGRAM_SIZE).unwrap();
+    }
+    assert_eq!(p.bitrate_bps(), Some(start_rate()));
+}
+
+#[test]
+fn bitrate_never_drops_below_the_floor() {
+    let mut p = warmed_up();
+    let mut now = 1_000;
+    for _ in 0..40 {
+        for _ in 0..3 {
+            p.report_loss(now);
+            now += 100;
+        }
+        p.push_frame(&test_frame(320, 180, 1), now, MAX_DATAGRAM_SIZE).unwrap();
+        now += 100;
+    }
+    assert_eq!(p.bitrate_bps(), Some(500_000));
+}
+
+#[test]
+fn bitrate_recovers_after_a_calm_period_but_not_above_the_start() {
+    let mut p = warmed_up();
+    for at in [1_000, 2_000, 3_000] {
+        p.report_loss(at);
+    }
+    p.push_frame(&test_frame(320, 180, 1), 3_100, MAX_DATAGRAM_SIZE).unwrap();
+    let lowered = p.bitrate_bps().unwrap();
+    assert!(lowered < start_rate());
+
+    let mut now = 3_100;
+    for _ in 0..8 {
+        now += 31_000;
+        p.push_frame(&test_frame(320, 180, 2), now, MAX_DATAGRAM_SIZE).unwrap();
+    }
+    assert_eq!(p.bitrate_bps(), Some(start_rate()));
+}
