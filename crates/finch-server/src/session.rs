@@ -20,6 +20,8 @@ pub struct ClientSession {
     pub current_voice_channel: Option<u32>,
     pub muted: bool,
     pub deafened: bool,
+    /// True while this peer is sharing its screen in its voice channel.
+    pub sharing_screen: bool,
     pub connection: quinn::Connection,
     pub control_tx: Sender<ServerMessage>,
 }
@@ -139,6 +141,14 @@ impl SessionManager {
     }
 
     /// Leave a voice room.
+    /// Mark whether `peer_id` is sharing its screen. Returns the previous value.
+    pub fn set_sharing(&self, peer_id: u32, sharing: bool) -> bool {
+        self.sessions
+            .get_mut(&peer_id)
+            .map(|mut session| std::mem::replace(&mut session.sharing_screen, sharing))
+            .unwrap_or(false)
+    }
+
     pub fn leave_voice(&self, peer_id: u32, short_id: u32) {
         if let Some(mut session) = self.sessions.get_mut(&peer_id)
             && session.current_voice_channel == Some(short_id)
@@ -252,7 +262,7 @@ mod tests {
             manager.register_session(ClientSession {
                 token_id: String::new(),
                 peer_id, user_id, username: "alice".into(), role: "member".into(),
-                current_voice_channel: None, muted: false, deafened: false,
+                current_voice_channel: None, muted: false, deafened: false, sharing_screen: false,
                 connection: connection.clone(), control_tx,
             });
         }

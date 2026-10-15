@@ -159,3 +159,60 @@ async fn stalled_keyframe_stream_does_not_block_the_next() -> anyhow::Result<()>
     drop(stalled);
     Ok(())
 }
+
+fn sharing_flag(client: &TestClient, peer_id: u32) -> Option<bool> {
+    client
+        .session
+        .initial_state
+        .voice_states
+        .iter()
+        .find(|state| state.peer_id == peer_id)
+        .map(|state| state.sharing_screen)
+}
+
+/// Someone who joins after the share started must learn about it from the state snapshot.
+#[tokio::test]
+async fn late_joiner_sees_who_is_sharing() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let (a, _b, _) = streamer_and_viewer(&server).await?;
+    let a_peer = a.session.session_peer_id;
+
+    let late = TestClient::register(&server, "carol").await?;
+    assert_eq!(sharing_flag(&late, a_peer), Some(true), "the active share is missing from the snapshot");
+
+    a.send(ClientMessage::StopScreenShare).await?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let later = TestClient::register(&server, "dave").await?;
+    assert_eq!(sharing_flag(&later, a_peer), Some(false), "a stopped share is still reported");
+    Ok(())
+}
+
+fn stopped_for(peer: u32) -> impl FnMut(&ServerMessage) -> Option<()> {
+    move |m| match m {
+        ServerMessage::ScreenShareStopped { peer_id } if *peer_id == peer => Some(()),
+        _ => None,
+    }
+}
+
+/// Leaving the voice channel ends the share for everyone watching.
+#[tokio::test]
+async fn leaving_voice_stops_the_share_for_viewers() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let (a, mut b, _) = streamer_and_viewer(&server).await?;
+
+    a.send(ClientMessage::LeaveVoice).await?;
+    b.expect_control(WAIT, stopped_for(a.session.session_peer_id)).await?;
+    Ok(())
+}
+
+/// A dropped connection ends the share for everyone watching, instead of leaving a dead player.
+#[tokio::test]
+async fn disconnect_stops_the_share_for_viewers() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let (a, mut b, _) = streamer_and_viewer(&server).await?;
+    let a_peer = a.session.session_peer_id;
+
+    a.session.connection.close(0u32.into(), b"gone");
+    b.expect_control(Duration::from_secs(20), stopped_for(a_peer)).await?;
+    Ok(())
+}

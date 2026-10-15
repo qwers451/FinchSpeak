@@ -253,6 +253,7 @@ pub async fn handle_connection(
         current_voice_channel: None,
         muted: false,
         deafened: false,
+        sharing_screen: false,
         connection: conn.clone(),
         control_tx: control_tx.clone(),
     };
@@ -367,7 +368,16 @@ pub async fn handle_connection(
         .get(&peer_id)
         .and_then(|s| s.current_voice_channel)
         .and_then(|short_id| sessions.short_to_channel.get(&short_id).map(|c| *c));
+    let was_sharing_in = sessions
+        .sessions
+        .get(&peer_id)
+        .and_then(|s| s.sharing_screen.then_some(s.current_voice_channel).flatten());
     sessions.unregister_session(peer_id);
+    if let Some(short_id) = was_sharing_in {
+        sessions
+            .broadcast_voice(short_id, ServerMessage::ScreenShareStopped { peer_id }, None)
+            .await;
+    }
     if let Some(channel_id) = left_voice {
         sessions
             .broadcast_all(ServerMessage::UserLeftVoice {
@@ -412,6 +422,15 @@ async fn linked_attachments(pool: &SqlitePool, message_id: Uuid) -> Vec<Attachme
             })
         })
         .collect()
+}
+
+/// If `peer_id` is sharing its screen, clear that and tell the voice room `short_id`.
+async fn stop_share_if_active(sessions: &SessionManager, peer_id: u32, short_id: u32) {
+    if sessions.set_sharing(peer_id, false) {
+        sessions
+            .broadcast_voice(short_id, ServerMessage::ScreenShareStopped { peer_id }, Some(peer_id))
+            .await;
+    }
 }
 
 /// Key frame streams read concurrently per connection.
@@ -564,8 +583,12 @@ async fn handle_client_message(
         }
 
         ClientMessage::JoinVoice { channel_id } => {
-            if let Some(short_id) = sessions.channel_to_short.get(&channel_id) {
-                sessions.join_voice(peer_id, *short_id);
+            if let Some(short_id) = sessions.channel_to_short.get(&channel_id).map(|s| *s) {
+                let old_room = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
+                if let Some(old_room) = old_room.filter(|old| *old != short_id) {
+                    stop_share_if_active(sessions, peer_id, old_room).await;
+                }
+                sessions.join_voice(peer_id, short_id);
 
                 let event = ServerMessage::UserJoinedVoice {
                     user_id,
@@ -588,6 +611,7 @@ async fn handle_client_message(
 
             if let Some((short_id, c_id)) = voice_info {
                 sessions.leave_voice(peer_id, short_id);
+                stop_share_if_active(sessions, peer_id, short_id).await;
 
                 let event = ServerMessage::UserLeftVoice {
                     user_id,
@@ -625,6 +649,7 @@ async fn handle_client_message(
         } => {
             let short_id = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
             if let Some(short_id) = short_id {
+                sessions.set_sharing(peer_id, true);
                 let event = ServerMessage::ScreenShareStarted {
                     user_id,
                     peer_id,
@@ -640,6 +665,7 @@ async fn handle_client_message(
         ClientMessage::StopScreenShare => {
             let short_id = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
             if let Some(short_id) = short_id {
+                sessions.set_sharing(peer_id, false);
                 let event = ServerMessage::ScreenShareStopped { peer_id };
                 sessions.broadcast_voice(short_id, event, Some(peer_id)).await;
             }

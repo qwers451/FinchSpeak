@@ -29,7 +29,7 @@ pub async fn server_state(pool: &SqlitePool, sessions: &SessionManager) -> Resul
     // Release DashMap guards before touching the database.
     let peers: Vec<_> = sessions.sessions.iter().map(|session| (
         session.user_id, session.peer_id, session.username.clone(),
-        session.current_voice_channel, session.muted, session.deafened,
+        session.current_voice_channel, session.muted, session.deafened, session.sharing_screen,
     )).collect();
     let online_ids: HashSet<_> = peers.iter().map(|peer| peer.0).collect();
     let mut online_users = Vec::with_capacity(online_ids.len());
@@ -49,9 +49,9 @@ pub async fn server_state(pool: &SqlitePool, sessions: &SessionManager) -> Resul
             }
         }
     }
-    let voice_states = peers.into_iter().filter_map(|(user_id, peer_id, username, short_id, muted, deafened)| {
+    let voice_states = peers.into_iter().filter_map(|(user_id, peer_id, username, short_id, muted, deafened, sharing_screen)| {
         let channel = channels.iter().find(|channel| Some(channel.short_id) == short_id)?;
-        Some(VoiceState { user_id, peer_id, username, channel_id: channel.id, muted, deafened, sharing_screen: false })
+        Some(VoiceState { user_id, peer_id, username, channel_id: channel.id, muted, deafened, sharing_screen })
     }).collect();
     Ok(ServerState { channels, online_users, voice_states })
 }
