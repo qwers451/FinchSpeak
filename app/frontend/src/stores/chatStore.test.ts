@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../services/api';
 import { setCurrentUser } from './authStore';
-import { handleIncomingMessage, messages, selectChannel, sendMessage, setActiveChannel, setMessages } from './chatStore';
+import { handleIncomingMessage, handleMessageRejected, messages, selectChannel, sendMessage, setActiveChannel, setMessages } from './chatStore';
+import { appError, setAppError } from './notificationStore';
 import type { Channel } from '../types';
 
 const channel: Channel = { id: 'chat', short_id: 1, name: 'general', channel_type: 'text', position: 0, bitrate_kbps: 64 };
@@ -102,5 +103,53 @@ describe('chat regressions', () => {
     await loading;
     handleIncomingMessage({ ...live('persisted', 'same'), author_id: 'me' });
     expect(messages().map((message) => message.id)).toEqual(['persisted']);
+  });
+
+  // --- AUD-036: messages are matched by the id the client chose, never by their text ---
+
+  async function sendTwice() {
+    const ids: string[] = [];
+    vi.spyOn(api, 'sendTextMessage').mockImplementation(async (_channel, _content, _attachments, clientMsgId) => {
+      ids.push(clientMsgId as string);
+    });
+    await sendMessage('same');
+    await sendMessage('same');
+    return ids;
+  }
+
+  it('AUD-036 sends a distinct client id with every message', async () => {
+    const ids = await sendTwice();
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).not.toEqual(ids[1]);
+    expect(messages().map((message) => message.id)).toEqual([`local-${ids[0]}`, `local-${ids[1]}`]);
+  });
+
+  it('AUD-036 a rejection rolls back exactly the message it names, even with identical text', async () => {
+    const ids = await sendTwice();
+    setAppError(null);
+    handleMessageRejected({ client_msg_id: ids[1], code: 400, message: 'Message must be 1..=4000 characters' });
+    expect(messages().map((message) => message.id)).toEqual([`local-${ids[0]}`]);
+    expect(appError()).toContain('Message must be 1..=4000 characters');
+  });
+
+  it('AUD-036 a rejection of an unknown id changes nothing', async () => {
+    const ids = await sendTwice();
+    handleMessageRejected({ client_msg_id: 'someone-elses', code: 400, message: 'no' });
+    expect(messages()).toHaveLength(ids.length);
+  });
+
+  it('AUD-036 the echo replaces the pending message with the same id, not merely the same text', async () => {
+    const ids = await sendTwice();
+    handleIncomingMessage({ ...live('stored', 'same'), author_id: 'me', client_msg_id: ids[1] });
+    expect(messages().map((message) => message.id).sort()).toEqual([`local-${ids[0]}`, 'stored'].sort());
+  });
+
+  it('AUD-036 history that already holds a pending message (a resend after reconnect) replaces it', async () => {
+    const ids = await sendTwice();
+    vi.spyOn(api, 'fetchChannelMessages').mockResolvedValue({ channel_id: 'chat', has_more: false, messages: [
+      { id: 'persisted', author_id: 'me', author_name: 'Me', content: 'same', attachments: [], timestamp: 1, client_msg_id: ids[1] },
+    ] });
+    await selectChannel(channel);
+    expect(messages().map((message) => message.id).sort()).toEqual([`local-${ids[0]}`, 'persisted'].sort());
   });
 });

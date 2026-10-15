@@ -256,6 +256,7 @@ async fn test_full_system_autotest() -> anyhow::Result<()> {
     // ─── 8. Send Chat Message over QUIC Stream 0 ─────────────────────────────
     let test_content = "Hello, FinchSpeak automated test message!";
     let send_msg = ClientMessage::SendMessage {
+            client_msg_id: None,
         channel_id: general_uuid,
         content: test_content.to_string(),
         attachments: vec![],

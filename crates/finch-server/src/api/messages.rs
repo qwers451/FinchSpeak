@@ -38,8 +38,8 @@ pub async fn channel_messages_handler(
     let before = query.before.unwrap_or(i64::MAX);
 
     // Fetch messages with author display_name
-    let mut rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<i64>, i64)>(
-        "SELECT m.id, m.author_id, u.display_name, m.content, m.reply_to_id, m.edited_at, m.created_at
+    let mut rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<i64>, i64, Option<String>)>(
+        "SELECT m.id, m.author_id, u.display_name, m.content, m.reply_to_id, m.edited_at, m.created_at, m.client_msg_id
          FROM messages m
          JOIN users u ON m.author_id = u.id
          WHERE m.channel_id = ? AND m.created_at < ?
@@ -92,7 +92,7 @@ pub async fn channel_messages_handler(
     }
 
     for row in rows {
-        let (id_str, author_id_str, author_name, content, _reply_to_id, edited_at, timestamp) = row;
+        let (id_str, author_id_str, author_name, content, _reply_to_id, edited_at, timestamp, client_msg_id) = row;
 
         let msg_id = Uuid::parse_str(&id_str).unwrap_or_default();
         let author_id = Uuid::parse_str(&author_id_str).unwrap_or_default();
@@ -106,6 +106,7 @@ pub async fn channel_messages_handler(
             attachments,
             timestamp,
             edited_at,
+            client_msg_id: client_msg_id.and_then(|id| Uuid::parse_str(&id).ok()),
         });
     }
 

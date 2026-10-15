@@ -42,6 +42,11 @@ pub enum ClientMessage {
         /// IDs of previously uploaded attachments to include.
         #[serde(default)]
         attachments: Vec<Uuid>,
+        /// Chosen by the sender. Echoed in [`ServerMessage::NewMessage`] and
+        /// [`ServerMessage::MessageRejected`], and makes a retry idempotent: a message with an
+        /// id the sender already used is not stored or broadcast again.
+        #[serde(default)]
+        client_msg_id: Option<Uuid>,
     },
 
     /// Request chat message history for a channel.
@@ -115,6 +120,17 @@ pub enum ServerMessage {
         #[serde(default)]
         attachments: Vec<AttachmentInfo>,
         timestamp: i64,
+        /// The id the author gave this message, if any.
+        #[serde(default)]
+        client_msg_id: Option<Uuid>,
+    },
+
+    /// A [`ClientMessage::SendMessage`] that carried a `client_msg_id` was refused. Without an
+    /// id the sender gets a plain [`ServerMessage::Error`].
+    MessageRejected {
+        client_msg_id: Uuid,
+        code: u16,
+        message: String,
     },
 
     /// Response to [`ClientMessage::FetchHistory`].

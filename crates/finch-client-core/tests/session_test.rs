@@ -171,6 +171,7 @@ async fn control_events_survive_datagram_flood() -> anyhow::Result<()> {
 
     a.control_tx
         .send(ClientMessage::SendMessage {
+            client_msg_id: None,
             channel_id: text_id,
             content: "after flood".to_string(),
             attachments: vec![],

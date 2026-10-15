@@ -79,6 +79,9 @@ pub struct HistoryMessage {
     pub attachments: Vec<AttachmentInfo>,
     pub timestamp: i64,
     pub edited_at: Option<i64>,
+    /// The id the author gave this message when sending it, if any.
+    #[serde(default)]
+    pub client_msg_id: Option<Uuid>,
 }
 
 /// Voice state for a user in a voice channel.

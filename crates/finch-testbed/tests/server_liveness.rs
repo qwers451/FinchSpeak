@@ -107,6 +107,7 @@ async fn stalled_client_does_not_block_chat_for_others() -> anyhow::Result<()> {
 
     a.control_tx
         .send(ClientMessage::SendMessage {
+            client_msg_id: None,
             channel_id: text_id,
             content: "still alive".to_string(),
             attachments: vec![],

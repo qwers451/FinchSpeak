@@ -21,6 +21,7 @@ async fn client_reconnects_after_server_restart() -> anyhow::Result<()> {
     let (text_id, _) = a.channel(ChannelType::Text);
 
     a.send(ClientMessage::SendMessage {
+            client_msg_id: None,
         channel_id: text_id,
         content: "before restart".to_string(),
         attachments: vec![],

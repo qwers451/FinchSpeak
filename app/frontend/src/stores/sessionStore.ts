@@ -1,7 +1,7 @@
 import { createSignal } from 'solid-js';
 import type { SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
 import { setPendingTofu } from './tofuStore';
-import { activeChannel, channels, handleChannelCreated, handleIncomingMessage, selectChannel, setChannels } from './chatStore';
+import { activeChannel, channels, handleChannelCreated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
 import { handleUserSpeaking, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
 export { appError, setAppError } from './notificationStore';
@@ -42,6 +42,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     setConnectionError(null);
   },
   'new-message': handleIncomingMessage,
+  'message-rejected': handleMessageRejected,
   'user-speaking': (data) => handleUserSpeaking(data.peer_id, data.is_speaking),
   'local-speaking': setIsLocalSpeaking,
   'ping-rtt': (data) => setPingRtt(data.rtt_ms),

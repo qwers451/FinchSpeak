@@ -62,7 +62,10 @@ export async function selectChannel(channel: Channel) {
       if (!isCurrent()) return;
       const historyMessages = history.messages.map((message) => ({ ...message, channel_id: channel.id }));
       const historyIds = new Set(historyMessages.map((message) => message.id));
-      setMessages((previous) => chronological([...historyMessages, ...previous.filter((message) => !historyIds.has(message.id))]));
+      // Pending messages the server already stored (e.g. sent just before a reconnect).
+      const stored = new Set(historyMessages.flatMap((message) => message.client_msg_id ? [`local-${message.client_msg_id}`] : []));
+      setMessages((previous) => chronological([...historyMessages,
+        ...previous.filter((message) => !historyIds.has(message.id) && !stored.has(message.id))]));
     } catch (err) {
       if (!isCurrent()) return;
       setAppError(String(err));
@@ -79,8 +82,11 @@ export async function sendMessage(content: string, attachments?: string[]) {
   const current = activeChannel();
   if (!current || !content.trim()) return;
   const user = currentUser();
+  // The server echoes this id in the stored message and in a rejection, so the pending message is
+  // matched by id and never by its text.
+  const clientMsgId = crypto.randomUUID();
   const optimisticMsg: Message = {
-    id: `local-${crypto.randomUUID()}`,
+    id: `local-${clientMsgId}`,
     channel_id: current.id,
     author_id: user?.id || 'me',
     author_name: user?.display_name || user?.username || 'You',
@@ -90,12 +96,19 @@ export async function sendMessage(content: string, attachments?: string[]) {
   };
   setMessages((prev) => [...prev, optimisticMsg]);
   try {
-    await api.sendTextMessage(current.id, content.trim(), attachments);
+    await api.sendTextMessage(current.id, content.trim(), attachments, clientMsgId);
   } catch (err) {
     setMessages((prev) => prev.filter((message) => message.id !== optimisticMsg.id));
     setAppError(String(err));
     console.error('Failed to send text message:', err);
   }
+}
+
+/** The server refused a message we sent: roll back exactly that one and say why. */
+export function handleMessageRejected(rejection: { client_msg_id: string; code: number; message: string }) {
+  const pendingId = `local-${rejection.client_msg_id}`;
+  setMessages((prev) => prev.filter((message) => message.id !== pendingId));
+  setAppError(`Message not sent: ${rejection.message}`);
 }
 
 export function handleIncomingMessage(incoming: IncomingMessage | Message) {
@@ -107,8 +120,11 @@ export function handleIncomingMessage(incoming: IncomingMessage | Message) {
     if (receivedMessageIds.has(msg.id)) return;
     receivedMessageIds.add(msg.id);
     setMessages((prev) => {
-      const pendingIndex = prev.findIndex((message) => message.id.startsWith('local-') &&
-        message.author_id === msg.author_id && message.content === msg.content);
+      // By id when the server echoed one; by author and text only for servers that do not.
+      const pendingIndex = msg.client_msg_id
+        ? prev.findIndex((message) => message.id === `local-${msg.client_msg_id}`)
+        : prev.findIndex((message) => message.id.startsWith('local-') &&
+            message.author_id === msg.author_id && message.content === msg.content);
       const filtered = prev.filter((_, index) => index !== pendingIndex);
       return filtered.some((message) => message.id === msg.id) ? filtered : chronological([...filtered, msg]);
     });

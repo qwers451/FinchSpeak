@@ -58,6 +58,7 @@ async fn attachments_are_delivered_and_cannot_be_stolen() -> anyhow::Result<()> 
 
     let file = a.api.upload_file("photo.png", vec![1u8; 512], "image/png").await?;
     a.send(ClientMessage::SendMessage {
+            client_msg_id: None,
         channel_id: text_id,
         content: "look".to_string(),
         attachments: vec![file.id],
@@ -73,6 +74,7 @@ async fn attachments_are_delivered_and_cannot_be_stolen() -> anyhow::Result<()> 
 
     // Bob references Alice's attachment in his own message.
     b.send(ClientMessage::SendMessage {
+            client_msg_id: None,
         channel_id: text_id,
         content: "mine now".to_string(),
         attachments: vec![file.id],

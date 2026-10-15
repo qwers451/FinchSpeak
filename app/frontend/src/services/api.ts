@@ -128,9 +128,9 @@ export const api = {
     return resp.json();
   },
 
-  sendTextMessage: async (channelId: string, content: string, attachments?: string[]): Promise<void> => {
+  sendTextMessage: async (channelId: string, content: string, attachments?: string[], clientMsgId?: string): Promise<void> => {
     if (isTauri()) {
-      return invoke('send_text_message', { channelId, content, attachments });
+      return invoke('send_text_message', { channelId, content, attachments, clientMsgId });
     }
     // In browser environment, broadcast or notify
     console.info(`[Browser mode] Simulated message sent to ${channelId}: ${content}`);

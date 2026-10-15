@@ -208,6 +208,7 @@ fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
             content,
             attachments,
             timestamp,
+            client_msg_id,
         } => {
             let _ = app_handle.emit(
                 "new-message",
@@ -219,6 +220,21 @@ fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
                     "content": content,
                     "attachments": attachments,
                     "timestamp": timestamp,
+                    "client_msg_id": client_msg_id,
+                }),
+            );
+        }
+        ServerMessage::MessageRejected {
+            client_msg_id,
+            code,
+            message,
+        } => {
+            let _ = app_handle.emit(
+                "message-rejected",
+                serde_json::json!({
+                    "client_msg_id": client_msg_id,
+                    "code": code,
+                    "message": message,
                 }),
             );
         }

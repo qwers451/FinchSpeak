@@ -23,6 +23,7 @@ async fn message_broadcast_to_all() -> anyhow::Result<()> {
         channel_id: text_id,
         content: "hello all".to_string(),
         attachments: vec![],
+        client_msg_id: None,
     })
     .await?;
 
@@ -53,6 +54,7 @@ async fn history_persisted_in_order() -> anyhow::Result<()> {
             channel_id: text_id,
             content: content.to_string(),
             attachments: vec![],
+            client_msg_id: None,
         })
         .await?;
         a.expect_control(WAIT, |m| match m {
@@ -114,7 +116,7 @@ async fn invalid_messages_are_rejected_with_error() -> anyhow::Result<()> {
         (text_id, "x".repeat(4001)),
     ];
     for (channel_id, content) in cases {
-        a.send(ClientMessage::SendMessage { channel_id, content, attachments: vec![] }).await?;
+        a.send(ClientMessage::SendMessage { channel_id, content, attachments: vec![], client_msg_id: None }).await?;
         a.expect_control(WAIT, |m| match m {
             ServerMessage::Error { code: 400, .. } => Some(()),
             _ => None,
@@ -134,7 +136,7 @@ async fn history_pages_by_message_id() -> anyhow::Result<()> {
     let mut a = TestClient::register(&server, "alice").await?;
     let (text_id, _) = a.channel(ChannelType::Text);
     for content in ["first", "second", "third"] {
-        a.send(ClientMessage::SendMessage { channel_id: text_id, content: content.to_string(), attachments: vec![] })
+        a.send(ClientMessage::SendMessage { channel_id: text_id, content: content.to_string(), attachments: vec![], client_msg_id: None })
             .await?;
         a.expect_control(WAIT, |m| match m {
             ServerMessage::NewMessage { content: c, .. } if c == content => Some(()),
@@ -153,5 +155,76 @@ async fn history_pages_by_message_id() -> anyhow::Result<()> {
     assert!(!page2.has_more);
     let contents: Vec<&str> = page2.messages.iter().map(|m| m.content.as_str()).collect();
     assert_eq!(contents, ["first"]);
+    Ok(())
+}
+
+/// A rejection names the exact message that was rejected, so a client can roll back that one
+/// even when several pending messages have the same text (AUD-036).
+#[tokio::test]
+async fn rejection_names_the_rejected_message() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let mut a = TestClient::register(&server, "alice").await?;
+    let (voice_id, _) = a.channel(ChannelType::Voice);
+
+    let (first, second) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+    for id in [first, second] {
+        a.send(ClientMessage::SendMessage {
+            channel_id: voice_id,
+            content: "same text".to_string(),
+            attachments: vec![],
+            client_msg_id: Some(id),
+        })
+        .await?;
+    }
+
+    let mut rejected = Vec::new();
+    for _ in 0..2 {
+        rejected.push(
+            a.expect_control(WAIT, |m| match m {
+                ServerMessage::MessageRejected { client_msg_id, code, .. } => Some((*client_msg_id, *code)),
+                _ => None,
+            })
+            .await?,
+        );
+    }
+    assert_eq!(rejected, [(first, 400), (second, 400)]);
+    Ok(())
+}
+
+/// The server echoes the sender's id, remembers it in the history, and a resend with the same id
+/// (a client retrying after a reconnect) does not create a second message (AUD-036).
+#[tokio::test]
+async fn client_message_id_is_echoed_stored_and_idempotent() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let mut a = TestClient::register(&server, "alice").await?;
+    let mut b = TestClient::register(&server, "bob").await?;
+    let (text_id, _) = a.channel(ChannelType::Text);
+    let id = uuid::Uuid::new_v4();
+
+    let send = |content: &str| ClientMessage::SendMessage {
+        channel_id: text_id,
+        content: content.to_string(),
+        attachments: vec![],
+        client_msg_id: Some(id),
+    };
+    a.send(send("once")).await?;
+    for client in [&mut a, &mut b] {
+        let echoed = client
+            .expect_control(WAIT, |m| match m {
+                ServerMessage::NewMessage { client_msg_id, content, .. } if content == "once" => Some(*client_msg_id),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(echoed, Some(id));
+    }
+
+    // Retry with the same id: nothing new is broadcast or stored.
+    a.send(send("once")).await?;
+    b.expect_no_control(Duration::from_millis(400), |m| matches!(m, ServerMessage::NewMessage { .. })).await?;
+
+    let history = a.api.fetch_messages(text_id, None, 50).await?;
+    let matching: Vec<_> = history.messages.iter().filter(|m| m.content == "once").collect();
+    assert_eq!(matching.len(), 1, "the retry created a duplicate");
+    assert_eq!(matching[0].client_msg_id, Some(id));
     Ok(())
 }

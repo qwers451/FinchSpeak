@@ -33,6 +33,8 @@ export interface Message {
   content: string;
   attachments: AttachmentInfo[];
   timestamp: number;
+  /** The id the author chose when sending; ties a pending message to the stored one. */
+  client_msg_id?: string | null;
 }
 
 export type IncomingMessage = Omit<Message, 'id'> & { message_id: string };
@@ -73,6 +75,7 @@ export interface SessionEvents {
     };
   };
   'new-message': IncomingMessage;
+  'message-rejected': { client_msg_id: string; code: number; message: string };
   'user-speaking': { peer_id: number; is_speaking: boolean };
   'local-speaking': boolean;
   'ping-rtt': { rtt_ms: number };

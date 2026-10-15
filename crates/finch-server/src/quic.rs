@@ -408,12 +408,28 @@ async fn linked_attachments(pool: &SqlitePool, message_id: Uuid) -> Vec<Attachme
 /// Maximum length of a chat message in characters.
 const MAX_MESSAGE_CHARS: usize = 4000;
 
-/// Send an error to one client without holding any session guard across the `.await`.
-async fn send_error(sessions: &SessionManager, peer_id: u32, code: u16, message: String) {
+/// Send a message to one client without holding any session guard across the `.await`.
+async fn send_to(sessions: &SessionManager, peer_id: u32, message: ServerMessage) {
     let tx = sessions.sessions.get(&peer_id).map(|s| s.control_tx.clone());
     if let Some(tx) = tx {
-        let _ = tx.send(ServerMessage::Error { code, message }).await;
+        let _ = tx.send(message).await;
     }
+}
+
+/// Tell the sender its message was refused: by id when it supplied one, so the client can roll
+/// back exactly that message, otherwise with a plain error.
+async fn reject_message(
+    sessions: &SessionManager,
+    peer_id: u32,
+    client_msg_id: Option<Uuid>,
+    code: u16,
+    message: String,
+) {
+    let reply = match client_msg_id {
+        Some(client_msg_id) => ServerMessage::MessageRejected { client_msg_id, code, message },
+        None => ServerMessage::Error { code, message },
+    };
+    send_to(sessions, peer_id, reply).await;
 }
 
 /// Handle a single incoming ClientMessage on the Control Stream.
@@ -438,12 +454,14 @@ async fn handle_client_message(
             channel_id,
             content,
             attachments,
+            client_msg_id,
         } => {
             let content = content.trim().to_string();
             if content.is_empty() || content.chars().count() > MAX_MESSAGE_CHARS {
-                send_error(
+                reject_message(
                     sessions,
                     peer_id,
+                    client_msg_id,
                     400,
                     format!("Message must be 1..={MAX_MESSAGE_CHARS} characters"),
                 )
@@ -457,7 +475,7 @@ async fn handle_client_message(
                     .await
                     .unwrap_or(None);
             if channel_type.as_deref() != Some("text") {
-                send_error(sessions, peer_id, 400, "Unknown text channel".to_string()).await;
+                reject_message(sessions, peer_id, client_msg_id, 400, "Unknown text channel".to_string()).await;
                 return;
             }
 
@@ -470,19 +488,26 @@ async fn handle_client_message(
             let message_id = Uuid::now_v7();
 
             let res = sqlx::query(
-                "INSERT INTO messages (id, channel_id, author_id, content, created_at) VALUES (?, ?, ?, ?, ?)"
+                "INSERT INTO messages (id, channel_id, author_id, content, created_at, client_msg_id) VALUES (?, ?, ?, ?, ?, ?)"
             )
             .bind(message_id.to_string())
             .bind(channel_id.to_string())
             .bind(user_id.to_string())
             .bind(&content)
             .bind(now)
+            .bind(client_msg_id.map(|id| id.to_string()))
             .execute(pool)
             .await;
 
-            if let Err(e) = &res {
-                tracing::error!("Failed to store message from peer {peer_id}: {e}");
-                send_error(sessions, peer_id, 500, "Message could not be saved".to_string()).await;
+            match &res {
+                // A retry with an id this author already used: already stored and broadcast.
+                Err(sqlx::Error::Database(e)) if e.is_unique_violation() => return,
+                Err(e) => {
+                    tracing::error!("Failed to store message from peer {peer_id}: {e}");
+                    reject_message(sessions, peer_id, client_msg_id, 500, "Message could not be saved".to_string())
+                        .await;
+                }
+                Ok(_) => {}
             }
 
             if res.is_ok() {
@@ -508,6 +533,7 @@ async fn handle_client_message(
                     content,
                     attachments: linked,
                     timestamp: now,
+                    client_msg_id,
                 };
                 sessions.broadcast_all(new_msg).await;
             }

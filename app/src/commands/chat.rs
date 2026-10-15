@@ -64,10 +64,14 @@ pub async fn send_text_message(
     channel_id: String,
     content: String,
     attachments: Option<Vec<String>>,
+    client_msg_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let ch_uuid = Uuid::parse_str(&channel_id)
         .map_err(|e| format!("Invalid channel UUID: {}", e))?;
+    let client_msg_id = client_msg_id
+        .map(|id| Uuid::parse_str(&id).map_err(|e| format!("Invalid message id: {}", e)))
+        .transpose()?;
 
     let attach_uuids: Vec<Uuid> = attachments
         .unwrap_or_default()
@@ -82,6 +86,7 @@ pub async fn send_text_message(
         channel_id: ch_uuid,
         content,
         attachments: attach_uuids,
+        client_msg_id,
     })
     .await
     .map_err(|e| format!("Failed to queue message: {}", e))?;
