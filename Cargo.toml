@@ -6,6 +6,7 @@ members = [
     "crates/finch-audio",
     "crates/finch-screen",
     "crates/finch-client-core",
+    "crates/finch-testbed",
     "app",
 ]
 

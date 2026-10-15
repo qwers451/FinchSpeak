@@ -1,0 +1,27 @@
+[package]
+name = "finch-testbed"
+description = "FinchSpeak headless test bench — real server, headless clients, voice metrics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+finch-server = { path = "../finch-server" }
+finch-client-core = { workspace = true }
+finch-audio = { workspace = true }
+finch-protocol = { workspace = true }
+finch-screen = { workspace = true }
+tokio = { workspace = true }
+bytes = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+dashmap = "6"
+tempfile = "3"
+hound = "3"
+rand = "0.8"
+jsonwebtoken = "9"
+serde = { workspace = true }
+quinn = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

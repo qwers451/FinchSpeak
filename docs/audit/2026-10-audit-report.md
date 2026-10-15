@@ -143,7 +143,7 @@
 ### AUD-011 — Порядок и пагинация истории по секундам
 - Уровень: Важно
 - Где: `crates/finch-server/src/api/messages.rs:41` (`created_at < ?`, `ORDER BY created_at`), `quic.rs` (запись `created_at` в секундах)
-- Воспроизведение: несколько сообщений в одну секунду идут в произвольном порядке; при пагинации `before = timestamp` сообщения той же секунды пропадают.
+- Воспроизведение: несколько сообщений в одну секунду идут в произвольном порядке — **подтверждено стендом** (`finch-testbed/tests/chat.rs::history_persisted_in_order`: отправлено first, second, third → история вернула third, second, first); при пагинации `before = timestamp` сообщения той же секунды пропадают.
 - Предлагаемое исправление: сортировка и курсор по `id` (UUID v7 монотонен по времени) — `ORDER BY created_at DESC, id DESC`, курсор `before_id`.
 - Размер: S
 
