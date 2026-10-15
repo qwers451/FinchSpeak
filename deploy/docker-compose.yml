@@ -1,0 +1,15 @@
+services:
+  finch-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: finch-server
+    restart: unless-stopped
+    ports:
+      - "4433:4433/udp"
+      - "8443:8443/tcp"
+    volumes:
+      - ./data:/app/data
+      - ./finch-server.toml:/app/finch-server.toml:ro
+    environment:
+      - RUST_LOG=info,finch_server=debug

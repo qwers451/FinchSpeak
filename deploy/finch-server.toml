@@ -1,0 +1,15 @@
+[server]
+host = "0.0.0.0"
+quic_port = 4433
+http_port = 8443
+
+[database]
+url = "sqlite:///app/data/finchspeak.db?mode=rwc"
+
+[storage]
+upload_dir = "/app/data/uploads"
+max_file_size_mb = 50
+
+[auth]
+jwt_secret = "CHANGE_ME_SECURE_JWT_SECRET_32_BYTES_MINIMUM"
+token_expiry_hours = 72

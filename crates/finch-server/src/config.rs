@@ -102,7 +102,7 @@ fn default_max_file_size_mb() -> usize {
 pub struct AuthConfig {
     #[serde(default = "default_jwt_secret")]
     pub jwt_secret: String,
-    #[serde(default = "default_jwt_expiration_hours")]
+    #[serde(default = "default_jwt_expiration_hours", alias = "token_expiry_hours")]
     pub jwt_expiration_hours: i64,
 }
 
@@ -163,6 +163,9 @@ mod tests {
         [storage]
         upload_dir = "/tmp/uploads"
         max_file_size_mb = 100
+
+        [auth]
+        token_expiry_hours = 48
         "#;
 
         let config: ServerConfig = toml::from_str(toml_str).unwrap();
@@ -171,6 +174,37 @@ mod tests {
         assert_eq!(config.server.http_port, 9000);
         assert_eq!(config.storage.upload_dir, "/tmp/uploads");
         assert_eq!(config.storage.max_file_size_mb, 100);
+        assert_eq!(config.auth.jwt_expiration_hours, 48);
+    }
+
+    #[test]
+    fn test_deploy_config_toml() {
+        let toml_str = r#"
+        [server]
+        host = "0.0.0.0"
+        quic_port = 4433
+        http_port = 8443
+
+        [database]
+        url = "sqlite:///app/data/finchspeak.db?mode=rwc"
+
+        [storage]
+        upload_dir = "/app/data/uploads"
+        max_file_size_mb = 50
+
+        [auth]
+        jwt_secret = "CHANGE_ME_SECURE_JWT_SECRET_32_BYTES_MINIMUM"
+        token_expiry_hours = 72
+        "#;
+
+        let config: ServerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.server.host, "0.0.0.0");
+        assert_eq!(config.server.quic_port, 4433);
+        assert_eq!(config.server.http_port, 8443);
+        assert_eq!(config.database.url, "sqlite:///app/data/finchspeak.db?mode=rwc");
+        assert_eq!(config.storage.upload_dir, "/app/data/uploads");
+        assert_eq!(config.storage.max_file_size_mb, 50);
+        assert_eq!(config.auth.jwt_secret, "CHANGE_ME_SECURE_JWT_SECRET_32_BYTES_MINIMUM");
         assert_eq!(config.auth.jwt_expiration_hours, 72);
     }
 }
