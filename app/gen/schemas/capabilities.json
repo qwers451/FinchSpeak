@@ -1,1 +1,1 @@
-{}
+{"default":{"identifier":"default","description":"Lets the main window listen to backend events; app commands are always allowed.","local":true,"windows":["main"],"permissions":["core:default"]}}

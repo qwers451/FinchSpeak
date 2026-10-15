@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Lets the main window listen to backend events; app commands are always allowed.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
