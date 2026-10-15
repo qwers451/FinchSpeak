@@ -20,6 +20,11 @@ pub struct TestServer {
 impl TestServer {
     /// Start a server on 127.0.0.1 with free ports and a fresh database.
     pub async fn start() -> anyhow::Result<Self> {
+        Self::start_with(|_| {}).await
+    }
+
+    /// Like [`Self::start`], with a hook to adjust the configuration before launch.
+    pub async fn start_with(adjust: impl FnOnce(&mut ServerConfig)) -> anyhow::Result<Self> {
         crate::init_tracing();
         let dir = tempfile::tempdir()?;
         let db_path = dir.path().join("finch.db");
@@ -37,6 +42,7 @@ impl TestServer {
         config.storage.max_file_size_mb = TEST_MAX_FILE_SIZE_MB;
         config.server.tls_dir = dir.path().join("tls").to_string_lossy().to_string();
         config.auth.jwt_secret = format!("testbed-secret-{}", uuid::Uuid::new_v4());
+        adjust(&mut config);
 
         let running = launch(config.clone()).await?;
         config.server.http_port = running.http_addr.port();
