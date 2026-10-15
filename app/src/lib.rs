@@ -7,6 +7,7 @@ pub mod connection;
 pub mod state;
 
 use state::AppState;
+use tauri::Manager;
 
 pub fn run() {
     // Initialize tracing subscriber
@@ -17,10 +18,30 @@ pub fn run() {
         )
         .try_init();
 
+    tracing::info!("Initializing FinchSpeak client application...");
+
     let state = AppState::new();
 
     if let Err(e) = tauri::Builder::default()
         .manage(state)
+        .setup(|app| {
+            tracing::info!("Tauri setup initialized");
+            if let Some(window) = app.get_webview_window("main") {
+                tracing::info!("Main window found, ensuring show and focus");
+                let _ = window.show();
+                let _ = window.set_focus();
+            } else {
+                tracing::warn!("Main window not created by config, creating manually");
+                let window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+                    .title("FinchSpeak")
+                    .inner_size(1280.0, 800.0)
+                    .min_inner_size(900.0, 600.0)
+                    .build()?;
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // Auth
             commands::auth::login,

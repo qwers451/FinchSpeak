@@ -3,7 +3,7 @@ import type { User } from '../types';
 import { api } from '../services/api';
 
 export const [currentUser, setCurrentUser] = createSignal<User | null>(null);
-export const [serverUrl, setServerUrl] = createSignal<string>('http://127.0.0.1:8080');
+export const [serverUrl, setServerUrl] = createSignal<string>('http://127.0.0.1:8443');
 export const [authLoading, setAuthLoading] = createSignal<boolean>(false);
 export const [authError, setAuthError] = createSignal<string | null>(null);
 

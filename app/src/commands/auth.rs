@@ -19,9 +19,9 @@ fn parse_quic_addr(server_url: &str) -> anyhow::Result<(SocketAddr, String)> {
     let host = url
         .host_str()
         .ok_or_else(|| anyhow::anyhow!("Missing host in server_url"))?;
-    // By default FinchSpeak server runs REST on port 8080 and QUIC on port 4433 (or +1)
-    let port = url.port().unwrap_or(8080);
-    let quic_port = if port == 8080 { 4433 } else { port };
+    // By default FinchSpeak server runs REST on port 8443 (or 8080) and QUIC on port 4433
+    let port = url.port().unwrap_or(8443);
+    let quic_port = if port == 8443 || port == 8080 { 4433 } else { port };
 
     let addr_str = format!("{}:{}", host, quic_port);
     let mut addrs = addr_str.to_socket_addrs()?;

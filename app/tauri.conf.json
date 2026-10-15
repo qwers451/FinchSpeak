@@ -12,13 +12,15 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "FinchSpeak",
         "width": 1280,
         "height": 800,
         "minWidth": 900,
         "minHeight": 600,
         "decorations": true,
-        "transparent": false
+        "transparent": false,
+        "visible": true
       }
     ],
     "security": {
