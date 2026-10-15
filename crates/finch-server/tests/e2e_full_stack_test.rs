@@ -311,7 +311,7 @@ async fn test_full_system_autotest() -> anyhow::Result<()> {
             None
         }
     }).await?;
-    assert_eq!(joined_user, "alice");
+    assert_eq!(joined_user, "Alice");
 
     let leave_voice = ClientMessage::LeaveVoice;
     alice_send.write_all(&encode_message(&leave_voice)?).await?;
