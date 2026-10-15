@@ -19,6 +19,9 @@ use crate::vad::{VadDecision, VadMode, VoiceActivityDetector, DEFAULT_VAD_THRESH
 /// voices); one extra frame is kept as margin. Without this the start of every word is clipped.
 pub const PREROLL_FRAMES: usize = 4;
 
+/// Largest output-device delay passed on to the echo canceller.
+pub const MAX_STREAM_DELAY_MS: u32 = 500;
+
 /// Duration of one frame in the packet timestamps.
 const FRAME_MS: u32 = 20;
 
@@ -87,6 +90,15 @@ impl VoiceCapture {
     /// Forget the echo path (reference stream interrupted, device changed).
     pub fn reset_echo_canceller(&mut self) {
         self.echo_canceller.reset();
+    }
+
+    /// Tell the echo canceller how long played audio takes to reach the speakers (the output
+    /// device's buffer). Clamped to [`MAX_STREAM_DELAY_MS`]; the canceller still tracks the rest.
+    pub fn set_stream_delay_ms(&mut self, delay_ms: u32) {
+        let delay = delay_ms.min(MAX_STREAM_DELAY_MS) as i32;
+        if let Err(error) = self.echo_canceller.set_stream_delay_ms(delay) {
+            tracing::warn!(%error, delay, "echo canceller rejected the stream delay");
+        }
     }
 
     /// Feed the 48 kHz frame that is being sent to the speakers (AEC far-end reference).
@@ -192,6 +204,17 @@ mod tests {
             ..VoiceCaptureConfig::default()
         })
         .unwrap()
+    }
+
+    #[test]
+    fn stream_delay_hint_is_accepted_and_clamped() {
+        let mut capture = capture_for_test();
+        for delay in [0, 40, 500, 10_000, u32::MAX] {
+            capture.set_stream_delay_ms(delay); // must not panic or poison the canceller
+        }
+        let mut frame = tone_frame(0);
+        capture.process(&mut frame, 1, 0);
+        assert!(frame.iter().all(|sample| sample.is_finite()), "the canceller still produces sane audio");
     }
 
     #[test]

@@ -5,7 +5,7 @@
 //! The audio hardware callbacks communicate with the worker thread strictly via lock-free
 //! SPSC ring buffers (`ringbuf::HeapRb`) without mutex locks or memory allocations.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -201,6 +201,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 let reference_rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
                 let (mut reference_prod, mut reference_cons) = reference_rb.split();
                 let mut reference_feeder: Option<ReferenceFeeder> = None;
+                // How long the output device holds audio before it plays (set by the callback).
+                let output_latency_ms = Arc::new(AtomicU32::new(0));
+                let mut applied_latency_ms = 0u32;
 
                 let mut playback_stream: Option<Stream> = None;
                 let mut output_resampler: Option<OutputResampler> = None;
@@ -221,6 +224,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             };
                             let channels = config.channels() as usize;
                             let is_deafened_ref = state.is_deafened.clone();
+                            let latency_ref = output_latency_ms.clone();
 
                             output_resampler = match OutputResampler::new(output_sample_rate) {
                                 Ok(resampler) => Some(resampler),
@@ -237,7 +241,11 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             };
                             let stream_res = device.build_output_stream(
                                 &config.into(),
-                                move |data: &mut [f32], _| {
+                                move |data: &mut [f32], info: &cpal::OutputCallbackInfo| {
+                                    let timestamp = info.timestamp();
+                                    if let Some(latency) = timestamp.playback.duration_since(&timestamp.callback) {
+                                        latency_ref.store(latency.as_millis() as u32, Ordering::Relaxed);
+                                    }
                                     if channels == 0 {
                                         return;
                                     }
@@ -450,6 +458,11 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
 
                     // A2. Echo cancellation reference: what the speakers actually played.
                     if let (Some(feeder), Some(capture)) = (&mut reference_feeder, &mut voice_capture) {
+                        let latency = output_latency_ms.load(Ordering::Relaxed);
+                        if latency.abs_diff(applied_latency_ms) >= 10 {
+                            capture.set_stream_delay_ms(latency);
+                            applied_latency_ms = latency;
+                        }
                         if reference_cons.occupied_len() >= RING_BUFFER_CAPACITY - REFERENCE_OVERFLOW_MARGIN {
                             // The callback outran us and dropped samples: the stream is no longer
                             // contiguous, so forget the echo path instead of learning a wrong one.
