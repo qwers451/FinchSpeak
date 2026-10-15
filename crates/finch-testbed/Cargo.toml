@@ -23,5 +23,6 @@ rand = "0.8"
 jsonwebtoken = "9"
 serde = { workspace = true }
 quinn = { workspace = true }
+rustls = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
