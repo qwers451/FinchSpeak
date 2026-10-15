@@ -35,3 +35,4 @@ thiserror = { workspace = true }
 [dev-dependencies]
 finch-server = { path = "../finch-server" }
 anyhow = { workspace = true }
+rcgen = { workspace = true }

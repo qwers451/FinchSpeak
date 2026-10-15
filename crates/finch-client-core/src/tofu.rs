@@ -72,22 +72,34 @@ impl ServerCertVerifier for TofuVerifier {
         Ok(ServerCertVerified::assertion())
     }
 
+    /// The pinned fingerprint only identifies the certificate; the handshake signature proves
+    /// the server holds its private key. Both checks are required.
     fn verify_tls12_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, RustlsError> {
-        Ok(HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.crypto_provider.signature_verification_algorithms,
+        )
     }
 
     fn verify_tls13_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, RustlsError> {
-        Ok(HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.crypto_provider.signature_verification_algorithms,
+        )
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
@@ -128,3 +140,4 @@ pub fn create_client_config(
 
     Ok(client_config)
 }
+

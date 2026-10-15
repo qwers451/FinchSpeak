@@ -1455,6 +1455,7 @@ dependencies = [
  "finch-protocol",
  "finch-server",
  "quinn",
+ "rcgen",
  "reqwest 0.12.28",
  "ring",
  "rustls",
