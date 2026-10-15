@@ -33,10 +33,23 @@ pub async fn run_voice_link(
     input: &[f32],
     tail_frames: usize,
 ) -> anyhow::Result<VoiceRun> {
+    run_voice_link_with(sender, receiver, input, tail_frames, VoiceCaptureConfig::default().vad_threshold_db).await
+}
+
+/// Like [`run_voice_link`] with an explicit VAD threshold; a very low threshold
+/// (e.g. −100 dB) transmits every frame, isolating network effects from VAD pauses.
+pub async fn run_voice_link_with(
+    sender: &TestClient,
+    receiver: &mut TestClient,
+    input: &[f32],
+    tail_frames: usize,
+    vad_threshold_db: f32,
+) -> anyhow::Result<VoiceRun> {
     let (_, short_id) = sender.channel(ChannelType::Voice);
     let sender_peer = sender.session.session_peer_id;
     let mut capture = VoiceCapture::new(VoiceCaptureConfig {
         channel_short_id: short_id,
+        vad_threshold_db,
         ..VoiceCaptureConfig::default()
     })?;
     let mut mixer = AudioMixer::new();

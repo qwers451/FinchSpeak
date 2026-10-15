@@ -17,11 +17,12 @@ Debug WAVs of the last run: `target/testbed-out/`.
 | AEC double-talk: near-end level kept | ≥ near − 6 dB | −22.1 dBFS (near −23.3) | pass | 2026-10-15 | cc0476d |
 | VAD on pink noise −35 dBFS: speaking indicator | never lit | lit 2× | **fail — AUD-050** | 2026-10-15 | cc0476d |
 | VAD on pink noise −35 dBFS: non-silent packets | 0 | 104 | **fail — AUD-050** | 2026-10-15 | cc0476d |
-| Network 5% loss + 0–60 ms jitter: latency (3 runs) | ≤ 200 ms | 116 / 156 / 196 ms | pass (close to limit) | 2026-10-15 | — |
-| Network: packets delivered by the network | — | 237–239 of 247 (~96%) | info | 2026-10-15 | — |
-| Network: jitter buffer depth | ≤ 6 packets | 20 / 21 / 68 | **fail — AUD-022** | 2026-10-15 | — |
-| Network: jitter-buffer loss rate (late packets counted as lost) | — | 17–35% | **fail — AUD-022** | 2026-10-15 | — |
-| Network: longest run of silent frames during speech | ≤ 3 | 0 / 0 / 3 | pass | 2026-10-15 | — |
+| Network 5% loss + 0–60 ms jitter: latency (3 runs, VAD off) | ≤ 200 ms | 96 / 136 / 76 ms | pass | 2026-10-15 | after AUD-022 |
+| Network: packets delivered by the network | — | 254–259 of 265 (~97%) | info | 2026-10-15 | after AUD-022 |
+| Network: jitter buffer depth | ≤ 6 packets | 6 / 6 / 6 | pass | 2026-10-15 | after AUD-022 |
+| Network: jitter-buffer loss rate | — | 0.4–2.4% | info | 2026-10-15 | after AUD-022 |
+| Network: longest run of silent frames during speech | ≤ 3 | 0 / 0 / 0 | pass | 2026-10-15 | after AUD-022 |
+| (before AUD-022 fix) jitter buffer depth / loss | — | 20–68 packets / 17–35% | historical | 2026-10-15 | 27dcb0f |
 
 Network results vary between runs (real-time scheduling); three runs are recorded.
 

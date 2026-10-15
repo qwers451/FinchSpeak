@@ -49,12 +49,17 @@ pub struct JitterBuffer {
 
     // RFC 3550 Jitter estimation
     last_transit: Option<(Instant, u32)>,
-    jitter_samples: f64,
+    jitter_ms: f64,
     target_packets: usize,
 
     // Packet loss tracking
     total_expected: u64,
     total_lost: u64,
+
+    /// True until `target_packets` are queued (start of a talk spurt or after an underrun).
+    priming: bool,
+    /// While re-buffering after an underrun, fill with PLC instead of silence.
+    conceal_while_priming: bool,
 }
 
 impl JitterBuffer {
@@ -68,10 +73,12 @@ impl JitterBuffer {
             queue: BTreeMap::new(),
             decoder,
             last_transit: None,
-            jitter_samples: 0.0,
+            jitter_ms: 0.0,
             target_packets: MIN_BUFFER_PACKETS,
             total_expected: 0,
             total_lost: 0,
+            priming: true,
+            conceal_while_priming: false,
         })
     }
 
@@ -101,18 +108,25 @@ impl JitterBuffer {
         // RFC 3550 inter-arrival jitter calculation
         if let Some((last_arrival, last_timestamp)) = self.last_transit {
             let arrival_diff_ms = now.duration_since(last_arrival).as_secs_f64() * 1000.0;
-            let arrival_samples = arrival_diff_ms * 48.0;
-            let timestamp_diff = (header.timestamp.wrapping_sub(last_timestamp)) as f64;
+            // MediaHeader timestamps are in milliseconds.
+            let timestamp_diff_ms = (header.timestamp.wrapping_sub(last_timestamp)) as f64;
 
-            let d = (arrival_samples - timestamp_diff).abs();
-            self.jitter_samples += (d - self.jitter_samples) / 16.0;
+            let d = (arrival_diff_ms - timestamp_diff_ms).abs();
+            self.jitter_ms += (d - self.jitter_ms) / 16.0;
 
-            // Adapt target buffer depth based on jitter (48 samples = 1 ms)
-            let jitter_ms = self.jitter_samples / 48.0;
+            // Adapt target buffer depth based on jitter
+            let jitter_ms = self.jitter_ms;
             let needed_packets = (jitter_ms / 20.0).ceil() as usize + 1;
             self.target_packets = needed_packets.clamp(MIN_BUFFER_PACKETS, MAX_BUFFER_PACKETS);
         }
         self.last_transit = Some((now, header.timestamp));
+
+        // A packet whose slot was already played or concealed can no longer be used.
+        if let Some(next) = self.next_playout_seq
+            && extended_seq < next
+        {
+            return;
+        }
 
         // Insert into queue
         self.queue.insert(
@@ -123,6 +137,16 @@ impl JitterBuffer {
                 flags: header.flags,
             },
         );
+
+        // Bound latency: if the sender runs ahead of playout, drop the oldest packets.
+        while self.queue.len() > MAX_BUFFER_PACKETS {
+            self.queue.pop_first();
+        }
+        if let (Some(next), Some(&oldest)) = (self.next_playout_seq, self.queue.keys().next())
+            && next < oldest
+        {
+            self.next_playout_seq = Some(oldest);
+        }
 
         // Initialize playout pointer if starting fresh
         if self.next_playout_seq.is_none()
@@ -143,10 +167,27 @@ impl JitterBuffer {
             }
         };
 
-        // If buffer is still priming initial packets
-        if self.queue.len() < self.target_packets && self.total_expected == 0 {
-            output.fill(0.0);
-            return PlayoutResult::Buffering;
+        // Buffer `target_packets` at the start of every talk spurt and after an underrun
+        if self.priming {
+            if self.queue.len() < self.target_packets {
+                if self.conceal_while_priming {
+                    let _ = self.decoder.decode_plc(output);
+                    return PlayoutResult::Concealed;
+                }
+                output.fill(0.0);
+                return PlayoutResult::Buffering;
+            }
+            self.priming = false;
+            self.conceal_while_priming = false;
+        }
+
+        // Underrun: nothing queued at all means playout is ahead of the network, not that the
+        // packet was lost. Hold position and re-buffer to the current target instead.
+        if self.queue.is_empty() {
+            let _ = self.decoder.decode_plc(output);
+            self.priming = true;
+            self.conceal_while_priming = true;
+            return PlayoutResult::Concealed;
         }
 
         self.total_expected += 1;
@@ -159,9 +200,10 @@ impl JitterBuffer {
                 self.next_playout_seq = Some(playout_seq + 1);
 
                 if is_silence && self.queue.is_empty() {
-                    // Reset playout on silence end
+                    // Reset playout on silence end; the next spurt is buffered again
                     self.next_playout_seq = None;
                     self.last_transit = None;
+                    self.priming = true;
                 }
                 PlayoutResult::Normal
             } else {
@@ -220,7 +262,7 @@ mod tests {
         let seqs = [65534u16, 65535u16, 0u16, 1u16];
 
         for &s in &seqs {
-            let header = MediaHeader::new_audio(1, 1, s, (s as u32) * 960, false, false);
+            let header = MediaHeader::new_audio(1, 1, s, (s as u32) * 20, false, false);
             buffer.push(&header, opus_data.clone(), now);
         }
 
@@ -242,7 +284,7 @@ mod tests {
         let h0 = MediaHeader::new_audio(1, 1, 0, 0, false, false);
         buffer.push(&h0, opus_data.clone(), now);
 
-        let h2 = MediaHeader::new_audio(1, 1, 2, 1920, false, false);
+        let h2 = MediaHeader::new_audio(1, 1, 2, 40, false, false);
         buffer.push(&h2, opus_data.clone(), now);
 
         let mut out = [0.0f32; FRAME_SIZE_48K];
@@ -258,5 +300,97 @@ mod tests {
         // Playout packet 2 (arrived)
         let r2 = buffer.pop_frame(&mut out);
         assert_eq!(r2, PlayoutResult::Normal);
+    }
+
+    fn opus_frame() -> Bytes {
+        let mut encoder = OpusVoiceEncoder::new(64).unwrap();
+        encoder.encode(&[0.1f32; FRAME_SIZE_48K]).unwrap()
+    }
+
+    fn push_seq(buffer: &mut JitterBuffer, seq: u16, silence: bool, payload: &Bytes) {
+        let header = MediaHeader::new_audio(1, 1, seq, seq as u32 * 20, silence, false);
+        buffer.push(&header, payload.clone(), Instant::now());
+    }
+
+    /// A packet arriving after its slot was played (or concealed) is useless and must not
+    /// linger in the queue (AUD-022).
+    #[test]
+    fn test_late_packet_is_dropped() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let mut out = [0.0f32; FRAME_SIZE_48K];
+
+        push_seq(&mut buffer, 10, false, &payload);
+        push_seq(&mut buffer, 12, false, &payload);
+        assert_eq!(buffer.pop_frame(&mut out), PlayoutResult::Normal); // 10
+        assert_eq!(buffer.pop_frame(&mut out), PlayoutResult::Concealed); // 11 lost
+        push_seq(&mut buffer, 11, false, &payload); // 11 arrives too late
+        assert_eq!(buffer.buffered_len(), 1, "only 12 should remain queued");
+    }
+
+    /// The queue never grows beyond MAX_BUFFER_PACKETS, even if the sender runs ahead
+    /// of playout (AUD-022).
+    #[test]
+    fn test_queue_is_bounded() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        for seq in 0..50u16 {
+            push_seq(&mut buffer, seq, false, &payload);
+        }
+        assert!(
+            buffer.buffered_len() <= MAX_BUFFER_PACKETS,
+            "queue holds {} packets",
+            buffer.buffered_len()
+        );
+    }
+
+    /// After a silence reset the next talk spurt is buffered again instead of playing
+    /// the first packet immediately (AUD-022).
+    #[test]
+    fn test_reprimes_after_silence() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let mut out = [0.0f32; FRAME_SIZE_48K];
+
+        push_seq(&mut buffer, 0, false, &payload);
+        push_seq(&mut buffer, 1, true, &payload); // last packet of the spurt
+        buffer.pop_frame(&mut out);
+        buffer.pop_frame(&mut out);
+
+        push_seq(&mut buffer, 30, false, &payload); // next spurt starts
+        assert_eq!(buffer.pop_frame(&mut out), PlayoutResult::Buffering);
+    }
+
+    /// Packets arrive with 0..60 ms random delay. The buffer must grow its delay to absorb the
+    /// jitter instead of declaring late packets lost (AUD-022).
+    #[test]
+    fn test_absorbs_random_network_delay() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let mut out = [0.0f32; FRAME_SIZE_48K];
+        let start = Instant::now();
+
+        // Deterministic pseudo-random delays in 0..=60 ms (LCG).
+        let mut x: u64 = 42;
+        let mut arrivals: Vec<(u64, u16)> = (0..250u16)
+            .map(|seq| {
+                x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                (seq as u64 * 20 + (x >> 33) % 61, seq)
+            })
+            .collect();
+        arrivals.sort();
+
+        let mut next = 0;
+        for tick in 0..280u64 {
+            let now_ms = tick * 20;
+            while next < arrivals.len() && arrivals[next].0 <= now_ms {
+                let (at, seq) = arrivals[next];
+                let header = MediaHeader::new_audio(1, 1, seq, seq as u32 * 20, false, false);
+                buffer.push(&header, payload.clone(), start + std::time::Duration::from_millis(at));
+                next += 1;
+            }
+            buffer.pop_frame(&mut out);
+        }
+        assert!(buffer.loss_rate() < 0.05, "loss rate {:.2} with no real losses", buffer.loss_rate());
     }
 }

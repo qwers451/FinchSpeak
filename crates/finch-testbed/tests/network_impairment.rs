@@ -9,7 +9,7 @@ use finch_testbed::client::TestClient;
 use finch_testbed::metrics::delay_samples;
 use finch_testbed::netem::{NetemConfig, UdpImpairmentProxy};
 use finch_testbed::server::TestServer;
-use finch_testbed::voice::run_voice_link;
+use finch_testbed::voice::run_voice_link_with;
 use tokio::net::UdpSocket;
 
 const SR: usize = 48_000;
@@ -59,7 +59,6 @@ fn longest_silent_run(output: &[f32], from: usize, to: usize) -> usize {
 }
 
 #[tokio::test]
-#[ignore = "AUD-022"]
 async fn voice_under_loss_and_jitter() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
     let proxy = UdpImpairmentProxy::start(
@@ -74,13 +73,14 @@ async fn voice_under_loss_and_jitter() -> anyhow::Result<()> {
     b.join_voice().await?;
     b.drain_datagrams();
 
-    // Silence, a chirp for latency, then 5 s of continuous speech-like signal (no VAD pauses).
+    // Silence, a chirp for latency, then 5 s of speech-like signal. VAD is disabled so every
+    // frame is transmitted and any silent output frame comes from the network path.
     let speech_start = SR / 5 + SR / 10;
     let mut input = vec![0.0f32; SR / 5];
     input.extend(chirp(SR / 10, 300.0, 3_000.0));
     input.extend(babble(5 * SR, -20.0, 3)?);
 
-    let run = run_voice_link(&a, &mut b, &input, 15).await?;
+    let run = run_voice_link_with(&a, &mut b, &input, 15, -100.0).await?;
 
     assert!(!run.received_headers.is_empty(), "receiver got no audio");
     let latency = delay_samples(&input[..speech_start], &run.output[..speech_start + SR], SR)

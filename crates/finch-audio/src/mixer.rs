@@ -203,7 +203,7 @@ mod tests {
         assert_eq!(event, Some((42, true)));
 
         // Subsequent normal packet from same speaker does not generate transition event
-        let next_hdr = MediaHeader::new_audio(1, 42, 2, 960, false, false);
+        let next_hdr = MediaHeader::new_audio(1, 42, 2, 20, false, false);
         let event = mixer.on_audio_packet(&next_hdr, payload.clone(), now);
         assert_eq!(event, None);
 
@@ -246,7 +246,7 @@ mod tests {
 
         // Sequences 1, 2, 4 queued for peer 7; 3 is missing.
         for seq in [1u16, 2, 4] {
-            let header = MediaHeader::new_audio(1, 7, seq, seq as u32 * 960, false, false);
+            let header = MediaHeader::new_audio(1, 7, seq, seq as u32 * 20, false, false);
             mixer.on_audio_packet(&header, payload.clone(), now);
         }
         assert_eq!(mixer.max_buffered_packets(), 3);
