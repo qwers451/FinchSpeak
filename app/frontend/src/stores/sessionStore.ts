@@ -1,6 +1,6 @@
 import { createSignal } from 'solid-js';
 import type { SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
-import { setPendingTofu } from './authStore';
+import { setPendingTofu } from './tofuStore';
 import { activeChannel, channels, handleChannelCreated, handleIncomingMessage, selectChannel, setChannels } from './chatStore';
 import { handleUserSpeaking, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
