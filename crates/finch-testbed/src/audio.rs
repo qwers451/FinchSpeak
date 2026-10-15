@@ -18,8 +18,7 @@ fn fixture_path(name: &str) -> PathBuf {
 
 /// Load a 16 kHz speech fixture and upsample it to 48 kHz.
 ///
-/// Uses rubato directly: `finch_audio::InputResampler` drops samples for
-/// non-48 kHz input (AUD-048) and cannot be trusted to prepare reference signals.
+/// Uses rubato directly so reference signals do not depend on the resampler under test.
 pub fn load_speech_48k(name: &str) -> anyhow::Result<Vec<f32>> {
     let mut reader = hound::WavReader::open(fixture_path(name))?;
     let spec = reader.spec();

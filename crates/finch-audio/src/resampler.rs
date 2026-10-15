@@ -30,11 +30,12 @@ impl InputResampler {
             return Ok(Self::Passthrough);
         }
 
-        // We want the resampler to output exactly FRAME_SIZE_48K (960) samples
+        // rubato's chunk size is the *input* block: 20 ms at the source rate,
+        // which yields exactly FRAME_SIZE_48K (960) output samples.
         let resampler = FftFixedInOut::<f32>::new(
             source_rate as usize,
             INTERNAL_SAMPLE_RATE as usize,
-            FRAME_SIZE_48K,
+            (source_rate as usize * 20) / 1000,
             1, // mono
         )?;
         let input_needed = resampler.input_frames_next();
@@ -93,12 +94,11 @@ impl OutputResampler {
             return Ok(Self::Passthrough);
         }
 
-        // We input FRAME_SIZE_48K (960) samples at 48 kHz
-        let target_chunk = (target_rate as usize * 20) / 1000;
+        // rubato's chunk size is the *input* block: one FRAME_SIZE_48K (960) frame at 48 kHz.
         let resampler = FftFixedInOut::<f32>::new(
             INTERNAL_SAMPLE_RATE as usize,
             target_rate as usize,
-            target_chunk,
+            FRAME_SIZE_48K,
             1, // mono
         )?;
 
@@ -158,7 +158,6 @@ mod tests {
     /// Every input sample must end up in the output: N input samples at `rate`
     /// produce N * 48000 / rate output samples (within one frame).
     #[test]
-    #[ignore = "AUD-048"]
     fn test_input_resampler_preserves_duration() {
         let mut failures = Vec::new();
         for rate in [16_000u32, 44_100, 96_000] {
@@ -186,7 +185,6 @@ mod tests {
 
     /// 50 frames of 960 samples at 48 kHz must play for one second at any device rate.
     #[test]
-    #[ignore = "AUD-051"]
     fn test_output_resampler_preserves_duration() {
         let mut failures = Vec::new();
         for rate in [16_000u32, 44_100, 96_000] {
