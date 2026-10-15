@@ -124,7 +124,6 @@ fn noise_suppression_babble_measured() {
 }
 
 #[test]
-#[ignore = "AUD-021"]
 fn echo_cancelled_after_convergence() {
     let far_once = load_speech_48k("speech_2").expect("fixture");
     let far: Vec<f32> = far_once.iter().cycle().take(6 * SR).copied().collect();
