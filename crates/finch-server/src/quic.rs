@@ -82,14 +82,21 @@ pub async fn run_server(
     tracing::info!("QUIC server listening on {}", endpoint.local_addr()?);
 
     while let Some(incoming) = endpoint.accept().await {
-        let connection = incoming.await?;
-        let remote = connection.remote_address();
         let pool = pool.clone();
         let sessions = sessions.clone();
         let sfu = sfu.clone();
         let jwt_secret = jwt_secret.clone();
 
+        // Each handshake runs in its own task: a failed handshake must never stop the accept loop.
         tokio::spawn(async move {
+            let remote = incoming.remote_address();
+            let connection = match incoming.await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("QUIC handshake from {remote} failed: {e}");
+                    return;
+                }
+            };
             tracing::info!("New QUIC connection from {remote}");
             if let Err(e) = handle_connection(connection, pool, sessions, sfu, jwt_secret).await {
                 tracing::warn!("Connection from {remote} terminated: {e}");

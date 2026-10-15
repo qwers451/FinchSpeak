@@ -91,7 +91,6 @@ async fn server_responsive_after_abrupt_disconnect() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "AUD-004"]
 async fn server_survives_failed_handshake() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
 

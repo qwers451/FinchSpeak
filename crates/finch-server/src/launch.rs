@@ -114,3 +114,32 @@ impl RunningServer {
         self.endpoint.wait_idle().await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ephemeral_config() -> ServerConfig {
+        let mut config = ServerConfig::default();
+        config.server.host = "127.0.0.1".to_string();
+        config.server.http_port = 0;
+        config.server.quic_port = 0;
+        config.database.url = "sqlite::memory:".to_string();
+        config
+    }
+
+    /// After a server task exits on its own (`wait_for_exit` returned), `shutdown` must not panic.
+    #[tokio::test]
+    async fn shutdown_after_unexpected_exit_does_not_panic() {
+        let mut server = launch(ephemeral_config()).await.unwrap();
+
+        // Closing the endpoint ends the QUIC accept loop, like an unexpected exit.
+        server.endpoint.close(0u32.into(), b"test");
+        tokio::time::timeout(std::time::Duration::from_secs(5), server.wait_for_exit())
+            .await
+            .unwrap();
+
+        let joined = tokio::spawn(server.shutdown()).await;
+        assert!(joined.is_ok(), "shutdown panicked: {joined:?}");
+    }
+}
