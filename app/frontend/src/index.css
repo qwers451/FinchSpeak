@@ -660,3 +660,5 @@ body {
 .admin-fresh-code { padding: 8px 10px; border: 1px solid var(--accent-teal); border-radius: 6px; margin: 6px 0; }
 .admin-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
 .admin-table th, .admin-table td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border-color); font-size: 0.85rem; }
+
+.admin-actions { display: flex; gap: 6px; flex-wrap: wrap; }

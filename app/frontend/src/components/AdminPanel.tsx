@@ -1,5 +1,6 @@
 import { For, Show, createSignal, onMount } from 'solid-js';
-import { adminOpen, createInvite, invites, loadInvites, revokeInvite, setAdminOpen } from '../stores/adminStore';
+import { adminOpen, createInvite, invites, loadInvites, loadMembers, members, moderate, revokeInvite, setAdminOpen } from '../stores/adminStore';
+import { currentUser } from '../stores/authStore';
 
 const formatTime = (seconds: number) => new Date(seconds * 1000).toLocaleString();
 
@@ -9,7 +10,10 @@ export function AdminPanel() {
   const [hours, setHours] = createSignal(72);
   const [fresh, setFresh] = createSignal<string | null>(null);
 
-  onMount(() => void loadInvites());
+  onMount(() => {
+    void loadInvites();
+    void loadMembers();
+  });
 
   const create = async () => setFresh(await createInvite(maxUses(), hours()));
 
@@ -21,6 +25,41 @@ export function AdminPanel() {
             <h2>Administration</h2>
             <button type="button" class="icon-btn" title="Close" onClick={() => setAdminOpen(false)}>✕</button>
           </div>
+
+          <h3>Members</h3>
+          <table class="admin-table">
+            <thead><tr><th>Name</th><th>Role</th><th>State</th><th /></tr></thead>
+            <tbody>
+              <For each={members()}>
+                {(member) => (
+                  <tr>
+                    <td>{member.display_name} <small>({member.username})</small></td>
+                    <td>{member.role}</td>
+                    <td>{member.banned ? 'banned' : member.online ? 'online' : 'offline'}</td>
+                    <td class="admin-actions">
+                      <Show when={member.id !== currentUser()?.id}>
+                        <Show when={member.role === 'member'} fallback={
+                          <button type="button" onClick={() => void moderate(member.id, 'make-member')}>Make member</button>
+                        }>
+                          <button type="button" onClick={() => void moderate(member.id, 'make-admin')}>Make admin</button>
+                        </Show>
+                        <Show when={member.online}>
+                          <button type="button" onClick={() => void moderate(member.id, 'kick')}>Kick</button>
+                        </Show>
+                        <Show when={member.role === 'member'}>
+                          <Show when={member.banned} fallback={
+                            <button type="button" class="danger" onClick={() => void moderate(member.id, 'ban')}>Ban</button>
+                          }>
+                            <button type="button" onClick={() => void moderate(member.id, 'unban')}>Unban</button>
+                          </Show>
+                        </Show>
+                      </Show>
+                    </td>
+                  </tr>
+                )}
+              </For>
+            </tbody>
+          </table>
 
           <h3>Invitations</h3>
           <p class="admin-hint">People need a code to register. Give it to them in person; it stops working after its uses or time run out.</p>

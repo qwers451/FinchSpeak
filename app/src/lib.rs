@@ -89,6 +89,11 @@ pub fn run() {
             commands::admin::create_invite,
             commands::admin::list_invites,
             commands::admin::revoke_invite,
+            commands::admin::admin_users,
+            commands::admin::set_user_role,
+            commands::admin::kick_user,
+            commands::admin::ban_user,
+            commands::admin::unban_user,
             // Screen
             commands::screen::register_video_channel,
             commands::screen::subscribe_screen_share,

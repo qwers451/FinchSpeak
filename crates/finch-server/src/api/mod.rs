@@ -1,5 +1,6 @@
 //! REST API router configuration.
 
+pub mod admin;
 pub mod auth;
 pub mod channels;
 pub mod files;
@@ -35,6 +36,12 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .route("/api/auth/logout", post(auth::logout_handler))
         .route("/api/auth/me", get(auth::me_handler))
         .route("/api/state", get(state::state_handler))
+        // Moderation (admins)
+        .route("/api/admin/users", get(admin::list_users_handler))
+        .route("/api/admin/users/{id}/role", axum::routing::put(admin::set_role_handler))
+        .route("/api/admin/users/{id}/kick", post(admin::kick_handler))
+        .route("/api/admin/users/{id}/ban", post(admin::ban_handler))
+        .route("/api/admin/users/{id}/unban", post(admin::unban_handler))
         // Invitations
         .route("/api/invites", post(invites::create_invite_handler).get(invites::list_invites_handler))
         .route("/api/invites/{code}", axum::routing::delete(invites::revoke_invite_handler))

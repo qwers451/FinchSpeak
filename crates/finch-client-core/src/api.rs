@@ -49,6 +49,17 @@ pub struct MessagesHistoryDto {
     pub has_more: bool,
 }
 
+/// A member as listed to admins.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUserDto {
+    pub id: String,
+    pub username: String,
+    pub display_name: String,
+    pub role: String,
+    pub banned: bool,
+    pub online: bool,
+}
+
 /// An invitation code as listed by the server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InviteDto {
@@ -173,6 +184,41 @@ impl ApiClient {
                 "invite_code": invite_code
             }));
         parse_json(self.send(req).await?).await
+    }
+
+    /// Admin: all members with role, ban and online state.
+    pub async fn admin_users(&self) -> Result<Vec<AdminUserDto>, ClientError> {
+        let req = self.authorized(self.http.get(self.url("/api/admin/users")));
+        parse_json(self.send(req).await?).await
+    }
+
+    /// Admin: make a user an `"admin"` or a `"member"`.
+    pub async fn set_user_role(&self, user_id: Uuid, role: &str) -> Result<(), ClientError> {
+        let req = self
+            .authorized(self.http.put(self.url(&format!("/api/admin/users/{user_id}/role"))))
+            .json(&serde_json::json!({ "role": role }));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
+    /// Admin: disconnect a user and revoke their tokens (they may log in again).
+    pub async fn kick_user(&self, user_id: Uuid) -> Result<(), ClientError> {
+        self.admin_action(user_id, "kick").await
+    }
+
+    /// Admin: disconnect a user and refuse their logins.
+    pub async fn ban_user(&self, user_id: Uuid) -> Result<(), ClientError> {
+        self.admin_action(user_id, "ban").await
+    }
+
+    pub async fn unban_user(&self, user_id: Uuid) -> Result<(), ClientError> {
+        self.admin_action(user_id, "unban").await
+    }
+
+    async fn admin_action(&self, user_id: Uuid, action: &str) -> Result<(), ClientError> {
+        let req = self.authorized(self.http.post(self.url(&format!("/api/admin/users/{user_id}/{action}"))));
+        check_status(self.send(req).await?).await?;
+        Ok(())
     }
 
     /// Admin: create an invitation code.

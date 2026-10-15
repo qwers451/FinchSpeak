@@ -84,6 +84,15 @@ export interface WatchedShare {
   peer_id: number;
 }
 
+export interface AdminUser {
+  id: string;
+  username: string;
+  display_name: string;
+  role: 'admin' | 'member';
+  banned: boolean;
+  online: boolean;
+}
+
 export interface Invite {
   code: string;
   created_at: number;

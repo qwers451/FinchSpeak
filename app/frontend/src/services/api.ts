@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
+import type { AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -203,6 +203,37 @@ export const api = {
   revokeInvite: async (code: string): Promise<void> => {
     if (isTauri()) {
       return invoke('revoke_invite', { code });
+    }
+  },
+
+  adminUsers: async (): Promise<AdminUser[]> => {
+    if (isTauri()) {
+      return invoke('admin_users');
+    }
+    return [];
+  },
+
+  setUserRole: async (userId: string, role: 'admin' | 'member'): Promise<void> => {
+    if (isTauri()) {
+      return invoke('set_user_role', { userId, role });
+    }
+  },
+
+  kickUser: async (userId: string): Promise<void> => {
+    if (isTauri()) {
+      return invoke('kick_user', { userId });
+    }
+  },
+
+  banUser: async (userId: string): Promise<void> => {
+    if (isTauri()) {
+      return invoke('ban_user', { userId });
+    }
+  },
+
+  unbanUser: async (userId: string): Promise<void> => {
+    if (isTauri()) {
+      return invoke('unban_user', { userId });
     }
   },
 

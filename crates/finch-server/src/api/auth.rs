@@ -327,20 +327,24 @@ pub async fn login_handler(
 ) -> Result<impl IntoResponse, ServerError> {
     let username = payload.username.trim().to_lowercase();
 
-    let row = sqlx::query_as::<_, (String, String, String, String, Option<String>)>(
-        "SELECT id, password_hash, display_name, role, avatar_path FROM users WHERE username = ?"
+    let row = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<i64>)>(
+        "SELECT id, password_hash, display_name, role, avatar_path, banned_at FROM users WHERE username = ?"
     )
     .bind(&username)
     .fetch_optional(&state.pool)
     .await?;
 
-    let (user_id_str, hash, display_name, role, avatar_path) = match row {
+    let (user_id_str, hash, display_name, role, avatar_path, banned_at) = match row {
         Some(r) => r,
         None => return Err(ServerError::AuthFailed("Invalid username or password".to_string())),
     };
 
     if !verify_password(&payload.password, &hash) {
         return Err(ServerError::AuthFailed("Invalid username or password".to_string()));
+    }
+
+    if banned_at.is_some() {
+        return Err(ServerError::Banned);
     }
 
     let user_id = Uuid::parse_str(&user_id_str).map_err(|_| ServerError::Unauthorized)?;

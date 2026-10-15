@@ -29,6 +29,9 @@ pub enum ServerError {
     #[error("Forbidden")]
     Forbidden,
 
+    #[error("This account is banned")]
+    Banned,
+
     #[error("A valid invite code is required")]
     InviteRequired,
 
@@ -48,6 +51,7 @@ impl IntoResponse for ServerError {
             Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "Invalid or missing token".to_string()),
             Self::Forbidden => (StatusCode::FORBIDDEN, "Permission denied".to_string()),
+            Self::Banned => (StatusCode::FORBIDDEN, "This account has been banned from the server".to_string()),
             Self::InviteRequired => (StatusCode::FORBIDDEN, "A valid invite code is required to register".to_string()),
             Self::FileUpload(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg.clone()),
             Self::Database(err) => {
