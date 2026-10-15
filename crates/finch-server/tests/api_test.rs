@@ -15,13 +15,20 @@ use serde_json::{json, Value};
 use tower::util::ServiceExt;
 
 use finch_server::api::create_router;
-use finch_server::config::ServerConfig;
 use finch_server::db::init_db;
+
+/// These scenarios create several users without invitations.
+fn open_registration() -> finch_server::config::ServerConfig {
+    let mut config = finch_server::config::ServerConfig::default();
+    config.auth.registration = finch_server::config::RegistrationMode::Open;
+    config
+}
+
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn aud038_concurrent_first_registrations_create_one_admin() -> anyhow::Result<()> {
     let pool = init_db("sqlite::memory:").await?;
-    let app = create_router(pool.clone(), ServerConfig::default(), finch_server::session::SessionManager::new());
+    let app = create_router(pool.clone(), open_registration(), finch_server::session::SessionManager::new());
     let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(8));
     let mut tasks = Vec::new();
     for index in 0..8 {
@@ -44,7 +51,7 @@ async fn aud038_concurrent_first_registrations_create_one_admin() -> anyhow::Res
 #[tokio::test]
 async fn aud039_deleted_session_rejects_its_still_signed_token() -> anyhow::Result<()> {
     let pool = init_db("sqlite::memory:").await?;
-    let app = create_router(pool.clone(), ServerConfig::default(), finch_server::session::SessionManager::new());
+    let app = create_router(pool.clone(), open_registration(), finch_server::session::SessionManager::new());
     let request = Request::builder().method("POST").uri("/api/auth/register")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(json!({"username":"alice", "password":"password_123"}).to_string()))?;
@@ -64,7 +71,7 @@ async fn aud039_deleted_session_rejects_its_still_signed_token() -> anyhow::Resu
 #[tokio::test]
 async fn aud039_logout_revokes_only_the_requested_token() -> anyhow::Result<()> {
     let pool = init_db("sqlite::memory:").await?;
-    let app = create_router(pool, ServerConfig::default(), finch_server::session::SessionManager::new());
+    let app = create_router(pool, open_registration(), finch_server::session::SessionManager::new());
     let mut tokens = Vec::new();
     for path in ["/api/auth/register", "/api/auth/login"] {
         let request = Request::builder().method("POST").uri(path)
@@ -91,7 +98,7 @@ async fn aud039_logout_revokes_only_the_requested_token() -> anyhow::Result<()> 
 #[tokio::test]
 async fn test_full_api_lifecycle() -> anyhow::Result<()> {
     let pool = init_db("sqlite::memory:").await?;
-    let config = ServerConfig::default();
+    let config = open_registration();
     let app = create_router(pool.clone(), config, finch_server::session::SessionManager::new());
 
     // ─── 1. Register First User (Admin) ─────────────────────────────────────

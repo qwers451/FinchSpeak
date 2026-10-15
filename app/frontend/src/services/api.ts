@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { Channel, IncomingMessage, MessageHistory, ScreenSources, User, AudioDevices, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
+import type { Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -31,15 +31,15 @@ export const api = {
     return data.user;
   },
 
-  register: async (serverUrl: string, username: string, displayName: string, password: string): Promise<User> => {
+  register: async (serverUrl: string, username: string, displayName: string, password: string, inviteCode?: string): Promise<User> => {
     if (isTauri()) {
-      return invoke('register', { serverUrl, username, displayName, password });
+      return invoke('register', { serverUrl, username, displayName, password, inviteCode: inviteCode || null });
     }
     const cleanUrl = serverUrl.replace(/\/+$/, '');
     const resp = await fetch(`${cleanUrl}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, display_name: displayName, password }),
+      body: JSON.stringify({ username, display_name: displayName, password, invite_code: inviteCode || null }),
     });
     if (!resp.ok) {
       const err = await resp.text();
@@ -182,6 +182,27 @@ export const api = {
   setAudioDevices: async (input: string | null, output: string | null): Promise<void> => {
     if (isTauri()) {
       return invoke('set_audio_devices', { input, output });
+    }
+  },
+
+  // Administration
+  createInvite: async (maxUses: number, expiresHours: number): Promise<Invite> => {
+    if (isTauri()) {
+      return invoke('create_invite', { maxUses, expiresHours });
+    }
+    throw new Error('Administration needs the desktop app');
+  },
+
+  listInvites: async (): Promise<Invite[]> => {
+    if (isTauri()) {
+      return invoke('list_invites');
+    }
+    return [];
+  },
+
+  revokeInvite: async (code: string): Promise<void> => {
+    if (isTauri()) {
+      return invoke('revoke_invite', { code });
     }
   },
 

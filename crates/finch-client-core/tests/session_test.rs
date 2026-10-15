@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 async fn start_server() -> anyhow::Result<RunningServer> {
     let mut config = ServerConfig::default();
+    config.auth.registration = finch_server::config::RegistrationMode::Open;
     config.server.host = "127.0.0.1".to_string();
     config.server.http_port = 0;
     config.server.quic_port = 0;

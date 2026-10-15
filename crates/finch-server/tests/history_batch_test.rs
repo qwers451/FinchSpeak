@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use finch_server::{
-    api::create_router, config::ServerConfig, db::init_db, session::SessionManager,
+    api::create_router, db::init_db, session::SessionManager,
 };
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
@@ -16,6 +16,14 @@ use tracing::{
 };
 use tracing_subscriber::{layer::Context, prelude::*, Layer};
 use uuid::Uuid;
+
+/// These scenarios create several users without invitations.
+fn open_registration() -> finch_server::config::ServerConfig {
+    let mut config = finch_server::config::ServerConfig::default();
+    config.auth.registration = finch_server::config::RegistrationMode::Open;
+    config
+}
+
 
 #[derive(Clone, Default)]
 struct AttachmentQueries(Arc<Mutex<Vec<u64>>>);
@@ -76,7 +84,7 @@ async fn history_batches_only_page_attachments_and_preserves_pagination() -> any
     let queries = AttachmentQueries::default();
     tracing::subscriber::set_global_default(tracing_subscriber::registry().with(queries.clone()))?;
     let pool = init_db("sqlite::memory:").await?;
-    let app = create_router(pool.clone(), ServerConfig::default(), SessionManager::new());
+    let app = create_router(pool.clone(), open_registration(), SessionManager::new());
     let request = Request::builder()
         .method("POST")
         .uri("/api/auth/register")

@@ -29,6 +29,9 @@ pub enum ServerError {
     #[error("Forbidden")]
     Forbidden,
 
+    #[error("A valid invite code is required")]
+    InviteRequired,
+
     #[error("File upload error: {0}")]
     FileUpload(String),
 
@@ -45,6 +48,7 @@ impl IntoResponse for ServerError {
             Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "Invalid or missing token".to_string()),
             Self::Forbidden => (StatusCode::FORBIDDEN, "Permission denied".to_string()),
+            Self::InviteRequired => (StatusCode::FORBIDDEN, "A valid invite code is required to register".to_string()),
             Self::FileUpload(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg.clone()),
             Self::Database(err) => {
                 tracing::error!("Database query failed: {err}");

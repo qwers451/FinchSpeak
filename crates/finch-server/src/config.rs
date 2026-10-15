@@ -105,6 +105,17 @@ fn default_max_file_size_mb() -> usize {
     50
 }
 
+/// Who may create an account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RegistrationMode {
+    /// Anyone who can reach the server.
+    Open,
+    /// Only with a code from an admin (the very first account is always allowed: it becomes admin).
+    #[default]
+    Invite,
+}
+
 /// Authentication and JWT settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
@@ -115,6 +126,9 @@ pub struct AuthConfig {
     /// Where a generated secret is stored when `jwt_secret` is not set by the operator.
     #[serde(default = "default_jwt_secret_file")]
     pub jwt_secret_file: String,
+    /// `invite` (default) or `open`.
+    #[serde(default)]
+    pub registration: RegistrationMode,
 }
 
 impl Default for AuthConfig {
@@ -123,6 +137,7 @@ impl Default for AuthConfig {
             jwt_secret: default_jwt_secret(),
             jwt_expiration_hours: default_jwt_expiration_hours(),
             jwt_secret_file: default_jwt_secret_file(),
+            registration: RegistrationMode::default(),
         }
     }
 }

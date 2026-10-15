@@ -17,7 +17,6 @@ use bytes::BytesMut;
 use finch_protocol::codec::{decode_message, encode_message};
 use finch_protocol::messages::{ClientMessage, ServerMessage};
 use finch_server::api::create_router;
-use finch_server::config::ServerConfig;
 use finch_server::db::init_db;
 use finch_server::quic;
 use finch_server::session::SessionManager;
@@ -28,6 +27,14 @@ use quinn::{ClientConfig, Endpoint};
 use serde_json::{json, Value};
 use tower::util::ServiceExt;
 use uuid::Uuid;
+
+/// These scenarios create several users without invitations.
+fn open_registration() -> finch_server::config::ServerConfig {
+    let mut config = finch_server::config::ServerConfig::default();
+    config.auth.registration = finch_server::config::RegistrationMode::Open;
+    config
+}
+
 
 #[derive(Debug)]
 struct SkipServerVerification;
@@ -130,7 +137,7 @@ where
 async fn test_full_system_autotest() -> anyhow::Result<()> {
     // ─── 1. Initialize SQLite Database & Configuration ───────────────────────
     let pool = init_db("sqlite::memory:").await?;
-    let config = ServerConfig::default();
+    let config = open_registration();
     let jwt_secret = config.auth.jwt_secret.clone();
     let sessions = SessionManager::new();
     quic::sync_channels_from_db(&pool, &sessions).await?;

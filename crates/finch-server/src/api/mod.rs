@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod channels;
 pub mod files;
+pub mod invites;
 pub mod messages;
 pub mod state;
 
@@ -34,6 +35,9 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .route("/api/auth/logout", post(auth::logout_handler))
         .route("/api/auth/me", get(auth::me_handler))
         .route("/api/state", get(state::state_handler))
+        // Invitations
+        .route("/api/invites", post(invites::create_invite_handler).get(invites::list_invites_handler))
+        .route("/api/invites/{code}", axum::routing::delete(invites::revoke_invite_handler))
         // Channels routes
         .route("/api/channels", get(channels::list_channels_handler))
         .route("/api/channels", post(channels::create_channel_handler))

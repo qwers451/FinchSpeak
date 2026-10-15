@@ -136,16 +136,19 @@ pub async fn register(
     username: String,
     display_name: String,
     password: String,
+    invite_code: Option<String>,
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<UserDto, String> {
     info!("Registering to {} as {}", server_url, username);
 
     let mut api = trusted_api(&server_url, &state, &app_handle).await?;
-    let auth_data: AuthResponse = api
-        .register(&username, &password, &display_name)
-        .await
-        .map_err(|e| format!("Registration failed: {}", e))?;
+    let invite = invite_code.as_deref().map(str::trim).filter(|code| !code.is_empty());
+    let registered = match invite {
+        Some(code) => api.register_with_invite(&username, &password, &display_name, code).await,
+        None => api.register(&username, &password, &display_name).await,
+    };
+    let auth_data: AuthResponse = registered.map_err(|e| format!("Registration failed: {}", e))?;
     api.set_token(auth_data.token.clone());
     *state.api.write().await = Some(api);
 

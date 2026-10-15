@@ -10,14 +10,15 @@ import {
 
 export function AuthModal() {
   const [isRegister, setIsRegister] = createSignal(false);
-  const [username, setUsername] = createSignal('alice');
-  const [displayName, setDisplayName] = createSignal('Alice');
-  const [password, setPassword] = createSignal('password123');
+  const [username, setUsername] = createSignal('');
+  const [displayName, setDisplayName] = createSignal('');
+  const [password, setPassword] = createSignal('');
+  const [inviteCode, setInviteCode] = createSignal('');
 
   const handleSubmit = async (e: Event) => {
     e.preventDefault();
     if (isRegister()) {
-      await registerUser(username(), displayName(), password());
+      await registerUser(username(), displayName(), password(), inviteCode());
     } else {
       await loginUser(username(), password());
     }
@@ -75,6 +76,17 @@ export function AuthModal() {
           </div>
 
           <Show when={isRegister()}>
+            <div class="form-group">
+              <label class="form-label">Invite code (ask the server admin)</label>
+              <input
+                type="text"
+                class="form-input"
+                value={inviteCode()}
+                onInput={(e) => setInviteCode(e.currentTarget.value)}
+                placeholder="e.g. K7M2QX9TPW4B"
+                autocomplete="off"
+              />
+            </div>
             <div class="form-group">
               <label class="form-label">Display Name</label>
               <input

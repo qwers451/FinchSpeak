@@ -1,4 +1,5 @@
 import { For, Show } from 'solid-js';
+import { setAdminOpen } from '../stores/adminStore';
 import {
   channels,
   activeChannel,
@@ -178,6 +179,9 @@ export function Sidebar() {
           >
             {isDeafened() ? '🚫' : '🎧'}
           </button>
+          <Show when={currentUser()?.role === 'admin'}>
+            <button class="icon-btn" title="Administration" onClick={() => setAdminOpen(true)}>🛠</button>
+          </Show>
           <button
             class="icon-btn"
             title="Log out"

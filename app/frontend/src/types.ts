@@ -84,6 +84,14 @@ export interface WatchedShare {
   peer_id: number;
 }
 
+export interface Invite {
+  code: string;
+  created_at: number;
+  expires_at: number;
+  max_uses: number;
+  uses: number;
+}
+
 export interface AudioDevice {
   name: string;
   is_default: boolean;

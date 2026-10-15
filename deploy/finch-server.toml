@@ -19,3 +19,6 @@ max_file_size_mb = 50
 # jwt_secret = "..."
 jwt_secret_file = "/app/data/jwt_secret"
 token_expiry_hours = 72
+# Who may register: "invite" (default; an admin creates codes in the app) or "open".
+# The very first account on an empty server is always allowed and becomes the admin.
+registration = "invite"

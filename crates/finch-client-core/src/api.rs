@@ -49,6 +49,16 @@ pub struct MessagesHistoryDto {
     pub has_more: bool,
 }
 
+/// An invitation code as listed by the server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InviteDto {
+    pub code: String,
+    pub created_at: i64,
+    pub expires_at: i64,
+    pub max_uses: i64,
+    pub uses: i64,
+}
+
 /// HTTP client bound to one FinchSpeak server.
 #[derive(Debug, Clone)]
 pub struct ApiClient {
@@ -132,15 +142,58 @@ impl ApiClient {
         password: &str,
         display_name: &str,
     ) -> Result<AuthResponse, ClientError> {
+        self.register_inner(username, password, display_name, None).await
+    }
+
+    /// Register with an invitation code (needed on servers that do not allow open registration).
+    pub async fn register_with_invite(
+        &self,
+        username: &str,
+        password: &str,
+        display_name: &str,
+        invite_code: &str,
+    ) -> Result<AuthResponse, ClientError> {
+        self.register_inner(username, password, display_name, Some(invite_code)).await
+    }
+
+    async fn register_inner(
+        &self,
+        username: &str,
+        password: &str,
+        display_name: &str,
+        invite_code: Option<&str>,
+    ) -> Result<AuthResponse, ClientError> {
         let req = self
             .http
             .post(self.url("/api/auth/register"))
             .json(&serde_json::json!({
                 "username": username,
                 "display_name": display_name,
-                "password": password
+                "password": password,
+                "invite_code": invite_code
             }));
         parse_json(self.send(req).await?).await
+    }
+
+    /// Admin: create an invitation code.
+    pub async fn create_invite(&self, max_uses: Option<i64>, expires_hours: Option<i64>) -> Result<InviteDto, ClientError> {
+        let req = self
+            .authorized(self.http.post(self.url("/api/invites")))
+            .json(&serde_json::json!({ "max_uses": max_uses, "expires_hours": expires_hours }));
+        parse_json(self.send(req).await?).await
+    }
+
+    /// Admin: all invitation codes.
+    pub async fn list_invites(&self) -> Result<Vec<InviteDto>, ClientError> {
+        let req = self.authorized(self.http.get(self.url("/api/invites")));
+        parse_json(self.send(req).await?).await
+    }
+
+    /// Admin: make a code unusable.
+    pub async fn revoke_invite(&self, code: &str) -> Result<(), ClientError> {
+        let req = self.authorized(self.http.delete(self.url(&format!("/api/invites/{code}"))));
+        check_status(self.send(req).await?).await?;
+        Ok(())
     }
 
     pub async fn login(&self, username: &str, password: &str) -> Result<AuthResponse, ClientError> {

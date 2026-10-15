@@ -190,6 +190,8 @@ pub struct RegisterRequest {
     pub username: String,
     pub password: String,
     pub display_name: Option<String>,
+    /// Required when the server only registers people with an invitation.
+    pub invite_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -243,6 +245,25 @@ pub async fn register_handler(
         .unwrap_or_default()
         .as_secs() as i64;
 
+    // One transaction: spending the invite and creating the account stand or fall together.
+    let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
+    if state.config.auth.registration == crate::config::RegistrationMode::Invite {
+        let first_user = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users").fetch_one(&mut *tx).await? == 0;
+        if !first_user {
+            let code = payload.invite_code.as_deref().map(|c| c.trim().to_uppercase()).unwrap_or_default();
+            let spent = sqlx::query(
+                "UPDATE invites SET uses = uses + 1 WHERE code = ? AND uses < max_uses AND expires_at > ?",
+            )
+            .bind(&code)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+            if spent.rows_affected() != 1 {
+                return Err(ServerError::InviteRequired);
+            }
+        }
+    }
+
     // SQLite serializes the write and the role decision as one statement.
     let res = sqlx::query_scalar::<_, String>(
         "INSERT INTO users (id, username, display_name, password_hash, role, status, created_at)
@@ -254,11 +275,12 @@ pub async fn register_handler(
     .bind(&display_name)
     .bind(&password_hash)
     .bind(now)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await;
 
     match res {
         Ok(role) => {
+            tx.commit().await?;
             let (token, jti) = issue_jwt(
                 &user_id,
                 &username,

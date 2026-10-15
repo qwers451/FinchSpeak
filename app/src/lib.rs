@@ -85,6 +85,10 @@ pub fn run() {
             commands::voice::get_audio_devices,
             commands::voice::set_audio_devices,
             commands::voice::set_speaker_volume,
+            // Administration
+            commands::admin::create_invite,
+            commands::admin::list_invites,
+            commands::admin::revoke_invite,
             // Screen
             commands::screen::register_video_channel,
             commands::screen::subscribe_screen_share,

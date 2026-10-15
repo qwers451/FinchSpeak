@@ -31,11 +31,11 @@ export async function loginUser(username: string, password: string) {
   }
 }
 
-export async function registerUser(username: string, displayName: string, password: string) {
+export async function registerUser(username: string, displayName: string, password: string, inviteCode?: string) {
   setAuthLoading(true);
   setAuthError(null);
   try {
-    const user = await api.register(serverUrl(), username, displayName, password);
+    const user = await api.register(serverUrl(), username, displayName, password, inviteCode);
     setCurrentUser(user);
     await loadChannels();
     return true;

@@ -13,6 +13,7 @@ use finch_testbed::client::connect_to;
 /// Start a server on a dedicated current-thread runtime; returns (http_url, quic_addr).
 fn start_isolated_server(dir: &std::path::Path) -> anyhow::Result<(ApiClient, SocketAddr)> {
     let mut config = ServerConfig::default();
+    config.auth.registration = finch_server::config::RegistrationMode::Open;
     config.server.host = "127.0.0.1".to_string();
     config.server.http_port = 0;
     config.server.quic_port = 0;

@@ -650,3 +650,13 @@ body {
   padding: 4px 8px;
   border-radius: 4px;
 }
+
+.admin-panel { max-width: 640px; width: 90%; max-height: 85vh; overflow-y: auto; }
+.admin-header { display: flex; justify-content: space-between; align-items: center; }
+.admin-hint { color: var(--text-dim); font-size: 0.85rem; }
+.admin-invite-form { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; margin: 10px 0; }
+.admin-invite-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; }
+.admin-invite-form input { width: 110px; }
+.admin-fresh-code { padding: 8px 10px; border: 1px solid var(--accent-teal); border-radius: 6px; margin: 6px 0; }
+.admin-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+.admin-table th, .admin-table td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border-color); font-size: 0.85rem; }
