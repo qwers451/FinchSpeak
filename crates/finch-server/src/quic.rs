@@ -155,6 +155,17 @@ pub async fn sync_channels_from_db(pool: &SqlitePool, sessions: &SessionManager)
     Ok(())
 }
 
+/// Send a final error on the control stream and wait (bounded) until the peer has it,
+/// so the client sees the reason instead of a bare "connection lost".
+async fn reject_and_flush(send_stream: &mut quinn::SendStream, err: &ServerMessage) {
+    if let Ok(bytes) = encode_message(err)
+        && send_stream.write_all(&bytes).await.is_ok()
+    {
+        let _ = send_stream.finish();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), send_stream.stopped()).await;
+    }
+}
+
 /// Handle a single authenticated QUIC connection.
 pub async fn handle_connection(
     conn: quinn::Connection,
@@ -184,7 +195,7 @@ pub async fn handle_connection(
                     code: 401,
                     message: "First message must be Authenticate".to_string(),
                 };
-                send_stream.write_all(&encode_message(&err)?).await?;
+                reject_and_flush(&mut send_stream, &err).await;
                 return Err(anyhow::anyhow!("Unauthenticated first message"));
             }
             Err(finch_protocol::codec::CodecError::Incomplete { .. }) => continue,
@@ -200,7 +211,7 @@ pub async fn handle_connection(
                 code: 401,
                 message: "Invalid or expired JWT token".to_string(),
             };
-            send_stream.write_all(&encode_message(&err)?).await?;
+            reject_and_flush(&mut send_stream, &err).await;
             return Err(anyhow::anyhow!("Invalid JWT token"));
         }
     };

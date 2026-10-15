@@ -42,10 +42,11 @@ async fn assert_token_rejected(server: &TestServer, token: String) -> anyhow::Re
         Err(ClientError::Http { status, .. }) => assert_eq!(status, 401),
         other => panic!("expected HTTP 401, got {other:?}"),
     }
-    assert!(
-        connect_with_token(server, &token).await.is_err(),
-        "QUIC must reject the token"
-    );
+    match connect_with_token(server, &token).await {
+        Err(ClientError::AuthRejected { code, .. }) => assert_eq!(code, 401),
+        Err(other) => panic!("expected AuthRejected 401 on QUIC, got {other:?}"),
+        Ok(_) => panic!("QUIC must reject the token"),
+    }
     Ok(())
 }
 

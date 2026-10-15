@@ -114,7 +114,6 @@ async fn bad_password_returns_401() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "AUD-047"]
 async fn invalid_token_rejected_on_quic() -> anyhow::Result<()> {
     let server = start_server().await?;
 
