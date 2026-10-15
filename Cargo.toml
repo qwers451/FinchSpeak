@@ -5,6 +5,7 @@ members = [
     "crates/finch-server",
     "crates/finch-audio",
     "crates/finch-screen",
+    "crates/finch-client-core",
     "app",
 ]
 
@@ -49,3 +50,4 @@ bytes = "1"
 finch-protocol = { path = "crates/finch-protocol" }
 finch-audio = { path = "crates/finch-audio" }
 finch-screen = { path = "crates/finch-screen" }
+finch-client-core = { path = "crates/finch-client-core" }

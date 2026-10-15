@@ -1,0 +1,37 @@
+[package]
+name = "finch-client-core"
+description = "FinchSpeak client core — QUIC session, TOFU, REST API client (no UI dependencies)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+finch-protocol = { workspace = true }
+
+# Async & QUIC
+tokio = { workspace = true }
+quinn = { workspace = true }
+rustls = { workspace = true }
+ring = "0.17"
+
+# HTTP
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+bytes = { workspace = true }
+
+# Concurrency
+dashmap = "6"
+
+# Logging
+tracing = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+[dev-dependencies]
+finch-server = { path = "../finch-server" }
+anyhow = { workspace = true }

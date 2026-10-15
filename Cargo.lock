@@ -1445,6 +1445,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "finch-client-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "dashmap",
+ "finch-protocol",
+ "finch-server",
+ "quinn",
+ "reqwest 0.12.28",
+ "ring",
+ "rustls",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "finch-protocol"
 version = "0.1.0"
 dependencies = [
