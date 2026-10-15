@@ -137,8 +137,16 @@ impl SessionManager {
     }
 
     /// Subscribe viewer to streamer's screen share.
+    /// Subscribe a viewer to a streamer's screen; only members of the same voice room may watch.
     pub fn subscribe_screen(&self, viewer_peer_id: u32, streamer_peer_id: u32) {
         let short_id = self.sessions.get(&streamer_peer_id).and_then(|s| s.current_voice_channel);
+        let viewer_room = self.sessions.get(&viewer_peer_id).and_then(|s| s.current_voice_channel);
+        if short_id.is_none() || viewer_room != short_id {
+            tracing::warn!(
+                "Peer {viewer_peer_id} tried to watch peer {streamer_peer_id} outside their voice room"
+            );
+            return;
+        }
         if let Some(short_id) = short_id
             && let Some(mut room) = self.voice_rooms.get_mut(&short_id)
         {

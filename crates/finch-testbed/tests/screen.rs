@@ -89,3 +89,24 @@ async fn keyframe_request_forwarded() -> anyhow::Result<()> {
     .await?;
     Ok(())
 }
+
+/// Only members of the streamer's voice room may watch (AUD-017).
+#[tokio::test]
+async fn outsider_cannot_subscribe_to_screen() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let (a, _b, voice_short) = streamer_and_viewer(&server).await?;
+    let mut outsider = TestClient::register(&server, "mallory").await?;
+    outsider
+        .send(ClientMessage::SubscribeScreenShare { target_user_id: a.session.user_id })
+        .await?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    outsider.drain_datagrams();
+
+    let delta: Vec<u8> = vec![1u8; 3000];
+    for packet in slice_p_frame(voice_short, a.session.session_peer_id, 1, 2, 1033, &delta, false) {
+        a.session.send_datagram(packet.encode())?;
+    }
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(outsider.drain_datagrams().is_empty(), "outsider received the screen stream");
+    Ok(())
+}
