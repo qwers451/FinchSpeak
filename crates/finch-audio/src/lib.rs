@@ -11,17 +11,23 @@
 //! - [`jitter`] — Adaptive jitter buffer with sequence rollover handling
 //! - [`vad`] — RMS dBFS Voice Activity Detection with hangover
 //! - [`mixer`] — Multi-speaker mixing with `tanh()` soft-limiter
+//! - [`aec`] — Acoustic Echo Cancellation with reference ring buffer
+//! - [`noise`] — Neural network noise suppression based on `nnnoiseless`
 
+pub mod aec;
 pub mod devices;
 pub mod jitter;
 pub mod mixer;
+pub mod noise;
 pub mod opus;
 pub mod resampler;
 pub mod vad;
 
+pub use aec::EchoCanceller;
 pub use devices::{list_input_devices, list_output_devices, AudioDeviceInfo};
 pub use jitter::{JitterBuffer, PlayoutResult};
 pub use mixer::AudioMixer;
+pub use noise::NoiseSuppressor;
 pub use opus::{AudioOpusError, OpusVoiceDecoder, OpusVoiceEncoder};
 pub use resampler::{InputResampler, OutputResampler, FRAME_SIZE_48K, INTERNAL_SAMPLE_RATE};
 pub use vad::{VadDecision, VoiceActivityDetector};

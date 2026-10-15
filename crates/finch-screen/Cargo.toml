@@ -14,6 +14,11 @@ xcap = "0.1"
 # H.264 codec
 openh264 = "0.6"
 
+# Audio loopback and Opus encoding
+cpal = "0.15"
+audiopus = "0.3.0-rc.0"
+ringbuf = "0.4"
+
 # Logging
 tracing = { workspace = true }
 

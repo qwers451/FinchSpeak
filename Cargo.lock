@@ -1414,6 +1414,7 @@ dependencies = [
  "quinn",
  "reqwest 0.12.28",
  "ring",
+ "ringbuf",
  "rmp-serde",
  "rustls",
  "serde",
@@ -1448,6 +1449,7 @@ name = "finch-protocol"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "chacha20poly1305",
  "rmp-serde",
  "serde",
  "thiserror 2.0.21",
@@ -1458,9 +1460,12 @@ dependencies = [
 name = "finch-screen"
 version = "0.1.0"
 dependencies = [
+ "audiopus",
  "bytes",
+ "cpal",
  "finch-protocol",
  "openh264",
+ "ringbuf",
  "thiserror 2.0.21",
  "tracing",
  "xcap",

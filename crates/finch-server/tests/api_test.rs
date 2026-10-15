@@ -42,7 +42,10 @@ async fn test_full_api_lifecycle() -> anyhow::Result<()> {
 
     let body_bytes = res.into_body().collect().await?.to_bytes();
     let admin_auth: Value = serde_json::from_slice(&body_bytes)?;
-    let admin_token = admin_auth["token"].as_str().unwrap().to_string();
+    let admin_token = admin_auth["token"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Admin token missing"))?
+        .to_string();
     assert_eq!(admin_auth["user"]["role"], "admin");
     assert_eq!(admin_auth["user"]["username"], "admin");
 
@@ -74,7 +77,10 @@ async fn test_full_api_lifecycle() -> anyhow::Result<()> {
 
     let member_body = res_member.into_body().collect().await?.to_bytes();
     let member_auth: Value = serde_json::from_slice(&member_body)?;
-    let member_token = member_auth["token"].as_str().unwrap().to_string();
+    let member_token = member_auth["token"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Member token missing"))?
+        .to_string();
     assert_eq!(member_auth["user"]["role"], "member");
 
     // ─── 4. Login with Correct and Bad Passwords ────────────────────────────
@@ -131,7 +137,10 @@ async fn test_full_api_lifecycle() -> anyhow::Result<()> {
     assert_eq!(channels[1]["name"], "General Voice");
     assert_eq!(channels[1]["short_id"], 2);
 
-    let general_id = channels[0]["id"].as_str().unwrap().to_string();
+    let general_id = channels[0]["id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("General channel ID missing"))?
+        .to_string();
 
     // ─── 7. Create Channel: Member Forbidden (403), Admin Allowed (201) ─────
     let create_ch = json!({

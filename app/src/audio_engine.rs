@@ -1,25 +1,42 @@
 //! Audio engine managing microphone capture and speaker playback via cpal.
 //!
-//! All `cpal::Stream` instances are owned by a dedicated background OS thread,
-//! ensuring real-time priority and full `Send + Sync` safety across Tauri state.
+//! All `cpal::Stream` instances and DSP processing (rubato resampling, AEC,
+//! noise suppression, VAD, and Opus codec) run in a dedicated background worker thread.
+//! The audio hardware callbacks communicate with the worker thread strictly via lock-free
+//! SPSC ring buffers (`ringbuf::HeapRb`) without mutex locks or memory allocations.
 
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Stream;
 use finch_audio::{
-    InputResampler, OpusVoiceEncoder, OutputResampler, VadDecision, VoiceActivityDetector,
-    FRAME_SIZE_48K,
+    EchoCanceller, InputResampler, NoiseSuppressor, OpusVoiceEncoder, OutputResampler,
+    VadDecision, VoiceActivityDetector, FRAME_SIZE_48K,
 };
 use finch_protocol::media::{MediaHeader, MEDIA_HEADER_SIZE};
+use ringbuf::traits::{Consumer, Observer, Producer, Split};
+use ringbuf::HeapRb;
 use tauri::Emitter;
 use tracing::{error, info};
 
 use crate::state::AppState;
+
+/// Capacity of lock-free ring buffers (16384 samples ~ 341 ms at 48 kHz).
+const RING_BUFFER_CAPACITY: usize = 16384;
+
+/// Errors that can occur in the audio engine.
+#[derive(Debug, thiserror::Error)]
+pub enum AudioEngineError {
+    #[error("Failed to spawn audio worker thread: {0}")]
+    ThreadSpawnFailed(#[from] std::io::Error),
+
+    #[error("Audio worker command channel disconnected: {0}")]
+    ChannelClosed(String),
+}
 
 enum AudioCommand {
     Start {
@@ -35,12 +52,14 @@ pub struct AudioEngine {
     is_running: Arc<AtomicBool>,
 }
 
-// Explicitly safe because cmd_tx is Sender and is_running is Arc<AtomicBool>
 unsafe impl Send for AudioEngine {}
 unsafe impl Sync for AudioEngine {}
 
 impl AudioEngine {
-    pub fn new() -> Self {
+    /// Creates and starts a new audio engine with a background worker thread.
+    ///
+    /// Returns an error if the OS worker thread could not be spawned.
+    pub fn try_new() -> Result<Self, AudioEngineError> {
         let (cmd_tx, cmd_rx) = channel::<AudioCommand>();
         let is_running = Arc::new(AtomicBool::new(false));
         let is_running_thread = is_running.clone();
@@ -48,230 +67,470 @@ impl AudioEngine {
         std::thread::Builder::new()
             .name("finch-audio-worker".into())
             .spawn(move || {
-                let mut _capture_stream: Option<Stream> = None;
-                let mut _playback_stream: Option<Stream> = None;
-
-                while let Ok(cmd) = cmd_rx.recv() {
-                    match cmd {
-                        AudioCommand::Start {
-                            channel_id,
-                            state,
-                            app_handle,
-                        } => {
-                            // Stop existing streams if any
-                            _capture_stream = None;
-                            _playback_stream = None;
-
-                            let host = cpal::default_host();
-
-                            // 1. Output (Playback) Stream
-                            if let Some(device) = host.default_output_device() {
-                                if let Ok(config) = device.default_output_config() {
-                                    let sample_rate = config.sample_rate().0;
-                                    let channels = config.channels() as usize;
-
-                                    let mixer_ref = state.mixer.clone();
-                                    let is_deafened_ref = state.is_deafened.clone();
-                                    let app_handle_out = app_handle.clone();
-
-                                    let mut resampler = OutputResampler::new(sample_rate)
-                                        .unwrap_or(OutputResampler::Passthrough);
-                                    let mut frame_48k = [0.0f32; FRAME_SIZE_48K];
-
-                                    let err_fn = |err| error!("Audio output error: {}", err);
-                                    if let Ok(stream) = device.build_output_stream(
-                                        &config.into(),
-                                        move |data: &mut [f32], _| {
-                                            if is_deafened_ref.load(Ordering::Relaxed) {
-                                                data.fill(0.0);
-                                                return;
-                                            }
-
-                                            let speech_events = {
-                                                if let Ok(mut mixer) = mixer_ref.try_lock() {
-                                                    mixer.mix_frame(&mut frame_48k, Instant::now())
-                                                } else {
-                                                    frame_48k.fill(0.0);
-                                                    Vec::new()
-                                                }
-                                            };
-
-                                            for (peer_id, speaking) in speech_events {
-                                                let _ = app_handle_out.emit(
-                                                    "user-speaking",
-                                                    serde_json::json!({
-                                                        "peer_id": peer_id,
-                                                        "is_speaking": speaking
-                                                    }),
-                                                );
-                                            }
-
-                                            if let Ok(resampled) = resampler.process(&frame_48k) {
-                                                for (i, chunk) in data.chunks_mut(channels).enumerate() {
-                                                    let sample = resampled.get(i).copied().unwrap_or(0.0);
-                                                    for out_ch in chunk.iter_mut() {
-                                                        *out_ch = sample;
-                                                    }
-                                                }
-                                            } else {
-                                                data.fill(0.0);
-                                            }
-                                        },
-                                        err_fn,
-                                        None,
-                                    ) {
-                                        if stream.play().is_ok() {
-                                            _playback_stream = Some(stream);
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 2. Input (Capture) Stream
-                            if let Some(device) = host.default_input_device() {
-                                if let Ok(config) = device.default_input_config() {
-                                    let sample_rate = config.sample_rate().0;
-                                    let channels = config.channels() as usize;
-
-                                    let mut resampler = InputResampler::new(sample_rate)
-                                        .unwrap_or(InputResampler::Passthrough);
-                                    let mut vad = VoiceActivityDetector::new(-45.0);
-                                    let mut encoder = match OpusVoiceEncoder::new(64) {
-                                        Ok(enc) => Some(enc),
-                                        Err(e) => {
-                                            error!("Failed to create Opus encoder: {}", e);
-                                            None
-                                        }
-                                    };
-
-                                    let is_muted_ref = state.is_muted.clone();
-                                    let quic_conn_ref = state.quic_connection.clone();
-                                    let app_handle_in = app_handle.clone();
-                                    let seq_counter = Arc::new(AtomicU16::new(0));
-
-                                    let mut accumulated_samples: Vec<f32> = Vec::new();
-                                    let mut frame_48k = [0.0f32; FRAME_SIZE_48K];
-                                    let mut is_currently_speaking = false;
-
-                                    let err_fn = |err| error!("Audio input error: {}", err);
-                                    if let Ok(stream) = device.build_input_stream(
-                                        &config.into(),
-                                        move |data: &[f32], _| {
-                                            if is_muted_ref.load(Ordering::Relaxed) {
-                                                if is_currently_speaking {
-                                                    is_currently_speaking = false;
-                                                    let _ = app_handle_in.emit("local-speaking", false);
-                                                }
-                                                return;
-                                            }
-
-                                            for frame in data.chunks(channels) {
-                                                let mono_sample = frame.iter().sum::<f32>() / channels as f32;
-                                                accumulated_samples.push(mono_sample);
-                                            }
-
-                                            let needed = resampler.input_frames_needed();
-                                            while accumulated_samples.len() >= needed {
-                                                let chunk: Vec<f32> = accumulated_samples.drain(..needed).collect();
-                                                if resampler.process(&chunk, &mut frame_48k).is_ok() {
-                                                    let vad_decision = vad.process(&frame_48k);
-                                                    let should_send = vad_decision.should_transmit();
-
-                                                    if vad_decision == VadDecision::Speaking {
-                                                        if !is_currently_speaking {
-                                                            is_currently_speaking = true;
-                                                            let _ = app_handle_in.emit("local-speaking", true);
-                                                        }
-                                                    } else if vad_decision == VadDecision::Silence {
-                                                        if is_currently_speaking {
-                                                            is_currently_speaking = false;
-                                                            let _ = app_handle_in.emit("local-speaking", false);
-                                                        }
-                                                    }
-
-                                                    if should_send {
-                                                        if let Some(enc) = &mut encoder {
-                                                            if let Ok(opus_bytes) = enc.encode(&frame_48k) {
-                                                                let seq = seq_counter.fetch_add(1, Ordering::Relaxed);
-                                                                let now_ms = SystemTime::now()
-                                                                    .duration_since(UNIX_EPOCH)
-                                                                    .unwrap_or_default()
-                                                                    .as_millis() as u32;
-
-                                                                let is_silence = vad_decision.is_silence_packet();
-                                                                let header = MediaHeader::new_audio(
-                                                                    channel_id,
-                                                                    0,
-                                                                    seq,
-                                                                    now_ms,
-                                                                    is_silence,
-                                                                    false,
-                                                                );
-
-                                                                let mut packet = vec![0u8; MEDIA_HEADER_SIZE + opus_bytes.len()];
-                                                                let mut slice = &mut packet[..MEDIA_HEADER_SIZE];
-                                                                header.write_to(&mut slice);
-                                                                packet[MEDIA_HEADER_SIZE..].copy_from_slice(&opus_bytes);
-
-                                                                if let Ok(conn_guard) = quic_conn_ref.try_read() {
-                                                                    if let Some(conn) = &*conn_guard {
-                                                                        let _ = conn.send_datagram(Bytes::from(packet));
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        err_fn,
-                                        None,
-                                    ) {
-                                        if stream.play().is_ok() {
-                                            _capture_stream = Some(stream);
-                                        }
-                                    }
-                                }
-                            }
-
-                            is_running_thread.store(true, Ordering::SeqCst);
-                            info!("Audio worker started streams for channel {}", channel_id);
-                        }
-                        AudioCommand::Stop => {
-                            _capture_stream = None;
-                            _playback_stream = None;
-                            is_running_thread.store(false, Ordering::SeqCst);
-                            info!("Audio worker stopped all streams");
-                        }
-                    }
-                }
+                run_worker(cmd_rx, is_running_thread);
             })
-            .expect("Failed to spawn audio worker thread");
+            .map_err(AudioEngineError::ThreadSpawnFailed)?;
 
-        Self { cmd_tx, is_running }
+        Ok(Self { cmd_tx, is_running })
     }
 
+    /// Creates a new audio engine. If thread spawning fails, logs an error
+    /// and returns an inactive engine instance without panicking.
+    pub fn new() -> Self {
+        match Self::try_new() {
+            Ok(engine) => engine,
+            Err(err) => {
+                error!("Failed to initialize audio engine: {}", err);
+                let (cmd_tx, _) = channel::<AudioCommand>();
+                Self {
+                    cmd_tx,
+                    is_running: Arc::new(AtomicBool::new(false)),
+                }
+            }
+        }
+    }
+
+    /// Returns whether the audio streams are currently active.
     pub fn is_running(&self) -> bool {
         self.is_running.load(Ordering::SeqCst)
     }
 
+    /// Starts audio capture and playback for the specified voice channel.
     pub fn start(
         &mut self,
         channel_id: u32,
         state: AppState,
         app_handle: tauri::AppHandle,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), AudioEngineError> {
         self.cmd_tx
             .send(AudioCommand::Start {
                 channel_id,
                 state,
                 app_handle,
             })
-            .map_err(|e| anyhow::anyhow!("Failed to send start audio command: {}", e))?;
+            .map_err(|e| AudioEngineError::ChannelClosed(e.to_string()))?;
         Ok(())
     }
 
+    /// Stops audio capture and playback streams.
     pub fn stop(&mut self) {
+        self.is_running.store(false, Ordering::SeqCst);
         let _ = self.cmd_tx.send(AudioCommand::Stop);
+    }
+}
+
+impl Default for AudioEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for AudioEngine {
+    fn drop(&mut self) {
+        self.is_running.store(false, Ordering::SeqCst);
+        let _ = self.cmd_tx.send(AudioCommand::Stop);
+    }
+}
+
+/// Dedicated OS thread function managing cpal streams, DSP, and lock-free ring buffers.
+fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
+    let mut pending_cmd: Option<AudioCommand> = None;
+
+    loop {
+        let cmd = match pending_cmd.take() {
+            Some(c) => c,
+            None => match cmd_rx.recv() {
+                Ok(c) => c,
+                Err(_) => {
+                    // AudioEngine dropped, terminate thread
+                    is_running.store(false, Ordering::SeqCst);
+                    break;
+                }
+            },
+        };
+
+        match cmd {
+            AudioCommand::Start {
+                channel_id,
+                state,
+                app_handle,
+            } => {
+                is_running.store(true, Ordering::SeqCst);
+                info!("Starting audio worker streams for channel {}", channel_id);
+
+                let host = cpal::default_host();
+
+                // 1. Output (Playback) Ring Buffer & cpal Stream
+                let playback_rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
+                let (mut playback_prod, mut playback_cons) = playback_rb.split();
+
+                let mut playback_stream: Option<Stream> = None;
+                let mut output_resampler: Option<OutputResampler> = None;
+                let mut output_sample_rate = 48000u32;
+
+                if let Some(device) = host.default_output_device() {
+                    match device.default_output_config() {
+                        Ok(config) => {
+                            output_sample_rate = config.sample_rate().0;
+                            let channels = config.channels() as usize;
+                            let is_deafened_ref = state.is_deafened.clone();
+
+                            output_resampler = match OutputResampler::new(output_sample_rate) {
+                                Ok(resampler) => Some(resampler),
+                                Err(e) => {
+                                    error!("Failed to initialize OutputResampler: {}", e);
+                                    Some(OutputResampler::Passthrough)
+                                }
+                            };
+
+                            let err_fn = |err| error!("Audio output error: {}", err);
+                            let stream_res = device.build_output_stream(
+                                &config.into(),
+                                move |data: &mut [f32], _| {
+                                    if channels == 0 {
+                                        return;
+                                    }
+                                    if is_deafened_ref.load(Ordering::Relaxed) {
+                                        data.fill(0.0);
+                                        return;
+                                    }
+                                    for chunk in data.chunks_mut(channels) {
+                                        let sample = playback_cons.try_pop().unwrap_or(0.0);
+                                        for out_ch in chunk.iter_mut() {
+                                            *out_ch = sample;
+                                        }
+                                    }
+                                },
+                                err_fn,
+                                None,
+                            );
+
+                            match stream_res {
+                                Ok(stream) => {
+                                    if let Err(e) = stream.play() {
+                                        error!("Failed to start playback stream: {}", e);
+                                    } else {
+                                        playback_stream = Some(stream);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to build playback stream: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to get default output audio config: {}", e);
+                        }
+                    }
+                } else {
+                    error!("No default audio output device available");
+                }
+
+                // 2. Input (Capture) Ring Buffer & cpal Stream
+                let capture_rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
+                let (mut capture_prod, mut capture_cons) = capture_rb.split();
+
+                let mut capture_stream: Option<Stream> = None;
+                let mut input_resampler: Option<InputResampler> = None;
+
+                if let Some(device) = host.default_input_device() {
+                    match device.default_input_config() {
+                        Ok(config) => {
+                            let sample_rate = config.sample_rate().0;
+                            let channels = config.channels() as usize;
+
+                            input_resampler = match InputResampler::new(sample_rate) {
+                                Ok(resampler) => Some(resampler),
+                                Err(e) => {
+                                    error!("Failed to initialize InputResampler: {}", e);
+                                    Some(InputResampler::Passthrough)
+                                }
+                            };
+
+                            let err_fn = |err| error!("Audio input error: {}", err);
+                            let stream_res = device.build_input_stream(
+                                &config.into(),
+                                move |data: &[f32], _| {
+                                    if channels == 0 {
+                                        return;
+                                    }
+                                    for frame in data.chunks(channels) {
+                                        let mut sum = 0.0f32;
+                                        for &s in frame {
+                                            sum += s;
+                                        }
+                                        let mono = sum / (channels as f32);
+                                        let _ = capture_prod.try_push(mono);
+                                    }
+                                },
+                                err_fn,
+                                None,
+                            );
+
+                            match stream_res {
+                                Ok(stream) => {
+                                    if let Err(e) = stream.play() {
+                                        error!("Failed to start capture stream: {}", e);
+                                    } else {
+                                        capture_stream = Some(stream);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to build capture stream: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to get default input audio config: {}", e);
+                        }
+                    }
+                } else {
+                    error!("No default audio input device available");
+                }
+
+                if playback_stream.is_none() && capture_stream.is_none() {
+                    error!("Both playback and capture audio streams failed to initialize");
+                    is_running.store(false, Ordering::SeqCst);
+                    continue;
+                }
+
+                // 3. DSP modules for worker thread processing
+                let mut echo_canceller = EchoCanceller::new();
+                let mut noise_suppressor = NoiseSuppressor::new();
+                let mut vad = VoiceActivityDetector::new(-45.0);
+                let mut encoder = match OpusVoiceEncoder::new(64) {
+                    Ok(enc) => Some(enc),
+                    Err(e) => {
+                        error!("Failed to create Opus voice encoder: {}", e);
+                        None
+                    }
+                };
+
+                let mut is_currently_speaking = false;
+                let mut seq: u16 = 0;
+                let mut playback_frame_48k = [0.0f32; FRAME_SIZE_48K];
+                let mut capture_frame_48k = [0.0f32; FRAME_SIZE_48K];
+                let mut capture_raw_buf = Vec::with_capacity(4096);
+
+                let target_output_chunk = ((output_sample_rate as usize * 20) / 1000).max(1);
+                let target_playback_headroom = target_output_chunk * 3;
+
+                // 4. Real-time active worker processing loop
+                while is_running.load(Ordering::SeqCst) {
+                    match cmd_rx.try_recv() {
+                        Ok(new_cmd) => {
+                            pending_cmd = Some(new_cmd);
+                            break;
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            is_running.store(false, Ordering::SeqCst);
+                            return;
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    }
+
+                    // A. Playback processing (mixer -> AEC reference -> OutputResampler -> playback_prod)
+                    if playback_stream.is_some() {
+                        if let Some(resampler) = &mut output_resampler {
+                            while playback_prod.occupied_len() < target_playback_headroom
+                                && playback_prod.vacant_len() >= target_output_chunk
+                            {
+                                let speech_events = if let Ok(mut mixer) = state.mixer.try_lock() {
+                                    mixer.mix_frame(&mut playback_frame_48k, Instant::now())
+                                } else {
+                                    playback_frame_48k.fill(0.0);
+                                    Vec::new()
+                                };
+
+                                for (peer_id, speaking) in speech_events {
+                                    let _ = app_handle.emit(
+                                        "user-speaking",
+                                        serde_json::json!({
+                                            "peer_id": peer_id,
+                                            "is_speaking": speaking
+                                        }),
+                                    );
+                                }
+
+                                echo_canceller.push_reference(&playback_frame_48k);
+
+                                match resampler.process(&playback_frame_48k) {
+                                    Ok(resampled) => {
+                                        for &sample in &resampled {
+                                            let _ = playback_prod.try_push(sample);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Output resampling error: {}", e);
+                                        for _ in 0..target_output_chunk {
+                                            let _ = playback_prod.try_push(0.0);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // B. Capture processing (capture_cons -> InputResampler -> AEC -> Noise -> VAD -> Opus)
+                    if capture_stream.is_some() {
+                        if let Some(resampler) = &mut input_resampler {
+                            let needed = resampler.input_frames_needed();
+                            if needed > 0 {
+                                while capture_cons.occupied_len() >= needed {
+                                    capture_raw_buf.clear();
+                                    for _ in 0..needed {
+                                        if let Some(s) = capture_cons.try_pop() {
+                                            capture_raw_buf.push(s);
+                                        }
+                                    }
+
+                                    if capture_raw_buf.len() != needed {
+                                        break;
+                                    }
+
+                                    if state.is_muted.load(Ordering::Relaxed) {
+                                        if is_currently_speaking {
+                                            is_currently_speaking = false;
+                                            let _ = app_handle.emit("local-speaking", false);
+                                        }
+                                        continue;
+                                    }
+
+                                    if let Err(e) =
+                                        resampler.process(&capture_raw_buf, &mut capture_frame_48k)
+                                    {
+                                        error!("Input resampling error: {}", e);
+                                        continue;
+                                    }
+
+                                    echo_canceller.process_capture(&mut capture_frame_48k);
+                                    noise_suppressor.process_frame(&mut capture_frame_48k);
+
+                                    let vad_decision = vad.process(&capture_frame_48k);
+                                    let should_send = vad_decision.should_transmit();
+
+                                    if vad_decision == VadDecision::Speaking {
+                                        if !is_currently_speaking {
+                                            is_currently_speaking = true;
+                                            let _ = app_handle.emit("local-speaking", true);
+                                        }
+                                    } else if vad_decision == VadDecision::Silence {
+                                        if is_currently_speaking {
+                                            is_currently_speaking = false;
+                                            let _ = app_handle.emit("local-speaking", false);
+                                        }
+                                    }
+
+                                    if should_send {
+                                        if let Some(enc) = &mut encoder {
+                                            match enc.encode(&capture_frame_48k) {
+                                                Ok(opus_bytes) => {
+                                                    let current_seq = seq;
+                                                    seq = seq.wrapping_add(1);
+
+                                                    let now_ms = match SystemTime::now()
+                                                        .duration_since(UNIX_EPOCH)
+                                                    {
+                                                        Ok(dur) => dur.as_millis() as u32,
+                                                        Err(_) => 0,
+                                                    };
+
+                                                    let is_silence =
+                                                        vad_decision.is_silence_packet();
+                                                    let sender_id = state
+                                                        .session_peer_id
+                                                        .load(Ordering::Relaxed);
+                                                    let header = MediaHeader::new_audio(
+                                                        channel_id,
+                                                        sender_id,
+                                                        current_seq,
+                                                        now_ms,
+                                                        is_silence,
+                                                        false,
+                                                    );
+
+                                                    let mut packet = vec![
+                                                        0u8;
+                                                        MEDIA_HEADER_SIZE
+                                                            + opus_bytes.len()
+                                                    ];
+                                                    let mut slice =
+                                                        &mut packet[..MEDIA_HEADER_SIZE];
+                                                    header.write_to(&mut slice);
+                                                    packet[MEDIA_HEADER_SIZE..]
+                                                        .copy_from_slice(&opus_bytes);
+
+                                                    if let Ok(conn_guard) =
+                                                        state.quic_connection.try_read()
+                                                    {
+                                                        if let Some(conn) = &*conn_guard {
+                                                            let _ = conn.send_datagram(
+                                                                Bytes::from(packet),
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    error!("Opus encoding failed: {}", e);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+
+                if is_currently_speaking {
+                    let _ = app_handle.emit("local-speaking", false);
+                }
+
+                info!("Audio streams for channel {} stopped", channel_id);
+            }
+            AudioCommand::Stop => {
+                is_running.store(false, Ordering::SeqCst);
+                info!("Audio worker stopped");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_audio_engine_lifecycle() {
+        let mut engine = AudioEngine::new();
+        assert!(!engine.is_running());
+        engine.stop();
+        assert!(!engine.is_running());
+    }
+
+    #[test]
+    fn test_ringbuf_transfer() {
+        use ringbuf::traits::*;
+        use ringbuf::HeapRb;
+
+        let rb = HeapRb::<f32>::new(1024);
+        let (mut prod, mut cons) = rb.split();
+
+        assert_eq!(prod.vacant_len(), 1024);
+        assert_eq!(cons.occupied_len(), 0);
+
+        for i in 0..100 {
+            assert!(prod.try_push(i as f32).is_ok());
+        }
+
+        assert_eq!(cons.occupied_len(), 100);
+
+        for i in 0..100 {
+            assert_eq!(cons.try_pop(), Some(i as f32));
+        }
+
+        assert_eq!(cons.occupied_len(), 0);
     }
 }

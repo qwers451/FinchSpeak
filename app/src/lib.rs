@@ -19,7 +19,7 @@ pub fn run() {
 
     let state = AppState::new();
 
-    tauri::Builder::default()
+    if let Err(e) = tauri::Builder::default()
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             // Auth
@@ -47,5 +47,7 @@ pub fn run() {
             commands::screen::request_idr_keyframe,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running FinchSpeak application");
+    {
+        tracing::error!("Error while running FinchSpeak application: {e}");
+    }
 }
