@@ -4,7 +4,7 @@ import { setPendingTofu } from './tofuStore';
 import { activeChannel, channels, handleChannelCreated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
 import { handleUserSpeaking, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
-import { resetScreenState, setWatching, watching } from './screenState';
+import { resetScreenState, resetScreenStateOnDisconnect, setWatching, watching } from './screenState';
 import { screenHandlers } from './screenStore';
 export { appError, setAppError } from './notificationStore';
 
@@ -43,6 +43,12 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     })));
     setConnectionStatus('connected');
     setConnectionError(null);
+    const watched = watching();
+    if (watched) {
+      const sharer = data.initial_state.voice_states.find((state) => state.user_id === watched.user_id && state.sharing_screen);
+      if (sharer) setWatching({ user_id: watched.user_id, peer_id: sharer.peer_id });
+      else setWatching(null);
+    }
   },
   'new-message': handleIncomingMessage,
   'message-rejected': handleMessageRejected,
@@ -70,7 +76,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     setSpeakingPeers(new Set<number>());
     setIsLocalSpeaking(false);
     setPingRtt(null);
-    resetScreenState();
+    resetScreenStateOnDisconnect();
   },
   reconnecting: () => setConnectionStatus('reconnecting'),
   reconnected: () => {

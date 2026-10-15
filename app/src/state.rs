@@ -61,6 +61,8 @@ pub struct AppState {
     pub screen_viewer: Arc<Mutex<ScreenViewer>>,
     /// Session peer id of the sharer being watched; 0 = not watching.
     pub viewing_peer: Arc<AtomicU32>,
+    /// User whose share we watch; used to subscribe again after a reconnect.
+    pub viewing_user: Arc<RwLock<Option<uuid::Uuid>>>,
     /// Our own running screen share, if any.
     pub screen_sharer: Arc<std::sync::Mutex<Option<ScreenSharer>>>,
     /// TOFU verified fingerprints: hostname -> SHA-256 hex string
@@ -102,6 +104,7 @@ impl AppState {
     /// Forget the screen share we were watching.
     pub async fn stop_watching(&self) {
         self.viewing_peer.store(0, std::sync::atomic::Ordering::SeqCst);
+        *self.viewing_user.write().await = None;
         *self.screen_viewer.lock().await = ScreenViewer::new();
     }
 
@@ -121,6 +124,7 @@ impl AppState {
             mixer: Arc::new(Mutex::new(AudioMixer::new())),
             screen_viewer: Arc::new(Mutex::new(ScreenViewer::new())),
             viewing_peer: Arc::new(AtomicU32::new(0)),
+            viewing_user: Arc::new(RwLock::new(None)),
             screen_sharer: Arc::new(std::sync::Mutex::new(None)),
             saved_fingerprints: Arc::new(DashMap::new()),
             known_servers_path: Arc::new(RwLock::new(None)),

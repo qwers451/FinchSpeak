@@ -82,14 +82,42 @@ it('AUD-018 someone who leaves the room stops being watched', async () => {
   expect(watching()).toBeNull();
 });
 
-it('AUD-018 losing the connection clears sharing and watching', async () => {
+it('AUD-018 losing the connection ends our share but keeps what we watch', async () => {
   vi.spyOn(api, 'startScreenShare').mockResolvedValue();
   vi.spyOn(api, 'subscribeScreenShare').mockResolvedValue();
   await startSharing('monitor', 1);
   await watchShare('alice', 20);
   sessionHandlers['connection-lost']('network down');
   expect(isSharing()).toBe(false);
+  expect(watching()).toEqual({ user_id: 'alice', peer_id: 20 });
+});
+
+const snapshot = (voice_states: { user_id: string; peer_id: number; sharing_screen: boolean }[]) => ({
+  user_id: 'me', session_peer_id: 10, channels: [], initial_state: { channels: [], online_users: [],
+    voice_states: voice_states.map((state) => ({ ...state, username: state.user_id, channel_id: 'room', muted: false, deafened: false })) },
+});
+
+it('AUD-018 after a reconnect the watched share continues if its sharer is still sharing', async () => {
+  vi.spyOn(api, 'subscribeScreenShare').mockResolvedValue();
+  await watchShare('alice', 20);
+  sessionHandlers['connection-lost']('network down');
+  sessionHandlers.authenticated(snapshot([{ user_id: 'alice', peer_id: 33, sharing_screen: true }]));
+  expect(watching()).toEqual({ user_id: 'alice', peer_id: 33 });
+});
+
+it('AUD-018 after a reconnect a share that ended meanwhile is closed', async () => {
+  vi.spyOn(api, 'subscribeScreenShare').mockResolvedValue();
+  await watchShare('alice', 20);
+  sessionHandlers['connection-lost']('network down');
+  sessionHandlers.authenticated(snapshot([{ user_id: 'alice', peer_id: 20, sharing_screen: false }]));
   expect(watching()).toBeNull();
+});
+
+it('AUD-018 a restarted share keeps being watched under its new peer id', async () => {
+  vi.spyOn(api, 'subscribeScreenShare').mockResolvedValue();
+  await watchShare('alice', 20);
+  sessionHandlers['screen-share-started']({ user_id: 'alice', peer_id: 44, width: 1280, height: 720, fps: 30 });
+  expect(watching()).toEqual({ user_id: 'alice', peer_id: 44 });
 });
 
 it('AUD-018 the snapshot tells a late joiner who is already sharing', () => {

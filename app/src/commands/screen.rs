@@ -168,6 +168,7 @@ pub async fn subscribe_screen_share(
     // A fresh viewer: it starts by asking the sharer for a key frame.
     *state.screen_viewer.lock().await = ScreenViewer::new();
     state.viewing_peer.store(target_peer_id, Ordering::SeqCst);
+    *state.viewing_user.write().await = Some(target_uuid);
 
     tx.send(ClientMessage::SubscribeScreenShare {
         target_user_id: target_uuid,

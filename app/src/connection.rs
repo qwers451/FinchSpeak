@@ -10,6 +10,7 @@ use finch_client_core::error::ClientError;
 use finch_client_core::session::{
     connect, reconnect_with_backoff, Backoff, ConnectParams, Session, SessionEvent,
 };
+use finch_client_core::screen::ScreenViewer;
 use finch_protocol::media::{MediaHeader, MediaType, MEDIA_HEADER_SIZE};
 use finch_protocol::messages::{ClientMessage, ServerMessage};
 use quinn::Connection;
@@ -130,7 +131,12 @@ async fn forward_events(
                     }
                 }
             }
-            SessionEvent::Control(msg) => emit_control(msg, app_handle),
+            SessionEvent::Control(msg) => {
+                if let ServerMessage::ScreenShareStarted { user_id, peer_id, .. } = &msg {
+                    follow_watched_share(state, *user_id, *peer_id).await;
+                }
+                emit_control(msg, app_handle)
+            }
             SessionEvent::Datagram(bytes) => route_datagram(bytes, state, app_handle).await,
             SessionEvent::UniStreamStarted { header } => {
                 if header.media_type == MediaType::VideoKey && is_watching(state, &header) {
@@ -196,6 +202,9 @@ async fn reconnect(
                     muted: state.is_muted.load(Ordering::SeqCst),
                     deafened: state.is_deafened.load(Ordering::SeqCst),
                 }).await;
+                // Same control stream, so this is processed after the rejoin above.
+                *state.screen_viewer.lock().await = ScreenViewer::new();
+                resubscribe(state).await;
             }
             let _ = app_handle.emit("reconnected", ());
             Some(events)
@@ -404,6 +413,24 @@ async fn route_datagram(bytes: Bytes, state: &AppState, app_handle: &tauri::AppH
     }
 }
 
+/// The share we watch (re)started, perhaps under a new peer id: follow it and subscribe again.
+async fn follow_watched_share(state: &AppState, user_id: uuid::Uuid, peer_id: u32) {
+    if *state.viewing_user.read().await != Some(user_id) {
+        return;
+    }
+    state.viewing_peer.store(peer_id, Ordering::SeqCst);
+    *state.screen_viewer.lock().await = ScreenViewer::new();
+    resubscribe(state).await;
+}
+
+/// Ask the server for the share we are watching again (after a reconnect or a restarted share).
+async fn resubscribe(state: &AppState) {
+    let Some(user_id) = *state.viewing_user.read().await else { return };
+    if let Some(tx) = state.control_tx.read().await.clone() {
+        let _ = tx.send(ClientMessage::SubscribeScreenShare { target_user_id: user_id }).await;
+    }
+}
+
 /// Only media from the sharer we subscribed to is shown.
 fn is_watching(state: &AppState, header: &MediaHeader) -> bool {
     let peer = state.viewing_peer.load(Ordering::SeqCst);
@@ -500,5 +527,37 @@ mod tests {
         assert!(state.screen_sharer.lock().unwrap().is_none(), "the capture thread must be stopped");
         assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 0);
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn aud018_viewer_follows_a_share_that_restarts_under_a_new_peer() {
+        let state = AppState::new();
+        let (tx, mut rx) = mpsc::channel(8);
+        *state.control_tx.write().await = Some(tx);
+        let alice = uuid::Uuid::new_v4();
+        *state.viewing_user.write().await = Some(alice);
+        state.viewing_peer.store(5, Ordering::SeqCst);
+
+        // Someone else's share is none of our business.
+        follow_watched_share(&state, uuid::Uuid::new_v4(), 99).await;
+        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 5);
+        assert!(rx.try_recv().is_err());
+
+        // Alice's share starts again, now as peer 7: follow it and subscribe again.
+        follow_watched_share(&state, alice, 7).await;
+        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 7);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ClientMessage::SubscribeScreenShare { target_user_id }) if target_user_id == alice
+        ));
+    }
+
+    #[tokio::test]
+    async fn aud018_subscribing_again_without_a_watched_share_does_nothing() {
+        let state = AppState::new();
+        let (tx, mut rx) = mpsc::channel(8);
+        *state.control_tx.write().await = Some(tx);
+        resubscribe(&state).await;
+        assert!(rx.try_recv().is_err());
     }
 }

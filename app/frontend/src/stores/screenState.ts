@@ -9,6 +9,11 @@ export const [isSharing, setIsSharing] = createSignal<boolean>(false);
 export const [watching, setWatching] = createSignal<WatchedShare | null>(null);
 export const [screenSources, setScreenSources] = createSignal<ScreenSources>({ monitors: [], windows: [] });
 
+/** Our own share ends with the connection; what we watch is resumed after a reconnect. */
+export function resetScreenStateOnDisconnect() {
+  setIsSharing(false);
+}
+
 export function resetScreenState() {
   setIsSharing(false);
   setWatching(null);

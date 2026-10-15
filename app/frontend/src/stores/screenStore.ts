@@ -61,7 +61,11 @@ const markSharing = (peerId: number, sharing: boolean) =>
 
 export const screenHandlers: Pick<{ [K in keyof SessionEvents]: (payload: SessionEvents[K]) => void },
   'screen-share-started' | 'screen-share-stopped' | 'screen-share-ended'> = {
-  'screen-share-started': (data) => markSharing(data.peer_id, true),
+  'screen-share-started': (data) => {
+    markSharing(data.peer_id, true);
+    // The share we watch restarted, perhaps under a new peer id: keep following it.
+    if (watching()?.user_id === data.user_id) setWatching({ user_id: data.user_id, peer_id: data.peer_id });
+  },
   'screen-share-stopped': (data) => {
     markSharing(data.peer_id, false);
     if (watching()?.peer_id === data.peer_id) setWatching(null);
