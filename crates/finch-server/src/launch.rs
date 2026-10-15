@@ -26,7 +26,12 @@ pub struct RunningServer {
 ///
 /// Port `0` in `config.server` binds an ephemeral port; the actual addresses
 /// are available on the returned [`RunningServer`].
-pub async fn launch(config: ServerConfig) -> Result<RunningServer> {
+pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
+    config.auth.jwt_secret = config
+        .auth
+        .resolve_jwt_secret()
+        .context("Failed to resolve JWT secret")?;
+
     tracing::info!("Initializing FinchSpeak database at {}", config.database.url);
     let pool = init_db(&config.database.url)
         .await
@@ -125,6 +130,7 @@ mod tests {
         config.server.http_port = 0;
         config.server.quic_port = 0;
         config.database.url = "sqlite::memory:".to_string();
+        config.auth.jwt_secret = "launch-unit-test-secret-0123456789".to_string();
         config
     }
 

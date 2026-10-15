@@ -26,6 +26,7 @@ async fn start_server() -> anyhow::Result<RunningServer> {
         .join(format!("finch-client-core-{}", Uuid::new_v4()))
         .to_string_lossy()
         .to_string();
+    config.auth.jwt_secret = "client-core-test-secret-0123456789".to_string();
     launch(config).await
 }
 

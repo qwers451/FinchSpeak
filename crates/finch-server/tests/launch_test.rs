@@ -25,6 +25,7 @@ async fn launch_binds_ephemeral_ports_and_shuts_down() -> anyhow::Result<()> {
     config.server.quic_port = 0;
     config.database.url = "sqlite::memory:".to_string();
     config.storage.upload_dir = upload_dir.to_string_lossy().to_string();
+    config.auth.jwt_secret = "launch-test-secret-0123456789abcdef".to_string();
 
     let server = launch(config).await?;
     let http_addr = server.http_addr;

@@ -35,6 +35,7 @@ impl TestServer {
         );
         config.storage.upload_dir = upload_dir.to_string_lossy().to_string();
         config.storage.max_file_size_mb = TEST_MAX_FILE_SIZE_MB;
+        config.auth.jwt_secret = format!("testbed-secret-{}", uuid::Uuid::new_v4());
 
         let running = launch(config.clone()).await?;
         config.server.http_port = running.http_addr.port();

@@ -11,5 +11,9 @@ upload_dir = "/app/data/uploads"
 max_file_size_mb = 50
 
 [auth]
-jwt_secret = "CHANGE_ME_SECURE_JWT_SECRET_32_BYTES_MINIMUM"
+# Leave jwt_secret unset: a random secret is generated on first start and kept in
+# jwt_secret_file (inside the data volume), so tokens survive restarts.
+# To use your own, uncomment and set a long random value:
+# jwt_secret = "..."
+jwt_secret_file = "/app/data/jwt_secret"
 token_expiry_hours = 72

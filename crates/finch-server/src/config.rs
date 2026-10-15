@@ -104,6 +104,9 @@ pub struct AuthConfig {
     pub jwt_secret: String,
     #[serde(default = "default_jwt_expiration_hours", alias = "token_expiry_hours")]
     pub jwt_expiration_hours: i64,
+    /// Where a generated secret is stored when `jwt_secret` is not set by the operator.
+    #[serde(default = "default_jwt_secret_file")]
+    pub jwt_secret_file: String,
 }
 
 impl Default for AuthConfig {
@@ -111,6 +114,7 @@ impl Default for AuthConfig {
         Self {
             jwt_secret: default_jwt_secret(),
             jwt_expiration_hours: default_jwt_expiration_hours(),
+            jwt_secret_file: default_jwt_secret_file(),
         }
     }
 }
@@ -121,6 +125,53 @@ fn default_jwt_secret() -> String {
 
 fn default_jwt_expiration_hours() -> i64 {
     72 // 3 days
+}
+
+fn default_jwt_secret_file() -> String {
+    "./data/jwt_secret".to_string()
+}
+
+/// Prefix of the placeholder secret shipped in `deploy/finch-server.toml`.
+const PLACEHOLDER_SECRET_PREFIX: &str = "CHANGE_ME";
+
+impl AuthConfig {
+    /// The secret used to sign JWTs.
+    ///
+    /// - A placeholder (`CHANGE_ME…`) is an operator mistake and stops startup.
+    /// - An empty value or the well-known default from the repository is never used for
+    ///   signing: a random 256-bit secret is generated once and stored in `jwt_secret_file`,
+    ///   so tokens survive restarts.
+    /// - Any other value is the operator's own secret and is used as is.
+    pub fn resolve_jwt_secret(&self) -> Result<String> {
+        let configured = self.jwt_secret.trim();
+        if configured.starts_with(PLACEHOLDER_SECRET_PREFIX) {
+            anyhow::bail!(
+                "auth.jwt_secret is still the placeholder; set your own secret or remove the line to auto-generate one"
+            );
+        }
+        if !configured.is_empty() && configured != default_jwt_secret() {
+            return Ok(configured.to_string());
+        }
+
+        let path = Path::new(&self.jwt_secret_file);
+        if let Ok(stored) = fs::read_to_string(path) {
+            let stored = stored.trim();
+            if !stored.is_empty() {
+                return Ok(stored.to_string());
+            }
+        }
+
+        let mut bytes = [0u8; 32];
+        rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut bytes);
+        let secret: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)
+                .with_context(|| format!("Failed to create directory for {:?}", path))?;
+        }
+        fs::write(path, &secret).with_context(|| format!("Failed to write JWT secret to {:?}", path))?;
+        tracing::warn!("No JWT secret configured; generated a new one and stored it in {:?}", path);
+        Ok(secret)
+    }
 }
 
 impl ServerConfig {
@@ -206,5 +257,47 @@ mod tests {
         assert_eq!(config.storage.max_file_size_mb, 50);
         assert_eq!(config.auth.jwt_secret, "CHANGE_ME_SECURE_JWT_SECRET_32_BYTES_MINIMUM");
         assert_eq!(config.auth.jwt_expiration_hours, 72);
+    }
+
+    fn temp_secret_file() -> std::path::PathBuf {
+        std::env::temp_dir()
+            .join(format!("finch-jwt-{}", uuid::Uuid::new_v4()))
+            .join("jwt_secret")
+    }
+
+    #[test]
+    fn test_default_secret_is_replaced_and_persisted() {
+        let auth = AuthConfig {
+            jwt_secret_file: temp_secret_file().to_string_lossy().to_string(),
+            ..AuthConfig::default()
+        };
+
+        let first = auth.resolve_jwt_secret().unwrap();
+        assert_ne!(first, default_jwt_secret());
+        assert!(first.len() >= 64, "secret too short: {}", first.len());
+
+        // Restart: the same generated secret is read back, so issued tokens stay valid.
+        let second = auth.resolve_jwt_secret().unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_placeholder_secret_is_rejected() {
+        let auth = AuthConfig {
+            jwt_secret: "CHANGE_ME_SECURE_JWT_SECRET_32_BYTES_MINIMUM".to_string(),
+            jwt_secret_file: temp_secret_file().to_string_lossy().to_string(),
+            ..AuthConfig::default()
+        };
+        assert!(auth.resolve_jwt_secret().is_err());
+    }
+
+    #[test]
+    fn test_custom_secret_is_kept() {
+        let auth = AuthConfig {
+            jwt_secret: "a-real-operator-chosen-secret-0123456789abcdef".to_string(),
+            jwt_secret_file: temp_secret_file().to_string_lossy().to_string(),
+            ..AuthConfig::default()
+        };
+        assert_eq!(auth.resolve_jwt_secret().unwrap(), auth.jwt_secret);
     }
 }
