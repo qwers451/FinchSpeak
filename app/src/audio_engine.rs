@@ -10,14 +10,11 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use bytes::Bytes;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Stream;
 use finch_audio::{
-    EchoCanceller, InputResampler, NoiseSuppressor, OpusVoiceEncoder, OutputResampler,
-    VadDecision, VoiceActivityDetector, FRAME_SIZE_48K,
+    InputResampler, OutputResampler, VadDecision, VoiceCapture, VoiceCaptureConfig, FRAME_SIZE_48K,
 };
-use finch_protocol::media::{MediaHeader, MEDIA_HEADER_SIZE};
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::HeapRb;
 use tauri::Emitter;
@@ -294,12 +291,12 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     continue;
                 }
 
-                // 3. DSP modules for worker thread processing
-                let mut echo_canceller = EchoCanceller::new();
-                let mut noise_suppressor = NoiseSuppressor::new();
-                let mut vad = VoiceActivityDetector::new(-45.0);
-                let mut encoder = match OpusVoiceEncoder::new(64) {
-                    Ok(enc) => Some(enc),
+                // 3. DSP pipeline for worker thread processing
+                let mut voice_capture = match VoiceCapture::new(VoiceCaptureConfig {
+                    channel_short_id: channel_id,
+                    ..VoiceCaptureConfig::default()
+                }) {
+                    Ok(capture) => Some(capture),
                     Err(e) => {
                         error!("Failed to create Opus voice encoder: {}", e);
                         None
@@ -307,7 +304,6 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 };
 
                 let mut is_currently_speaking = false;
-                let mut seq: u16 = 0;
                 let mut playback_frame_48k = [0.0f32; FRAME_SIZE_48K];
                 let mut capture_frame_48k = [0.0f32; FRAME_SIZE_48K];
                 let mut capture_raw_buf = Vec::with_capacity(4096);
@@ -352,7 +348,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     );
                                 }
 
-                                echo_canceller.push_reference(&playback_frame_48k);
+                                if let Some(capture) = &mut voice_capture {
+                                    capture.push_playback_reference(&playback_frame_48k);
+                                }
 
                                 match resampler.process(&playback_frame_48k) {
                                     Ok(resampled) => {
@@ -403,76 +401,34 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         continue;
                                     }
 
-                                    echo_canceller.process_capture(&mut capture_frame_48k);
-                                    noise_suppressor.process_frame(&mut capture_frame_48k);
+                                    let Some(capture) = &mut voice_capture else {
+                                        continue;
+                                    };
 
-                                    let vad_decision = vad.process(&capture_frame_48k);
-                                    let should_send = vad_decision.should_transmit();
+                                    let now_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
+                                        Ok(dur) => dur.as_millis() as u32,
+                                        Err(_) => 0,
+                                    };
+                                    let sender_id = state.session_peer_id.load(Ordering::Relaxed);
+                                    let output =
+                                        capture.process(&mut capture_frame_48k, sender_id, now_ms);
 
-                                    if vad_decision == VadDecision::Speaking {
+                                    if output.vad == VadDecision::Speaking {
                                         if !is_currently_speaking {
                                             is_currently_speaking = true;
                                             let _ = app_handle.emit("local-speaking", true);
                                         }
-                                    } else if vad_decision == VadDecision::Silence {
+                                    } else if output.vad == VadDecision::Silence {
                                         if is_currently_speaking {
                                             is_currently_speaking = false;
                                             let _ = app_handle.emit("local-speaking", false);
                                         }
                                     }
 
-                                    if should_send {
-                                        if let Some(enc) = &mut encoder {
-                                            match enc.encode(&capture_frame_48k) {
-                                                Ok(opus_bytes) => {
-                                                    let current_seq = seq;
-                                                    seq = seq.wrapping_add(1);
-
-                                                    let now_ms = match SystemTime::now()
-                                                        .duration_since(UNIX_EPOCH)
-                                                    {
-                                                        Ok(dur) => dur.as_millis() as u32,
-                                                        Err(_) => 0,
-                                                    };
-
-                                                    let is_silence =
-                                                        vad_decision.is_silence_packet();
-                                                    let sender_id = state
-                                                        .session_peer_id
-                                                        .load(Ordering::Relaxed);
-                                                    let header = MediaHeader::new_audio(
-                                                        channel_id,
-                                                        sender_id,
-                                                        current_seq,
-                                                        now_ms,
-                                                        is_silence,
-                                                        false,
-                                                    );
-
-                                                    let mut packet = vec![
-                                                        0u8;
-                                                        MEDIA_HEADER_SIZE
-                                                            + opus_bytes.len()
-                                                    ];
-                                                    let mut slice =
-                                                        &mut packet[..MEDIA_HEADER_SIZE];
-                                                    header.write_to(&mut slice);
-                                                    packet[MEDIA_HEADER_SIZE..]
-                                                        .copy_from_slice(&opus_bytes);
-
-                                                    if let Ok(conn_guard) =
-                                                        state.quic_connection.try_read()
-                                                    {
-                                                        if let Some(conn) = &*conn_guard {
-                                                            let _ = conn.send_datagram(
-                                                                Bytes::from(packet),
-                                                            );
-                                                        }
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    error!("Opus encoding failed: {}", e);
-                                                }
+                                    if let Some(packet) = output.packet {
+                                        if let Ok(conn_guard) = state.quic_connection.try_read() {
+                                            if let Some(conn) = &*conn_guard {
+                                                let _ = conn.send_datagram(packet);
                                             }
                                         }
                                     }

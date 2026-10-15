@@ -1409,6 +1409,7 @@ dependencies = [
  "cpal",
  "dashmap",
  "finch-audio",
+ "finch-client-core",
  "finch-protocol",
  "finch-screen",
  "quinn",

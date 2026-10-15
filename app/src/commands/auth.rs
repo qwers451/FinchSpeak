@@ -1,36 +1,11 @@
 //! Authentication and session management commands.
 
-use std::net::{SocketAddr, ToSocketAddrs};
-
+use finch_client_core::api::{resolve_quic_addr, ApiClient, AuthResponse};
 use tauri::{AppHandle, State};
 use tracing::{error, info};
 
 use crate::connection::start_quic_session;
 use crate::state::{AppState, UserDto};
-
-#[derive(serde::Deserialize)]
-pub struct AuthResponse {
-    pub token: String,
-    pub user: UserDto,
-}
-
-fn parse_quic_addr(server_url: &str) -> anyhow::Result<(SocketAddr, String)> {
-    let url = reqwest::Url::parse(server_url)?;
-    let host = url
-        .host_str()
-        .ok_or_else(|| anyhow::anyhow!("Missing host in server_url"))?;
-    // By default FinchSpeak server runs REST on port 8443 (or 8080) and QUIC on port 4433
-    let port = url.port().unwrap_or(8443);
-    let quic_port = if port == 8443 || port == 8080 { 4433 } else { port };
-
-    let addr_str = format!("{}:{}", host, quic_port);
-    let mut addrs = addr_str.to_socket_addrs()?;
-    let addr = addrs
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("Could not resolve host: {}", host))?;
-
-    Ok((addr, host.to_string()))
-}
 
 #[tauri::command]
 pub async fn login(
@@ -42,31 +17,13 @@ pub async fn login(
 ) -> Result<UserDto, String> {
     info!("Logging in to {} as {}", server_url, username);
 
-    let client = state.http_client.clone();
-    let login_url = format!("{}/api/auth/login", server_url.trim_end_matches('/'));
-
-    let resp = client
-        .post(&login_url)
-        .json(&serde_json::json!({
-            "username": username,
-            "password": password
-        }))
-        .send()
+    let mut api = ApiClient::new(&server_url).map_err(|e| format!("Network request failed: {}", e))?;
+    let auth_data: AuthResponse = api
+        .login(&username, &password)
         .await
-        .map_err(|e| format!("Network request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        let err_body = resp
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown server error".into());
-        return Err(format!("Login failed: {}", err_body));
-    }
-
-    let auth_data: AuthResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
+        .map_err(|e| format!("Login failed: {}", e))?;
+    api.set_token(auth_data.token.clone());
+    *state.api.write().await = Some(api);
 
     // Store auth info in state
     *state.server_url.write().await = Some(server_url.clone());
@@ -74,7 +31,7 @@ pub async fn login(
     *state.current_user.write().await = Some(auth_data.user.clone());
 
     // Connect QUIC
-    match parse_quic_addr(&server_url) {
+    match resolve_quic_addr(&server_url) {
         Ok((quic_addr, hostname)) => {
             *state.server_quic_addr.write().await = Some(quic_addr);
             if let Err(e) = start_quic_session(
@@ -110,32 +67,13 @@ pub async fn register(
 ) -> Result<UserDto, String> {
     info!("Registering to {} as {}", server_url, username);
 
-    let client = state.http_client.clone();
-    let reg_url = format!("{}/api/auth/register", server_url.trim_end_matches('/'));
-
-    let resp = client
-        .post(&reg_url)
-        .json(&serde_json::json!({
-            "username": username,
-            "display_name": display_name,
-            "password": password
-        }))
-        .send()
+    let mut api = ApiClient::new(&server_url).map_err(|e| format!("Network request failed: {}", e))?;
+    let auth_data: AuthResponse = api
+        .register(&username, &password, &display_name)
         .await
-        .map_err(|e| format!("Network request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        let err_body = resp
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown server error".into());
-        return Err(format!("Registration failed: {}", err_body));
-    }
-
-    let auth_data: AuthResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
+        .map_err(|e| format!("Registration failed: {}", e))?;
+    api.set_token(auth_data.token.clone());
+    *state.api.write().await = Some(api);
 
     // Store auth info in state
     *state.server_url.write().await = Some(server_url.clone());
@@ -143,7 +81,7 @@ pub async fn register(
     *state.current_user.write().await = Some(auth_data.user.clone());
 
     // Connect QUIC
-    if let Ok((quic_addr, hostname)) = parse_quic_addr(&server_url) {
+    if let Ok((quic_addr, hostname)) = resolve_quic_addr(&server_url) {
         *state.server_quic_addr.write().await = Some(quic_addr);
         if let Err(e) = start_quic_session(
             quic_addr,
@@ -171,6 +109,7 @@ pub async fn logout(state: State<'_, AppState>) -> Result<(), String> {
     }
     *state.control_tx.write().await = None;
     *state.auth_token.write().await = None;
+    *state.api.write().await = None;
     *state.current_user.write().await = None;
     *state.current_voice_channel.write().await = None;
 

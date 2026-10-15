@@ -5,20 +5,13 @@ use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::Arc;
 
 use dashmap::DashMap;
+use finch_client_core::api::ApiClient;
+pub use finch_client_core::api::UserDto;
 use finch_audio::AudioMixer;
 use finch_protocol::messages::ClientMessage;
 use finch_screen::FrameAssembler;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex, RwLock};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserDto {
-    pub id: String,
-    pub username: String,
-    pub display_name: String,
-    pub role: String,
-    pub avatar_url: Option<String>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VideoChunkPayload {
@@ -34,7 +27,8 @@ pub struct AudioEngineHandle {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub http_client: reqwest::Client,
+    /// REST client for the current server (set on login/register).
+    pub api: Arc<RwLock<Option<ApiClient>>>,
     pub server_url: Arc<RwLock<Option<String>>>,
     pub server_quic_addr: Arc<RwLock<Option<SocketAddr>>>,
     pub auth_token: Arc<RwLock<Option<String>>>,
@@ -65,10 +59,7 @@ impl Default for AppState {
 impl AppState {
     pub fn new() -> Self {
         Self {
-            http_client: reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
-                .build()
-                .unwrap_or_default(),
+            api: Arc::new(RwLock::new(None)),
             server_url: Arc::new(RwLock::new(None)),
             server_quic_addr: Arc::new(RwLock::new(None)),
             auth_token: Arc::new(RwLock::new(None)),
