@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::models::{
-    AttachmentInfo, ChannelMapping, HistoryMessage, ServerState, UserStatus, VideoCodec,
+    AttachmentInfo, Channel, ChannelMapping, HistoryMessage, ServerState, UserStatus, VideoCodec,
 };
 
 // ─── Client → Server ────────────────────────────────────────────────────────
@@ -163,6 +163,11 @@ pub enum ServerMessage {
 
     /// Instruct the streamer to immediately generate and send an IDR keyframe.
     KeyframeRequested,
+
+    /// A channel was created (broadcast to all clients).
+    ChannelCreated {
+        channel: Channel,
+    },
 
     /// A user's online presence changed.
     PresenceUpdate {

@@ -7,6 +7,9 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use finch_protocol::messages::ServerMessage;
+use finch_protocol::models::{Channel, ChannelType};
+
 use crate::api::auth::{ArcSharedState, AuthUser};
 use crate::error::ServerError;
 
@@ -113,6 +116,21 @@ pub async fn create_channel_handler(
     .bind(now)
     .execute(&state.pool)
     .await?;
+
+    // Make the channel usable for voice right away and tell every connected client.
+    if let Ok(uuid) = Uuid::parse_str(&channel_id) {
+        state.sessions.register_channel(uuid, next_short_id as u32);
+        let channel = Channel {
+            id: uuid,
+            short_id: next_short_id as u32,
+            name: name.clone(),
+            channel_type: if channel_type == "voice" { ChannelType::Voice } else { ChannelType::Text },
+            topic: payload.topic.clone(),
+            position: next_position as i32,
+            bitrate_kbps: bitrate,
+        };
+        state.sessions.broadcast_all(ServerMessage::ChannelCreated { channel }).await;
+    }
 
     let created = ChannelDto {
         id: channel_id,

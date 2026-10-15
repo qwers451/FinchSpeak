@@ -20,6 +20,14 @@ export async function loadChannels() {
   }
 }
 
+export function handleChannelCreated(channel: Channel) {
+  setChannels((prev) =>
+    prev.some((c) => c.id === channel.id)
+      ? prev
+      : [...prev, channel].sort((a, b) => a.position - b.position)
+  );
+}
+
 export async function selectChannel(channel: Channel) {
   setActiveChannel(channel);
   if (channel.channel_type === 'text') {

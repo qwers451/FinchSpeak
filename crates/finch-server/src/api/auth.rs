@@ -14,6 +14,7 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::config::ServerConfig;
+use crate::session::SessionManager;
 use crate::error::ServerError;
 
 /// JWT Claims.
@@ -78,6 +79,8 @@ pub trait FromRef<T> {
 pub struct ArcSharedState {
     pub pool: SqlitePool,
     pub config: ServerConfig,
+    /// Live QUIC sessions, shared with the QUIC server.
+    pub sessions: SessionManager,
 }
 
 impl FromRef<ArcSharedState> for ArcSharedState {

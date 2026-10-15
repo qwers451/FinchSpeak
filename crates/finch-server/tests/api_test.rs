@@ -22,7 +22,7 @@ use finch_server::db::init_db;
 async fn test_full_api_lifecycle() -> anyhow::Result<()> {
     let pool = init_db("sqlite::memory:").await?;
     let config = ServerConfig::default();
-    let app = create_router(pool.clone(), config);
+    let app = create_router(pool.clone(), config, finch_server::session::SessionManager::new());
 
     // ─── 1. Register First User (Admin) ─────────────────────────────────────
     let register_admin = json!({

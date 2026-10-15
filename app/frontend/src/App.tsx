@@ -1,6 +1,6 @@
 import { onMount, onCleanup, Show } from 'solid-js';
 import { currentUser, setPendingTofu } from './stores/authStore';
-import { activeChannel, loadChannels, handleIncomingMessage } from './stores/chatStore';
+import { activeChannel, loadChannels, handleIncomingMessage, handleChannelCreated } from './stores/chatStore';
 import {
   handleUserSpeaking,
   setIsLocalSpeaking,
@@ -36,6 +36,7 @@ export function App() {
       unlisteners.push(await api.onLocalSpeaking((s) => setIsLocalSpeaking(s)));
       unlisteners.push(await api.onPingRtt((data) => setPingRtt(data.rtt_ms)));
       unlisteners.push(await api.onTofuRequired((data) => setPendingTofu(data)));
+      unlisteners.push(await api.onChannelCreated(handleChannelCreated));
       unlisteners.push(
         await api.onUserJoinedVoice((data) => {
           setVoiceParticipants((prev) => {

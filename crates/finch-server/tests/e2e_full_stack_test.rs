@@ -136,7 +136,7 @@ async fn test_full_system_autotest() -> anyhow::Result<()> {
     quic::sync_channels_from_db(&pool, &sessions).await?;
     let sfu = SfuRouter::new(sessions.clone());
 
-    let app = create_router(pool.clone(), config.clone());
+    let app = create_router(pool.clone(), config.clone(), sessions.clone());
 
     // ─── 2. Start QUIC SFU Server on ephemeral UDP port ─────────────────────
     let server_config = quic::make_server_config()?;

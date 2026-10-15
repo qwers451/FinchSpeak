@@ -214,6 +214,9 @@ fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
                 }),
             );
         }
+        ServerMessage::ChannelCreated { channel } => {
+            let _ = app_handle.emit("channel-created", serde_json::json!({ "channel": channel }));
+        }
         ServerMessage::KeyframeRequested => {
             let _ = app_handle.emit("keyframe-requested", ());
         }

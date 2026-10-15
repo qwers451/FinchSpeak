@@ -48,7 +48,7 @@ pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
     let http_addr = listener.local_addr()?;
     tracing::info!("Axum REST API listening on http://{http_addr}");
 
-    let app = create_router(pool.clone(), config.clone());
+    let app = create_router(pool.clone(), config.clone(), sessions.clone());
     let (http_shutdown, http_shutdown_rx) = oneshot::channel::<()>();
     let http_task = tokio::spawn(async move {
         let shutdown = async {

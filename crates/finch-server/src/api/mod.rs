@@ -12,10 +12,11 @@ use tower_http::cors::{Any, CorsLayer};
 
 use crate::api::auth::ArcSharedState;
 use crate::config::ServerConfig;
+use crate::session::SessionManager;
 
 /// Build the Axum router for the FinchSpeak REST API.
-pub fn create_router(pool: SqlitePool, config: ServerConfig) -> Router {
-    let shared_state = ArcSharedState { pool, config };
+pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionManager) -> Router {
+    let shared_state = ArcSharedState { pool, config, sessions };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)

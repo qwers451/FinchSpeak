@@ -206,6 +206,13 @@ export const api = {
     return () => {};
   },
 
+  onChannelCreated: async (cb: (channel: Channel) => void): Promise<UnlistenFn> => {
+    if (isTauri()) {
+      return listen('channel-created', (e) => cb((e.payload as { channel: Channel }).channel));
+    }
+    return () => {};
+  },
+
   onTofuRequired: async (cb: (data: { hostname: string; fingerprint: string }) => void): Promise<UnlistenFn> => {
     if (isTauri()) {
       return listen('tofu-required', (e) => cb(e.payload as any));
