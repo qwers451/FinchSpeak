@@ -422,8 +422,10 @@ async fn handle_client_message(
 ) {
     match msg {
         ClientMessage::Ping { timestamp } => {
-            if let Some(session) = sessions.sessions.get(&peer_id) {
-                let _ = session.control_tx.send(ServerMessage::Pong { timestamp }).await;
+            // Clone the sender so no DashMap guard is held across the `.await`.
+            let tx = sessions.sessions.get(&peer_id).map(|s| s.control_tx.clone());
+            if let Some(tx) = tx {
+                let _ = tx.send(ServerMessage::Pong { timestamp }).await;
             }
         }
 
@@ -571,11 +573,9 @@ async fn handle_client_message(
         }
 
         ClientMessage::RequestKeyframe { target_peer_id } => {
-            if let Some(streamer) = sessions.sessions.get(&target_peer_id) {
-                let _ = streamer
-                    .control_tx
-                    .send(ServerMessage::KeyframeRequested)
-                    .await;
+            let tx = sessions.sessions.get(&target_peer_id).map(|s| s.control_tx.clone());
+            if let Some(tx) = tx {
+                let _ = tx.send(ServerMessage::KeyframeRequested).await;
             }
         }
 

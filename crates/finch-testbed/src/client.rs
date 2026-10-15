@@ -50,7 +50,8 @@ pub async fn connect_with_token(
     connect_to(server.quic_addr, token).await
 }
 
-async fn connect_to(
+/// Open a QUIC session to `quic_addr` (e.g. an impairment proxy) with a fresh TOFU store.
+pub async fn connect_to(
     quic_addr: SocketAddr,
     token: &str,
 ) -> Result<(Session, mpsc::Receiver<SessionEvent>), ClientError> {
