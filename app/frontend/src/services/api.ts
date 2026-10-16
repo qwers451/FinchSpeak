@@ -361,6 +361,19 @@ export const api = {
     }
   },
 
+  testMicrophone: async (seconds = 3): Promise<void> => {
+    if (isTauri()) {
+      return invoke('test_microphone', { seconds });
+    }
+  },
+
+  captureThumbnail: async (kind: 'monitor' | 'window', id: number, maxWidth = 320): Promise<ArrayBuffer> => {
+    if (isTauri()) {
+      return invoke('capture_thumbnail', { kind, id, maxWidth });
+    }
+    throw new Error('Previews need the desktop app');
+  },
+
   getVoiceSettings: async (): Promise<VoiceSettings> => {
     if (isTauri()) {
       return invoke('get_voice_settings');

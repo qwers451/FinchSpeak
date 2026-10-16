@@ -17,6 +17,38 @@ export const voiceParticipants = () => {
   return channel ? participantsForChannel(channel.id) : [];
 };
 export const [pingRtt, setPingRtt] = createSignal<number | null>(null);
+
+// --- live microphone level, microphone test, link quality ----------------------------------
+
+/** Quietest level the meter shows; also what "nothing" is. */
+export const MIC_FLOOR_DB = -70;
+export const [micLevelDb, setMicLevelDb] = createSignal<number>(MIC_FLOOR_DB);
+export const [micTestPhase, setMicTestPhase] = createSignal<'idle' | 'recording' | 'playing'>('idle');
+export type LinkQuality = 'good' | 'fair' | 'poor';
+export const [voiceQuality, setVoiceQuality] = createSignal<Record<number, { quality: LinkQuality; loss: number }>>({});
+
+/** Meter fill, 0..1, for a level in dBFS. */
+export const levelFraction = (db: number) => Math.min(1, Math.max(0, (db - MIC_FLOOR_DB) / -MIC_FLOOR_DB));
+
+export function handleMicLevel(level: { db: number }) {
+  setMicLevelDb(Number.isFinite(level.db) ? level.db : MIC_FLOOR_DB);
+}
+
+export function handleMicTest(test: { phase: 'recording' | 'playing' | 'done' }) {
+  setMicTestPhase(test.phase === 'done' ? 'idle' : test.phase);
+}
+
+export function handleVoiceQuality(report: { peer_id: number; quality: LinkQuality; loss: number }[]) {
+  setVoiceQuality(Object.fromEntries(report.map((entry) => [entry.peer_id, { quality: entry.quality, loss: entry.loss }])));
+}
+
+export async function startMicTest(seconds = 3) {
+  try {
+    await api.testMicrophone(seconds);
+  } catch (err) {
+    setAppError(String(err).replace(/^Error:\s*/, ''));
+  }
+}
 let mutedBeforeDeafen = false;
 
 // --- audio devices -------------------------------------------------------------------------
@@ -196,6 +228,9 @@ export async function leaveVoice() {
     resetScreenState();
     setActiveVoiceChannel(null);
     setSpeakingPeers(new Set<number>());
+    setMicLevelDb(MIC_FLOOR_DB);
+    setMicTestPhase('idle');
+    setVoiceQuality({});
   } catch (err) {
     console.error('Failed to leave voice channel:', err);
   }

@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../services/api';
 import { appError, setAppError } from './notificationStore';
-import { isSharing, loadScreenSources, screenAudioKey, screenSources, startSharing, stopSharing, stopWatching, watchShare, watching } from './screenStore';
+import { isSharing, loadScreenSources, screenAudioKey, screenSources, sharingInfo, startSharing, stopSharing, stopWatching, watchShare, watching } from './screenStore';
 import { sessionHandlers, resetSessionState } from './sessionStore';
 import { allVoiceParticipants, setVoiceParticipants } from './voiceStore';
 
@@ -25,13 +25,13 @@ it('AUD-018 lists the screens and windows that can be shared', async () => {
 
 it('AUD-018 marks us as sharing only when the backend accepted the share', async () => {
   vi.spyOn(api, 'startScreenShare').mockRejectedValue('Could not capture the screen');
-  await startSharing('monitor', 1);
+  expect(await startSharing('monitor', 1)).toContain('Could not capture');
   expect(isSharing()).toBe(false);
-  expect(appError()).toContain('Could not capture');
 
   vi.spyOn(api, 'startScreenShare').mockResolvedValue();
-  await startSharing('monitor', 1);
+  expect(await startSharing('monitor', 1, true, 'DISPLAY1')).toBeNull();
   expect(isSharing()).toBe(true);
+  expect(sharingInfo()).toEqual({ label: 'DISPLAY1', audio: true });
 
   const stop = vi.spyOn(api, 'stopScreenShare').mockResolvedValue();
   await stopSharing();

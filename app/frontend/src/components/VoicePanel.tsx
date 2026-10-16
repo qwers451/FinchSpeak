@@ -1,108 +1,94 @@
-import { For, Show } from 'solid-js';
-import {
-  activeVoiceChannel,
-  voiceParticipants,
-  speakingPeers,
-  isLocalSpeaking,
-} from '../stores/voiceStore';
-import { currentUser } from '../stores/authStore';
-import { api } from '../services/api';
+import { createMemo, createSignal, For, Show } from 'solid-js';
+import { endedShare, watching } from '../stores/screenStore';
 import { localPeerId } from '../stores/sessionStore';
-import { DeviceSettings } from './DeviceSettings';
-import { VoiceSettingsPanel } from './VoiceSettingsPanel';
-import { ScreenSharePicker } from './ScreenSharePicker';
-import { ScreenViewer } from './ScreenViewer';
-import { screenAudioKey, stopWatching, watchShare, watching } from '../stores/screenStore';
+import { activeVoiceChannel, pingRtt, speakingPeers, voiceParticipants } from '../stores/voiceStore';
+import { Avatar, Icon } from '../ui';
+import { SharePickerModal } from './screen/SharePickerModal';
+import { SharerPill } from './screen/SharerPill';
+import { EndedPanel, ViewerPanel } from './screen/ViewerPanel';
+import { Dock } from './voice/Dock';
+import { LiveCard } from './voice/LiveCard';
+import { isMeParticipant, ParticipantTile } from './voice/ParticipantTile';
+import { VoiceSettingsModal } from './voice/VoiceSettingsModal';
+import { arrange, avatarSizeFor, gridColumns, gridRows } from './voice/voiceLayout';
 
+/** What the round-trip time to the server says about the link. */
+function pingLabel(ms: number | null): { text: string; color: string } | null {
+  if (ms === null) return null;
+  const quality = ms < 60 ? 'excellent' : ms < 120 ? 'good' : ms < 250 ? 'fair' : 'poor';
+  return { text: `${ms} ms · ${quality}`, color: ms < 120 ? 'var(--teal)' : 'var(--amber)' };
+}
+
+/** D1/D2: the voice room: LIVE cards, the grid of people, the roster, the dock. */
 export function VoicePanel() {
-  const handleVolumeChange = (peerId: number, vol: number) => {
-    api.setSpeakerVolume(peerId, vol);
-  };
+  const [picker, setPicker] = createSignal(false);
+  const [settings, setSettings] = createSignal(false);
+  const arranged = createMemo(() => arrange(voiceParticipants(), localPeerId(), speakingPeers()));
+  const tiles = () => arranged().grid.length;
+  const ping = () => pingLabel(pingRtt());
+  const showViewer = () => !!watching() || !!endedShare();
 
   return (
-    <div style={{ flex: 1, display: "flex", "flex-direction": "column", height: "100%", background: "var(--bg-main)" }}>
-      {/* Header */}
-      <div class="chat-header">
-        <div class="header-channel-name">
-          <span>🔊</span>
-          <span>{activeVoiceChannel()?.name || 'Voice Room'}</span>
-        </div>
+    <main class="main voice-room">
+      <div class="mhead">
+        <Icon name="vol" size="lg" class="t3" />
+        <h3 style={{ 'font-size': '18px' }}>{activeVoiceChannel()?.name ?? 'Voice room'}</h3>
+        <span class="tag violet">{voiceParticipants().length} in room</span>
+        <span class="grow" />
+        <Show when={ping()}>
+          {(p) => <span class="pill" style={{ 'border-color': p().color, color: p().color }}><Icon name="bars" size="sm" />{p().text}</span>}
+        </Show>
       </div>
 
-      <DeviceSettings />
-      <VoiceSettingsPanel />
-      <ScreenSharePicker />
+      <SharerPill />
 
-      <Show when={watching()}>
-        {(share) => (
-          <div class="screen-viewer-frame">
-            <ScreenViewer peerId={share().peer_id} />
-            <label class="screen-volume" title="Volume of the shared screen's sound">
-              🔊
-              <input
-                type="range" min="0" max="2" step="0.05" value="1"
-                onInput={(event) => api.setSpeakerVolume(screenAudioKey(share().peer_id), parseFloat(event.currentTarget.value))}
-              />
-            </label>
-            <button type="button" class="screen-viewer-close" onClick={() => void stopWatching()}>Stop watching</button>
+      <div class="room-body">
+        <Show when={showViewer()}>
+          <div class="viewer-slot"><ViewerPanel /><EndedPanel /></div>
+        </Show>
+
+        <Show when={arranged().shares.filter((share) => share.peer_id !== watching()?.peer_id).length > 0}>
+          <div class="live-row">
+            <For each={arranged().shares.filter((share) => share.peer_id !== watching()?.peer_id)}>{(share) => <LiveCard participant={share} />}</For>
           </div>
-        )}
-      </Show>
+        </Show>
 
-      {/* Participant Grid */}
-      <div class="voice-grid">
-        {/* Local user card */}
-        <div class={`participant-card ${isLocalSpeaking() ? 'speaking' : ''}`}>
-          <div class="participant-avatar">
-            {currentUser()?.display_name?.charAt(0).toUpperCase() || 'U'}
+        <Show when={tiles() > 0} fallback={<div class="col center grow t2">Nobody is here yet.</div>}>
+          <div
+            class={`room-grid${showViewer() ? ' compact' : ''}`}
+            style={{ '--rows': showViewer() ? 1 : gridRows(tiles()), 'grid-template-columns': `repeat(${showViewer() ? Math.min(6, Math.max(3, tiles())) : gridColumns(tiles())}, minmax(0, 1fr))`, 'grid-template-rows': showViewer() ? 'auto' : `repeat(${gridRows(tiles())}, minmax(0, 1fr))` }}
+            role="list"
+            aria-label="People in the room"
+          >
+            <For each={arranged().grid}>
+              {(participant) => (
+                <ParticipantTile participant={participant} isMe={isMeParticipant(participant, localPeerId())} avatarSize={showViewer() ? 56 : avatarSizeFor(tiles())} />
+              )}
+            </For>
           </div>
-          <div class="participant-name">
-            {currentUser()?.display_name || 'You'} (You)
+        </Show>
+
+        <Show when={arranged().roster.length > 0}>
+          <div class="roster" aria-label="More people in the room">
+            <span class="sec-label">+ {arranged().roster.length} more · scroll</span>
+            <div class="roster-list">
+              <For each={arranged().roster}>
+                {(participant) => (
+                  <div class="mem">
+                    <Avatar name={participant.username} id={participant.user_id} size={24} speaking={speakingPeers().has(participant.peer_id)} />
+                    <span class="grow trunc">{participant.username}</span>
+                    <Show when={participant.is_muted}><Icon name="mic-off" size="sm" class="tr" /></Show>
+                  </div>
+                )}
+              </For>
+            </div>
           </div>
-        </div>
-
-        {/* Remote participants */}
-        <For each={voiceParticipants().filter((participant) => participant.peer_id !== localPeerId())}>
-          {(participant) => {
-            const isSpeaking = () => speakingPeers().has(participant.peer_id);
-            return (
-              <div class={`participant-card ${isSpeaking() ? 'speaking' : ''}`}>
-                <div class="participant-avatar">
-                  {participant.username.charAt(0).toUpperCase()}
-                </div>
-                <div class="participant-name">{participant.username}</div>
-                <Show when={participant.is_muted}><span title="Muted">🔇</span></Show>
-                <Show when={participant.is_deafened}><span title="Deafened">🎧</span></Show>
-                <Show when={participant.is_sharing}>
-                  <button
-                    type="button"
-                    class="watch-share"
-                    disabled={watching()?.peer_id === participant.peer_id}
-                    onClick={() => void watchShare(participant.user_id, participant.peer_id)}
-                  >
-                    {watching()?.peer_id === participant.peer_id ? 'Watching' : '🖥 Watch screen'}
-                  </button>
-                </Show>
-
-                {/* Per-user volume slider */}
-                <div style={{ display: "flex", "align-items": "center", gap: "8px", width: "100%", "margin-top": "6px" }}>
-                  <span style={{ "font-size": "0.75rem", color: "var(--text-dim)" }}>🔈</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="2"
-                    step="0.05"
-                    value="1.0"
-                    style={{ flex: 1, "accent-color": "var(--accent-teal)" }}
-                    onChange={(e) => handleVolumeChange(participant.peer_id, parseFloat(e.currentTarget.value))}
-                  />
-                  <span style={{ "font-size": "0.75rem", color: "var(--text-dim)" }}>🔊</span>
-                </div>
-              </div>
-            );
-          }}
-        </For>
+        </Show>
       </div>
-    </div>
+
+      <Dock onShare={() => setPicker(true)} onSettings={() => setSettings(true)} />
+      <SharePickerModal open={picker()} onClose={() => setPicker(false)} />
+      <VoiceSettingsModal open={settings()} onClose={() => setSettings(false)} />
+    </main>
   );
 }

@@ -37,6 +37,8 @@ pub struct RemoteSpeaker {
 /// Multi-speaker audio mixer.
 pub struct AudioMixer {
     speakers: HashMap<u32, RemoteSpeaker>,
+    /// Volumes chosen before the speaker's first packet (e.g. remembered from the last call).
+    preset_volumes: HashMap<u32, f32>,
     scratch_buf: [f32; FRAME_SIZE_48K],
 }
 
@@ -50,6 +52,7 @@ impl AudioMixer {
     pub fn new() -> Self {
         Self {
             speakers: HashMap::new(),
+            preset_volumes: HashMap::new(),
             scratch_buf: [0.0f32; FRAME_SIZE_48K],
         }
     }
@@ -57,6 +60,8 @@ impl AudioMixer {
     /// Add or update a speaker's volume multiplier (0.0 to 2.0).
     pub fn set_speaker_volume(&mut self, peer_id: u32, volume: f32) {
         let clamped = volume.clamp(0.0, 2.0);
+        // Remembered even if the speaker has not sent anything yet.
+        self.preset_volumes.insert(peer_id, clamped);
         if let Some(speaker) = self.speakers.get_mut(&peer_id) {
             speaker.volume = clamped;
         }
@@ -65,6 +70,7 @@ impl AudioMixer {
     /// Remove a speaker who left the voice channel.
     pub fn remove_speaker(&mut self, peer_id: u32) {
         self.speakers.remove(&peer_id);
+        self.preset_volumes.remove(&peer_id);
     }
 
     /// Largest playout queue length across all remote speakers.
@@ -120,7 +126,7 @@ impl AudioMixer {
                 };
                 entry.insert(RemoteSpeaker {
                     peer_id,
-                    volume: 1.0,
+                    volume: self.preset_volumes.get(&peer_id).copied().unwrap_or(1.0),
                     jitter_buffer,
                     last_packet_time: now,
                     is_speaking: false,
@@ -303,5 +309,21 @@ mod tests {
         mixer.on_screen_audio_packet(&screen, payload, now);
         let peers: Vec<u32> = mixer.loss_counters().iter().map(|(peer, _, _)| *peer).collect();
         assert_eq!(peers, vec![7]);
+    }
+
+    #[test]
+    fn a_volume_chosen_before_the_first_packet_is_used_when_the_speaker_appears() {
+        let mut mixer = AudioMixer::new();
+        mixer.set_speaker_volume(7, 1.5);
+        mixer.set_speaker_volume(8, 9.0); // out of range: clamped
+        let mut encoder = crate::opus::OpusVoiceEncoder::new(64).unwrap();
+        let payload = encoder.encode(&[0.1f32; FRAME_SIZE_48K]).unwrap();
+        let now = Instant::now();
+        mixer.on_audio_packet(&MediaHeader::new_audio(1, 7, 0, 0, false, false), payload.clone(), now);
+        mixer.on_audio_packet(&MediaHeader::new_audio(1, 8, 0, 0, false, false), payload, now);
+        assert_eq!(mixer.speakers[&7].volume, 1.5);
+        assert_eq!(mixer.speakers[&8].volume, 2.0);
+        mixer.remove_speaker(7);
+        assert!(!mixer.preset_volumes.contains_key(&7), "a speaker who left is forgotten");
     }
 }

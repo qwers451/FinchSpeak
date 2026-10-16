@@ -2,13 +2,14 @@ import { createSignal } from 'solid-js';
 import type { SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
 import { setPendingMismatch, setPendingTofu } from './tofuStore';
 import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
-import { activeVoiceChannel, handleUserSpeaking, leaveVoice, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
+import { activeVoiceChannel, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
 import { clearTyping, noteIncoming, noteTyping, resetActivity, setUnreadFromServer } from './activityStore';
 import { handleMessageDeleted, handleMessageEdited, handleReactionChanged, renameAuthor } from './chatStore';
 import { currentUser, setCurrentUser } from './authStore';
 import { resetScreenState, resetScreenStateOnDisconnect, setWatching, watching } from './screenState';
 import { screenHandlers } from './screenStore';
+import { applySavedVolume } from './volumeStore';
 export { appError, setAppError } from './notificationStore';
 
 export const [connectionStatus, setConnectionStatus] = createSignal<'connected' | 'disconnected' | 'reconnecting' | 'failed'>('disconnected');
@@ -52,6 +53,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     setConnectionError(null);
     setReconnectInfo(null);
     setUnreadFromServer(data.initial_state.unread);
+    for (const state of data.initial_state.voice_states) void applySavedVolume(state.user_id, state.peer_id);
     const watched = watching();
     if (watched) {
       const sharer = data.initial_state.voice_states.find((state) => state.user_id === watched.user_id && state.sharing_screen);
@@ -79,6 +81,9 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'user-speaking': (data) => handleUserSpeaking(data.peer_id, data.is_speaking),
   'local-speaking': setIsLocalSpeaking,
   'ping-rtt': (data) => setPingRtt(data.rtt_ms),
+  'mic-level': handleMicLevel,
+  'mic-test': handleMicTest,
+  'voice-quality': handleVoiceQuality,
   'tofu-required': setPendingTofu,
   'tofu-mismatch': setPendingMismatch,
   'reconnect-attempt': ({ attempt, retry_in_secs }) => setReconnectInfo({ attempt, retryInSecs: retry_in_secs }),
@@ -88,13 +93,17 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     handleChannelDeleted(channel_id);
     if (activeVoiceChannel()?.id === channel_id) void leaveVoice();
   },
-  'user-joined-voice': (data) => setVoiceParticipants((previous) => [
-    ...previous.filter((participant) => participant.peer_id !== data.peer_id), data,
-  ]),
+  'user-joined-voice': (data) => {
+    setVoiceParticipants((previous) => [
+      ...previous.filter((participant) => participant.peer_id !== data.peer_id), data,
+    ]);
+    void applySavedVolume(data.user_id, data.peer_id);
+  },
   'user-left-voice': (data) => {
+    // Say why the watched share ended while the sharer's name is still known.
+    if (watching()?.peer_id === data.peer_id) screenHandlers['screen-share-stopped']({ peer_id: data.peer_id, reason: 'Left' });
     setVoiceParticipants((previous) => previous.filter((participant) => participant.peer_id !== data.peer_id || participant.channel_id !== data.channel_id));
     handleUserSpeaking(data.peer_id, false);
-    if (watching()?.peer_id === data.peer_id) setWatching(null);
   },
   'user-voice-state-changed': (data) => setVoiceParticipants((previous) => previous.map((participant) =>
     participant.peer_id === data.peer_id ? { ...participant, is_muted: data.muted, is_deafened: data.deafened } : participant)),

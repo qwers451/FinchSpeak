@@ -185,12 +185,16 @@ export interface SessionEvents {
   'channel-deleted': { channel_id: string };
   'user-voice-state-changed': { peer_id: number; muted: boolean; deafened: boolean };
   'screen-share-started': { user_id: string; peer_id: number; width: number; height: number; fps: number };
-  'screen-share-stopped': { peer_id: number };
+  'screen-share-stopped': { peer_id: number; reason?: string };
   /** Our own share ended by itself (capture failed, window closed). */
   'screen-share-ended': string;
   /** The sound of the shared screen could not be captured; the picture still goes out. */
   'screen-audio-failed': string;
   'presence-update': { user_id: string; status: UserStatus };
+  /** Level of the processed microphone, about 25 times a second during a call. */
+  'mic-level': { db: number; speaking: boolean };
+  'mic-test': { phase: 'recording' | 'playing' | 'done'; seconds?: number };
+  'voice-quality': { peer_id: number; quality: 'good' | 'fair' | 'poor'; loss: number }[];
   'connection-lost': string;
   reconnecting: null;
   reconnected: null;
