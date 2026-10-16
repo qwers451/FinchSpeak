@@ -17,6 +17,75 @@ pub struct ServerConfig {
     pub storage: StorageConfig,
     #[serde(default)]
     pub auth: AuthConfig,
+    #[serde(default)]
+    pub backup: BackupConfig,
+    #[serde(default)]
+    pub logging: LoggingConfig,
+}
+
+/// Periodic copies of the database (SQLite `VACUUM INTO`, consistent while the server runs).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_backup_dir")]
+    pub dir: String,
+    #[serde(default = "default_backup_interval_hours")]
+    pub interval_hours: u64,
+    /// How many of the newest backups to keep.
+    #[serde(default = "default_backup_keep")]
+    pub keep: usize,
+}
+
+impl Default for BackupConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            dir: default_backup_dir(),
+            interval_hours: default_backup_interval_hours(),
+            keep: default_backup_keep(),
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_backup_dir() -> String {
+    "./data/backups".to_string()
+}
+
+fn default_backup_interval_hours() -> u64 {
+    24
+}
+
+fn default_backup_keep() -> usize {
+    7
+}
+
+/// Log files (rotated daily).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoggingConfig {
+    #[serde(default = "default_log_dir")]
+    pub dir: String,
+    /// How many daily files to keep.
+    #[serde(default = "default_log_keep")]
+    pub keep_files: usize,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self { dir: default_log_dir(), keep_files: default_log_keep() }
+    }
+}
+
+fn default_log_dir() -> String {
+    "./data/logs".to_string()
+}
+
+fn default_log_keep() -> usize {
+    14
 }
 
 /// Network binding and ports.

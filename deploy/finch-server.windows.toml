@@ -1,0 +1,26 @@
+# FinchSpeak server settings (copy of finch-server.toml.example; the server reads
+# finch-server.toml from the folder it is started in). Everything is optional.
+
+[server]
+host = "0.0.0.0"
+quic_port = 4433      # UDP, voice and video
+http_port = 8443      # TCP, HTTPS (login, history, files)
+
+[storage]
+max_file_size_mb = 50
+
+[auth]
+# "invite": people register with a code from an admin (the first account on an empty
+# server becomes the admin). "open": anyone who can reach the server may register.
+registration = "invite"
+token_expiry_hours = 72
+
+[backup]
+enabled = true
+dir = "./data/backups"
+interval_hours = 24
+keep = 7              # newest copies kept
+
+[logging]
+dir = "./data/logs"
+keep_files = 14       # daily files kept

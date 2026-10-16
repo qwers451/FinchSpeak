@@ -24,6 +24,7 @@ pub struct RunningServer {
     http_shutdown: Option<oneshot::Sender<()>>,
     http_task: Option<JoinHandle<()>>,
     quic_task: Option<JoinHandle<()>>,
+    backup_task: Option<JoinHandle<()>>,
 }
 
 /// Initialize the database and start the REST and QUIC servers.
@@ -72,6 +73,8 @@ pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
     let (http_shutdown, http_shutdown_rx) = oneshot::channel::<()>();
     let http_task = tokio::spawn(https::serve(listener, https_config, app, http_shutdown_rx));
 
+    let backup_task = config.backup.enabled.then(|| crate::backup::spawn(pool.clone(), config.backup.clone()));
+
     let quic_endpoint = endpoint.clone();
     let jwt_secret = config.auth.jwt_secret.clone();
     let quic_task = tokio::spawn(async move {
@@ -88,6 +91,7 @@ pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
         http_shutdown: Some(http_shutdown),
         http_task: Some(http_task),
         quic_task: Some(quic_task),
+        backup_task,
     })
 }
 
@@ -111,6 +115,9 @@ impl RunningServer {
 
     /// Stop accepting connections and wait for both server tasks to finish.
     pub async fn shutdown(mut self) {
+        if let Some(task) = self.backup_task.take() {
+            task.abort();
+        }
         self.endpoint.close(0u32.into(), b"shutdown");
         if let Some(tx) = self.http_shutdown.take() {
             let _ = tx.send(());

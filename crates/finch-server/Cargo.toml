@@ -46,6 +46,7 @@ dashmap = "6"
 # Logging
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+tracing-appender = "0.2"
 
 # Error handling
 anyhow = { workspace = true }
@@ -60,5 +61,6 @@ toml = "0.8"
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+tempfile = "3"
 # launch_test talks to the TLS REST listener
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

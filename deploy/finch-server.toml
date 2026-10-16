@@ -22,3 +22,13 @@ token_expiry_hours = 72
 # Who may register: "invite" (default; an admin creates codes in the app) or "open".
 # The very first account on an empty server is always allowed and becomes the admin.
 registration = "invite"
+
+[backup]
+enabled = true
+dir = "/app/data/backups"
+interval_hours = 24
+keep = 7
+
+[logging]
+dir = "/app/data/logs"
+keep_files = 14

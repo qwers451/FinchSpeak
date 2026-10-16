@@ -188,12 +188,16 @@ impl JitterBuffer {
         // queued than the target; playing it all out would keep every later packet that much
         // later for good. Skip the oldest and stay close to the target.
         let limit = self.target_packets + CATCH_UP_SLACK_PACKETS;
-        let mut skipped = false;
+        let mut removed = 0u64;
         while self.queue.len() > limit {
             self.queue.pop_first();
-            skipped = true;
+            removed += 1;
         }
-        if skipped && let Some(&oldest) = self.queue.keys().next() {
+        if removed > 0 && let Some(&oldest) = self.queue.keys().next() {
+            // Slots that never arrived before the new start count as lost, skipped ones as played.
+            let covered = oldest.saturating_sub(playout_seq);
+            self.total_expected += covered;
+            self.total_lost += covered.saturating_sub(removed);
             self.next_playout_seq = Some(oldest);
         }
         let playout_seq = self.next_playout_seq.unwrap_or(playout_seq);
@@ -435,5 +439,19 @@ mod tests {
             deepest_after_settling <= 3,
             "{deepest_after_settling} packets still queued: the burst became permanent latency"
         );
+    }
+
+    /// Packets that never arrived must still show up as loss when a burst makes the buffer
+    /// skip ahead past them.
+    #[test]
+    fn test_loss_before_a_skip_is_counted() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let mut out = [0.0f32; FRAME_SIZE_48K];
+        for seq in [0u16, 1, 3, 4, 5, 6, 7] {
+            push_seq(&mut buffer, seq, false, &payload); // 2 is lost
+        }
+        buffer.pop_frame(&mut out);
+        assert!(buffer.loss_rate() > 0.0, "the missing packet was not counted");
     }
 }

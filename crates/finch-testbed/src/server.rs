@@ -49,6 +49,7 @@ impl TestServer {
         config.storage.max_file_size_mb = TEST_MAX_FILE_SIZE_MB;
         config.server.tls_dir = dir.path().join("tls").to_string_lossy().to_string();
         config.auth.jwt_secret = format!("testbed-secret-{}", uuid::Uuid::new_v4());
+        config.backup.enabled = false;
         // Most scenarios create many users; invitation-only registration has its own tests.
         config.auth.registration = finch_server::config::RegistrationMode::Open;
         adjust(&mut config);
