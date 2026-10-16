@@ -450,7 +450,7 @@ export const api = {
     if (isTauri()) {
       return invoke('get_voice_settings');
     }
-    return { input_gain: 1, vad_threshold_db: -45, push_to_talk: false, key_down: false, monitor: false };
+    return { input_gain: 1, vad_threshold_db: -45, push_to_talk: false, key_down: false, monitor: false, voice_enhancement: true };
   },
 
   setVoiceSettings: async (settings: VoiceSettings): Promise<void> => {

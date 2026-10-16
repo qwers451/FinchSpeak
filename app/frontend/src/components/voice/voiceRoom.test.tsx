@@ -233,3 +233,19 @@ it('captures a push-to-talk key, Esc cancels, and "hear myself" warns about head
   await flush();
   expect(document.body.textContent).toContain('Use headphones');
 });
+
+it('voice enhancement defaults on and toggles through the backend', async () => {
+  const send = vi.spyOn(api, 'setVoiceSettings').mockResolvedValue();
+  const host = mount(() => <VoiceSettingsModal open onClose={() => {}} />);
+  const toggle = byLabel(host, 'Voice enhancement');
+  expect(toggle).not.toBeNull();
+  expect(toggle.getAttribute('aria-checked')).toBe('true');
+  expect(host.textContent).toContain('Balances quiet and loud speech and limits peaks.');
+  toggle.click();
+  await flush();
+  expect(send).toHaveBeenLastCalledWith({ ...DEFAULT_VOICE_SETTINGS, voice_enhancement: false });
+  expect(toggle.getAttribute('aria-checked')).toBe('false');
+  expect(byLabel(host, 'Hear myself')).not.toBeNull();
+  setVoiceSettings({ ...DEFAULT_VOICE_SETTINGS, voice_enhancement: false });
+  expect(toggle.getAttribute('aria-checked')).toBe('false');
+});

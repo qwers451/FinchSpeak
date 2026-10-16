@@ -583,6 +583,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     }
 
                                     if state.is_muted.load(Ordering::Relaxed) {
+                                        if let Some(capture) = &mut voice_capture {
+                                            capture.set_transmit_gate(false);
+                                        }
                                         if is_currently_speaking {
                                             is_currently_speaking = false;
                                             let _ = app_handle.emit("local-speaking", false);
@@ -606,6 +609,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         Err(_) => 0,
                                     };
                                     let sender_id = state.session_peer_id.load(Ordering::Relaxed);
+                                    capture.set_voice_enhancement(state.voice_settings.voice_enhancement());
                                     capture.set_input_gain(state.voice_settings.input_gain());
                                     capture.set_vad_threshold_db(state.voice_settings.vad_threshold_db());
                                     // While testing the microphone nothing goes out to the others.

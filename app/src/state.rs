@@ -44,6 +44,7 @@ pub struct VoiceSettings {
     push_to_talk: AtomicBool,
     key_down: AtomicBool,
     monitor: AtomicBool,
+    voice_enhancement: AtomicBool,
 }
 
 impl Default for VoiceSettings {
@@ -54,6 +55,7 @@ impl Default for VoiceSettings {
             push_to_talk: AtomicBool::new(false),
             key_down: AtomicBool::new(false),
             monitor: AtomicBool::new(false),
+            voice_enhancement: AtomicBool::new(true),
         }
     }
 }
@@ -67,9 +69,17 @@ pub struct VoiceSettingsDto {
     /// The push-to-talk key is held down right now.
     pub key_down: bool,
     pub monitor: bool,
+    #[serde(default = "default_voice_enhancement")]
+    pub voice_enhancement: bool,
 }
 
+fn default_voice_enhancement() -> bool { true }
+
 impl VoiceSettings {
+    pub fn voice_enhancement(&self) -> bool {
+        self.voice_enhancement.load(Ordering::Relaxed)
+    }
+
     pub fn input_gain(&self) -> f32 {
         f32::from_bits(self.input_gain.load(Ordering::Relaxed))
     }
@@ -99,6 +109,7 @@ impl VoiceSettings {
         self.vad_threshold_db.store(threshold.to_bits(), Ordering::Relaxed);
         self.push_to_talk.store(new.push_to_talk, Ordering::Relaxed);
         self.monitor.store(new.monitor, Ordering::Relaxed);
+        self.voice_enhancement.store(new.voice_enhancement, Ordering::Relaxed);
         if !new.push_to_talk {
             self.key_down.store(false, Ordering::Relaxed);
         }
@@ -111,6 +122,7 @@ impl VoiceSettings {
             push_to_talk: self.push_to_talk.load(Ordering::Relaxed),
             key_down: self.key_down.load(Ordering::Relaxed),
             monitor: self.monitor(),
+            voice_enhancement: self.voice_enhancement(),
         }
     }
 }
@@ -257,7 +269,7 @@ mod voice_settings_tests {
     use super::*;
 
     fn dto(gain: f32, threshold: f32, ptt: bool) -> VoiceSettingsDto {
-        VoiceSettingsDto { input_gain: gain, vad_threshold_db: threshold, push_to_talk: ptt, key_down: false, monitor: false }
+        VoiceSettingsDto { input_gain: gain, vad_threshold_db: threshold, push_to_talk: ptt, key_down: false, monitor: false, voice_enhancement: true }
     }
 
     #[test]
@@ -307,4 +319,20 @@ mod voice_settings_tests {
         settings.apply(&wanted);
         assert_eq!(settings.snapshot(), wanted);
     }
-}
+    #[test]
+    fn enhancement_defaults_migrates_and_round_trips() {
+        let settings = VoiceSettings::default();
+        assert!(settings.voice_enhancement());
+        let old = r#"{"input_gain":1.5,"vad_threshold_db":-50,"push_to_talk":false,"key_down":false,"monitor":false}"#;
+        let mut migrated: VoiceSettingsDto = serde_json::from_str(old).unwrap();
+        assert!(migrated.voice_enhancement);
+        assert_eq!(migrated.input_gain, 1.5);
+        assert_eq!(migrated.vad_threshold_db, -50.0);
+        for enabled in [false, true] {
+            migrated.voice_enhancement = enabled;
+            settings.apply(&migrated);
+            assert_eq!(settings.voice_enhancement(), enabled);
+            assert_eq!(settings.snapshot(), migrated);
+            assert_eq!(serde_json::from_str::<VoiceSettingsDto>(&serde_json::to_string(&migrated).unwrap()).unwrap(), migrated);
+        }
+    }}

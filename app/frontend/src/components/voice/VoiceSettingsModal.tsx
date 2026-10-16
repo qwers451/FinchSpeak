@@ -58,6 +58,11 @@ export function VoiceSettingsModal(props: { open: boolean; onClose: () => void }
         <DevicePicker kind="input" label="Microphone" devices={availableDevices().inputs} />
         <DevicePicker kind="output" label="Speakers" devices={availableDevices().outputs} />
 
+        <div class="setrow">
+          <div class="col grow"><strong class="fs13">Voice enhancement</strong><span class="t3 fs12">Balances quiet and loud speech and limits peaks.</span></div>
+          <Toggle label="Voice enhancement" checked={voiceSettings().voice_enhancement} onChange={(checked) => void changeVoiceSettings({ voice_enhancement: checked })} />
+        </div>
+
         <div class="col g8">
           <div class="row between"><span class="field-label">Input volume</span><span class="fs13 t2">{Math.round(voiceSettings().input_gain * 100)}%</span></div>
           <Slider label="Input volume" min={0} max={3} step={0.05} value={voiceSettings().input_gain} onChange={(value) => void changeVoiceSettings({ input_gain: value })} />
@@ -71,11 +76,13 @@ export function VoiceSettingsModal(props: { open: boolean; onClose: () => void }
           </div>
           <Slider label="Speech threshold" min={-70} max={-15} step={1} value={voiceSettings().vad_threshold_db} onChange={(value) => void changeVoiceSettings({ vad_threshold_db: value })} />
           <span class="t3 fs12">
-            <Show when={isMuted()} fallback={loud() ? 'Your voice is above the line: it is sent.' : 'Speak: the bar should cross the yellow line. Lower the threshold to pick up quieter speech.'}>
+            <Show when={isMuted()} fallback={loud() ? 'Your voice is above the line: detected speech can be sent.' : 'Speak: the bar should cross the yellow line. Lower the threshold to pick up quieter speech.'}>
               You are muted: the meter is off.
             </Show>
           </span>
         </div>
+
+        <span class="t3 fs12">The meter shows the level used to open the microphone. Automatic leveling follows speech detection; lower the threshold if quiet speech is missed.</span>
 
         <div class="row g12">
           <Button variant="secondary" icon="play" disabled={micTestPhase() !== 'idle'} onClick={() => void startMicTest(3)}>

@@ -91,3 +91,33 @@ it('AUD-042 corrupt saved settings fall back to the defaults', async () => {
   await restoreVoiceSettings();
   expect(send).toHaveBeenCalledWith({ ...DEFAULT_VOICE_SETTINGS });
 });
+
+it('enhancement migrates old preferences without losing existing values', async () => {
+  localStorage.setItem('finchspeak.voiceSettings', JSON.stringify({ settings: { input_gain: 1.5, vad_threshold_db: -52, push_to_talk: true, monitor: true }, key: 'F9' }));
+  const send = vi.spyOn(api, 'setVoiceSettings').mockResolvedValue();
+  vi.spyOn(api, 'setPushToTalkKey').mockResolvedValue();
+  await restoreVoiceSettings();
+  expect(send).toHaveBeenCalledWith({ input_gain: 1.5, vad_threshold_db: -52, push_to_talk: true, monitor: true, key_down: false, voice_enhancement: true });
+  expect(pushToTalkKey()).toBe('F9');
+});
+
+it.each([undefined, 'bad', null, false, true])('enhancement restores saved %s safely', async (value) => {
+  localStorage.setItem('finchspeak.voiceSettings', JSON.stringify({ settings: { voice_enhancement: value } }));
+  vi.spyOn(api, 'setVoiceSettings').mockResolvedValue();
+  await restoreVoiceSettings();
+  expect(voiceSettings().voice_enhancement).toBe(typeof value === 'boolean' ? value : true);
+});
+
+it('enhancement false survives restart and rejected changes preserve storage', async () => {
+  const send = vi.spyOn(api, 'setVoiceSettings').mockResolvedValue();
+  await changeVoiceSettings({ voice_enhancement: false });
+  const saved = localStorage.getItem('finchspeak.voiceSettings');
+  setVoiceSettings(DEFAULT_VOICE_SETTINGS);
+  await restoreVoiceSettings();
+  expect(voiceSettings().voice_enhancement).toBe(false);
+  send.mockRejectedValue('unavailable');
+  await changeVoiceSettings({ voice_enhancement: true });
+  expect(voiceSettings().voice_enhancement).toBe(false);
+  expect(localStorage.getItem('finchspeak.voiceSettings')).toBe(saved);
+  expect(appError()).toContain('unavailable');
+});

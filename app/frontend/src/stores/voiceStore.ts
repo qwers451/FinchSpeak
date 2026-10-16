@@ -118,7 +118,7 @@ async function restoreAudioDevices() {
 
 // --- microphone settings -------------------------------------------------------------------
 
-export const DEFAULT_VOICE_SETTINGS: VoiceSettings = { input_gain: 1, vad_threshold_db: -45, push_to_talk: false, key_down: false, monitor: false };
+export const DEFAULT_VOICE_SETTINGS: VoiceSettings = { input_gain: 1, vad_threshold_db: -45, push_to_talk: false, key_down: false, monitor: false, voice_enhancement: true };
 export const [voiceSettings, setVoiceSettings] = createSignal<VoiceSettings>(DEFAULT_VOICE_SETTINGS);
 /** The push-to-talk key, e.g. "F8". */
 export const [pushToTalkKey, setPushToTalkKey] = createSignal<string | null>(null);
@@ -140,6 +140,7 @@ function readSavedVoice(): SavedVoice | null {
         vad_threshold_db: number(s.vad_threshold_db, -45),
         push_to_talk: s.push_to_talk === true,
         monitor: s.monitor === true,
+        voice_enhancement: typeof s.voice_enhancement === 'boolean' ? s.voice_enhancement : true,
       },
       key: typeof saved.key === 'string' && saved.key ? saved.key : null,
     };

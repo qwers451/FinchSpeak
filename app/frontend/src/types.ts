@@ -176,6 +176,7 @@ export interface Invite {
 }
 
 export interface VoiceSettings {
+  voice_enhancement: boolean;
   /** Microphone volume multiplier, 1 = unchanged. */
   input_gain: number;
   /** Speech detector loudness threshold in dBFS. */
