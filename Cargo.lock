@@ -1619,7 +1619,7 @@ dependencies = [
 
 [[package]]
 name = "finch-app"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1655,7 +1655,7 @@ dependencies = [
 
 [[package]]
 name = "finch-audio"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "audiopus",
  "bytes",
@@ -1673,7 +1673,7 @@ dependencies = [
 
 [[package]]
 name = "finch-client-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1697,7 +1697,7 @@ dependencies = [
 
 [[package]]
 name = "finch-protocol"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -1709,7 +1709,7 @@ dependencies = [
 
 [[package]]
 name = "finch-screen"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "audiopus",
  "bytes",
@@ -1725,7 +1725,7 @@ dependencies = [
 
 [[package]]
 name = "finch-server"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1762,7 +1762,7 @@ dependencies = [
 
 [[package]]
 name = "finch-testbed"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "bytes",

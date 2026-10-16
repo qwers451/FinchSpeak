@@ -5,12 +5,13 @@ $output = [System.IO.Path]::GetFullPath((Join-Path $root $OutputDirectory))
 if (-not $output.StartsWith($root + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Release output must be inside the repository"
 }
-$serverExe = Join-Path $root "target/release/finch-server.exe"
+$serverExe = Join-Path $root "target/server-static/x86_64-pc-windows-msvc/release/finch-server.exe"
 $clientExe = Join-Path $root "target/release/finch-app.exe"
 foreach ($file in @($serverExe, $clientExe)) {
     if (-not (Test-Path -LiteralPath $file)) { throw "Build release binaries first: $file" }
 }
 New-Item -ItemType Directory -Force -Path $output | Out-Null
+& "$PSScriptRoot/test-server-runtime.ps1" -Executable $serverExe
 # Build in a fresh staging directory; never remove an existing server's data directory.
 $stage = Join-Path $output ("staging-" + [guid]::NewGuid().ToString("N"))
 $server = Join-Path $stage "FinchSpeak-server"
@@ -23,9 +24,18 @@ Copy-Item -LiteralPath (Join-Path $root "deploy/README-PACKAGE.txt") -Destinatio
 @echo off
 title FinchSpeak Server
 cd /d "%~dp0"
+if not exist "%~dp0finch-server.exe" (
+  echo ERROR: finch-server.exe is missing. Extract ALL files from the ZIP first.
+  echo Keep Run_Server.bat and finch-server.exe in the same writable folder.
+  pause
+  exit /b 2
+)
 if not exist finch-server.toml copy finch-server.toml.example finch-server.toml >nul
-finch-server.exe
+"%~dp0finch-server.exe"
+set "server_exit=%errorlevel%"
+if not "%server_exit%"=="0" echo Server stopped with error %server_exit%. Please copy the error text above.
 pause
+exit /b %server_exit%
 '@ | Set-Content -LiteralPath (Join-Path $server "Run_Server.bat") -Encoding ascii
 Copy-Item -Path (Join-Path $server "*") -Destination $portable
 Copy-Item -LiteralPath $clientExe -Destination $portable

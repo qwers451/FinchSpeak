@@ -2,7 +2,10 @@ FinchSpeak for Windows
 ======================
 
 SERVER (one computer, always on)
-  1. Run_Server.bat. Open UDP 4433 and TCP 8443 in the firewall / router.
+  1. Right-click the ZIP > Extract All. Keep ALL files together in a writable folder.
+     Run Run_Server.bat from the extracted folder, not from inside the ZIP viewer.
+     The server does not require a separate Visual C++ Redistributable installation.
+     Open UDP 4433 and TCP 8443 in the firewall / router.
   2. The first account created becomes the admin. Settings: finch-server.toml.
   3. Data lives in the "data" folder and finchspeak.db next to the server:
        data\backups   daily copies of the database (last 7)
@@ -12,7 +15,7 @@ SERVER (one computer, always on)
   Back up the whole folder to move or restore the server.
 
 CLIENT (everyone)
-  1. Install FinchSpeak_1.0.0_x64-setup.exe from GitHub Releases, or use
+  1. Install FinchSpeak_<version>_x64-setup.exe from the latest GitHub Release, or use
      Run_FinchSpeak.bat from FinchSpeak-windows.zip (the server-only ZIP has no client).
   2. Server address: https://<server address>:8443
   3. The first time, the app shows the server's certificate fingerprint. Compare it with

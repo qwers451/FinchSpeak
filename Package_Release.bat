@@ -12,7 +12,7 @@ if errorlevel 1 goto :fail
 cd ..\..
 
 echo [2/4] Server and client (release)...
-cargo build --release -p finch-server
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-server-release.ps1
 if errorlevel 1 goto :fail
 cargo build --release -p finch-app --features custom-protocol
 if errorlevel 1 goto :fail

@@ -64,13 +64,15 @@ jobs:
       - name: Server package
         shell: pwsh
         run: |
-          cargo build --release -p finch-server
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/build-server-release.ps1
           ./scripts/package-release.ps1
 
       - name: Packaged server smoke test
         shell: pwsh
-        run: ./scripts/test-release-package.ps1
+        run: |
+          ./scripts/test-server-launcher.ps1
+          ./scripts/test-release-package.ps1
+          ./scripts/test-server-launcher.ps1 -Archive dist/FinchSpeak-windows.zip
 
       - name: Sign the installer and write latest.json
         shell: pwsh
@@ -80,12 +82,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "The secret TAURI_SIGNING_PRIVATE_KEY is not set: updates cannot be signed" }
-          $installer = Get-ChildItem ../target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          $installer = Get-Item "../target/release/bundle/nsis/FinchSpeak_${version}_x64-setup.exe"
           ./frontend/node_modules/.bin/tauri signer sign $installer.FullName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node ../scripts/make-latest-json.mjs $installer.FullName "${{ github.ref_name }}" "${{ github.repository }}" ../dist/latest.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo run --release -p finch-app --example verify-release -- $installer.FullName ../dist/latest.json
+          cargo run --release -p finch-app --features tauri/custom-protocol --example verify-release -- $installer.FullName ../dist/latest.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           foreach ($file in @($installer.FullName, "$($installer.FullName).sig", "../dist/latest.json")) {
             $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -97,6 +100,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $installer = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
-          gh release create "${{ github.ref_name }}" --title "FinchSpeak ${{ github.ref_name }}" --notes-file docs/RELEASE-NOTES-1.0.0.md `
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          $installer = Get-Item "target/release/bundle/nsis/FinchSpeak_${version}_x64-setup.exe"
+          gh release create "${{ github.ref_name }}" --title "FinchSpeak ${{ github.ref_name }}" --notes-file docs/RELEASE-NOTES-1.0.1.md `
             $installer.FullName "$($installer.FullName).sig" dist/FinchSpeak-server-windows.zip dist/FinchSpeak-windows.zip dist/latest.json dist/SHA256SUMS.txt

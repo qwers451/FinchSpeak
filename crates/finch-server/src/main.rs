@@ -48,7 +48,19 @@ async fn main() -> Result<()> {
     let _log_guard = init_logging(&config);
 
     // 2. Initialize database, REST API and QUIC server
-    let mut server = launch(config).await?;
+    let mut server = match launch(config).await {
+        Ok(server) => server,
+        Err(error) => {
+            // Returning anyhow's error only writes stderr. Keep the full chain
+            // in the persistent log as well, so a closed console loses no cause.
+            tracing::error!(error = ?error, "Server startup failed");
+            return Err(error);
+        }
+    };
+    println!(
+        "FinchSpeak {} ready. HTTPS: {} | QUIC: {}\nCertificate SHA-256: {}\nKeep this window open. Press Ctrl+C to stop.",
+        env!("CARGO_PKG_VERSION"), server.http_addr, server.quic_addr, server.certificate_fingerprint
+    );
 
     // 3. Wait for shutdown signal (Ctrl+C) or an unexpected server exit
     tokio::select! {

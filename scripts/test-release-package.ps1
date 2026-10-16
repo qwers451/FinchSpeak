@@ -1,9 +1,11 @@
 param([string]$Archive = "dist/FinchSpeak-server-windows.zip")
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
+$expectedVersion = (Get-Content -LiteralPath (Join-Path $root 'app/tauri.conf.json') | ConvertFrom-Json).version
 $work = Join-Path $root ("target/release-smoke-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $work | Out-Null
 Expand-Archive -LiteralPath (Join-Path $root $Archive) -DestinationPath $work
+& "$PSScriptRoot/test-server-runtime.ps1" -Executable (Join-Path $work 'finch-server.exe')
 foreach ($file in @("finch-server.exe", "finch-server.toml.example", "Run_Server.bat", "README.txt")) {
     if (-not (Test-Path -LiteralPath (Join-Path $work $file))) { throw "Package is missing $file" }
 }
@@ -32,7 +34,7 @@ function Start-TestServer {
         if ($script:process.HasExited) { throw "Packaged server exited: $(Get-Content (Join-Path $work 'stderr.log') -Raw)" }
         try {
             $health = Invoke-RestMethod "$base/health" -SkipCertificateCheck -TimeoutSec 1
-            if ($health.version -ne "1.0.0") { throw "Unexpected release version $($health.version)" }
+            if ($health.version -ne $expectedVersion) { throw "Unexpected release version $($health.version)" }
             return
         } catch { if ($attempt -eq 99) { throw }; Start-Sleep -Milliseconds 100 }
     }
@@ -80,6 +82,6 @@ try {
     Start-TestServer
     $restored = Request POST /api/auth/login @{ username="testmember"; password="test-release-password" }
     if ($restored.user.display_name -ne "Test Restored") { throw "Database backup was not restored" }
-    Write-Output "PASS: packaged 1.0.0 server, health, admin bootstrap, invitation, member, channels, profile, restart, stable TLS certificate, backup and restore"
+    Write-Output "PASS: packaged $expectedVersion server, health, admin bootstrap, invitation, member, channels, profile, restart, stable TLS certificate, backup and restore"
     Write-Output "Isolated test data: $work"
 } finally { Stop-TestServer }
