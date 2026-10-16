@@ -220,6 +220,7 @@ pub async fn add_reaction_handler(
     if !valid_emoji(&emoji) {
         return Err(ServerError::BadRequest("Not a valid reaction".into()));
     }
+    state.sessions.allow_action(auth.user_id, "reaction", 30, std::time::Duration::from_secs(10)).map_err(ServerError::TooManyRequests)?;
     let (channel_id, _) = message_owner(&state, id).await?;
     let distinct: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT emoji) FROM message_reactions WHERE message_id = ? AND emoji != ?")
         .bind(id.to_string())

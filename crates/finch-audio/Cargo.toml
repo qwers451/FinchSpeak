@@ -23,7 +23,7 @@ sonora = { version = "=0.2.0", default-features = false }
 earshot = "=1.2.2"
 
 # Ring buffer for real-time audio
-ringbuf = "0.4"
+ringbuf = "0.5"
 
 # Encryption (E2EE)
 chacha20poly1305 = "0.10"

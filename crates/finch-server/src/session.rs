@@ -59,6 +59,8 @@ pub struct SessionManager {
     /// Messages per person, to stop floods: `(limit, window)`.
     message_rule: Arc<std::sync::Mutex<(usize, std::time::Duration)>>,
     message_hits: Arc<crate::limits::WindowLimiter>,
+    /// Other things a person could repeat endlessly (status changes).
+    action_hits: Arc<crate::limits::WindowLimiter>,
 }
 
 impl Default for SessionManager {
@@ -79,6 +81,7 @@ impl SessionManager {
             last_typing: Arc::new(DashMap::new()),
             message_rule: Arc::new(std::sync::Mutex::new((30, std::time::Duration::from_secs(10)))),
             message_hits: Arc::new(crate::limits::WindowLimiter::default()),
+            action_hits: Arc::new(crate::limits::WindowLimiter::default()),
         }
     }
 
@@ -87,6 +90,11 @@ impl SessionManager {
         if let Ok(mut rule) = self.message_rule.lock() {
             *rule = (limit.max(1), window);
         }
+    }
+
+    /// Count one `kind` of action of `user`: at most `max` per `window`; `Err(seconds)` when over.
+    pub fn allow_action(&self, user: Uuid, kind: &str, max: usize, window: std::time::Duration) -> Result<(), u64> {
+        self.action_hits.hit(&format!("{kind}:{user}"), std::time::Instant::now(), max, window)
     }
 
     /// Count a message of `user`; `Err(seconds)` when they are sending too fast.

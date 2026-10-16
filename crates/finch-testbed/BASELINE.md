@@ -55,6 +55,11 @@ over localhost, synthetic audio and video payloads (no real Opus or H.264 work).
 
 Not measured here: real microphones and decoders on 50 machines, internet latency, TLS handshakes from 50 different addresses.
 
+Release preparation rerun, 2026-10-16 (1.0.0): 50 sign-ins in 1.0 s;
+voice 294294/294294 (100%), video 18036/18036 (100%), chat 5000/5000;
+chat p50/p95/max 20/63/68 ms; zero disconnects; whole-process RSS 48 MB;
+CPU average/max 109%/272% of one core. Same localhost/synthetic-payload limits apply.
+
 ## Voice under loss and jitter: made repeatable (stage 7)
 
 The test failed in about 1 of 3 runs because the loss pattern still depended on connection set-up timing and on how

@@ -1,5 +1,10 @@
 # FinchSpeak
 
+Версия 1.0.0 подготовлена для приёмки на двух ПК. Скачать установщик клиента,
+серверный ZIP или portable-пакет: [GitHub Releases](https://github.com/qwers451/FinchSpeak/releases).
+Результаты проверок: [RELEASE-VALIDATION](docs/RELEASE-VALIDATION.md).
+Проверки владельца: [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md).
+
 <p align="center">
   <strong>Самохостируемый высокопроизводительный голосовой и текстовый мессенджер с демонстрацией экрана на Rust</strong>
 </p>
@@ -145,7 +150,7 @@ graph TD
 
 ### Системные требования
 
-* **Rust**: компилятор версии `1.80+` (редакция 2024).
+* **Rust**: актуальный stable (редакция 2024; тот же канал используется в CI).
 * **Node.js**: версия `18.x` или новее, менеджер пакетов `npm`.
 * **C-компилятор и сборочные инструменты**:
   * **Windows**: Visual Studio C++ Build Tools (MSVC).
@@ -157,7 +162,7 @@ graph TD
 ### 1. Клонирование репозитория
 
 ```bash
-git clone https://github.com/your-username/FinchSpeak.git
+git clone https://github.com/qwers451/FinchSpeak.git
 cd FinchSpeak
 ```
 

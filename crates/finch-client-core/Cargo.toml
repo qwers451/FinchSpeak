@@ -37,4 +37,4 @@ thiserror = { workspace = true }
 finch-server = { path = "../finch-server" }
 anyhow = { workspace = true }
 rcgen = { workspace = true }
-openh264 = "0.6"
+openh264 = "0.9"

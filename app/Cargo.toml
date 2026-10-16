@@ -41,7 +41,7 @@ dashmap = "6"
 
 # Audio I/O
 cpal = "0.15"
-ringbuf = "0.4"
+ringbuf = "0.5"
 
 # Logging
 tracing = { workspace = true }

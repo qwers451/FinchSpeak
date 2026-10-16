@@ -85,6 +85,7 @@ pub struct ArcSharedState {
     pub sessions: SessionManager,
     pub login_guard: std::sync::Arc<crate::limits::LoginGuard>,
     pub register_hits: std::sync::Arc<crate::limits::WindowLimiter>,
+    pub avatar_hits: std::sync::Arc<crate::limits::WindowLimiter>,
 }
 
 impl FromRef<ArcSharedState> for ArcSharedState {
@@ -335,7 +336,15 @@ pub async fn login_handler(
     peer: Option<axum::Extension<crate::limits::PeerAddr>>,
     Json(payload): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, ServerError> {
+    // Bound input before allocating a persistent brute-force guard key. Registration
+    // uses the same username limit; invalid names never represent existing accounts.
+    if payload.username.len() > 128 {
+        return Err(ServerError::AuthFailed("Invalid username or password".to_string()));
+    }
     let username = payload.username.trim().to_lowercase();
+    if username.len() < 3 || username.len() > 32 {
+        return Err(ServerError::AuthFailed("Invalid username or password".to_string()));
+    }
     // Wrong passwords are counted per login and address; too many lock that pair for a while.
     let guard_key = match &peer {
         Some(axum::Extension(crate::limits::PeerAddr(ip))) => format!("{username}|{ip}"),

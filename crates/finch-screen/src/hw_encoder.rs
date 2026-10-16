@@ -5,7 +5,7 @@
 //! while delta (P) frames are fragmented into datagrams.
 
 use bytes::Bytes;
-use openh264::encoder::{Encoder, EncoderConfig, FrameType, RateControlMode, UsageType};
+use openh264::encoder::{BitRate, Encoder, EncoderConfig, FrameRate, FrameType, RateControlMode, UsageType};
 use crate::yuv::{packed_to_i420, PixelOrder};
 use openh264::formats::YUVSlices;
 use openh264::{OpenH264API, Timestamp};
@@ -113,11 +113,11 @@ impl H264VideoEncoder {
         validate_dimensions(config.width, config.height)?;
 
         let openh264_config = EncoderConfig::new()
-            .set_bitrate_bps(config.bitrate_bps)
-            .max_frame_rate(config.fps.max(1) as f32)
+            .bitrate(BitRate::from_bps(config.bitrate_bps))
+            .max_frame_rate(FrameRate::from_hz(config.fps.max(1) as f32))
             .usage_type(UsageType::ScreenContentRealTime)
             .rate_control_mode(RateControlMode::Bitrate)
-            .enable_skip_frame(false);
+            .skip_frames(false);
 
         let encoder = Encoder::with_api_config(OpenH264API::from_source(), openh264_config)?;
 

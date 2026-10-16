@@ -617,10 +617,12 @@ pub fn resolve_quic_addr_with_port(
     let host = url
         .host_str()
         .ok_or_else(|| ClientError::Network("Missing host in server_url".to_string()))?;
+    // The client endpoint and default server bind are IPv4. DNS often returns
+    // ::1 first for localhost; prefer a compatible address when both exist.
     let addr = format!("{host}:{port}")
         .to_socket_addrs()
         .map_err(|e| ClientError::Network(e.to_string()))?
-        .next()
+        .min_by_key(|addr| !addr.is_ipv4())
         .ok_or_else(|| ClientError::Network(format!("Could not resolve host: {host}")))?;
     Ok((addr, host.to_string()))
 }
@@ -640,7 +642,7 @@ pub fn resolve_quic_addr(server_url: &str) -> Result<(SocketAddr, String), Clien
     let addr = addr_str
         .to_socket_addrs()
         .map_err(|e| ClientError::Network(e.to_string()))?
-        .next()
+        .min_by_key(|addr| !addr.is_ipv4())
         .ok_or_else(|| ClientError::Network(format!("Could not resolve host: {host}")))?;
 
     Ok((addr, host.to_string()))

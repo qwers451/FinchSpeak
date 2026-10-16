@@ -1619,7 +1619,7 @@ dependencies = [
 
 [[package]]
 name = "finch-app"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1655,7 +1655,7 @@ dependencies = [
 
 [[package]]
 name = "finch-audio"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "audiopus",
  "bytes",
@@ -1673,7 +1673,7 @@ dependencies = [
 
 [[package]]
 name = "finch-client-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1697,7 +1697,7 @@ dependencies = [
 
 [[package]]
 name = "finch-protocol"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -1709,7 +1709,7 @@ dependencies = [
 
 [[package]]
 name = "finch-screen"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "audiopus",
  "bytes",
@@ -1725,7 +1725,7 @@ dependencies = [
 
 [[package]]
 name = "finch-server"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1762,7 +1762,7 @@ dependencies = [
 
 [[package]]
 name = "finch-testbed"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3834,9 +3834,9 @@ dependencies = [
 
 [[package]]
 name = "openh264"
-version = "0.6.6"
+version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c1af3a4d35290ba7a46d1ce69cb13ae740a2d72cc2ee00abee3c84bed3dbe5d"
+checksum = "e54411f498088327bf5c45d2de7e5b0ed25875ee3be5800485afe45da7206bff"
 dependencies = [
  "openh264-sys2",
  "wide",
@@ -3844,9 +3844,9 @@ dependencies = [
 
 [[package]]
 name = "openh264-sys2"
-version = "0.6.6"
+version = "0.9.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77a77c1e18503537113d77b1b1d05274e81fa9f44843c06be2d735adb19f7c9d"
+checksum = "414f5bd53da84e126dc9449eb6f0003bb6994b2de63c48119b0c9b7a8b28086a"
 dependencies = [
  "cc",
  "nasm-rs",
@@ -4642,9 +4642,9 @@ dependencies = [
 
 [[package]]
 name = "ringbuf"
-version = "0.4.8"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe47b720588c8702e34b5979cb3271a8b1842c7cb6f57408efa70c779363488c"
+checksum = "b58b631e416dd7d84549d7e6a50f767e111f9b03e30d04f40072f6618f386aaf"
 dependencies = [
  "crossbeam-utils",
  "portable-atomic",
@@ -4832,9 +4832,9 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "safe_arch"
-version = "0.7.4"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96b02de82ddbe1b636e6170c21be622223aea188ef2e139be0a5b219ec215323"
+checksum = "42c6efa15875e6ecb39ca61fb0b0c1a40b84fac5a5ffe71eef7d1000c8eb3f5f"
 dependencies = [
  "bytemuck",
 ]
@@ -7058,9 +7058,9 @@ dependencies = [
 
 [[package]]
 name = "wide"
-version = "0.7.33"
+version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ce5da8ecb62bcd8ec8b7ea19f69a51275e91299be594ea5cc6ef7819e16cd03"
+checksum = "d920ac99c3c8edce110cb8d07dbb324d6d026011dce85b1e9355b70f0adacc4f"
 dependencies = [
  "bytemuck",
  "safe_arch",

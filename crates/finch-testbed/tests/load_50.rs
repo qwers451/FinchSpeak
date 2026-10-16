@@ -134,7 +134,7 @@ async fn fifty_people_voice_chat_and_two_screen_shares() -> anyhow::Result<()> {
                             let _ = connection.send_datagram(audio_datagram(voice_short, peer, seq, 80));
                             voice_sent.fetch_add(1, Ordering::Relaxed);
                         }
-                        if sharer_index.is_some() && seq % 2 == 0 {
+                        if sharer_index.is_some() && seq.is_multiple_of(2) {
                             // 30 pictures a second, three fragments each (about 3.4 kB).
                             let delta = vec![(frame % 251) as u8; 3300];
                             for packet in slice_p_frame(voice_short, peer, frame.wrapping_add(1), 1, 1033, &delta, false) {
@@ -145,7 +145,7 @@ async fn fifty_people_voice_chat_and_two_screen_shares() -> anyhow::Result<()> {
                         }
                         seq = seq.wrapping_add(1);
                         second += 1;
-                        if index >= CLIENTS - CHATTERS && second % 50 == 0 {
+                        if index >= CLIENTS - CHATTERS && second.is_multiple_of(50) {
                             let text = format!("load {}", now_ms());
                             let _ = control_tx.try_send(ClientMessage::SendMessage {
                                 channel_id: text_channel,
@@ -168,10 +168,10 @@ async fn fifty_people_voice_chat_and_two_screen_shares() -> anyhow::Result<()> {
                     },
                     SessionEvent::Control(ServerMessage::NewMessage { content, .. }) => {
                         totals.chat_received.fetch_add(1, Ordering::Relaxed);
-                        if index == 0 {
-                            if let Some(sent) = content.strip_prefix("load ").and_then(|t| t.parse::<u128>().ok()) {
-                                latencies.lock().unwrap().push(now_ms().saturating_sub(sent) as f64);
-                            }
+                        if index == 0
+                            && let Some(sent) = content.strip_prefix("load ").and_then(|t| t.parse::<u128>().ok())
+                        {
+                            latencies.lock().unwrap().push(now_ms().saturating_sub(sent) as f64);
                         }
                     }
                     SessionEvent::ConnectionLost(_) => { totals.lost_connections.fetch_add(1, Ordering::Relaxed); }

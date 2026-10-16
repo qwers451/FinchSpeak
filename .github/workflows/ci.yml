@@ -32,12 +32,13 @@ jobs:
         working-directory: app/frontend
         run: npm ci
 
-      - name: Frontend type check, tests and build
+      - name: Frontend tests
         working-directory: app/frontend
-        run: |
-          npx tsc --noEmit
-          npm test
-          npm run build
+        run: npm test
+
+      - name: Frontend type check and build
+        working-directory: app/frontend
+        run: npm run build
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings

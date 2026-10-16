@@ -86,6 +86,19 @@ fn channel_of(session: &Session, kind: ChannelType) -> (Uuid, u32) {
 }
 
 #[tokio::test]
+async fn localhost_url_connects_to_the_default_ipv4_server() -> anyhow::Result<()> {
+    let server = start_server().await?;
+    let auth = api_for(&server)?.register("alice", "password_123", "Alice").await?;
+    let (quic_addr, hostname) = finch_client_core::api::resolve_quic_addr_with_port(
+        &format!("https://localhost:{}", server.http_addr.port()), Some(server.quic_addr.port()),
+    )?;
+    let (session, _) = connect(ConnectParams { quic_addr, hostname, token: auth.token, require_known_fingerprint: false }, Arc::new(DashMap::new())).await?;
+    assert_ne!(session.session_peer_id, 0);
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn register_login_and_connect() -> anyhow::Result<()> {
     let server = start_server().await?;
     let api = api_for(&server)?;

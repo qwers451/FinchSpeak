@@ -17,6 +17,17 @@ fn status(error: &ClientError) -> Option<u16> {
 }
 
 #[tokio::test]
+async fn oversized_login_names_are_rejected_without_creating_lockout_entries() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let api = server.api()?;
+    let username = "x".repeat(16_384);
+    for _ in 0..6 {
+        assert_eq!(status(&api.login(&username, "wrong-password").await.expect_err("oversized login")), Some(401));
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn five_wrong_passwords_lock_that_login_for_a_while_and_the_right_one_works_after() -> anyhow::Result<()> {
     let server = TestServer::start_with(|c| c.auth.login_lockout_secs = 2).await?;
     let _alice = TestClient::register(&server, "alice").await?;
@@ -118,5 +129,68 @@ async fn a_message_flood_is_rejected_with_429_and_normal_chat_goes_on() -> anyho
         .send(ClientMessage::SendMessage { channel_id: channel, content: "calm again".into(), attachments: vec![], client_msg_id: None, reply_to: None })
         .await?;
     alice.expect_control(Duration::from_secs(2), |m| matches!(m, ServerMessage::NewMessage { content, .. } if content == "calm again").then_some(())).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_flood_of_status_changes_is_cut_off() -> anyhow::Result<()> {
+    use finch_protocol::models::UserStatus;
+    let server = TestServer::start().await?;
+    let alice = TestClient::register(&server, "alice").await?;
+    let mut bob = TestClient::register(&server, "bob").await?;
+    for i in 0..40 {
+        alice.send(ClientMessage::SetStatus { status: if i % 2 == 0 { UserStatus::Idle } else { UserStatus::Online }, text: None }).await?;
+    }
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let mut seen = 0;
+    while bob
+        .expect_control(Duration::from_millis(300), |m| matches!(m, ServerMessage::PresenceUpdate { user_id, .. } if *user_id == alice.session.user_id).then_some(()))
+        .await
+        .is_ok()
+    {
+        seen += 1;
+    }
+    assert!((1..=10).contains(&seen), "got {seen} updates for 40 requests");
+    Ok(())
+}
+
+#[tokio::test]
+async fn picture_changes_are_limited_per_hour() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let alice = TestClient::register(&server, "alice").await?;
+    let image = image::RgbImage::from_fn(32, 32, |x, y| image::Rgb([x as u8, y as u8, 1]));
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(image).write_to(&mut bytes, image::ImageFormat::Png)?;
+    let png = bytes.into_inner();
+    for _ in 0..10 {
+        alice.api.upload_avatar(png.clone(), "image/png").await?;
+    }
+    assert_eq!(status(&alice.api.upload_avatar(png, "image/png").await.expect_err("eleventh")), Some(429));
+    Ok(())
+}
+
+#[tokio::test]
+async fn reaction_flooding_is_slowed_down() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let mut alice = TestClient::register(&server, "alice").await?;
+    let (channel, _) = alice.channel(ChannelType::Text);
+    alice
+        .send(ClientMessage::SendMessage { channel_id: channel, content: "react to me".into(), attachments: vec![], client_msg_id: None, reply_to: None })
+        .await?;
+    let message = alice
+        .expect_control(Duration::from_secs(2), |m| match m {
+            ServerMessage::NewMessage { message_id, .. } => Some(*message_id),
+            _ => None,
+        })
+        .await?;
+    let mut refused = 0;
+    for i in 0..40 {
+        let emoji = char::from_u32(0x1F600 + (i % 15)).map(String::from).unwrap_or_default();
+        if let Err(error) = alice.api.add_reaction(message, &emoji).await {
+            assert_eq!(status(&error), Some(429));
+            refused += 1;
+        }
+    }
+    assert!(refused >= 5, "only {refused} refused of 40");
     Ok(())
 }

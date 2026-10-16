@@ -730,7 +730,7 @@ async fn handle_client_message(
         }
 
         ClientMessage::SetStatus { status, text } => {
-            if status == UserStatus::Offline {
+            if status == UserStatus::Offline || sessions.allow_action(user_id, "status", 10, std::time::Duration::from_secs(10)).is_err() {
                 return;
             }
             let text = crate::api::state::clean_status_text(text.as_deref());

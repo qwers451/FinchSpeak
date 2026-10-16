@@ -65,6 +65,8 @@ async fn user_dto(state: &ArcSharedState, user_id: Uuid) -> Result<UserDto, Serv
 
 /// POST /api/auth/avatar (multipart field `file`).
 pub async fn upload_handler(auth: AuthUser, State(state): State<ArcSharedState>, mut multipart: Multipart) -> Result<Json<UserDto>, ServerError> {
+    // Decoding and re-encoding pictures is work: a person may change theirs a few times an hour.
+    state.avatar_hits.hit(&auth.user_id.to_string(), std::time::Instant::now(), 10, std::time::Duration::from_secs(3600)).map_err(ServerError::TooManyRequests)?;
     let mut data = Vec::new();
     let mut received = 0usize;
     if let Some(mut field) = multipart.next_field().await.map_err(|e| ServerError::BadRequest(e.to_string()))? {

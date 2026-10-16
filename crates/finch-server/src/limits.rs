@@ -1,10 +1,12 @@
 //! Rate limits: wrong passwords, registrations, and message floods.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
+
+const MAX_LOGIN_KEYS: usize = 10_000;
 
 /// The address a REST request came from (added by the HTTPS listener).
 #[derive(Debug, Clone, Copy)]
@@ -13,19 +15,27 @@ pub struct PeerAddr(pub IpAddr);
 /// Counts wrong passwords per key and locks the key for a while after too many.
 #[derive(Default)]
 pub struct LoginGuard {
-    entries: DashMap<String, Entry>,
+    entries: std::sync::Mutex<HashMap<String, Entry>>,
 }
 
 #[derive(Default, Clone, Copy)]
 struct Entry {
     failures: u32,
     locked_until: Option<Instant>,
+    expires_at: Option<Instant>,
 }
 
 impl LoginGuard {
     /// `Err(seconds to wait)` while `key` is locked.
     pub fn check(&self, key: &str, now: Instant) -> Result<(), u64> {
-        match self.entries.get(key).and_then(|entry| entry.locked_until) {
+        let mut entries = self.entries.lock().map_err(|_| 1u64)?;
+        if entries.len() >= MAX_LOGIN_KEYS && !entries.contains_key(key) {
+            entries.retain(|_, entry| entry.expires_at.is_some_and(|until| until > now));
+            if entries.len() >= MAX_LOGIN_KEYS {
+                return Err(1);
+            }
+        }
+        match entries.get(key).and_then(|entry| entry.locked_until) {
             Some(until) if until > now => Err((until - now).as_secs() + 1),
             _ => Ok(()),
         }
@@ -33,12 +43,20 @@ impl LoginGuard {
 
     /// A wrong password. Returns `Err(seconds)` if this one locked the key.
     pub fn failure(&self, key: &str, now: Instant, max_failures: u32, lockout: Duration) -> Result<(), u64> {
-        let mut entry = self.entries.entry(key.to_string()).or_default();
+        let mut entries = self.entries.lock().map_err(|_| 1u64)?;
+        if entries.len() >= MAX_LOGIN_KEYS && !entries.contains_key(key) {
+            entries.retain(|_, entry| entry.expires_at.is_some_and(|until| until > now));
+            if entries.len() >= MAX_LOGIN_KEYS {
+                return Err(lockout.as_secs().max(1));
+            }
+        }
+        let entry = entries.entry(key.to_string()).or_default();
         // A lock that has run out starts counting again from zero.
         if entry.locked_until.is_some_and(|until| until <= now) {
             *entry = Entry::default();
         }
-        entry.failures += 1;
+        entry.expires_at = Some(now + lockout);
+        entry.failures = entry.failures.saturating_add(1);
         if entry.failures >= max_failures {
             entry.locked_until = Some(now + lockout);
             entry.failures = 0;
@@ -48,10 +66,8 @@ impl LoginGuard {
     }
 
     pub fn success(&self, key: &str) {
-        self.entries.remove(key);
-        if self.entries.len() > 10_000 {
-            let now = Instant::now();
-            self.entries.retain(|_, entry| entry.locked_until.is_some_and(|until| until > now));
+        if let Ok(mut entries) = self.entries.lock() {
+            entries.remove(key);
         }
     }
 }
@@ -85,6 +101,20 @@ impl WindowLimiter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unsuccessful_logins_alone_cannot_grow_the_guard_without_bound() {
+        let guard = LoginGuard::default();
+        let now = Instant::now();
+        for index in 0..10_100 {
+            let _ = guard.failure(&format!("unknown-{index}"), now, 5, Duration::from_secs(60));
+        }
+        assert!(guard.entries.lock().unwrap().len() <= 10_000);
+        assert!(guard.check("uncached-victim", now).is_err(), "saturation must reject new keys before password verification");
+        assert!(guard.check("later", now + Duration::from_secs(61)).is_ok());
+        assert!(guard.failure("later", now + Duration::from_secs(61), 5, Duration::from_secs(60)).is_ok());
+        assert!(guard.entries.lock().unwrap().len() < 10_000, "expired attempts must be reclaimed without a successful login");
+    }
 
     #[test]
     fn five_wrong_passwords_lock_the_key_for_the_lockout_and_a_success_resets() {

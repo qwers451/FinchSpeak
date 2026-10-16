@@ -5,6 +5,7 @@
 pub mod api;
 pub mod audit;
 pub mod backup;
+pub mod cleanup;
 pub mod chat;
 pub mod config;
 pub mod db;

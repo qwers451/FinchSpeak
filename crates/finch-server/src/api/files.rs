@@ -86,12 +86,7 @@ pub async fn upload_file_handler(
         let data = data.freeze();
 
         let attachment_id = Uuid::new_v4();
-        let extension = PathBuf::from(&filename)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("bin")
-            .to_string();
-
+        let extension = storage_extension(&filename);
         let safe_filename = format!("{}.{}", attachment_id, extension);
         let file_path = upload_dir.join(&safe_filename);
 
@@ -179,14 +174,17 @@ pub async fn download_file_handler(
         .map_err(|_| ServerError::NotFound("File not found on disk".to_string()))?;
 
     let mut headers = HeaderMap::new();
-    let content_type_header = HeaderValue::from_str(&content_type)
+    let content_type_header = HeaderValue::from_str(&safe_content_type(&content_type))
         .map_err(|e| ServerError::Internal(format!("Invalid Content-Type header: {e}")))?;
-    let disposition_str = format!("inline; filename=\"{filename}\"");
+    let disposition_str = content_disposition(&filename, &safe_content_type(&content_type));
     let disposition_header = HeaderValue::from_str(&disposition_str)
         .map_err(|e| ServerError::Internal(format!("Invalid Content-Disposition header: {e}")))?;
 
     headers.insert(CONTENT_TYPE, content_type_header);
     headers.insert(CONTENT_DISPOSITION, disposition_header);
+    // Whatever was uploaded must never run or be re-interpreted as something else when opened.
+    headers.insert("X-Content-Type-Options", HeaderValue::from_static("nosniff"));
+    headers.insert("Content-Security-Policy", HeaderValue::from_static("default-src 'none'; sandbox"));
 
     Ok((headers, data))
 }
@@ -209,4 +207,71 @@ pub async fn download_thumb_handler(
     headers.insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
     headers.insert("X-Content-Type-Options", HeaderValue::from_static("nosniff"));
     Ok((headers, data))
+}
+
+/// File extension used for the name on disk: letters and digits only, at most 8, else `bin`.
+pub fn storage_extension(filename: &str) -> String {
+    let ext = filename.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("");
+    if ext.is_empty() || ext.len() > 8 || !ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return "bin".to_string();
+    }
+    ext.to_lowercase()
+}
+
+/// Only pictures open inline (and only the kinds a browser shows safely); everything else is downloaded.
+pub fn content_disposition(filename: &str, content_type: &str) -> String {
+    let inline_ok = matches!(content_type, "image/png" | "image/jpeg" | "image/gif" | "image/webp");
+    let name: String = filename.chars().map(|c| if c.is_control() || matches!(c, '"' | '\\' | '/' | ';') { '_' } else { c }).collect();
+    format!("{}; filename=\"{}\"", if inline_ok { "inline" } else { "attachment" }, name)
+}
+
+/// The type announced by the uploader, unless it is not a plain `type/subtype`: then it is opaque bytes.
+pub fn safe_content_type(announced: &str) -> String {
+    let plain = announced.len() <= 100
+        && announced.matches('/').count() == 1
+        && !announced.starts_with('/')
+        && !announced.ends_with('/')
+        && announced.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '+' | '-' | '_'));
+    if plain { announced.to_ascii_lowercase() } else { "application/octet-stream".to_string() }
+}
+
+#[cfg(test)]
+mod hardening_tests {
+    use super::*;
+
+    #[test]
+    fn only_simple_extensions_reach_the_disk_name() {
+        assert_eq!(storage_extension("report.PDF"), "pdf");
+        assert_eq!(storage_extension("archive.tar.gz"), "gz");
+        assert_eq!(storage_extension(".hidden"), "hidden");
+        let long = format!("a.{}", "x".repeat(30));
+        for odd in ["noextension", "x.", "a.b c", "a.<script>", "evil.exe.", "a./../b", long.as_str(), "a.\u{0}"] {
+            assert_eq!(storage_extension(odd), "bin", "{odd:?}");
+        }
+    }
+
+    #[test]
+    fn pictures_open_inline_and_everything_else_is_a_download() {
+        assert!(content_disposition("a.png", "image/png").starts_with("inline"));
+        for risky in ["text/html", "image/svg+xml", "application/pdf", "application/octet-stream", "text/javascript"] {
+            assert!(content_disposition("a.x", risky).starts_with("attachment"), "{risky}");
+        }
+    }
+
+    #[test]
+    fn the_file_name_cannot_break_out_of_its_quotes() {
+        let header = content_disposition("a\"; filename=\"evil.exe\r\nX-Injected: 1", "text/plain");
+        assert!(!header.contains('\r') && !header.contains('\n'));
+        assert_eq!(header.matches('"').count(), 2);
+        assert!(HeaderValue::from_str(&header).is_ok());
+    }
+
+    #[test]
+    fn announced_types_are_plain_or_opaque() {
+        assert_eq!(safe_content_type("Image/PNG"), "image/png");
+        let long = "a/".repeat(80);
+        for bad in ["", "text", "text/html; charset=x", "a b/c", "text/html\r\nX: y", long.as_str(), "/x", "x/"] {
+            assert_eq!(safe_content_type(bad), "application/octet-stream", "{bad:?}");
+        }
+    }
 }
