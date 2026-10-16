@@ -64,6 +64,17 @@ pub struct AdminUserDto {
     pub last_seen: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchHitDto {
+    pub message_id: String,
+    pub channel_id: String,
+    pub channel_name: String,
+    pub author_id: String,
+    pub author_name: String,
+    pub content: String,
+    pub timestamp: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEntryDto {
     pub id: i64,
@@ -333,6 +344,17 @@ impl ApiClient {
             .json(&serde_json::json!({ "duration_secs": duration_secs }));
         check_status(self.send(req).await?).await?;
         Ok(())
+    }
+
+    /// Search messages (newest matches first), optionally in one channel.
+    pub async fn search_messages(&self, text: &str, channel: Option<Uuid>, limit: u32, offset: u32) -> Result<Vec<SearchHitDto>, ClientError> {
+        let mut req = self
+            .authorized(self.http.get(self.url("/api/search")))
+            .query(&[("q", text), ("limit", &limit.to_string()), ("offset", &offset.to_string())]);
+        if let Some(channel) = channel {
+            req = req.query(&[("channel", channel.to_string())]);
+        }
+        parse_json(self.send(req).await?).await
     }
 
     /// Moderator: `"kick"` out of the voice room, `"mute"` or `"unmute"` in it.

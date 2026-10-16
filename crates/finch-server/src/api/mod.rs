@@ -8,6 +8,7 @@ pub mod files;
 pub mod health;
 pub mod invites;
 pub mod messages;
+pub mod search;
 pub mod state;
 
 use axum::extract::DefaultBodyLimit;
@@ -43,6 +44,7 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .route("/api/auth/avatar", post(avatars::upload_handler).delete(avatars::delete_handler).layer(DefaultBodyLimit::max(4 * 1024 * 1024)))
         .route("/api/users/{id}/avatar", get(avatars::download_handler))
         .route("/api/state", get(state::state_handler))
+        .route("/api/search", get(search::search_handler))
         // Moderation (admins)
         .route("/api/admin/users", get(admin::list_users_handler))
         .route("/api/admin/users/{id}/role", axum::routing::put(admin::set_role_handler))
