@@ -182,6 +182,17 @@ pub enum ServerMessage {
         deafened: bool,
     },
 
+    /// A moderator silenced (or un-silenced) someone in their voice room.
+    ServerMuteChanged {
+        peer_id: u32,
+        server_muted: bool,
+    },
+
+    /// You were sent out of the voice room by a moderator.
+    VoiceKicked {
+        channel_id: Uuid,
+    },
+
     /// A user started sharing their screen.
     ScreenShareStarted {
         user_id: Uuid,

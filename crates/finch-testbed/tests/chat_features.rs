@@ -255,7 +255,8 @@ async fn files_that_are_not_images_have_no_thumbnail() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn history_pages_walk_back_without_gaps_or_duplicates() -> anyhow::Result<()> {
-    let server = TestServer::start().await?;
+    // 120 messages in a second would trip the flood limit.
+    let server = TestServer::start_with(|c| c.auth.message_limit = 1000).await?;
     let mut alice = TestClient::register(&server, "alice").await?;
     let (channel, _) = alice.channel(ChannelType::Text);
     let mut sent = Vec::new();

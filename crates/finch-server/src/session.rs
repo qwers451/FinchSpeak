@@ -23,6 +23,8 @@ pub struct ClientSession {
     pub deafened: bool,
     /// True while this peer is sharing its screen in its voice channel.
     pub sharing_screen: bool,
+    /// Silenced by a moderator; cleared when the person leaves the room.
+    pub server_muted: bool,
     pub connection: quinn::Connection,
     pub control_tx: Sender<ServerMessage>,
 }
@@ -54,6 +56,9 @@ pub struct SessionManager {
     pub short_to_channel: Arc<DashMap<u32, Uuid>>,
     /// When each user last had a typing hint forwarded (to throttle them).
     pub last_typing: Arc<DashMap<Uuid, std::time::Instant>>,
+    /// Messages per person, to stop floods: `(limit, window)`.
+    message_rule: Arc<std::sync::Mutex<(usize, std::time::Duration)>>,
+    message_hits: Arc<crate::limits::WindowLimiter>,
 }
 
 impl Default for SessionManager {
@@ -72,7 +77,22 @@ impl SessionManager {
             channel_to_short: Arc::new(DashMap::new()),
             short_to_channel: Arc::new(DashMap::new()),
             last_typing: Arc::new(DashMap::new()),
+            message_rule: Arc::new(std::sync::Mutex::new((30, std::time::Duration::from_secs(10)))),
+            message_hits: Arc::new(crate::limits::WindowLimiter::default()),
         }
+    }
+
+    /// Set how many messages one person may send per window.
+    pub fn set_message_rule(&self, limit: usize, window: std::time::Duration) {
+        if let Ok(mut rule) = self.message_rule.lock() {
+            *rule = (limit.max(1), window);
+        }
+    }
+
+    /// Count a message of `user`; `Err(seconds)` when they are sending too fast.
+    pub fn allow_message(&self, user: Uuid) -> Result<(), u64> {
+        let (limit, window) = self.message_rule.lock().map(|rule| *rule).unwrap_or((30, std::time::Duration::from_secs(10)));
+        self.message_hits.hit(&user.to_string(), std::time::Instant::now(), limit, window)
     }
 
     /// Allocate a new monotonic session peer ID.
@@ -158,6 +178,7 @@ impl SessionManager {
             && session.current_voice_channel == Some(short_id)
         {
             session.current_voice_channel = None;
+            session.server_muted = false;
         }
 
         self.remove_peer_from_voice_room(peer_id, short_id);
@@ -302,7 +323,7 @@ mod tests {
             manager.register_session(ClientSession {
                 token_id: String::new(),
                 peer_id, user_id, username: "alice".into(), role: "member".into(),
-                current_voice_channel: None, muted: false, deafened: false, sharing_screen: false,
+                current_voice_channel: None, muted: false, deafened: false, sharing_screen: false, server_muted: false,
                 connection: connection.clone(), control_tx,
             });
         }

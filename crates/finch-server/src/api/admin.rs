@@ -318,3 +318,62 @@ pub async fn backup_now_handler(auth: AuthUser, State(state): State<ArcSharedSta
     audit::record(&state.pool, &auth, "backup", None, None).await;
     Ok(StatusCode::NO_CONTENT)
 }
+
+#[derive(Debug, Deserialize)]
+pub struct VoiceModerationRequest {
+    /// `kick`, `mute` or `unmute`.
+    pub action: String,
+}
+
+/// POST /api/admin/users/{id}/voice: send someone out of their voice room, or silence/un-silence them there.
+pub async fn moderate_voice_handler(
+    auth: AuthUser,
+    State(state): State<ArcSharedState>,
+    Path(id): Path<Uuid>,
+    Json(request): Json<VoiceModerationRequest>,
+) -> Result<StatusCode, ServerError> {
+    use finch_protocol::messages::ServerMessage;
+    require(&auth, Permission::ModerateVoice)?;
+    if !matches!(request.action.as_str(), "kick" | "mute" | "unmute") {
+        return Err(ServerError::BadRequest("action must be \"kick\", \"mute\" or \"unmute\"".into()));
+    }
+    if id == auth.user_id {
+        return Err(ServerError::BadRequest("You cannot moderate yourself".into()));
+    }
+    let (role, _) = target_account(&state, &id.to_string()).await?;
+    if !may_act_on(&auth.role, &role) {
+        return Err(ServerError::Forbidden);
+    }
+    // The session of that person that is in a voice room.
+    let in_room = state
+        .sessions
+        .sessions
+        .iter()
+        .find(|s| s.user_id == id && s.current_voice_channel.is_some())
+        .map(|s| (s.peer_id, s.current_voice_channel.unwrap_or_default(), s.control_tx.clone(), s.sharing_screen));
+    let Some((peer_id, short_id, control_tx, was_sharing)) = in_room else {
+        return Err(ServerError::BadRequest("They are not in a voice room".into()));
+    };
+    let channel_id = state.sessions.short_to_channel.get(&short_id).map(|c| *c);
+    match request.action.as_str() {
+        "kick" => {
+            state.sessions.leave_voice(peer_id, short_id);
+            if was_sharing && state.sessions.set_sharing(peer_id, false) {
+                state.sessions.broadcast_voice(short_id, ServerMessage::ScreenShareStopped { peer_id, reason: finch_protocol::models::ShareEndReason::Left }, Some(peer_id)).await;
+            }
+            if let Some(channel_id) = channel_id {
+                let _ = control_tx.send(ServerMessage::VoiceKicked { channel_id }).await;
+                state.sessions.broadcast_all(ServerMessage::UserLeftVoice { user_id: id, peer_id, channel_id }).await;
+            }
+        }
+        _ => {
+            let muted = request.action == "mute";
+            if let Some(mut session) = state.sessions.sessions.get_mut(&peer_id) {
+                session.server_muted = muted;
+            }
+            state.sessions.broadcast_all(ServerMessage::ServerMuteChanged { peer_id, server_muted: muted }).await;
+        }
+    }
+    audit::record(&state.pool, &auth, &format!("voice_{}", request.action), Some(&name_of(&state, &id.to_string()).await), None).await;
+    Ok(StatusCode::NO_CONTENT)
+}

@@ -335,6 +335,15 @@ impl ApiClient {
         Ok(())
     }
 
+    /// Moderator: `"kick"` out of the voice room, `"mute"` or `"unmute"` in it.
+    pub async fn moderate_voice(&self, user_id: Uuid, action: &str) -> Result<(), ClientError> {
+        let req = self
+            .authorized(self.http.post(self.url(&format!("/api/admin/users/{user_id}/voice"))))
+            .json(&serde_json::json!({ "action": action }));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
     /// The log of administrative actions, newest first.
     pub async fn audit_log(&self, before: Option<i64>, limit: u32) -> Result<Vec<AuditEntryDto>, ClientError> {
         let mut path = format!("/api/admin/audit?limit={limit}");

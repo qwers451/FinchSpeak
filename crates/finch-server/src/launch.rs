@@ -71,6 +71,7 @@ pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
     let http_addr = listener.local_addr()?;
     tracing::info!("REST API listening on https://{http_addr} (certificate {certificate_fingerprint})");
 
+    sessions.set_message_rule(config.auth.message_limit, std::time::Duration::from_secs(config.auth.message_window_secs));
     let app = create_router(pool.clone(), config.clone(), sessions.clone());
     let (http_shutdown, http_shutdown_rx) = oneshot::channel::<()>();
     let http_task = tokio::spawn(https::serve(listener, https_config, app, http_shutdown_rx));

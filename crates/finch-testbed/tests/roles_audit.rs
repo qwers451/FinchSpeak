@@ -175,7 +175,9 @@ async fn the_admin_switches_registration_without_a_restart_and_sees_the_server_p
 
 #[tokio::test]
 async fn a_backup_can_be_made_from_the_server_page() -> anyhow::Result<()> {
-    let server = TestServer::start().await?;
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("backups").to_string_lossy().to_string();
+    let server = TestServer::start_with(move |c| c.backup.dir = path).await?;
     let boss = TestClient::register(&server, "boss").await?;
     assert_eq!(boss.api.server_overview().await?.backups_count, 0);
     boss.api.backup_now().await?;

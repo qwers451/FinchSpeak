@@ -347,6 +347,12 @@ fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
                 serde_json::json!({ "peer_id": peer_id, "reason": reason }),
             );
         }
+        ServerMessage::ServerMuteChanged { peer_id, server_muted } => {
+            let _ = app_handle.emit("server-mute-changed", serde_json::json!({ "peer_id": peer_id, "server_muted": server_muted }));
+        }
+        ServerMessage::VoiceKicked { channel_id } => {
+            let _ = app_handle.emit("voice-kicked", serde_json::json!({ "channel_id": channel_id }));
+        }
         ServerMessage::AvatarChanged { user_id, avatar_url } => {
             let _ = app_handle.emit("avatar-changed", serde_json::json!({ "user_id": user_id, "avatar_url": avatar_url }));
         }

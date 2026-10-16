@@ -198,6 +198,36 @@ pub struct AuthConfig {
     /// `invite` (default) or `open`.
     #[serde(default)]
     pub registration: RegistrationMode,
+    /// Wrong passwords for one login (from one address) before it is locked.
+    #[serde(default = "default_login_max_failures")]
+    pub login_max_failures: u32,
+    /// How long such a lock lasts.
+    #[serde(default = "default_login_lockout_secs")]
+    pub login_lockout_secs: u64,
+    /// New accounts per address per hour.
+    #[serde(default = "default_register_per_hour")]
+    pub register_per_hour: usize,
+    /// Messages one person may send per `message_window_secs`.
+    #[serde(default = "default_message_limit")]
+    pub message_limit: usize,
+    #[serde(default = "default_message_window_secs")]
+    pub message_window_secs: u64,
+}
+
+fn default_login_max_failures() -> u32 {
+    5
+}
+fn default_login_lockout_secs() -> u64 {
+    60
+}
+fn default_register_per_hour() -> usize {
+    20
+}
+fn default_message_limit() -> usize {
+    30
+}
+fn default_message_window_secs() -> u64 {
+    10
 }
 
 impl Default for AuthConfig {
@@ -207,6 +237,11 @@ impl Default for AuthConfig {
             jwt_expiration_hours: default_jwt_expiration_hours(),
             jwt_secret_file: default_jwt_secret_file(),
             registration: RegistrationMode::default(),
+            login_max_failures: default_login_max_failures(),
+            login_lockout_secs: default_login_lockout_secs(),
+            register_per_hour: default_register_per_hour(),
+            message_limit: default_message_limit(),
+            message_window_secs: default_message_window_secs(),
         }
     }
 }

@@ -261,6 +261,7 @@ pub async fn handle_connection(
         muted: false,
         deafened: false,
         sharing_screen: false,
+        server_muted: false,
         connection: conn.clone(),
         control_tx: control_tx.clone(),
     };
@@ -510,6 +511,10 @@ async fn handle_client_message(
             client_msg_id,
             reply_to,
         } => {
+            if let Err(wait) = sessions.allow_message(user_id) {
+                reject_message(sessions, peer_id, client_msg_id, 429, format!("You are sending messages too fast. Wait {wait} s")).await;
+                return;
+            }
             let content = content.trim().to_string();
             if content.is_empty() || content.chars().count() > MAX_MESSAGE_CHARS {
                 reject_message(

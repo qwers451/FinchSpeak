@@ -83,6 +83,8 @@ pub struct ArcSharedState {
     pub config: ServerConfig,
     /// Live QUIC sessions, shared with the QUIC server.
     pub sessions: SessionManager,
+    pub login_guard: std::sync::Arc<crate::limits::LoginGuard>,
+    pub register_hits: std::sync::Arc<crate::limits::WindowLimiter>,
 }
 
 impl FromRef<ArcSharedState> for ArcSharedState {
@@ -220,9 +222,16 @@ pub struct UserDto {
 /// Handler for POST /api/auth/register
 pub async fn register_handler(
     State(state): State<ArcSharedState>,
+    peer: Option<axum::Extension<crate::limits::PeerAddr>>,
     Json(payload): Json<RegisterRequest>,
 ) -> Result<impl IntoResponse, ServerError> {
     let username = payload.username.trim().to_lowercase();
+    if let Some(axum::Extension(crate::limits::PeerAddr(ip))) = peer {
+        state
+            .register_hits
+            .hit(&ip.to_string(), std::time::Instant::now(), state.config.auth.register_per_hour, std::time::Duration::from_secs(3600))
+            .map_err(ServerError::TooManyRequests)?;
+    }
     if username.len() < 3 || username.len() > 32 {
         return Err(ServerError::BadRequest(
             "Username must be between 3 and 32 characters".to_string(),
@@ -323,9 +332,16 @@ pub async fn register_handler(
 /// Handler for POST /api/auth/login
 pub async fn login_handler(
     State(state): State<ArcSharedState>,
+    peer: Option<axum::Extension<crate::limits::PeerAddr>>,
     Json(payload): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, ServerError> {
     let username = payload.username.trim().to_lowercase();
+    // Wrong passwords are counted per login and address; too many lock that pair for a while.
+    let guard_key = match &peer {
+        Some(axum::Extension(crate::limits::PeerAddr(ip))) => format!("{username}|{ip}"),
+        None => username.clone(),
+    };
+    state.login_guard.check(&guard_key, std::time::Instant::now()).map_err(ServerError::TooManyRequests)?;
 
     let row = sqlx::query_as::<_, (String, String, String, String, Option<i64>, Option<i64>)>(
         "SELECT id, password_hash, display_name, role, avatar_version, banned_at FROM users WHERE username = ?"
@@ -334,14 +350,22 @@ pub async fn login_handler(
     .fetch_optional(&state.pool)
     .await?;
 
+    let wrong = |state: &ArcSharedState| -> ServerError {
+        let lockout = std::time::Duration::from_secs(state.config.auth.login_lockout_secs);
+        match state.login_guard.failure(&guard_key, std::time::Instant::now(), state.config.auth.login_max_failures, lockout) {
+            Ok(()) => ServerError::AuthFailed("Invalid username or password".to_string()),
+            Err(wait) => ServerError::TooManyRequests(wait),
+        }
+    };
     let (user_id_str, hash, display_name, role, avatar_version, banned_at) = match row {
         Some(r) => r,
-        None => return Err(ServerError::AuthFailed("Invalid username or password".to_string())),
+        None => return Err(wrong(&state)),
     };
 
     if !verify_password(&payload.password, &hash) {
-        return Err(ServerError::AuthFailed("Invalid username or password".to_string()));
+        return Err(wrong(&state));
     }
+    state.login_guard.success(&guard_key);
 
     if banned_at.is_some() {
         let until: Option<i64> = sqlx::query_scalar("SELECT banned_until FROM users WHERE username = ?").bind(&username).fetch_one(&state.pool).await?;

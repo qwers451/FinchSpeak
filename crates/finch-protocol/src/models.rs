@@ -158,6 +158,9 @@ pub struct VoiceState {
     pub muted: bool,
     pub deafened: bool,
     pub sharing_screen: bool,
+    /// A moderator silenced this person in the room.
+    #[serde(default)]
+    pub server_muted: bool,
 }
 
 /// Mapping between channel UUID and compact short_id.

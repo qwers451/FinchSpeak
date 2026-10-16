@@ -59,7 +59,7 @@ pub async fn serve(
                     }
                 };
                 let acceptor = acceptor.clone();
-                let service = TowerToHyperService::new(app.clone());
+                let service = TowerToHyperService::new(app.clone().layer(axum::Extension(crate::limits::PeerAddr(peer.ip()))));
                 let watcher = graceful.watcher();
 
                 tokio::spawn(async move {

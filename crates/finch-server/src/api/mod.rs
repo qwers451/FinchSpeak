@@ -25,7 +25,7 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
     // axum caps request bodies at 2 MB by default; uploads follow the configured limit instead.
     let upload_limit = files::upload_body_limit(config.storage.max_file_size_mb);
     health::mark_started();
-    let shared_state = ArcSharedState { pool, config, sessions };
+    let shared_state = ArcSharedState { pool, config, sessions, login_guard: Default::default(), register_hits: Default::default() };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -49,6 +49,7 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .route("/api/admin/users/{id}/kick", post(admin::kick_handler))
         .route("/api/admin/users/{id}/ban", post(admin::ban_handler))
         .route("/api/admin/users/{id}/unban", post(admin::unban_handler))
+        .route("/api/admin/users/{id}/voice", post(admin::moderate_voice_handler))
         .route("/api/admin/audit", get(admin::audit_handler))
         .route("/api/admin/server", get(admin::overview_handler))
         .route("/api/admin/registration", axum::routing::put(admin::set_registration_handler))

@@ -46,7 +46,7 @@ impl SfuRouter {
         }
 
         // A muted microphone sends no voice; the sound of a shared screen is a separate stream.
-        if session.muted && header.media_type == MediaType::Audio {
+        if (session.muted || session.server_muted) && header.media_type == MediaType::Audio {
             return;
         }
 
