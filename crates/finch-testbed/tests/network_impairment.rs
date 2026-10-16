@@ -17,10 +17,15 @@ const MAX_BUFFER_PACKETS: usize = 6;
 
 /// Measure each probe against the receiver's wall-clock timeline, not the previous probe.
 fn probe_latencies(input: &[f32], output: &[f32], starts: &[usize]) -> anyhow::Result<Vec<usize>> {
+    probe_latencies_of(input, output, starts, SR / 10)
+}
+
+/// Like [`probe_latencies`] for probes of `len` samples.
+fn probe_latencies_of(input: &[f32], output: &[f32], starts: &[usize], len: usize) -> anyhow::Result<Vec<usize>> {
     starts
         .iter()
         .map(|&start| {
-            let reference = &input[start..start + SR / 10];
+            let reference = &input[start..start + len];
             let end = (start + reference.len() + SR / 2).min(output.len());
             let delay = delay_samples(reference, &output[start..end], SR / 2)
                 .ok_or_else(|| anyhow::anyhow!("probe at sample {start} not found in receiver output"))?;
@@ -81,7 +86,7 @@ async fn proxy_drops_and_delays() -> anyhow::Result<()> {
     let upstream = UdpSocket::bind("127.0.0.1:0").await?;
     let proxy = UdpImpairmentProxy::start(
         upstream.local_addr()?,
-        NetemConfig { loss: 0.05, delay_ms: (0, 60), seed: 42 },
+        NetemConfig { loss: 0.05, delay_ms: (0, 60), seed: 42, min_packet_size: 0 },
     )
     .await?;
     let sender = UdpSocket::bind("127.0.0.1:0").await?;
@@ -124,7 +129,7 @@ async fn voice_under_loss_and_jitter() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
     let proxy = UdpImpairmentProxy::start(
         server.quic_addr,
-        NetemConfig { loss: 0.05, delay_ms: (0, 60), seed: 42 },
+        NetemConfig { loss: 0.05, delay_ms: (0, 60), seed: 42, min_packet_size: 100 },
     )
     .await?;
 
@@ -134,23 +139,24 @@ async fn voice_under_loss_and_jitter() -> anyhow::Result<()> {
     b.join_voice().await?;
     b.drain_datagrams();
 
-    // Probe near the start, middle and end without introducing silent breaks in speech.
+    // Probes near the start, middle and end, laid over continuous speech-like noise (no silent
+    // breaks). The stream runs for 0.6 s before the first probe so the noise suppressor has
+    // settled: a chirp at the very first frames comes out of it at random strength.
     // VAD is disabled so every frame is transmitted and any silent output frame during
     // the speech segment comes from the network path.
-    let speech_start = SR / 5 + SR / 10;
-    let probe_starts = [SR / 5, 2 * SR + SR / 5, 4 * SR + SR / 5];
-    let probe = chirp(SR / 10, 300.0, 3_000.0);
-    let mut input = vec![0.0f32; SR / 5];
-    input.extend_from_slice(&probe);
-    input.extend(babble(5 * SR, -20.0, 3)?);
-    for &start in &probe_starts[1..] {
+    let probe_len = SR / 4;
+    let speech_start = 0;
+    let probe_starts = [3 * SR / 5, 2 * SR + SR / 5, 4 * SR + SR / 5];
+    let probe = chirp(probe_len, 300.0, 3_000.0);
+    let mut input = babble(5 * SR + SR / 2, -20.0, 3)?;
+    for &start in &probe_starts {
         input[start..start + probe.len()].copy_from_slice(&probe);
     }
 
     let run = run_voice_link_with(&a, &mut b, &input, 15, VadMode::Energy, -100.0).await?;
 
     assert!(!run.received_headers.is_empty(), "receiver got no audio");
-    let latencies = probe_latencies(&input, &run.output, &probe_starts)?;
+    let latencies = probe_latencies_of(&input, &run.output, &probe_starts, probe_len)?;
     let latency = latencies[0];
     let latency_ms: Vec<f32> = latencies.iter().map(|&lag| lag as f32 * 1000.0 / SR as f32).collect();
     let longest_gap = longest_silent_run(

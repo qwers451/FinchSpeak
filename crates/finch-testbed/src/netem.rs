@@ -22,6 +22,10 @@ pub struct NetemConfig {
     pub delay_ms: (u64, u64),
     /// RNG seed for reproducible runs.
     pub seed: u64,
+    /// Packets shorter than this pass untouched and do not use up random numbers. QUIC
+    /// acknowledgements are small and their number varies from run to run; leaving them out
+    /// makes the loss pattern of the (larger) media packets the same every run.
+    pub min_packet_size: usize,
 }
 
 /// Proxy between one client and `upstream`. Stops when dropped.
@@ -65,7 +69,7 @@ impl UdpImpairmentProxy {
                     if let Ok(mut addr) = client_addr.lock() {
                         *addr = Some(from);
                     }
-                    if let Some(delay) = impair(&rng, &cfg) {
+                    if let Some(delay) = impair(&rng, &cfg, n) {
                         let up = up.clone();
                         let data = buf[..n].to_vec();
                         delayed.spawn(async move {
@@ -102,7 +106,7 @@ impl UdpImpairmentProxy {
                     let Some(dest) = client_addr.lock().ok().and_then(|a| *a) else {
                         continue;
                     };
-                    if let Some(delay) = impair(&rng, &cfg) {
+                    if let Some(delay) = impair(&rng, &cfg, n) {
                         let listen = listen.clone();
                         let data = buf[..n].to_vec();
                         delayed.spawn(async move {
@@ -145,7 +149,10 @@ async fn retry_receive(error: io::Error, direction: &str, delay: &mut Duration) 
 }
 
 /// `None` = drop the packet, otherwise the delay before forwarding it.
-fn impair(rng: &Mutex<StdRng>, cfg: &NetemConfig) -> Option<Duration> {
+fn impair(rng: &Mutex<StdRng>, cfg: &NetemConfig, packet_len: usize) -> Option<Duration> {
+    if packet_len < cfg.min_packet_size {
+        return Some(Duration::ZERO);
+    }
     let mut rng = rng.lock().ok()?;
     if rng.gen_bool(cfg.loss.clamp(0.0, 1.0)) {
         return None;

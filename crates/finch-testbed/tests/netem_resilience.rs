@@ -18,6 +18,7 @@ async fn proxy_recovers_bidirectional_traffic_after_upstream_restarts() {
             loss: 0.0,
             delay_ms: (0, 0),
             seed: 10,
+            min_packet_size: 0,
         },
     )
     .await
