@@ -248,3 +248,24 @@ pub async fn forget_server_fingerprint(hostname: String, state: State<'_, AppSta
     }
     Ok(())
 }
+
+#[derive(serde::Serialize)]
+pub struct ServerInfo {
+    server_url: Option<String>,
+    hostname: Option<String>,
+    fingerprint: Option<String>,
+}
+
+/// The server we are signed in to and the certificate fingerprint we trust for it (About page).
+#[tauri::command]
+pub async fn server_info(state: State<'_, AppState>) -> Result<ServerInfo, String> {
+    let server_url = state.server_url.read().await.clone();
+    let hostname = server_url.as_deref().and_then(|url| {
+        let rest = url.split("://").nth(1).unwrap_or(url);
+        let host = rest.split('/').next().unwrap_or(rest);
+        let host = host.rsplit_once(':').map_or(host, |(name, port)| if port.chars().all(|c| c.is_ascii_digit()) { name } else { host });
+        (!host.is_empty()).then(|| host.to_string())
+    });
+    let fingerprint = hostname.as_ref().and_then(|name| state.saved_fingerprints.get(name).map(|entry| entry.value().clone()));
+    Ok(ServerInfo { server_url, hostname, fingerprint })
+}

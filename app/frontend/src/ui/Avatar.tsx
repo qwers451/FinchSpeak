@@ -1,4 +1,5 @@
-import { Show } from 'solid-js';
+import { createResource, Show } from 'solid-js';
+import { avatarSrc } from '../stores/avatarCache';
 import { avatarColor, initialOf } from './avatarColor';
 
 export type AvatarSize = 16 | 24 | 32 | 40 | 56 | 72 | 96 | 128;
@@ -20,16 +21,18 @@ type AvatarProps = {
 };
 
 export function Avatar(props: AvatarProps) {
+  const [loaded] = createResource(() => props.src ?? null, (address) => avatarSrc(address).catch(() => null));
+  const picture = () => (props.src ? loaded() ?? null : null);
   const size = () => props.size ?? 40;
   const sizeClass = () => (size() === 40 ? '' : ` s${size()}`);
   const color = () => (props.ghost ? ' ghost' : ` c${avatarColor(props.id ?? props.name ?? '')}`);
   return (
     <span
       class={`av${sizeClass()}${color()}${props.speaking ? ' speaking' : ''}${props.class ? ` ${props.class}` : ''}`}
-      style={props.src ? { 'background-image': `url(${props.src})`, 'background-size': 'cover', 'background-position': 'center' } : undefined}
+      style={picture() ? { 'background-image': `url(${picture()})`, 'background-size': 'cover', 'background-position': 'center' } : undefined}
       data-testid="avatar"
     >
-      <Show when={!props.src}>{props.ghost ? '?' : initialOf(props.name)}</Show>
+      <Show when={!picture()}>{props.ghost ? '?' : initialOf(props.name)}</Show>
       <Show when={props.status && size() >= 24}><span class={`st ${props.status === 'off' ? '' : props.status}`} /></Show>
     </span>
   );

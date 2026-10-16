@@ -16,7 +16,7 @@ import {
   participantsForChannel,
   speakingPeers,
 } from '../stores/voiceStore';
-import { connectionStatus, presence } from '../stores/sessionStore';
+import { connectionStatus, presence, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
 import { currentUser } from '../stores/authStore';
 import type { Channel } from '../types';
@@ -206,7 +206,7 @@ export function Sidebar() {
           <Avatar name={currentUser()?.display_name ?? currentUser()?.username} id={currentUser()?.id} size={40} status={myStatus()} speaking={isLocalSpeaking()} src={currentUser()?.avatar_url} />
           <div class="col grow" style={{ 'min-width': 0, 'text-align': 'left' }}>
             <span class="b trunc fs13">{currentUser()?.display_name || currentUser()?.username}</span>
-            <span class="t3 fs12">{statusLabel()}</span>
+            <span class="t3 fs12 trunc">{(currentUser() && statusTexts()[currentUser()!.id]) || statusLabel()}</span>
           </div>
         </button>
         <Button iconOnly size="sm" variant={isMuted() ? 'danger' : 'ghost'} icon={isMuted() ? 'mic-off' : 'mic'} label={isMuted() ? 'Unmute' : 'Mute'} title={isMuted() ? 'Unmute' : 'Mute'} onClick={() => void toggleMute()} />

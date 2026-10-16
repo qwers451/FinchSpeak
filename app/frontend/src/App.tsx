@@ -5,6 +5,7 @@ import { setAppError } from './stores/sessionStore';
 import { subscribeSessionEvents } from './services/sessionEvents';
 import { api } from './services/api';
 import { Sidebar } from './components/Sidebar';
+import { prefs } from './stores/settingsStore';
 import { MembersPanel } from './components/MembersPanel';
 import { ChatArea } from './components/ChatArea';
 import { VoicePanel } from './components/VoicePanel';
@@ -13,7 +14,7 @@ import { CertChangedModal, TofuModal } from './components/TofuModal';
 import { ConnectionBanner, Splash } from './components/ConnectionBanner';
 import { IconSprite, Titlebar, ToastHost } from './ui';
 import { AdminPanel } from './components/AdminPanel';
-import { ProfilePanel } from './components/ProfilePanel';
+import { SettingsModal } from './components/settings/SettingsModal';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 
 export function App() {
@@ -66,14 +67,14 @@ export function App() {
                 <ChatArea />
               </Show>
             </Show>
-            <MembersPanel />
+            <Show when={prefs().appearance.showMembers}><MembersPanel /></Show>
           </div>
         </Show>
       </Show>
       <TofuModal />
       <CertChangedModal />
       <AdminPanel />
-      <ProfilePanel />
+      <SettingsModal />
       <ToastHost />
     </div>
   );

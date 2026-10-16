@@ -181,3 +181,22 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 .ctl { border: 0; cursor: pointer; }
 .ctl:focus-visible { outline: none; box-shadow: var(--glow-focus); }
 .room-grid { align-content: center; max-height: calc(var(--rows, 1) * 300px); margin: auto 0; width: 100%; }
+
+/* Settings (F1-F4) */
+.settings { display: flex; gap: 24px; min-height: 480px; }
+.setnav { width: 200px; flex: none; display: flex; flex-direction: column; gap: 2px; }
+.setnav .si { all: unset; box-sizing: border-box; height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: var(--r-sm); color: var(--text-2); font-weight: 700; cursor: pointer; }
+.setnav .si:hover { background: var(--bg-hover); color: var(--text); }
+.setnav .si.on { background: var(--bg-card); color: var(--text); box-shadow: inset 3px 0 0 var(--yellow); }
+.setnav .si:focus-visible { outline: 2px solid var(--yellow); }
+.settings-page { flex: 1; min-width: 0; max-height: 70vh; overflow-y: auto; padding-right: 8px; }
+.seg span { cursor: pointer; display: inline-flex; align-items: center; }
+.seg span:focus-visible { outline: 2px solid var(--yellow); }
+.crop-frame { position: relative; width: 256px; height: 256px; border-radius: 50%; overflow: hidden; background: var(--bg-deep); cursor: grab; touch-action: none; display: flex; align-items: center; justify-content: center; }
+.crop-frame:active { cursor: grabbing; }
+.crop-ring { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 3px var(--yellow); pointer-events: none; }
+[data-density="compact"] .msg { padding-top: 2px; padding-bottom: 2px; }
+[data-density="compact"] .msg .av { width: 32px; height: 32px; font-size: 13px; }
+[data-density="compact"] .msg .msg-gutter { width: 32px; }
+[data-reduce-motion="true"] *, [data-reduce-motion="true"] *::before, [data-reduce-motion="true"] *::after { animation: none !important; transition: none !important; }
+.shell { zoom: var(--zoom, 1); width: calc(100vw / var(--zoom, 1)); height: calc(100vh / var(--zoom, 1)); }

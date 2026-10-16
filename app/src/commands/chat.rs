@@ -3,7 +3,7 @@
 use finch_client_core::api::ApiClient;
 pub use finch_client_core::api::{ChannelInfoDto, MessagesHistoryDto};
 use finch_protocol::messages::ClientMessage;
-use finch_protocol::models::AttachmentInfo;
+use finch_protocol::models::{AttachmentInfo, UserStatus};
 use tauri::State;
 use tracing::info;
 use uuid::Uuid;
@@ -185,4 +185,42 @@ pub async fn change_password(current_password: String, new_password: String, sta
         .change_password(&current_password, &new_password)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn upload_avatar(data: Vec<u8>, content_type: String, state: State<'_, AppState>) -> Result<finch_client_core::api::UserDto, String> {
+    let user = api_client(&state).await?.upload_avatar(data, &content_type).await.map_err(|e| e.to_string())?;
+    // Keep the signed-in user the app remembers in step with the server.
+    if let Some(me) = state.current_user.write().await.as_mut() {
+        me.avatar_url = user.avatar_url.clone();
+    }
+    Ok(user)
+}
+
+#[tauri::command]
+pub async fn remove_avatar(state: State<'_, AppState>) -> Result<(), String> {
+    api_client(&state).await?.delete_avatar().await.map_err(|e| e.to_string())?;
+    if let Some(me) = state.current_user.write().await.as_mut() {
+        me.avatar_url = None;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn download_avatar(user_id: String, state: State<'_, AppState>) -> Result<tauri::ipc::Response, String> {
+    let bytes = api_client(&state).await?.download_avatar(parse_id(&user_id)?).await.map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(bytes.to_vec()))
+}
+
+/// Choose how you appear: `online`, `idle` or `donotdisturb`, with an optional short text.
+#[tauri::command]
+pub async fn set_status(status: String, text: Option<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let status = match status.as_str() {
+        "online" => UserStatus::Online,
+        "idle" => UserStatus::Idle,
+        "donotdisturb" => UserStatus::DoNotDisturb,
+        other => return Err(format!("Unknown status \"{other}\"")),
+    };
+    let tx = state.control_tx.read().await.clone().ok_or_else(|| "Not connected via QUIC Control Stream".to_string())?;
+    tx.send(ClientMessage::SetStatus { status, text }).await.map_err(|e| format!("Failed to queue status: {e}"))
 }

@@ -20,6 +20,8 @@ export const [localPeerId, setLocalPeerId] = createSignal<number | null>(null);
 export const [sessionUserId, setSessionUserId] = createSignal<string | null>(null);
 export const [knownUsers, setKnownUsers] = createSignal<User[]>([]);
 export const [presence, setPresence] = createSignal<Record<string, UserStatus>>({});
+/** What people wrote next to their status. */
+export const [statusTexts, setStatusTexts] = createSignal<Record<string, string>>({});
 export const onlineUsers = () => knownUsers().filter((user) => (presence()[user.id] ?? user.status) !== 'offline');
 
 export function resetSessionState() {
@@ -30,6 +32,7 @@ export function resetSessionState() {
   setSessionUserId(null);
   setKnownUsers([]);
   setPresence({});
+  setStatusTexts({});
   setVoiceParticipants([]);
   setSpeakingPeers(new Set<number>());
   setIsLocalSpeaking(false);
@@ -46,6 +49,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     setChannels(data.initial_state.channels);
     setKnownUsers(data.initial_state.online_users);
     setPresence(Object.fromEntries(data.initial_state.online_users.map((user) => [user.id, user.status ?? 'online'])));
+    setStatusTexts(Object.fromEntries(data.initial_state.online_users.flatMap((user) => (user.status_text ? [[user.id, user.status_text]] : []))));
     setVoiceParticipants(data.initial_state.voice_states.map(({ muted, deafened, sharing_screen, ...participant }) => ({
       ...participant, is_muted: muted, is_deafened: deafened, is_sharing: sharing_screen,
     })));
@@ -108,7 +112,20 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'user-voice-state-changed': (data) => setVoiceParticipants((previous) => previous.map((participant) =>
     participant.peer_id === data.peer_id ? { ...participant, is_muted: data.muted, is_deafened: data.deafened } : participant)),
   ...screenHandlers,
-  'presence-update': (data) => setPresence((previous) => ({ ...previous, [data.user_id]: data.status })),
+  'presence-update': (data) => {
+    setPresence((previous) => ({ ...previous, [data.user_id]: data.status }));
+    setStatusTexts((previous) => {
+      const { [data.user_id]: _old, ...rest } = previous;
+      return data.status_text && data.status !== 'offline' ? { ...rest, [data.user_id]: data.status_text } : rest;
+    });
+    const me = currentUser();
+    if (me && me.id === data.user_id) setCurrentUser({ ...me, status: data.status, status_text: data.status_text ?? null });
+  },
+  'avatar-changed': ({ user_id, avatar_url }) => {
+    setKnownUsers((previous) => previous.map((user) => (user.id === user_id ? { ...user, avatar_url } : user)));
+    const me = currentUser();
+    if (me && me.id === user_id) setCurrentUser({ ...me, avatar_url });
+  },
   'connection-lost': (reason) => {
     setConnectionStatus('disconnected');
     setConnectionError(reason);

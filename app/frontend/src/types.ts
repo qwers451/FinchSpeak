@@ -5,6 +5,7 @@ export interface User {
   role: 'admin' | 'member';
   avatar_url?: string | null;
   status?: UserStatus;
+  status_text?: string | null;
 }
 
 export interface Channel {
@@ -190,7 +191,8 @@ export interface SessionEvents {
   'screen-share-ended': string;
   /** The sound of the shared screen could not be captured; the picture still goes out. */
   'screen-audio-failed': string;
-  'presence-update': { user_id: string; status: UserStatus };
+  'presence-update': { user_id: string; status: UserStatus; status_text?: string | null };
+  'avatar-changed': { user_id: string; avatar_url: string | null };
   /** Level of the processed microphone, about 25 times a second during a call. */
   'mic-level': { db: number; speaking: boolean };
   'mic-test': { phase: 'recording' | 'playing' | 'done'; seconds?: number };

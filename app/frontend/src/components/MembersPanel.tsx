@@ -1,5 +1,5 @@
 import { For, Show } from 'solid-js';
-import { knownUsers, presence } from '../stores/sessionStore';
+import { knownUsers, presence, statusTexts } from '../stores/sessionStore';
 import { Avatar } from '../ui';
 import type { User, UserStatus } from '../types';
 
@@ -14,7 +14,10 @@ export function MembersPanel() {
   const Row = (props: { user: User }) => (
     <div class={`mem${statusOf(props.user) === 'offline' ? ' off' : ''}`}>
       <Avatar name={props.user.display_name || props.user.username} id={props.user.id} size={32} src={props.user.avatar_url} status={statusClass(statusOf(props.user))} />
-      <span class="grow trunc">{props.user.display_name || props.user.username}</span>
+      <div class="col grow" style={{ 'min-width': 0 }}>
+        <span class="trunc">{props.user.display_name || props.user.username}</span>
+        <Show when={statusTexts()[props.user.id]}><span class="t3 fs12 trunc">{statusTexts()[props.user.id]}</span></Show>
+      </div>
       <Show when={props.user.role === 'admin'}><span class="tag admin">Admin</span></Show>
     </div>
   );

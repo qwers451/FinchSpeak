@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
+import type { UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -158,6 +158,29 @@ export const api = {
   },
 
   /** The bytes of an attachment. */
+  serverInfo: async (): Promise<{ server_url: string | null; hostname: string | null; fingerprint: string | null }> => {
+    if (isTauri()) return invoke('server_info');
+    return { server_url: null, hostname: null, fingerprint: null };
+  },
+
+  uploadAvatar: async (data: number[], contentType: string): Promise<User> => {
+    if (isTauri()) return invoke('upload_avatar', { data, contentType });
+    throw new Error('Pictures need the desktop app');
+  },
+
+  removeAvatar: async (): Promise<void> => {
+    if (isTauri()) return invoke('remove_avatar');
+  },
+
+  downloadAvatar: async (userId: string): Promise<ArrayBuffer> => {
+    if (isTauri()) return invoke('download_avatar', { userId });
+    throw new Error('Pictures need the desktop app');
+  },
+
+  setStatus: async (status: UserStatus, text: string | null): Promise<void> => {
+    if (isTauri()) return invoke('set_status', { status, text });
+  },
+
   markChannelRead: async (channelId: string, messageId: string): Promise<void> => {
     if (isTauri()) {
       return invoke('mark_channel_read', { channelId, messageId });
