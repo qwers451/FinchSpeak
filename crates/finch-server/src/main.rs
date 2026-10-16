@@ -18,12 +18,17 @@ fn init_logging(config: &ServerConfig) -> Option<tracing_appender::non_blocking:
     let filter = || EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,finch_server=debug"));
     let console = tracing_subscriber::fmt::layer().with_filter(filter());
 
-    let appender = tracing_appender::rolling::Builder::new()
-        .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_prefix("finch-server")
-        .filename_suffix("log")
-        .max_log_files(config.logging.keep_files.max(1))
-        .build(&config.logging.dir);
+    let appender = (|| -> Result<_> {
+        // Rotation prunes old logs before opening a writer. Its directory must
+        // already exist, otherwise a successful first start prints a false error.
+        std::fs::create_dir_all(&config.logging.dir)?;
+        Ok(tracing_appender::rolling::Builder::new()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix("finch-server")
+            .filename_suffix("log")
+            .max_log_files(config.logging.keep_files.max(1))
+            .build(&config.logging.dir)?)
+    })();
     match appender {
         Ok(appender) => {
             let (writer, guard) = tracing_appender::non_blocking(appender);

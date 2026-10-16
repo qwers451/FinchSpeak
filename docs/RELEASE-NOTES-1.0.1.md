@@ -10,6 +10,8 @@ Windows server startup and release validation fixes:
   listening addresses and certificate fingerprint, even with `RUST_LOG=warn`.
 - `Run_Server.bat` detects incomplete extraction, explains what to do and preserves
   the server's exit code. Extract all ZIP contents into a writable folder first.
+- A clean first start no longer prints a false log-directory error before creating
+  the logging folder.
 - Release checks exercise the real BAT with shipped settings in both ZIPs,
   Cyrillic/spaces in paths, restart, busy ports, invalid settings/TLS, missing files,
   API bootstrap, invitations and database backup/restore. PE imports are checked

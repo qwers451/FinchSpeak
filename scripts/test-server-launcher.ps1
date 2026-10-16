@@ -67,6 +67,7 @@ try {
     Start-Launcher $work
     Wait-Healthy
     if ((Get-Content (Join-Path $work 'stdout.log') -Raw) -notmatch 'FinchSpeak .+ ready') { throw 'No visible readiness status' }
+    if ((Get-Content (Join-Path $work 'stderr.log') -Raw) -match 'Error reading the log directory/files') { throw 'Fresh startup reports a false log directory error' }
     $config = Join-Path $work 'finch-server.toml'
     $configHash = (Get-FileHash -LiteralPath $config).Hash
     if ($configHash -ne (Get-FileHash -LiteralPath (Join-Path $work 'finch-server.toml.example')).Hash) { throw 'Launcher changed shipped defaults' }
