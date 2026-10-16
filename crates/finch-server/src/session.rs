@@ -52,6 +52,8 @@ pub struct SessionManager {
     pub channel_to_short: Arc<DashMap<Uuid, u32>>,
     /// Map channel short_id -> channel UUID
     pub short_to_channel: Arc<DashMap<u32, Uuid>>,
+    /// When each user last had a typing hint forwarded (to throttle them).
+    pub last_typing: Arc<DashMap<Uuid, std::time::Instant>>,
 }
 
 impl Default for SessionManager {
@@ -69,6 +71,7 @@ impl SessionManager {
             voice_rooms: Arc::new(DashMap::new()),
             channel_to_short: Arc::new(DashMap::new()),
             short_to_channel: Arc::new(DashMap::new()),
+            last_typing: Arc::new(DashMap::new()),
         }
     }
 
@@ -222,6 +225,17 @@ impl SessionManager {
         let targets: Vec<_> = self
             .sessions
             .iter()
+            .map(|entry| (*entry.key(), entry.value().control_tx.clone(), entry.value().connection.clone()))
+            .collect();
+        deliver(targets, &msg);
+    }
+
+    /// Broadcast to everybody except the sessions of `user_id`.
+    pub async fn broadcast_except_user(&self, msg: ServerMessage, user_id: Uuid) {
+        let targets: Vec<_> = self
+            .sessions
+            .iter()
+            .filter(|entry| entry.value().user_id != user_id)
             .map(|entry| (*entry.key(), entry.value().control_tx.clone(), entry.value().connection.clone()))
             .collect();
         deliver(targets, &msg);

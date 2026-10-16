@@ -34,7 +34,8 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .route("/api/auth/register", post(auth::register_handler))
         .route("/api/auth/login", post(auth::login_handler))
         .route("/api/auth/logout", post(auth::logout_handler))
-        .route("/api/auth/me", get(auth::me_handler))
+        .route("/api/auth/me", get(auth::me_handler).patch(auth::update_profile_handler))
+        .route("/api/auth/password", post(auth::change_password_handler))
         .route("/api/state", get(state::state_handler))
         // Moderation (admins)
         .route("/api/admin/users", get(admin::list_users_handler))
@@ -52,6 +53,15 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .route(
             "/api/channels/{id}",
             axum::routing::patch(channels::update_channel_handler).delete(channels::delete_channel_handler),
+        )
+        // Editing and deleting messages
+        .route(
+            "/api/messages/{id}",
+            axum::routing::patch(messages::edit_message_handler).delete(messages::delete_message_handler),
+        )
+        .route(
+            "/api/messages/{id}/reactions/{emoji}",
+            axum::routing::put(messages::add_reaction_handler).delete(messages::remove_reaction_handler),
         )
         // Messages history routes
         .route(

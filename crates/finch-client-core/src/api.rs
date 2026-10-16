@@ -215,6 +215,62 @@ impl ApiClient {
         Ok(())
     }
 
+    /// Change your display name; returns the updated profile.
+    pub async fn update_profile(&self, display_name: &str) -> Result<UserDto, ClientError> {
+        let req = self
+            .authorized(self.http.patch(self.url("/api/auth/me")))
+            .json(&serde_json::json!({ "display_name": display_name }));
+        parse_json(self.send(req).await?).await
+    }
+
+    /// Change your password; other devices are signed out.
+    pub async fn change_password(&self, current_password: &str, new_password: &str) -> Result<(), ClientError> {
+        let req = self
+            .authorized(self.http.post(self.url("/api/auth/password")))
+            .json(&serde_json::json!({ "current_password": current_password, "new_password": new_password }));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
+    /// Edit one of your messages.
+    pub async fn edit_message(&self, message_id: Uuid, content: &str) -> Result<(), ClientError> {
+        let req = self
+            .authorized(self.http.patch(self.url(&format!("/api/messages/{message_id}"))))
+            .json(&serde_json::json!({ "content": content }));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
+    /// React to a message with an emoji.
+    pub async fn add_reaction(&self, message_id: Uuid, emoji: &str) -> Result<(), ClientError> {
+        let req = self.authorized(self.http.put(self.reaction_url(message_id, emoji)));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
+    /// Take your reaction back.
+    pub async fn remove_reaction(&self, message_id: Uuid, emoji: &str) -> Result<(), ClientError> {
+        let req = self.authorized(self.http.delete(self.reaction_url(message_id, emoji)));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
+    fn reaction_url(&self, message_id: Uuid, emoji: &str) -> String {
+        // The emoji is one path segment: percent-encode everything that is not unreserved.
+        let encoded: String = emoji
+            .bytes()
+            .map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") })
+            .collect();
+        self.url(&format!("/api/messages/{message_id}/reactions/{encoded}"))
+    }
+
+    /// Delete your message (admins: anyone's).
+    pub async fn delete_message(&self, message_id: Uuid) -> Result<(), ClientError> {
+        let req = self.authorized(self.http.delete(self.url(&format!("/api/messages/{message_id}"))));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
     /// Admin: all members with role, ban and online state.
     pub async fn admin_users(&self) -> Result<Vec<AdminUserDto>, ClientError> {
         let req = self.authorized(self.http.get(self.url("/api/admin/users")));

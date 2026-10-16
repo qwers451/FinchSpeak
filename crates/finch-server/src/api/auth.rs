@@ -413,3 +413,85 @@ pub async fn me_handler(
 
     Ok(Json(user))
 }
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateProfileRequest {
+    pub display_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+/// PATCH /api/auth/me: change your display name.
+pub async fn update_profile_handler(
+    auth: AuthUser,
+    State(state): State<ArcSharedState>,
+    Json(request): Json<UpdateProfileRequest>,
+) -> Result<impl IntoResponse, ServerError> {
+    let name = request.display_name.trim().to_string();
+    if name.is_empty() || name.chars().count() > 32 {
+        return Err(ServerError::BadRequest("Display name must be between 1 and 32 characters".into()));
+    }
+    sqlx::query("UPDATE users SET display_name = ? WHERE id = ?")
+        .bind(&name)
+        .bind(auth.user_id.to_string())
+        .execute(&state.pool)
+        .await?;
+    // Live sessions show the new name at once.
+    for mut session in state.sessions.sessions.iter_mut() {
+        if session.user_id == auth.user_id {
+            session.username = name.clone();
+        }
+    }
+    state
+        .sessions
+        .broadcast_all(finch_protocol::messages::ServerMessage::UserProfileChanged {
+            user_id: auth.user_id,
+            display_name: name,
+        })
+        .await;
+    me_handler(auth, State(state)).await
+}
+
+/// POST /api/auth/password: needs the current password; signs out every other device.
+pub async fn change_password_handler(
+    auth: AuthUser,
+    State(state): State<ArcSharedState>,
+    Json(request): Json<ChangePasswordRequest>,
+) -> Result<StatusCode, ServerError> {
+    if request.new_password.len() < 6 {
+        return Err(ServerError::BadRequest("Password must be at least 6 characters".into()));
+    }
+    let hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")
+        .bind(auth.user_id.to_string())
+        .fetch_one(&state.pool)
+        .await?;
+    if !verify_password(&request.current_password, &hash) {
+        return Err(ServerError::Forbidden);
+    }
+    let new_hash = hash_password(&request.new_password)?;
+    sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
+        .bind(new_hash)
+        .bind(auth.user_id.to_string())
+        .execute(&state.pool)
+        .await?;
+    sqlx::query("DELETE FROM sessions WHERE user_id = ? AND id != ?")
+        .bind(auth.user_id.to_string())
+        .bind(&auth.session_id)
+        .execute(&state.pool)
+        .await?;
+    let others: Vec<_> = state
+        .sessions
+        .sessions
+        .iter()
+        .filter(|session| session.user_id == auth.user_id && session.token_id != auth.session_id)
+        .map(|session| session.connection.clone())
+        .collect();
+    for connection in others {
+        connection.close(0u32.into(), b"password changed");
+    }
+    Ok(StatusCode::NO_CONTENT)
+}

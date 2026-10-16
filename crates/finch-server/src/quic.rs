@@ -456,7 +456,7 @@ async fn read_keyframe(recv: &mut quinn::RecvStream) -> Option<(MediaHeader, Byt
 }
 
 /// Maximum length of a chat message in characters.
-const MAX_MESSAGE_CHARS: usize = 4000;
+pub(crate) const MAX_MESSAGE_CHARS: usize = 4000;
 
 /// Send a message to one client without holding any session guard across the `.await`.
 async fn send_to(sessions: &SessionManager, peer_id: u32, message: ServerMessage) {
@@ -491,6 +491,9 @@ async fn handle_client_message(
     pool: &SqlitePool,
     sessions: &SessionManager,
 ) {
+    // The name may have been changed since the session started.
+    let current_name = sessions.sessions.get(&peer_id).map(|s| s.username.clone());
+    let username = current_name.as_deref().unwrap_or(username);
     match msg {
         ClientMessage::Ping { timestamp } => {
             // Clone the sender so no DashMap guard is held across the `.await`.
@@ -689,6 +692,28 @@ async fn handle_client_message(
             if let Some(target_peer) = sessions.user_to_peer.get(&target_user_id) {
                 sessions.unsubscribe_screen(peer_id, *target_peer);
             }
+        }
+
+        ClientMessage::Typing { channel_id } => {
+            const TYPING_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+            if !sessions.channel_to_short.contains_key(&channel_id) {
+                return;
+            }
+            let now = std::time::Instant::now();
+            let recent = sessions
+                .last_typing
+                .get(&user_id)
+                .is_some_and(|last| now.duration_since(*last) < TYPING_INTERVAL);
+            if recent {
+                return;
+            }
+            sessions.last_typing.insert(user_id, now);
+            sessions
+                .broadcast_except_user(
+                    ServerMessage::UserTyping { channel_id, user_id, username: username.to_string() },
+                    user_id,
+                )
+                .await;
         }
 
         ClientMessage::RequestKeyframe { target_peer_id } => {

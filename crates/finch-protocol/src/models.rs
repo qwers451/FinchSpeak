@@ -82,6 +82,16 @@ pub struct HistoryMessage {
     /// The id the author gave this message when sending it, if any.
     #[serde(default)]
     pub client_msg_id: Option<Uuid>,
+    /// Emoji reactions, one entry per emoji.
+    #[serde(default)]
+    pub reactions: Vec<ReactionInfo>,
+}
+
+/// Who reacted to a message with one emoji.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReactionInfo {
+    pub emoji: String,
+    pub user_ids: Vec<Uuid>,
 }
 
 /// Voice state for a user in a voice channel.

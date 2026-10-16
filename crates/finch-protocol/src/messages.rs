@@ -29,6 +29,11 @@ pub enum ClientMessage {
     /// Leave the current voice channel.
     LeaveVoice,
 
+    /// The user is typing in a channel (for the "is typing" hint; clients send it at most every few seconds).
+    Typing {
+        channel_id: Uuid,
+    },
+
     /// Update own voice state (mute/deafen).
     UpdateVoiceState {
         muted: bool,
@@ -183,6 +188,42 @@ pub enum ServerMessage {
     /// A channel was created (broadcast to all clients).
     ChannelCreated {
         channel: Channel,
+    },
+
+    /// A user changed their display name.
+    UserProfileChanged {
+        user_id: Uuid,
+        display_name: String,
+    },
+
+    /// Somebody is typing in a channel.
+    UserTyping {
+        channel_id: Uuid,
+        user_id: Uuid,
+        username: String,
+    },
+
+    /// A message was edited by its author.
+    MessageEdited {
+        message_id: Uuid,
+        channel_id: Uuid,
+        content: String,
+        edited_at: i64,
+    },
+
+    /// Somebody added or removed an emoji reaction.
+    ReactionChanged {
+        message_id: Uuid,
+        channel_id: Uuid,
+        user_id: Uuid,
+        emoji: String,
+        added: bool,
+    },
+
+    /// A message was deleted (by its author or an admin).
+    MessageDeleted {
+        message_id: Uuid,
+        channel_id: Uuid,
     },
 
     /// A channel was renamed, got a new topic or position.
