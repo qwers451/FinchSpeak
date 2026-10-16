@@ -1,14 +1,16 @@
 import { createSignal, onMount, onCleanup, Show } from 'solid-js';
 import { currentUser, setCurrentUser } from './stores/authStore';
 import { activeChannel, loadChannels } from './stores/chatStore';
-import { appError, setAppError, connectionStatus, connectionError } from './stores/sessionStore';
+import { setAppError } from './stores/sessionStore';
 import { subscribeSessionEvents } from './services/sessionEvents';
 import { api } from './services/api';
 import { Sidebar } from './components/Sidebar';
 import { ChatArea } from './components/ChatArea';
 import { VoicePanel } from './components/VoicePanel';
 import { AuthModal } from './components/AuthModal';
-import { TofuModal } from './components/TofuModal';
+import { CertChangedModal, TofuModal } from './components/TofuModal';
+import { ConnectionBanner, Splash } from './components/ConnectionBanner';
+import { IconSprite, Titlebar, ToastHost } from './ui';
 import { AdminPanel } from './components/AdminPanel';
 import { ProfilePanel } from './components/ProfilePanel';
 import type { UnlistenFn } from '@tauri-apps/api/event';
@@ -44,42 +46,33 @@ export function App() {
   });
 
   return (
-    <>
-    <Show when={appError()}>
-      <div class="status-banner error-banner" role="alert">
-        <span>{appError()}</span>
-        <button class="icon-btn" aria-label="Dismiss error" onClick={() => setAppError(null)}>✕</button>
-      </div>
-    </Show>
-    <Show when={currentUser() && connectionStatus() !== 'connected'}>
-      <div class="status-banner" role="status">
-        {connectionStatus() === 'reconnecting' ? 'Переподключение…' : 'Нет соединения'}
-        <Show when={connectionError()}><span> — {connectionError()}</span></Show>
-      </div>
-    </Show>
-    <Show when={eventsReady()} fallback={<div role="status">Подключение интерфейса…</div>}>
-    <div class="app-layout">
-      <Show when={currentUser()} fallback={<AuthModal />}>
-        <Sidebar />
-        <Show when={activeChannel()} fallback={
-          <div style={{ flex: 1, display: "flex", "align-items": "center", "justify-content": "center", "flex-direction": "column", gap: "16px", background: "var(--bg-main)", color: "var(--text-muted)" }}>
-            <div style={{ "font-size": "3rem" }}>💬</div>
-            <h2 style={{ color: "var(--text-main)", "font-weight": "600" }}>Welcome to FinchSpeak</h2>
-            <p style={{ "font-size": "0.95rem" }}>Select a channel in the sidebar to start chatting or talking.</p>
+    <div class="shell">
+      <IconSprite />
+      <Titlebar />
+      <ConnectionBanner />
+      <Show when={eventsReady()} fallback={<Splash />}>
+        <Show when={currentUser()} fallback={<AuthModal />}>
+          <div class="app-layout">
+            <Sidebar />
+            <Show when={activeChannel()} fallback={
+              <div class="splash" style={{ background: 'var(--bg-app)' }}>
+                <img src="./mascot.svg" alt="" width="260" />
+                <h2>Welcome to FinchSpeak</h2>
+                <p class="t2">Pick a channel on the left to start chatting or talking.</p>
+              </div>
+            }>
+              <Show when={activeChannel()?.channel_type === 'text'} fallback={<VoicePanel />}>
+                <ChatArea />
+              </Show>
+            </Show>
           </div>
-        }>
-          <Show when={activeChannel()?.channel_type === 'text'} fallback={<VoicePanel />}>
-            <ChatArea />
-          </Show>
         </Show>
       </Show>
-
-      {/* Trust On First Use Certificate Modal */}
       <TofuModal />
+      <CertChangedModal />
       <AdminPanel />
       <ProfilePanel />
+      <ToastHost />
     </div>
-    </Show>
-    </>
   );
 }

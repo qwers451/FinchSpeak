@@ -74,9 +74,15 @@ async fn trusted_api(
                 "Server certificate of {hostname} is not trusted yet - confirm its fingerprint and sign in again"
             ))
         }
-        Err(ClientError::FingerprintMismatch { hostname, .. }) => Err(format!(
-            "The certificate of {hostname} changed since you trusted it. Someone may be intercepting              the connection; do not sign in unless the server administrator confirms the change."
-        )),
+        Err(ClientError::FingerprintMismatch { hostname, expected, actual }) => {
+            let _ = app_handle.emit(
+                "tofu-mismatch",
+                serde_json::json!({ "hostname": hostname, "expected": expected, "actual": actual }),
+            );
+            Err(format!(
+                "The certificate of {hostname} changed since you trusted it. Someone may be intercepting the connection; do not sign in unless the server administrator confirms the change."
+            ))
+        }
         Err(e) => Err(format!("Cannot reach the server: {e}")),
     }
 }
@@ -226,6 +232,19 @@ pub async fn trust_fingerprint(
     if let Some(path) = &*state.known_servers_path.read().await {
         finch_client_core::tofu::save_fingerprints(path, &state.saved_fingerprints)
             .map_err(|e| format!("Failed to save server fingerprint: {}", e))?;
+    }
+    Ok(())
+}
+
+/// Forgets the pinned certificate of `hostname` so the next sign-in asks again (after the user
+/// confirmed a legitimate certificate change in the warning dialog).
+#[tauri::command]
+pub async fn forget_server_fingerprint(hostname: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.saved_fingerprints.remove(&hostname);
+    *state.pending_fingerprint.write().await = None;
+    if let Some(path) = &*state.known_servers_path.read().await {
+        finch_client_core::tofu::save_fingerprints(path, &state.saved_fingerprints)
+            .map_err(|e| format!("Failed to save server fingerprints: {}", e))?;
     }
     Ok(())
 }

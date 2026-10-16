@@ -359,7 +359,19 @@ pub async fn reconnect_with_backoff(
     fingerprints: Arc<DashMap<String, String>>,
     backoff: Backoff,
 ) -> Result<(Session, mpsc::Receiver<SessionEvent>), ClientError> {
+    reconnect_with_progress(params, fingerprints, backoff, |_, _| {}).await
+}
+
+/// Like [`reconnect_with_backoff`], and tells `on_retry(attempt, wait)` before each pause
+/// (`attempt` counts failed tries from 1) so the UI can show "retrying in 4 s".
+pub async fn reconnect_with_progress(
+    params: ConnectParams,
+    fingerprints: Arc<DashMap<String, String>>,
+    backoff: Backoff,
+    mut on_retry: impl FnMut(u32, Duration),
+) -> Result<(Session, mpsc::Receiver<SessionEvent>), ClientError> {
     let mut delay = backoff.initial;
+    let mut attempt = 0u32;
     loop {
         match connect(params.clone(), fingerprints.clone()).await {
             Ok(connected) => return Ok(connected),
@@ -369,7 +381,9 @@ pub async fn reconnect_with_backoff(
                 | ClientError::FingerprintMismatch { .. }),
             ) => return Err(e),
             Err(e) => {
+                attempt += 1;
                 info!("Reconnect to {} failed ({e}); retrying in {delay:?}", params.quic_addr);
+                on_retry(attempt, delay);
                 tokio::time::sleep(delay).await;
                 delay = (delay * 2).min(backoff.max);
             }

@@ -2,135 +2,133 @@ import { createSignal, Show } from 'solid-js';
 import {
   serverUrl,
   setServerUrl,
+  rememberedUsername,
   loginUser,
   registerUser,
   authLoading,
   authError,
+  setAuthError,
 } from '../stores/authStore';
+import { Button, Field, Icon } from '../ui';
+import { passwordStrength } from '../ui/passwordStrength';
+
+type ErrorLook = { icon: 'warn' | 'ban'; tone: 'red' | 'amber'; title: string; hint?: string; retry: boolean };
+
+/** Turns the error text from the backend into the plain-words banner of the design (A2). */
+export function describeAuthError(raw: string): ErrorLook {
+  const text = raw.replace(/^Error:\s*/, '');
+  const lower = text.toLowerCase();
+  if (lower.includes('banned')) {
+    return { icon: 'ban', tone: 'red', title: 'This account has been banned from the server', hint: 'Contact the server admin if you think this is a mistake.', retry: false };
+  }
+  if (lower.includes('invalid username or password') || lower.includes('401')) {
+    return { icon: 'warn', tone: 'red', title: 'Invalid username or password', hint: 'Check them and try again. Passwords are case-sensitive.', retry: false };
+  }
+  if (lower.includes('cannot reach') || lower.includes('connection refused') || lower.includes('timed out')) {
+    return { icon: 'warn', tone: 'amber', title: 'Cannot reach the server', hint: 'Check the address, your network and that the server is running.', retry: true };
+  }
+  return { icon: 'warn', tone: 'red', title: text, retry: false };
+}
 
 export function AuthModal() {
   const [isRegister, setIsRegister] = createSignal(false);
-  const [username, setUsername] = createSignal('');
+  const [username, setUsername] = createSignal(rememberedUsername());
   const [displayName, setDisplayName] = createSignal('');
   const [password, setPassword] = createSignal('');
   const [inviteCode, setInviteCode] = createSignal('');
 
-  const handleSubmit = async (e: Event) => {
-    e.preventDefault();
-    if (isRegister()) {
-      await registerUser(username(), displayName(), password(), inviteCode());
-    } else {
-      await loginUser(username(), password());
-    }
+  const strength = () => passwordStrength(password());
+  const inviteError = () => (authError() ?? '').toLowerCase().includes('invite') ? 'A valid invite code is required to register' : undefined;
+  const usernameError = () => (authError() ?? '').toLowerCase().includes('taken') || (authError() ?? '').toLowerCase().includes('already exists') ? 'Username is already taken' : undefined;
+  const banner = () => {
+    const raw = authError();
+    if (!raw || inviteError() || usernameError()) return null;
+    return describeAuthError(raw);
+  };
+
+  const submit = async (event: Event) => {
+    event.preventDefault();
+    if (authLoading()) return;
+    if (isRegister()) await registerUser(username().trim(), displayName().trim(), password(), inviteCode());
+    else await loginUser(username().trim(), password());
+  };
+
+  const switchMode = () => {
+    setIsRegister(!isRegister());
+    setAuthError(null);
   };
 
   return (
-    <div class="modal-overlay">
-      <div class="modal-card">
-        {/* Brand */}
-        <div style={{ display: "flex", "align-items": "center", gap: "12px", "justify-content": "center", "margin-bottom": "6px" }}>
-          <img src="/logo.png" alt="FinchSpeak" style={{ width: "42px", height: "42px", "border-radius": "10px", "box-shadow": "var(--glow-teal)" }} />
-          <h2 class="modal-title">FinchSpeak</h2>
+    <div class="app auth">
+      <div class="col center auth-brand">
+        <div class="auth-disc auth-disc-a" />
+        <div class="auth-disc auth-disc-b" />
+        <img src="./mascot.svg" alt="FinchSpeak goldfinch with a headset" class="auth-mascot" />
+        <div class="col g8" style={{ 'text-align': 'center', position: 'relative' }}>
+          <h1 style={{ 'font-size': '40px', 'line-height': '44px' }}>Talk. Share. <span class="ty">Chirp.</span></h1>
+          <p class="t2 fs16" style={{ 'max-width': '400px' }}>Your own voice rooms, chat and screen sharing, on a server you control.</p>
         </div>
-
-        <div style={{ "text-align": "center", color: "var(--text-muted)", "font-size": "0.9rem" }}>
-          {isRegister() ? 'Create an account to join the server' : 'Welcome back! Sign in to continue'}
-        </div>
-
-        <Show when={authError()}>
-          <div style={{
-            background: "rgba(255, 71, 87, 0.15)",
-            border: "1px solid var(--accent-danger)",
-            color: "#ff6b81",
-            padding: "10px 14px",
-            "border-radius": "8px",
-            "font-size": "0.85rem"
-          }}>
-            {authError()}
-          </div>
-        </Show>
-
-        <form onSubmit={handleSubmit} style={{ display: "flex", "flex-direction": "column", gap: "14px" }}>
-          <div class="form-group">
-            <label class="form-label">Server URL</label>
-            <input
-              type="text"
-              class="form-input"
-              value={serverUrl()}
-              onInput={(e) => setServerUrl(e.currentTarget.value)}
-              placeholder="https://127.0.0.1:8443"
-              required
-            />
+      </div>
+      <div class="col center grow auth-form-side">
+        <form class="col g24 auth-form" onSubmit={submit} noValidate>
+          <div class="col g8">
+            <h2 style={{ 'font-size': '32px', 'line-height': '38px' }}>{isRegister() ? 'Join the flock' : 'Welcome back'}</h2>
+            <span class="t2">{isRegister() ? 'Create your account on this server.' : 'Sign in to continue to your server.'}</span>
           </div>
 
-          <div class="form-group">
-            <label class="form-label">Username</label>
-            <input
-              type="text"
-              class="form-input"
-              value={username()}
-              onInput={(e) => setUsername(e.currentTarget.value)}
-              placeholder="e.g. alice"
-              required
-            />
-          </div>
-
-          <Show when={isRegister()}>
-            <div class="form-group">
-              <label class="form-label">Invite code (ask the server admin)</label>
-              <input
-                type="text"
-                class="form-input"
-                value={inviteCode()}
-                onInput={(e) => setInviteCode(e.currentTarget.value)}
-                placeholder="e.g. K7M2QX9TPW4B"
-                autocomplete="off"
-              />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Display Name</label>
-              <input
-                type="text"
-                class="form-input"
-                value={displayName()}
-                onInput={(e) => setDisplayName(e.currentTarget.value)}
-                placeholder="e.g. Alice Cooper"
-                required
-              />
-            </div>
+          <Show when={banner()}>
+            {(look) => (
+              <div class={`auth-banner ${look().tone}`} role="alert">
+                <Icon name={look().icon} class={look().tone === 'red' ? 'tr' : ''} />
+                <div class="col grow">
+                  <strong class="fs13">{look().title}</strong>
+                  <Show when={look().hint}><span class="t2 fs12">{look().hint}</span></Show>
+                </div>
+                <Show when={look().retry}>
+                  <Button size="sm" variant="secondary" onClick={() => void (isRegister() ? undefined : loginUser(username().trim(), password()))}>Retry</Button>
+                </Show>
+              </div>
+            )}
           </Show>
 
-          <div class="form-group">
-            <label class="form-label">Password</label>
-            <input
-              type="password"
-              class="form-input"
-              value={password()}
-              onInput={(e) => setPassword(e.currentTarget.value)}
-              placeholder="••••••••"
-              required
-            />
+          <div class="col g16">
+            <Field label="Server address" icon="db" value={serverUrl()} onInput={setServerUrl} placeholder="https://chat.example.com:8443" />
+            <Show when={isRegister()}>
+              <Field label="Invite code" icon="ticket" value={inviteCode()} onInput={setInviteCode} placeholder="K7M2QX9TPW4B" error={inviteError()}
+                help="Ask the server admin for a code. It works a limited number of times and expires." />
+            </Show>
+            <Show when={isRegister()} fallback={
+              <Field label="Username" icon="user" value={username()} onInput={setUsername} placeholder="alice" autocomplete="username" autofocus={!rememberedUsername()} />
+            }>
+              <div class="row g12">
+                <div class="grow"><Field label="Username" value={username()} onInput={setUsername} placeholder="carol" autocomplete="username" error={usernameError()} /></div>
+                <div class="grow"><Field label="Display name" value={displayName()} onInput={setDisplayName} placeholder="Carol Danvers" /></div>
+              </div>
+            </Show>
+            <div class="col g8">
+              <Field label="Password" icon="lock" type="password" value={password()} onInput={setPassword}
+                autocomplete={isRegister() ? 'new-password' : 'current-password'} autofocus={!!rememberedUsername() && !isRegister()} />
+              <Show when={isRegister() && password()}>
+                <div class="row g8" aria-label={`Password strength: ${strength().label}`}>
+                  {[1, 2, 3, 4].map((step) => <div class={`strength-seg${strength().score >= step ? ' on' : ''}`} />)}
+                  <span class="fs12 ty b fit">{strength().label}</span>
+                </div>
+              </Show>
+            </div>
           </div>
 
-          <button
-            type="submit"
-            class="btn-primary"
-            disabled={authLoading()}
-            style={{ opacity: authLoading() ? 0.7 : 1 }}
-          >
-            {authLoading() ? 'Connecting via QUIC...' : (isRegister() ? 'Register & Connect' : 'Sign In')}
-          </button>
-        </form>
+          <Button type="submit" variant="primary" size="lg" block loading={authLoading()}>
+            {authLoading() ? 'Connecting securely…' : isRegister() ? 'Create account' : 'Sign in'}
+          </Button>
 
-        <div style={{ "text-align": "center", "font-size": "0.85rem", color: "var(--text-dim)" }}>
-          {isRegister() ? 'Already have an account? ' : "Don't have an account? "}
-          <span
-            style={{ color: "var(--accent-teal)", cursor: "pointer", "font-weight": "600" }}
-            onClick={() => setIsRegister(!isRegister())}
-          >
-            {isRegister() ? 'Sign In' : 'Register'}
-          </span>
-        </div>
+          <div class="row g8 center">
+            <span class="t2">{isRegister() ? 'Already have an account?' : 'New here?'}</span>
+            <button type="button" class="link-btn ty b" style={{ margin: 0 }} onClick={switchMode}>{isRegister() ? 'Sign in' : 'Create an account'}</button>
+          </div>
+          <div class="row g8 t3 fs12" style={{ 'justify-content': 'center' }}>
+            <Icon name="lock" size="sm" /><span>Encrypted with TLS · certificate pinned on first use</span>
+          </div>
+        </form>
       </div>
     </div>
   );

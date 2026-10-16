@@ -145,6 +145,8 @@ export interface SessionEvents {
   'local-speaking': boolean;
   'ping-rtt': { rtt_ms: number };
   'tofu-required': { hostname: string; fingerprint: string };
+  'tofu-mismatch': { hostname: string; expected: string; actual: string };
+  'reconnect-attempt': { attempt: number; retry_in_secs: number };
   'channel-created': { channel: Channel };
   'user-joined-voice': VoiceParticipant;
   'user-left-voice': { user_id: string; peer_id: number; channel_id: string };

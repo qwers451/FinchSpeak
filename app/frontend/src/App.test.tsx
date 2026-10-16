@@ -4,6 +4,7 @@ import { App } from './App';
 import { setCurrentUser } from './stores/authStore';
 import { resetSessionState } from './stores/sessionStore';
 import { setActiveChannel, setChannels } from './stores/chatStore';
+import { clearToasts } from './ui';
 
 const transport = vi.hoisted(() => ({
   callbacks: new Map<string, (event: { payload: unknown }) => void>(),
@@ -18,6 +19,7 @@ beforeEach(() => {
   document.body.innerHTML = '<div id="root"></div>';
   Object.assign(window, { __TAURI_INTERNALS__: {} });
   resetSessionState();
+  clearToasts();
   setCurrentUser(null);
   setActiveChannel(null);
   setChannels([]);
@@ -48,15 +50,18 @@ it('AUD-019 renders disconnection, retry and server rejection messages', async (
   await vi.waitFor(() => expect(document.querySelector('form')).not.toBeNull());
   setCurrentUser({ id: 'me', username: 'me', display_name: 'Me', role: 'admin' });
   emit('connection-lost', 'network unavailable');
-  expect(document.body.textContent).toContain('Нет соединения');
+  expect(document.body.textContent).toContain('Connection lost');
   emit('reconnecting', null);
-  expect(document.body.textContent).toContain('Переподключение');
+  expect(document.body.textContent).toContain('Reconnecting');
   emit('reconnected', null);
-  expect(document.body.textContent).not.toContain('Нет соединения');
+  expect(document.body.textContent).not.toContain('Connection lost');
   emit('server-error', { code: 400, message: 'Message too long' });
-  expect(document.querySelector('[role="alert"]')?.textContent).toContain('Message too long');
-  (document.querySelector('[aria-label="Dismiss error"]') as HTMLButtonElement).click();
-  expect(document.querySelector('[role="alert"]')).toBeNull();
+  await vi.waitFor(() => expect(document.querySelector('.toast[role="alert"]')?.textContent).toContain('Message too long'));
+  (document.querySelector('.toast [aria-label="Dismiss"]') as HTMLButtonElement).click();
+  expect(document.querySelector('.toast[role="alert"]')).toBeNull();
+  emit('reconnect-attempt', { attempt: 2, retry_in_secs: 4 });
+  emit('reconnecting', null);
+  expect(document.body.textContent).toContain('try 2, next one in 4 s');
 });
 
 it('AUD-054 creates a text channel through the sidebar', async () => {
@@ -119,5 +124,5 @@ it('AUD-019 restores the running Rust session after a frontend reload', async ()
   await vi.waitFor(() => expect(document.querySelector('.online-users')?.textContent).toContain('Alice Display'));
   expect(document.querySelector('.voice-banner')?.textContent).toContain('Connected');
   expect(document.querySelector('[title="Unmute"]')).not.toBeNull();
-  expect(document.body.textContent).not.toContain('Нет соединения');
+  expect(document.body.textContent).not.toContain('Connection lost');
 });

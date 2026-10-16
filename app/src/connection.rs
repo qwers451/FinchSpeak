@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use bytes::Bytes;
 use finch_client_core::error::ClientError;
 use finch_client_core::session::{
-    connect, reconnect_with_backoff, Backoff, ConnectParams, Session, SessionEvent,
+    connect, reconnect_with_progress, Backoff, ConnectParams, Session, SessionEvent,
 };
 use finch_client_core::screen::ScreenViewer;
 use finch_protocol::media::{MediaHeader, MediaType, MEDIA_HEADER_SIZE};
@@ -172,7 +172,9 @@ async fn reconnect(
         }
     };
     let result = tokio::select! {
-        r = reconnect_with_backoff(params, state.saved_fingerprints.clone(), Backoff::default()) => r,
+        r = reconnect_with_progress(params, state.saved_fingerprints.clone(), Backoff::default(), |attempt, wait| {
+            let _ = app_handle.emit("reconnect-attempt", serde_json::json!({ "attempt": attempt, "retry_in_secs": wait.as_secs() }));
+        }) => r,
         _ = superseded => {
             info!("Reconnect cancelled: session was replaced or logged out");
             return None;

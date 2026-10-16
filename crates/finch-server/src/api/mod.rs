@@ -4,6 +4,7 @@ pub mod admin;
 pub mod auth;
 pub mod channels;
 pub mod files;
+pub mod health;
 pub mod invites;
 pub mod messages;
 pub mod state;
@@ -22,6 +23,7 @@ use crate::session::SessionManager;
 pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionManager) -> Router {
     // axum caps request bodies at 2 MB by default; uploads follow the configured limit instead.
     let upload_limit = files::upload_body_limit(config.storage.max_file_size_mb);
+    health::mark_started();
     let shared_state = ArcSharedState { pool, config, sessions };
 
     let cors = CorsLayer::new()
@@ -30,6 +32,7 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .allow_headers(Any);
 
     Router::new()
+        .route("/health", get(health::health_handler))
         // Auth routes
         .route("/api/auth/register", post(auth::register_handler))
         .route("/api/auth/login", post(auth::login_handler))

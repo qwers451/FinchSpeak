@@ -28,3 +28,25 @@ input.range::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; heigh
 input.range:focus-visible { outline: none; }
 input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgba(255, 194, 14, .35); }
 input.range:disabled { opacity: .45; cursor: not-allowed; }
+
+/* Auth screens (A1-A5) */
+.app.auth { flex: 1; }
+.auth-brand { width: 50%; max-width: 640px; min-width: 360px; background: var(--bg-deep); position: relative; padding: 48px; gap: 28px; overflow: hidden; }
+.auth-disc { position: absolute; border-radius: 50%; background: var(--bg-panel); }
+.auth-disc-a { left: -120px; top: -140px; width: 420px; height: 420px; }
+.auth-disc-b { right: -160px; bottom: -180px; width: 460px; height: 460px; }
+.auth-mascot { width: min(460px, 100%); height: auto; position: relative; }
+.auth-form-side { padding: 48px; background: var(--bg-app); overflow: auto; }
+.auth-form { width: 420px; max-width: 100%; }
+.auth-banner { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; }
+.auth-banner.red { background: rgba(255, 51, 0, .12); border: 1px solid rgba(255, 51, 0, .45); }
+.auth-banner.amber { background: rgba(255, 171, 0, .12); border: 1px solid rgba(255, 171, 0, .45); }
+.auth-banner.amber .ic { color: var(--amber); }
+.auth-banner.info { background: rgba(0, 180, 255, .08); border: 1px solid rgba(0, 180, 255, .35); }
+.strength-seg { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
+.strength-seg.on { background: var(--yellow); }
+.fp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 14px 16px; border-radius: 12px; background: var(--bg-app); border: 1.5px solid var(--line); font: 700 15px/22px var(--font-ui); letter-spacing: .03em; user-select: text; }
+.fp-grid.plain { display: flex; flex-direction: column; gap: 0; padding: 0; border: 0; background: none; font-size: 14px; }
+.fp-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 12px; background: var(--bg-app); border: 1.5px solid var(--line); }
+.fp-card.bad { background: rgba(255, 51, 0, .08); border-color: var(--red); }
+.splash { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; background: var(--bg-deep); }

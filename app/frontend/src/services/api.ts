@@ -87,6 +87,10 @@ export const api = {
     }
   },
 
+  forgetServerFingerprint: async (hostname: string): Promise<void> => {
+    if (isTauri()) return invoke('forget_server_fingerprint', { hostname });
+  },
+
   // Channels & Chat
   listChannels: async (): Promise<Channel[]> => {
     if (isTauri()) {

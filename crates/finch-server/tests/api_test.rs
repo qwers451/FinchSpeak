@@ -262,3 +262,26 @@ async fn test_full_api_lifecycle() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn health_reports_ok_without_credentials() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool, open_registration(), finch_server::session::SessionManager::new());
+    let response = app.oneshot(Request::builder().uri("/health").body(Body::empty())?).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&response.into_body().collect().await?.to_bytes())?;
+    assert_eq!(body["status"], "ok");
+    assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
+    assert!(body["uptime_secs"].is_u64());
+    Ok(())
+}
+
+#[tokio::test]
+async fn health_does_not_leak_users_or_channels() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool, open_registration(), finch_server::session::SessionManager::new());
+    let response = app.oneshot(Request::builder().uri("/health").body(Body::empty())?).await?;
+    let text = String::from_utf8(response.into_body().collect().await?.to_bytes().to_vec())?;
+    assert!(!text.contains("general") && !text.contains("user"), "health must stay minimal: {text}");
+    Ok(())
+}

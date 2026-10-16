@@ -1,6 +1,6 @@
 import { createSignal } from 'solid-js';
 import type { SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
-import { setPendingTofu } from './tofuStore';
+import { setPendingMismatch, setPendingTofu } from './tofuStore';
 import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
 import { activeVoiceChannel, handleUserSpeaking, leaveVoice, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
@@ -13,6 +13,8 @@ export { appError, setAppError } from './notificationStore';
 
 export const [connectionStatus, setConnectionStatus] = createSignal<'connected' | 'disconnected' | 'reconnecting' | 'failed'>('disconnected');
 export const [connectionError, setConnectionError] = createSignal<string | null>(null);
+/** Failed reconnect tries so far and the wait before the next one. */
+export const [reconnectInfo, setReconnectInfo] = createSignal<{ attempt: number; retryInSecs: number } | null>(null);
 export const [localPeerId, setLocalPeerId] = createSignal<number | null>(null);
 export const [sessionUserId, setSessionUserId] = createSignal<string | null>(null);
 export const [knownUsers, setKnownUsers] = createSignal<User[]>([]);
@@ -22,6 +24,7 @@ export const onlineUsers = () => knownUsers().filter((user) => (presence()[user.
 export function resetSessionState() {
   setConnectionStatus('disconnected');
   setConnectionError(null);
+  setReconnectInfo(null);
   setLocalPeerId(null);
   setSessionUserId(null);
   setKnownUsers([]);
@@ -47,6 +50,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     })));
     setConnectionStatus('connected');
     setConnectionError(null);
+    setReconnectInfo(null);
     const watched = watching();
     if (watched) {
       const sharer = data.initial_state.voice_states.find((state) => state.user_id === watched.user_id && state.sharing_screen);
@@ -75,6 +79,8 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'local-speaking': setIsLocalSpeaking,
   'ping-rtt': (data) => setPingRtt(data.rtt_ms),
   'tofu-required': setPendingTofu,
+  'tofu-mismatch': setPendingMismatch,
+  'reconnect-attempt': ({ attempt, retry_in_secs }) => setReconnectInfo({ attempt, retryInSecs: retry_in_secs }),
   'channel-created': ({ channel }) => handleChannelCreated(channel),
   'channel-updated': ({ channel }) => handleChannelUpdated(channel),
   'channel-deleted': ({ channel_id }) => {
@@ -104,7 +110,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   },
   reconnecting: () => setConnectionStatus('reconnecting'),
   reconnected: () => {
-    setConnectionStatus('connected'); setConnectionError(null);
+    setConnectionStatus('connected'); setConnectionError(null); setReconnectInfo(null);
     const channel = activeChannel();
     if (channel?.channel_type === 'text') void selectChannel(channel);
   },
