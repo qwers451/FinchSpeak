@@ -2,11 +2,12 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Sh
 import { markRead, typingNames, unread } from '../stores/activityStore';
 import { attachFiles } from '../stores/attachmentStore';
 import { currentUser } from '../stores/authStore';
-import { activeChannel, chatLoading, hasMoreHistory, loadingOlder, loadOlder, messages, setReplyingTo } from '../stores/chatStore';
+import { activeChannel, chatLoading, hasMoreHistory, loadingOlder, loadOlder, messages, revealTarget, setRevealTarget, setReplyingTo } from '../stores/chatStore';
 import type { Message } from '../types';
 import { Button, Icon, pushToast } from '../ui';
 import { rowInfo } from './chat/chatFormat';
 import { Composer } from './chat/Composer';
+import { SearchBox } from './chat/SearchBox';
 import { MessageItem } from './chat/MessageItem';
 
 /** Closer than this to the bottom counts as "reading the latest messages". */
@@ -121,6 +122,13 @@ export function ChatArea() {
 
   const reply = (message: Message) => setReplyingTo(message);
 
+  // A search result was opened: scroll to the message once it is there.
+  createEffect(() => {
+    const target = revealTarget();
+    if (!target) return;
+    queueMicrotask(() => { jumpTo(target); setRevealTarget(null); });
+  });
+
   const typingLine = createMemo(() => {
     const channel = activeChannel();
     if (!channel) return '';
@@ -161,6 +169,7 @@ export function ChatArea() {
           <span class="t2 fs13 trunc grow">{activeChannel()?.topic}</span>
         </Show>
         <Show when={!activeChannel()?.topic}><span class="grow" /></Show>
+        <SearchBox />
       </div>
 
       <div class="message-list" ref={list} onScroll={onScroll} role="log" aria-live="polite" aria-label="Messages">

@@ -224,3 +224,15 @@ pub async fn set_status(status: String, text: Option<String>, state: State<'_, A
     let tx = state.control_tx.read().await.clone().ok_or_else(|| "Not connected via QUIC Control Stream".to_string())?;
     tx.send(ClientMessage::SetStatus { status, text }).await.map_err(|e| format!("Failed to queue status: {e}"))
 }
+
+#[tauri::command]
+pub async fn search_messages(
+    text: String,
+    channel_id: Option<String>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+    state: State<'_, AppState>,
+) -> Result<Vec<finch_client_core::api::SearchHitDto>, String> {
+    let channel = channel_id.map(|id| parse_id(&id)).transpose()?;
+    api_client(&state).await?.search_messages(&text, channel, limit.unwrap_or(30), offset.unwrap_or(0)).await.map_err(|e| e.to_string())
+}

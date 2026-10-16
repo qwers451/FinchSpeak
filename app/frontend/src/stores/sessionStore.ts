@@ -10,6 +10,7 @@ import { currentUser, setCurrentUser } from './authStore';
 import { resetScreenState, resetScreenStateOnDisconnect, setWatching, watching } from './screenState';
 import { screenHandlers } from './screenStore';
 import { applySavedVolume } from './volumeStore';
+import { pushToast } from '../ui/toastStore';
 export { appError, setAppError } from './notificationStore';
 
 export const [connectionStatus, setConnectionStatus] = createSignal<'connected' | 'disconnected' | 'reconnecting' | 'failed'>('disconnected');
@@ -120,6 +121,12 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     });
     const me = currentUser();
     if (me && me.id === data.user_id) setCurrentUser({ ...me, status: data.status, status_text: data.status_text ?? null });
+  },
+  'server-mute-changed': ({ peer_id, server_muted }) => setVoiceParticipants((previous) => previous.map((participant) =>
+    participant.peer_id === peer_id ? { ...participant, server_muted } : participant)),
+  'voice-kicked': () => {
+    void leaveVoice();
+    pushToast({ kind: 'warn', title: 'You were removed from the voice room', text: 'A moderator sent you out. You can join again.' });
   },
   'avatar-changed': ({ user_id, avatar_url }) => {
     setKnownUsers((previous) => previous.map((user) => (user.id === user_id ? { ...user, avatar_url } : user)));

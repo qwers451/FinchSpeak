@@ -6,7 +6,8 @@ import { knownUsers } from '../../stores/sessionStore';
 import type { Message } from '../../types';
 import { Avatar, Button, ConfirmDialog, Icon } from '../../ui';
 import { Attachments } from './AttachmentView';
-import { clock, splitMentions } from './chatFormat';
+import { clock } from './chatFormat';
+import { RichText } from './RichText';
 import { EmojiPicker } from './EmojiPicker';
 
 type Props = {
@@ -40,7 +41,6 @@ export function MessageItem(props: Props) {
   const mentioned = () => !mine() && isMentioned(msg());
   const author = createMemo(() => knownUsers().find((user) => user.id === msg().author_id));
   const lookupLogin = (login: string) => knownUsers().find((user) => user.username.toLowerCase() === login)?.id;
-  const segments = createMemo(() => splitMentions(msg().content, lookupLogin));
   const nameOf = (userId: string) => {
     if (userId === me()?.id) return 'You';
     return knownUsers().find((user) => user.id === userId)?.display_name
@@ -101,9 +101,7 @@ export function MessageItem(props: Props) {
         </Show>
 
         <Show when={editing()} fallback={
-          <div class="body">
-            <For each={segments()}>{(part) => (part.mention ? <span class="mention-chip">{part.text}</span> : <>{part.text}</>)}</For>
-          </div>
+          <div class="body"><RichText text={msg().content} lookup={lookupLogin} /></div>
         }>
           <div class="col g8">
             <div class="composer is-focus" style={{ margin: 0 }}>

@@ -13,7 +13,7 @@ import { AuthModal } from './components/AuthModal';
 import { CertChangedModal, TofuModal } from './components/TofuModal';
 import { ConnectionBanner, Splash } from './components/ConnectionBanner';
 import { IconSprite, Titlebar, ToastHost } from './ui';
-import { AdminPanel } from './components/AdminPanel';
+import { AdminModal } from './components/admin/AdminModal';
 import { SettingsModal } from './components/settings/SettingsModal';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 
@@ -73,7 +73,7 @@ export function App() {
       </Show>
       <TofuModal />
       <CertChangedModal />
-      <AdminPanel />
+      <AdminModal />
       <SettingsModal />
       <ToastHost />
     </div>

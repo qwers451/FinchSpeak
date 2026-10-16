@@ -1,6 +1,6 @@
 //! Administration: invitation codes (and, for admins, moderation).
 
-use finch_client_core::api::{AdminUserDto, ApiClient, InviteDto};
+use finch_client_core::api::{AdminUserDto, ApiClient, AuditEntryDto, InviteDto, ServerOverviewDto};
 use uuid::Uuid;
 use tauri::State;
 
@@ -48,9 +48,36 @@ pub async fn kick_user(user_id: String, state: State<'_, AppState>) -> Result<()
     api(&state).await?.kick_user(parse_user(&user_id)?).await.map_err(|e| e.to_string())
 }
 
+/// Ban for `duration_secs` seconds, or for good when it is absent.
 #[tauri::command]
-pub async fn ban_user(user_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    api(&state).await?.ban_user(parse_user(&user_id)?).await.map_err(|e| e.to_string())
+pub async fn ban_user(user_id: String, duration_secs: Option<i64>, state: State<'_, AppState>) -> Result<(), String> {
+    api(&state).await?.ban_user_for(parse_user(&user_id)?, duration_secs).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn audit_log(before: Option<i64>, limit: Option<u32>, state: State<'_, AppState>) -> Result<Vec<AuditEntryDto>, String> {
+    api(&state).await?.audit_log(before, limit.unwrap_or(50)).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn server_overview(state: State<'_, AppState>) -> Result<ServerOverviewDto, String> {
+    api(&state).await?.server_overview().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_registration(mode: String, state: State<'_, AppState>) -> Result<(), String> {
+    api(&state).await?.set_registration(&mode).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn backup_now(state: State<'_, AppState>) -> Result<(), String> {
+    api(&state).await?.backup_now().await.map_err(|e| e.to_string())
+}
+
+/// `kick` out of the voice room, `mute` or `unmute` in it.
+#[tauri::command]
+pub async fn moderate_voice(user_id: String, action: String, state: State<'_, AppState>) -> Result<(), String> {
+    api(&state).await?.moderate_voice(parse_user(&user_id)?, &action).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -44,6 +44,7 @@ pub fn run() {
     let state = AppState::new();
 
     if let Err(e) = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -88,6 +89,12 @@ pub fn run() {
             commands::chat::remove_avatar,
             commands::chat::download_avatar,
             commands::chat::set_status,
+            commands::chat::search_messages,
+            commands::admin::audit_log,
+            commands::admin::server_overview,
+            commands::admin::set_registration,
+            commands::admin::backup_now,
+            commands::admin::moderate_voice,
             commands::voice::test_microphone,
             commands::screen::capture_thumbnail,
             commands::chat::download_thumb,

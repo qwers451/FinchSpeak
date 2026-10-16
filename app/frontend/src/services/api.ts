@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
+import type { AuditEntry, Role, SearchHit, ServerOverview, UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -304,7 +304,7 @@ export const api = {
     return [];
   },
 
-  setUserRole: async (userId: string, role: 'admin' | 'member'): Promise<void> => {
+  setUserRole: async (userId: string, role: Role): Promise<void> => {
     if (isTauri()) {
       return invoke('set_user_role', { userId, role });
     }
@@ -316,10 +316,37 @@ export const api = {
     }
   },
 
-  banUser: async (userId: string): Promise<void> => {
+  banUser: async (userId: string, durationSecs?: number): Promise<void> => {
     if (isTauri()) {
-      return invoke('ban_user', { userId });
+      return invoke('ban_user', { userId, durationSecs });
     }
+  },
+
+  auditLog: async (before?: number, limit = 50): Promise<AuditEntry[]> => {
+    if (isTauri()) return invoke('audit_log', { before, limit });
+    return [];
+  },
+
+  serverOverview: async (): Promise<ServerOverview> => {
+    if (isTauri()) return invoke('server_overview');
+    throw new Error('The server page needs the desktop app');
+  },
+
+  setRegistration: async (mode: 'open' | 'invite'): Promise<void> => {
+    if (isTauri()) return invoke('set_registration', { mode });
+  },
+
+  backupNow: async (): Promise<void> => {
+    if (isTauri()) return invoke('backup_now');
+  },
+
+  moderateVoice: async (userId: string, action: 'kick' | 'mute' | 'unmute'): Promise<void> => {
+    if (isTauri()) return invoke('moderate_voice', { userId, action });
+  },
+
+  searchMessages: async (text: string, channelId?: string, offset = 0, limit = 30): Promise<SearchHit[]> => {
+    if (isTauri()) return invoke('search_messages', { text, channelId, offset, limit });
+    return [];
   },
 
   unbanUser: async (userId: string): Promise<void> => {

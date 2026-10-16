@@ -15,6 +15,9 @@ export const [loadingOlder, setLoadingOlder] = createSignal<boolean>(false);
 /** The message the next sent message answers. */
 export const [replyingTo, setReplyingTo] = createSignal<Message | null>(null);
 
+/** A message to scroll to and flash once it is on screen (from a search result). */
+export const [revealTarget, setRevealTarget] = createSignal<string | null>(null);
+
 export const HISTORY_PAGE = 50;
 export const MAX_MESSAGE_CHARS = 4000;
 
@@ -317,4 +320,18 @@ export async function toggleReaction(message: Message, emoji: string) {
   } catch (err) {
     setAppError(String(err));
   }
+}
+
+/** Open the channel of a search result and load history until the message is there. */
+export async function revealMessage(channelId: string, messageId: string, maxPages = 20): Promise<boolean> {
+  const channel = channels().find((candidate) => candidate.id === channelId);
+  if (!channel) return false;
+  if (activeChannel()?.id !== channelId || messages().length === 0) await selectChannel(channel);
+  for (let page = 0; page < maxPages && !messages().some((message) => message.id === messageId); page++) {
+    if (!hasMoreHistory()) break;
+    await loadOlder();
+  }
+  const found = messages().some((message) => message.id === messageId);
+  if (found) setRevealTarget(messageId);
+  return found;
 }

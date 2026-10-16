@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/plugin-opener": "^2.7.2",
     "lucide-solid": "^0.475.0",
     "solid-js": "^1.9.4"
   },

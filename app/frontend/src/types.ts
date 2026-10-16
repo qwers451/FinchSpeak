@@ -1,8 +1,10 @@
+export type Role = 'admin' | 'moderator' | 'member';
+
 export interface User {
   id: string;
   username: string;
   display_name: string;
-  role: 'admin' | 'member';
+  role: Role;
   avatar_url?: string | null;
   status?: UserStatus;
   status_text?: string | null;
@@ -88,6 +90,8 @@ export interface VoiceParticipant {
   is_speaking?: boolean;
   /** Currently sharing their screen. */
   is_sharing?: boolean;
+  /** A moderator silenced this person. */
+  server_muted?: boolean;
 }
 
 export interface MonitorSource {
@@ -121,9 +125,46 @@ export interface AdminUser {
   id: string;
   username: string;
   display_name: string;
-  role: 'admin' | 'member';
+  role: Role;
   banned: boolean;
+  /** When a timed ban ends (unix seconds); null for a permanent one. */
+  banned_until?: number | null;
   online: boolean;
+  last_seen?: number | null;
+}
+
+export interface AuditEntry {
+  id: number;
+  at: number;
+  actor_name: string;
+  action: string;
+  target?: string | null;
+  details?: string | null;
+}
+
+export interface ServerOverview {
+  version: string;
+  uptime_secs: number;
+  certificate_fingerprint: string | null;
+  quic_port: number;
+  http_port: number;
+  registration: 'open' | 'invite';
+  backups_count: number;
+  last_backup_at: number | null;
+  last_backup_bytes: number | null;
+  backup_dir: string;
+  uploads_bytes: number;
+  log_dir: string;
+}
+
+export interface SearchHit {
+  message_id: string;
+  channel_id: string;
+  channel_name: string;
+  author_id: string;
+  author_name: string;
+  content: string;
+  timestamp: number;
 }
 
 export interface Invite {
@@ -193,6 +234,8 @@ export interface SessionEvents {
   'screen-audio-failed': string;
   'presence-update': { user_id: string; status: UserStatus; status_text?: string | null };
   'avatar-changed': { user_id: string; avatar_url: string | null };
+  'server-mute-changed': { peer_id: number; server_muted: boolean };
+  'voice-kicked': { channel_id: string };
   /** Level of the processed microphone, about 25 times a second during a call. */
   'mic-level': { db: number; speaking: boolean };
   'mic-test': { phase: 'recording' | 'playing' | 'done'; seconds?: number };

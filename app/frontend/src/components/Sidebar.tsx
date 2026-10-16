@@ -31,6 +31,7 @@ type ChannelDialog =
   | null;
 
 const isAdmin = () => currentUser()?.role === 'admin';
+const isStaff = () => currentUser()?.role === 'admin' || currentUser()?.role === 'moderator';
 
 /** Up / down / rename / delete, shown on hover (and keyboard focus) to admins. */
 function ChannelActions(props: { channel: Channel; onDialog: (dialog: ChannelDialog) => void }) {
@@ -212,7 +213,7 @@ export function Sidebar() {
         <Button iconOnly size="sm" variant={isMuted() ? 'danger' : 'ghost'} icon={isMuted() ? 'mic-off' : 'mic'} label={isMuted() ? 'Unmute' : 'Mute'} title={isMuted() ? 'Unmute' : 'Mute'} onClick={() => void toggleMute()} />
         <Button iconOnly size="sm" variant={isDeafened() ? 'danger' : 'ghost'} icon={isDeafened() ? 'phones-off' : 'phones'} label={isDeafened() ? 'Undeafen' : 'Deafen'} title={isDeafened() ? 'Undeafen' : 'Deafen'} onClick={() => void toggleDeafen()} />
         <Button iconOnly size="sm" variant="ghost" icon="sliders" label="Profile and settings" title="Profile and settings" onClick={() => setProfileOpen(true)} />
-        <Show when={isAdmin()}>
+        <Show when={isStaff()}>
           <Button iconOnly size="sm" variant="ghost" icon="shield" label="Administration" title="Administration" class="ty" onClick={() => setAdminOpen(true)} />
         </Show>
       </div>

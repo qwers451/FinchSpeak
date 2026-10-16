@@ -4,7 +4,8 @@ import { knownUsers } from '../../stores/sessionStore';
 import { setVolume, volumeFor } from '../../stores/volumeStore';
 import { isDeafened, isLocalSpeaking, isMuted, speakingPeers, voiceQuality } from '../../stores/voiceStore';
 import type { VoiceParticipant } from '../../types';
-import { Avatar, Icon, Slider } from '../../ui';
+import { moderateVoice } from '../../stores/adminStore';
+import { Avatar, Button, Icon, Slider } from '../../ui';
 
 type Props = {
   participant: VoiceParticipant;
@@ -33,12 +34,16 @@ export function ParticipantTile(props: Props) {
   const user = createMemo(() => knownUsers().find((candidate) => candidate.id === p().user_id));
   const name = () => user()?.display_name || p().username;
   const volume = () => volumeFor(p().user_id);
+  const staff = () => currentUser()?.role === 'admin' || currentUser()?.role === 'moderator';
+  /** Moderators act on plain members only; admins on everybody. */
+  const mayModerate = () => !props.isMe && staff() && (currentUser()?.role === 'admin' || (user()?.role ?? 'member') === 'member');
   const poor = () => !props.isMe && voiceQuality()[p().peer_id]?.quality === 'poor';
 
   return (
     <div class={`vc${speaking() ? ' speaking' : ''}`} data-peer-id={p().peer_id} aria-label={`${name()}${muted() ? ', muted' : ''}${deafened() ? ', deafened' : ''}`}>
       <Show when={!props.isMe}><Quality peerId={p().peer_id} /></Show>
       <div class="badges">
+        <Show when={p().server_muted}><span title="Silenced by a moderator" style={{ color: 'var(--amber)' }}><Icon name="shield" size="sm" /></span></Show>
         <Show when={muted()}><span title="Muted"><Icon name="mic-off" size="sm" /></span></Show>
         <Show when={deafened()}><span title="Deafened"><Icon name="phones-off" size="sm" /></span></Show>
       </div>
@@ -50,6 +55,12 @@ export function ParticipantTile(props: Props) {
       </span>
       <Show when={speaking()}><span class="tag cyan">Speaking</span></Show>
       <Show when={poor()}><span class="tag amber">Poor connection</span></Show>
+      <Show when={mayModerate()}>
+        <div class="row g4 mod-actions">
+          <Button size="sm" variant="ghost" onClick={() => void moderateVoice(p().user_id, p().server_muted ? 'unmute' : 'mute')}>{p().server_muted ? 'Allow to speak' : 'Silence'}</Button>
+          <Button size="sm" variant="ghost" onClick={() => void moderateVoice(p().user_id, 'kick')}>Remove</Button>
+        </div>
+      </Show>
       <Show when={!props.isMe}>
         <div class="vol">
           <Icon name={volume() === 0 ? 'vol-off' : 'vol'} size="sm" />
