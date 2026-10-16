@@ -65,7 +65,6 @@ it('AUD-019 renders disconnection, retry and server rejection messages', async (
 });
 
 it('AUD-054 creates a text channel through the sidebar', async () => {
-  vi.stubGlobal('prompt', vi.fn(() => 'new-channel'));
   let created = false;
   const channel = { id: 'new', name: 'new-channel', channel_type: 'text', short_id: 2, position: 1, bitrate_kbps: 64 };
   transport.invoke.mockImplementation(async (command) => {
@@ -76,8 +75,12 @@ it('AUD-054 creates a text channel through the sidebar', async () => {
     return null;
   });
   mount();
-  await vi.waitFor(() => expect(document.querySelector('[title="Create Text Channel"]')).not.toBeNull());
-  (document.querySelector('[title="Create Text Channel"]') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Create text channel"]')).not.toBeNull());
+  (document.querySelector('[aria-label="Create text channel"]') as HTMLButtonElement).click();
+  const nameInput = await vi.waitFor(() => { const el = document.querySelector('[role="dialog"] input') as HTMLInputElement; expect(el).not.toBeNull(); return el; });
+  nameInput.value = 'new-channel';
+  nameInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  (Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent === 'Create') as HTMLButtonElement).click();
   await vi.waitFor(() => expect(transport.invoke).toHaveBeenCalledWith('create_channel', {
     name: 'new-channel', channelType: 'text', topic: undefined, bitrateKbps: undefined,
   }));
@@ -90,8 +93,8 @@ it('AUD-037 hides channel creation from non-admins', async () => {
     ? { id: 'me', username: 'me', display_name: 'Me', role: 'member' } : []);
   mount();
   await vi.waitFor(() => expect(document.querySelector('.sidebar')).not.toBeNull());
-  expect(document.querySelector('[title="Create Text Channel"]')).toBeNull();
-  expect(document.querySelector('[title="Create Voice Channel"]')).toBeNull();
+  expect(document.querySelector('[aria-label="Create text channel"]')).toBeNull();
+  expect(document.querySelector('[aria-label="Create voice channel"]')).toBeNull();
 });
 
 it('cleans up subscriptions that finish after unmount', async () => {
@@ -122,7 +125,7 @@ it('AUD-019 restores the running Rust session after a frontend reload', async ()
   mount();
   await vi.waitFor(() => expect(document.querySelector('.sidebar')).not.toBeNull());
   await vi.waitFor(() => expect(document.querySelector('.online-users')?.textContent).toContain('Alice Display'));
-  expect(document.querySelector('.voice-banner')?.textContent).toContain('Connected');
+  expect(document.querySelector('.voice-banner')?.textContent).toContain('Voice connected');
   expect(document.querySelector('[title="Unmute"]')).not.toBeNull();
   expect(document.body.textContent).not.toContain('Connection lost');
 });

@@ -5,6 +5,7 @@ import { setAppError } from './stores/sessionStore';
 import { subscribeSessionEvents } from './services/sessionEvents';
 import { api } from './services/api';
 import { Sidebar } from './components/Sidebar';
+import { MembersPanel } from './components/MembersPanel';
 import { ChatArea } from './components/ChatArea';
 import { VoicePanel } from './components/VoicePanel';
 import { AuthModal } from './components/AuthModal';
@@ -65,6 +66,7 @@ export function App() {
                 <ChatArea />
               </Show>
             </Show>
+            <MembersPanel />
           </div>
         </Show>
       </Show>

@@ -1,13 +1,8 @@
-import { For, Show } from 'solid-js';
+import { createSignal, For, Show } from 'solid-js';
 import { setAdminOpen } from '../stores/adminStore';
 import { markRead, unread } from '../stores/activityStore';
 import { setProfileOpen } from '../stores/profileStore';
-import {
-  channels,
-  activeChannel,
-  selectChannel,
-  loadChannels,
-} from '../stores/chatStore';
+import { channels, activeChannel, selectChannel, loadChannels } from '../stores/chatStore';
 import {
   activeVoiceChannel,
   joinVoice,
@@ -19,209 +14,228 @@ import {
   isLocalSpeaking,
   pingRtt,
   participantsForChannel,
+  speakingPeers,
 } from '../stores/voiceStore';
-import { connectionStatus, onlineUsers, presence } from '../stores/sessionStore';
+import { connectionStatus, presence } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
 import { currentUser, logoutUser } from '../stores/authStore';
 import type { Channel } from '../types';
 import { api } from '../services/api';
 import { moveChannel, removeChannel, renameChannel } from '../stores/channelAdminStore';
+import { Avatar, Button, ConfirmDialog, Field, Icon, Modal } from '../ui';
 
-/** Rename / move / delete buttons, shown to admins next to a channel. */
-function ChannelAdminButtons(props: { channel: Channel }) {
-  const stop = (action: () => void) => (event: MouseEvent) => {
+type ChannelDialog =
+  | { kind: 'create'; type: 'text' | 'voice' }
+  | { kind: 'rename'; channel: Channel }
+  | { kind: 'delete'; channel: Channel }
+  | null;
+
+const isAdmin = () => currentUser()?.role === 'admin';
+
+/** Up / down / rename / delete, shown on hover (and keyboard focus) to admins. */
+function ChannelActions(props: { channel: Channel; onDialog: (dialog: ChannelDialog) => void }) {
+  const act = (action: () => void) => (event: MouseEvent) => {
     event.stopPropagation();
     action();
   };
   return (
-    <Show when={currentUser()?.role === 'admin'}>
-      <span class="channel-admin">
-        <button type="button" title="Move up" onClick={stop(() => void moveChannel(props.channel, -1))}>↑</button>
-        <button type="button" title="Move down" onClick={stop(() => void moveChannel(props.channel, 1))}>↓</button>
-        <button type="button" title="Rename" onClick={stop(() => { const name = prompt('New name:', props.channel.name); if (name) void renameChannel(props.channel, name); })}>✎</button>
-        <button type="button" title="Delete" onClick={stop(() => { if (confirm(`Delete #${props.channel.name} and all its messages?`)) void removeChannel(props.channel); })}>🗑</button>
+    <Show when={isAdmin()}>
+      <span class="acts">
+        <button type="button" aria-label={`Move ${props.channel.name} up`} title="Move up" onClick={act(() => void moveChannel(props.channel, -1))}><Icon name="up" /></button>
+        <button type="button" aria-label={`Move ${props.channel.name} down`} title="Move down" onClick={act(() => void moveChannel(props.channel, 1))}><Icon name="down" /></button>
+        <button type="button" aria-label={`Rename ${props.channel.name}`} title="Rename" onClick={act(() => props.onDialog({ kind: 'rename', channel: props.channel }))}><Icon name="edit" /></button>
+        <button type="button" aria-label={`Delete ${props.channel.name}`} title="Delete" onClick={act(() => props.onDialog({ kind: 'delete', channel: props.channel }))}><Icon name="trash" /></button>
       </span>
     </Show>
   );
 }
 
-export function Sidebar() {
-  const textChannels = () => channels().filter((c) => c.channel_type === 'text');
-  const voiceChannels = () => channels().filter((c) => c.channel_type === 'voice');
+function ChannelNameDialog(props: { dialog: Extract<ChannelDialog, { kind: 'create' | 'rename' }>; onClose: () => void }) {
+  const initial = () => (props.dialog.kind === 'rename' ? props.dialog.channel.name : '');
+  const [name, setName] = createSignal(initial());
+  const [busy, setBusy] = createSignal(false);
+  const title = () => (props.dialog.kind === 'rename' ? 'Rename channel' : props.dialog.type === 'voice' ? 'New voice channel' : 'New text channel');
+
+  const submit = async (event: Event) => {
+    event.preventDefault();
+    const value = name().trim();
+    if (!value || busy()) return;
+    setBusy(true);
+    try {
+      if (props.dialog.kind === 'rename') await renameChannel(props.dialog.channel, value);
+      else {
+        await api.createChannel(value, props.dialog.type);
+        await loadChannels();
+      }
+      props.onClose();
+    } catch (error) {
+      setAppError(String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-    <aside class="sidebar">
-      {/* Brand Header */}
-      <div class="brand-header">
-        <img src="/logo.png" alt="FinchSpeak" class="brand-logo" />
-        <span class="brand-title">FinchSpeak</span>
+    <Modal open onClose={props.onClose} title={title()} width="420px">
+      <form class="col g16" onSubmit={submit}>
+        <Field label="Channel name" value={name()} onInput={setName} placeholder={props.dialog.kind === 'create' && props.dialog.type === 'voice' ? 'Quiet corner' : 'general'} autofocus />
+        <div class="row g8" style={{ 'justify-content': 'flex-end' }}>
+          <Button variant="secondary" onClick={props.onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" loading={busy()} disabled={!name().trim()}>{props.dialog.kind === 'rename' ? 'Save' : 'Create'}</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+export function Sidebar() {
+  const [dialog, setDialog] = createSignal<ChannelDialog>(null);
+  const [collapsed, setCollapsed] = createSignal<{ text: boolean; voice: boolean }>({ text: false, voice: false });
+  const textChannels = () => channels().filter((c) => c.channel_type === 'text');
+  const voiceChannels = () => channels().filter((c) => c.channel_type === 'voice');
+  const myStatus = () => {
+    const user = currentUser();
+    const status = user ? presence()[user.id] ?? user.status ?? 'online' : 'online';
+    return status === 'donotdisturb' ? 'dnd' : status === 'idle' ? 'idle' : 'on';
+  };
+  const statusLabel = () => ({ on: 'Online', idle: 'Idle', dnd: 'Do not disturb' })[myStatus()];
+
+  const toggleCategory = (kind: 'text' | 'voice') => setCollapsed((previous) => ({ ...previous, [kind]: !previous[kind] }));
+
+  return (
+    <aside class="side sidebar" aria-label="Channels">
+      <div class="brand">
+        <img src="./mark.svg" alt="" />
+        <span>FinchSpeak</span>
       </div>
 
-      {/* Channel Navigation */}
-      <div class="channel-list">
-        {/* Text Channels */}
-        <div class="channel-category" style={{ display: "flex", "justify-content": "space-between", "align-items": "center" }}>
-          <span>Text Channels</span>
-          <Show when={currentUser()?.role === 'admin'}>
-          <button
-            class="icon-btn"
-            style={{ "font-size": "0.9rem", padding: "2px 6px", cursor: "pointer" }}
-            title="Create Text Channel"
-            onClick={async () => {
-              const name = prompt('Enter new channel name:');
-              if (name && name.trim()) {
-                try {
-                  await api.createChannel(name.trim(), 'text');
-                  await loadChannels();
-                } catch (error) { setAppError(String(error)); }
-              }
-            }}
-          >
-            +
+      <nav class="nav">
+        <div class="cat">
+          <button type="button" class="cat-toggle" aria-expanded={!collapsed().text} onClick={() => toggleCategory('text')}>
+            <Icon name={collapsed().text ? 'chev-r' : 'chev-d'} />Text channels
           </button>
+          <Show when={isAdmin()}>
+            <button type="button" class="cat-add" title="Create text channel" aria-label="Create text channel" onClick={() => setDialog({ kind: 'create', type: 'text' })}><Icon name="plus" /></button>
           </Show>
         </div>
-        <For each={textChannels()}>
-          {(channel) => (
-            <div
-              class={`channel-item ${activeChannel()?.id === channel.id ? 'active' : ''}`}
-              style={{ cursor: "pointer" }}
-              onClick={() => { selectChannel(channel); markRead(channel.id); }}
-            >
-              <span style={{ "font-size": "1.1rem", color: "var(--text-dim)" }}>#</span>
-              <span class={unread()[channel.id] ? 'channel-unread' : ''}>{channel.name}</span>
-              <Show when={unread()[channel.id]}>
-                {(entry) => (
-                  <span class={`unread-badge ${entry().mention ? 'mention' : ''}`} title={entry().mention ? 'You were mentioned' : 'Unread messages'}>
-                    {entry().count}
-                  </span>
-                )}
-              </Show>
-              <ChannelAdminButtons channel={channel} />
-            </div>
-          )}
-        </For>
+        <Show when={!collapsed().text}>
+          <For each={textChannels()}>
+            {(channel) => (
+              <div
+                class={`ch channel-item${activeChannel()?.id === channel.id ? ' on' : ''}${unread()[channel.id] ? ' unread' : ''}`}
+                role="button"
+                tabindex="0"
+                aria-current={activeChannel()?.id === channel.id ? 'page' : undefined}
+                onClick={() => { void selectChannel(channel); markRead(channel.id); }}
+                onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void selectChannel(channel); markRead(channel.id); } }}
+              >
+                <Icon name="hash" size="sm" />
+                <span class="trunc">{channel.name}</span>
+                <ChannelActions channel={channel} onDialog={setDialog} />
+                <Show when={unread()[channel.id]}>
+                  {(entry) => (
+                    <span class={`badge${entry().mention ? ' mention' : ''}`} style={{ 'margin-left': 'auto' }} title={entry().mention ? 'You were mentioned' : 'Unread messages'}>
+                      {entry().count > 99 ? '99+' : entry().count}
+                    </span>
+                  )}
+                </Show>
+              </div>
+            )}
+          </For>
+        </Show>
 
-        {/* Voice Channels */}
-        <div class="channel-category" style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "margin-top": "14px" }}>
-          <span>Voice Channels</span>
-          <Show when={currentUser()?.role === 'admin'}>
-          <button
-            class="icon-btn"
-            style={{ "font-size": "0.9rem", padding: "2px 6px", cursor: "pointer" }}
-            title="Create Voice Channel"
-            onClick={async () => {
-              const name = prompt('Enter new voice channel name:');
-              if (name && name.trim()) {
-                try {
-                  await api.createChannel(name.trim(), 'voice');
-                  await loadChannels();
-                } catch (error) { setAppError(String(error)); }
-              }
-            }}
-          >
-            +
+        <div class="cat">
+          <button type="button" class="cat-toggle" aria-expanded={!collapsed().voice} onClick={() => toggleCategory('voice')}>
+            <Icon name={collapsed().voice ? 'chev-r' : 'chev-d'} />Voice channels
           </button>
+          <Show when={isAdmin()}>
+            <button type="button" class="cat-add" title="Create voice channel" aria-label="Create voice channel" onClick={() => setDialog({ kind: 'create', type: 'voice' })}><Icon name="plus" /></button>
           </Show>
         </div>
-        <For each={voiceChannels()}>
-          {(channel) => (
-            <div>
-            <div
-              class={`channel-item ${activeVoiceChannel()?.id === channel.id ? 'active' : ''}`}
-              style={{ cursor: "pointer" }}
-              onClick={() => {
-                selectChannel(channel);
-                if (activeVoiceChannel()?.id !== channel.id) {
-                  joinVoice(channel);
-                }
-              }}
-            >
-              <span style={{ "font-size": "1.1rem" }}>🔊</span>
-              <span>{channel.name}</span>
-              <ChannelAdminButtons channel={channel} />
-            </div>
-            <For each={participantsForChannel(channel.id)}>
-              {(participant) => <div class="channel-participant">
-                {participant.username}
-                <Show when={participant.is_muted}><span title="Muted"> 🔇</span></Show>
-                <Show when={participant.is_deafened}><span title="Deafened"> 🎧</span></Show>
-              </div>}
-            </For>
-            </div>
-          )}
-        </For>
-      </div>
+        <Show when={!collapsed().voice}>
+          <For each={voiceChannels()}>
+            {(channel) => (
+              <>
+                <div
+                  class={`ch channel-item${activeVoiceChannel()?.id === channel.id ? ' on' : ''}`}
+                  role="button"
+                  tabindex="0"
+                  onClick={() => { void selectChannel(channel); if (activeVoiceChannel()?.id !== channel.id) void joinVoice(channel); }}
+                  onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void selectChannel(channel); if (activeVoiceChannel()?.id !== channel.id) void joinVoice(channel); } }}
+                >
+                  <Icon name="vol" size="sm" />
+                  <span class="trunc">{channel.name}</span>
+                  <ChannelActions channel={channel} onDialog={setDialog} />
+                  <Show when={participantsForChannel(channel.id).length > 0}>
+                    <span class="tag violet" style={{ 'margin-left': 'auto' }}>{participantsForChannel(channel.id).length}</span>
+                  </Show>
+                </div>
+                <For each={participantsForChannel(channel.id)}>
+                  {(participant) => (
+                    <div class="vp">
+                      <Avatar name={participant.username} id={participant.user_id} size={24} speaking={speakingPeers().has(participant.peer_id)} />
+                      <span class="grow trunc">{participant.username}</span>
+                      <Show when={participant.is_muted}><Icon name="mic-off" title="Muted" style={{ color: 'var(--red-text)' }} /></Show>
+                      <Show when={participant.is_deafened}><Icon name="phones-off" title="Deafened" style={{ color: 'var(--red-text)' }} /></Show>
+                      <Show when={participant.is_sharing}><Icon name="share" title="Sharing screen" style={{ color: 'var(--cyan)' }} /></Show>
+                    </div>
+                  )}
+                </For>
+              </>
+            )}
+          </For>
+        </Show>
+      </nav>
 
-      <div class="online-users">
-        <div class="channel-category">Online — {onlineUsers().length}</div>
-        <For each={onlineUsers()}>
-          {(user) => <div class="channel-participant">{user.display_name || user.username} · {presence()[user.id] ?? user.status ?? 'online'}</div>}
-        </For>
-      </div>
-
-      {/* Active Voice Connection Status Banner */}
       <Show when={activeVoiceChannel()}>
         {(channel) => (
-          <div class="voice-banner">
-            <div class="voice-status">
-              <span style={{ "font-size": "0.95rem" }}>● {connectionStatus() === 'connected' ? 'Connected' : 'Disconnected'}</span>
-              <span style={{ color: "var(--text-main)", "font-weight": "500" }}>{channel().name}</span>
-              <Show when={pingRtt() !== null}>
-                <span class="ping-indicator">{pingRtt()}ms</span>
-              </Show>
+          <div class="vstrip voice-banner">
+            <div class="col grow" style={{ 'min-width': 0 }}>
+              <span class="row g6 b fs13" style={{ color: '#A39CFF' }}>
+                <Icon name="bars" size="sm" />{connectionStatus() === 'connected' ? 'Voice connected' : 'Voice disconnected'}
+              </span>
+              <span class="t2 fs12 trunc">{channel().name}{pingRtt() !== null ? ` · ${pingRtt()} ms` : ''}</span>
             </div>
-            <button
-              class="icon-btn active-danger"
-              title="Disconnect"
-              onClick={() => leaveVoice()}
-            >
-              ✕
-            </button>
+            <Button iconOnly size="sm" variant="danger" icon="hangup" label="Disconnect from voice" title="Disconnect" onClick={() => void leaveVoice()} />
           </div>
         )}
       </Show>
 
-      {/* Current User Bar */}
-      <div class="user-panel">
-        <div class="user-profile">
-          <div class={`avatar ${isLocalSpeaking() ? 'speaking' : ''}`}>
-            {currentUser()?.display_name?.charAt(0).toUpperCase() || 'U'}
+      <div class="upanel user-panel">
+        <button type="button" class="row g10 grow profile-open" style={{ gap: '10px', 'min-width': 0 }} aria-label="Open profile" onClick={() => setProfileOpen(true)}>
+          <Avatar name={currentUser()?.display_name ?? currentUser()?.username} id={currentUser()?.id} size={40} status={myStatus()} speaking={isLocalSpeaking()} src={currentUser()?.avatar_url} />
+          <div class="col grow" style={{ 'min-width': 0, 'text-align': 'left' }}>
+            <span class="b trunc fs13">{currentUser()?.display_name || currentUser()?.username}</span>
+            <span class="t3 fs12">{statusLabel()}</span>
           </div>
-          <div class="user-info">
-            <span class="user-name">{currentUser()?.display_name || 'User'}</span>
-            <span class="user-status">● Online</span>
-          </div>
-        </div>
-
-        <div class="user-controls">
-          <button
-            class={`icon-btn ${isMuted() ? 'active-danger' : ''}`}
-            title={isMuted() ? 'Unmute' : 'Mute'}
-            onClick={() => toggleMute()}
-          >
-            {isMuted() ? '🔇' : '🎙️'}
-          </button>
-          <button
-            class={`icon-btn ${isDeafened() ? 'active-danger' : ''}`}
-            title={isDeafened() ? 'Undeafen' : 'Deafen'}
-            onClick={() => toggleDeafen()}
-          >
-            {isDeafened() ? '🚫' : '🎧'}
-          </button>
-          <button class="icon-btn" title="Profile and password" onClick={() => setProfileOpen(true)}>⚙</button>
-          <Show when={currentUser()?.role === 'admin'}>
-            <button class="icon-btn" title="Administration" onClick={() => setAdminOpen(true)}>🛠</button>
-          </Show>
-          <button
-            class="icon-btn"
-            title="Log out"
-            onClick={() => logoutUser()}
-          >
-            ⏻
-          </button>
-        </div>
+        </button>
+        <Button iconOnly size="sm" variant={isMuted() ? 'danger' : 'ghost'} icon={isMuted() ? 'mic-off' : 'mic'} label={isMuted() ? 'Unmute' : 'Mute'} title={isMuted() ? 'Unmute' : 'Mute'} onClick={() => void toggleMute()} />
+        <Button iconOnly size="sm" variant={isDeafened() ? 'danger' : 'ghost'} icon={isDeafened() ? 'phones-off' : 'phones'} label={isDeafened() ? 'Undeafen' : 'Deafen'} title={isDeafened() ? 'Undeafen' : 'Deafen'} onClick={() => void toggleDeafen()} />
+        <Button iconOnly size="sm" variant="ghost" icon="sliders" label="Profile and settings" title="Profile and settings" onClick={() => setProfileOpen(true)} />
+        <Show when={isAdmin()}>
+          <Button iconOnly size="sm" variant="ghost" icon="shield" label="Administration" title="Administration" class="ty" onClick={() => setAdminOpen(true)} />
+        </Show>
+        <Button iconOnly size="sm" variant="ghost" icon="logout" label="Log out" title="Log out" onClick={() => void logoutUser()} />
       </div>
+
+      <Show when={dialog()}>
+        {(current) => (
+          <>
+            <Show when={current().kind !== 'delete'}>
+              <ChannelNameDialog dialog={current() as Extract<ChannelDialog, { kind: 'create' | 'rename' }>} onClose={() => setDialog(null)} />
+            </Show>
+            <ConfirmDialog
+              open={current().kind === 'delete'}
+              danger
+              title={`Delete #${(current() as { channel?: Channel }).channel?.name ?? ''}?`}
+              message="All messages and files in this channel will be removed. People in a deleted voice channel are sent out."
+              confirmLabel="Delete channel"
+              onCancel={() => setDialog(null)}
+              onConfirm={() => { const d = current(); if (d.kind === 'delete') void removeChannel(d.channel); setDialog(null); }}
+            />
+          </>
+        )}
+      </Show>
     </aside>
   );
 }

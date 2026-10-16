@@ -50,3 +50,21 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 .fp-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 12px; background: var(--bg-app); border: 1.5px solid var(--line); }
 .fp-card.bad { background: rgba(255, 51, 0, .08); border-color: var(--red); }
 .splash { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; background: var(--bg-deep); }
+
+/* Sidebar details */
+.cat { justify-content: space-between; }
+.cat-toggle { all: unset; display: flex; align-items: center; gap: 6px; flex: 1; height: 28px; cursor: pointer; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
+.cat-toggle:focus-visible, .cat-add:focus-visible, .ch:focus-visible, .profile-open:focus-visible, .ch .acts button:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; border-radius: 6px; }
+.cat-add { all: unset; display: flex; align-items: center; cursor: pointer; color: var(--text-3); padding: 2px; border-radius: 6px; }
+.cat-add:hover { color: var(--text); background: var(--bg-hover); }
+.nav { overflow-y: auto; }
+.ch { cursor: pointer; }
+.ch .trunc { min-width: 0; }
+.ch:hover .acts, .ch:focus-within .acts { display: flex; }
+.ch .acts { margin-left: auto; }
+.ch .acts button { all: unset; display: flex; cursor: pointer; padding: 2px; border-radius: 4px; }
+.ch .acts button:hover { color: var(--text); background: var(--bg-card); }
+.profile-open { all: unset; display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; cursor: pointer; border-radius: 8px; }
+.app-layout { flex: 1; display: flex; min-height: 0; min-width: 0; }
+.vstrip .btn, .upanel .btn { flex: none; }
+.trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
