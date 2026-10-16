@@ -266,10 +266,18 @@ pub async fn handle_connection(
     };
     sessions.register_session(session);
 
+    let (pref, pref_text): (String, Option<String>) = sqlx::query_as("SELECT status_pref, status_text FROM users WHERE id = ?")
+        .bind(user_id.to_string())
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| ("online".to_string(), None));
     sessions
         .broadcast_all(ServerMessage::PresenceUpdate {
             user_id,
-            status: UserStatus::Online,
+            status: crate::api::state::status_from_pref(&pref),
+            status_text: pref_text,
         })
         .await;
 
@@ -395,10 +403,16 @@ pub async fn handle_connection(
             .await;
     }
     if !sessions.user_to_peer.contains_key(&user_id) {
+        let _ = sqlx::query("UPDATE users SET last_seen = ? WHERE id = ?")
+            .bind(crate::api::invites::now_secs())
+            .bind(user_id.to_string())
+            .execute(&pool)
+            .await;
         sessions
             .broadcast_all(ServerMessage::PresenceUpdate {
                 user_id,
                 status: UserStatus::Offline,
+                status_text: None,
             })
             .await;
     }
@@ -707,6 +721,22 @@ async fn handle_client_message(
         ClientMessage::UnsubscribeScreenShare { target_user_id } => {
             if let Some(target_peer) = sessions.user_to_peer.get(&target_user_id) {
                 sessions.unsubscribe_screen(peer_id, *target_peer);
+            }
+        }
+
+        ClientMessage::SetStatus { status, text } => {
+            if status == UserStatus::Offline {
+                return;
+            }
+            let text = crate::api::state::clean_status_text(text.as_deref());
+            let saved = sqlx::query("UPDATE users SET status_pref = ?, status_text = ? WHERE id = ?")
+                .bind(crate::api::state::pref_of_status(status))
+                .bind(&text)
+                .bind(user_id.to_string())
+                .execute(pool)
+                .await;
+            if saved.is_ok() {
+                sessions.broadcast_all(ServerMessage::PresenceUpdate { user_id, status, status_text: text }).await;
             }
         }
 

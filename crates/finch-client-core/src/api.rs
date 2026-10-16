@@ -58,6 +58,8 @@ pub struct AdminUserDto {
     pub role: String,
     pub banned: bool,
     pub online: bool,
+    #[serde(default)]
+    pub last_seen: Option<i64>,
 }
 
 /// An invitation code as listed by the server.
@@ -423,6 +425,39 @@ impl ApiClient {
             .authorized(self.http.post(self.url("/api/files/upload")))
             .multipart(form);
         parse_json(self.send(req).await?).await
+    }
+
+    /// Set your profile picture (any PNG/JPEG/WebP up to 2 MB; the server makes it 128x128).
+    pub async fn upload_avatar(&self, data: Vec<u8>, content_type: &str) -> Result<UserDto, ClientError> {
+        let part = Part::bytes(data).file_name("avatar".to_string()).mime_str(content_type)?;
+        let req = self.authorized(self.http.post(self.url("/api/auth/avatar"))).multipart(Form::new().part("file", part));
+        parse_json(self.send(req).await?).await
+    }
+
+    pub async fn delete_avatar(&self) -> Result<(), ClientError> {
+        let req = self.authorized(self.http.delete(self.url("/api/auth/avatar")));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
+    pub async fn download_avatar(&self, user_id: Uuid) -> Result<Bytes, ClientError> {
+        let req = self.authorized(self.http.get(self.url(&format!("/api/users/{user_id}/avatar"))));
+        Ok(check_status(self.send(req).await?).await?.bytes().await?)
+    }
+
+    /// Like `download_avatar`, but answers `(None, etag)` when `etag` is still current.
+    pub async fn download_avatar_cached(&self, user_id: Uuid, etag: Option<&str>) -> Result<(Option<Bytes>, Option<String>), ClientError> {
+        let mut req = self.authorized(self.http.get(self.url(&format!("/api/users/{user_id}/avatar"))));
+        if let Some(etag) = etag {
+            req = req.header("If-None-Match", etag);
+        }
+        let resp = self.send(req).await?;
+        if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+            return Ok((None, etag.map(str::to_string)));
+        }
+        let resp = check_status(resp).await?;
+        let tag = resp.headers().get("etag").and_then(|v| v.to_str().ok()).map(str::to_string);
+        Ok((Some(resp.bytes().await?), tag))
     }
 
     /// Tell the server how far you have read `channel_id` (only moves forward).

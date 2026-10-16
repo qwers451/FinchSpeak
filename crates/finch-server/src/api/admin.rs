@@ -18,6 +18,7 @@ pub struct AdminUserDto {
     pub role: String,
     pub banned: bool,
     pub online: bool,
+    pub last_seen: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,15 +66,16 @@ pub async fn list_users_handler(
     State(state): State<ArcSharedState>,
 ) -> Result<Json<Vec<AdminUserDto>>, ServerError> {
     require_admin(&auth)?;
-    let rows = sqlx::query_as::<_, (String, String, String, String, Option<i64>)>(
-        "SELECT id, username, display_name, role, banned_at FROM users ORDER BY username",
+    let rows = sqlx::query_as::<_, (String, String, String, String, Option<i64>, Option<i64>)>(
+        "SELECT id, username, display_name, role, banned_at, last_seen FROM users ORDER BY username",
     )
     .fetch_all(&state.pool)
     .await?;
     let online: std::collections::HashSet<Uuid> = state.sessions.sessions.iter().map(|s| s.user_id).collect();
     let users = rows
         .into_iter()
-        .map(|(id, username, display_name, role, banned_at)| AdminUserDto {
+        .map(|(id, username, display_name, role, banned_at, last_seen)| AdminUserDto {
+            last_seen,
             online: Uuid::parse_str(&id).is_ok_and(|uuid| online.contains(&uuid)),
             id,
             username,

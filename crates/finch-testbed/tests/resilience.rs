@@ -81,7 +81,7 @@ async fn server_responsive_after_abrupt_disconnect() -> anyhow::Result<()> {
     let a_user = a.session.user_id;
     a.session.connection.close(0u32.into(), b"gone");
     b.expect_control(Duration::from_secs(20), |m| match m {
-        ServerMessage::PresenceUpdate { user_id, status: UserStatus::Offline } if *user_id == a_user => {
+        ServerMessage::PresenceUpdate { user_id, status: UserStatus::Offline, .. } if *user_id == a_user => {
             Some(())
         }
         _ => None,

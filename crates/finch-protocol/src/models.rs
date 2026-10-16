@@ -11,6 +11,9 @@ pub struct User {
     pub display_name: String,
     pub avatar_url: Option<String>,
     pub status: UserStatus,
+    /// What they wrote next to their status ("In a meeting"), if anything.
+    #[serde(default)]
+    pub status_text: Option<String>,
     pub role: UserRole,
 }
 

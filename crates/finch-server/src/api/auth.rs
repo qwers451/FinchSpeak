@@ -327,14 +327,14 @@ pub async fn login_handler(
 ) -> Result<impl IntoResponse, ServerError> {
     let username = payload.username.trim().to_lowercase();
 
-    let row = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<i64>)>(
-        "SELECT id, password_hash, display_name, role, avatar_path, banned_at FROM users WHERE username = ?"
+    let row = sqlx::query_as::<_, (String, String, String, String, Option<i64>, Option<i64>)>(
+        "SELECT id, password_hash, display_name, role, avatar_version, banned_at FROM users WHERE username = ?"
     )
     .bind(&username)
     .fetch_optional(&state.pool)
     .await?;
 
-    let (user_id_str, hash, display_name, role, avatar_path, banned_at) = match row {
+    let (user_id_str, hash, display_name, role, avatar_version, banned_at) = match row {
         Some(r) => r,
         None => return Err(ServerError::AuthFailed("Invalid username or password".to_string())),
     };
@@ -375,11 +375,11 @@ pub async fn login_handler(
         quic_port: state.config.server.quic_port,
         token,
         user: UserDto {
+            avatar_url: crate::api::avatars::avatar_url(&user_id_str, avatar_version),
             id: user_id_str,
             username,
             display_name,
             role,
-            avatar_url: avatar_path,
         },
     };
 
@@ -391,24 +391,24 @@ pub async fn me_handler(
     auth: AuthUser,
     State(state): State<ArcSharedState>,
 ) -> Result<impl IntoResponse, ServerError> {
-    let row = sqlx::query_as::<_, (String, String, String, String, Option<String>)>(
-        "SELECT id, username, display_name, role, avatar_path FROM users WHERE id = ?"
+    let row = sqlx::query_as::<_, (String, String, String, String, Option<i64>)>(
+        "SELECT id, username, display_name, role, avatar_version FROM users WHERE id = ?"
     )
     .bind(auth.user_id.to_string())
     .fetch_optional(&state.pool)
     .await?;
 
-    let (id, username, display_name, role, avatar_path) = match row {
+    let (id, username, display_name, role, avatar_version) = match row {
         Some(r) => r,
         None => return Err(ServerError::NotFound("User not found".to_string())),
     };
 
     let user = UserDto {
+        avatar_url: crate::api::avatars::avatar_url(&id, avatar_version),
         id,
         username,
         display_name,
         role,
-        avatar_url: avatar_path,
     };
 
     Ok(Json(user))

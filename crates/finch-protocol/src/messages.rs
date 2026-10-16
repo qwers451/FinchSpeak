@@ -34,6 +34,13 @@ pub enum ClientMessage {
         channel_id: Uuid,
     },
 
+    /// Choose how you appear while connected (not `Offline`), with an optional short text.
+    SetStatus {
+        status: UserStatus,
+        #[serde(default)]
+        text: Option<String>,
+    },
+
     /// Update own voice state (mute/deafen).
     UpdateVoiceState {
         muted: bool,
@@ -251,6 +258,14 @@ pub enum ServerMessage {
     PresenceUpdate {
         user_id: Uuid,
         status: UserStatus,
+        #[serde(default)]
+        status_text: Option<String>,
+    },
+
+    /// Someone's profile picture changed (`None`: they removed it). The address changes with the picture.
+    AvatarChanged {
+        user_id: Uuid,
+        avatar_url: Option<String>,
     },
 
     /// Heartbeat pong — echo of the client's timestamp.

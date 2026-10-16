@@ -36,16 +36,17 @@ pub async fn server_state(pool: &SqlitePool, sessions: &SessionManager, for_user
     let mut online_users = Vec::with_capacity(online_ids.len());
     if !online_ids.is_empty() {
         let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-            "SELECT id, username, display_name, avatar_path, role FROM users WHERE id IN (",
+            "SELECT id, username, display_name, avatar_version, role, status_pref, status_text FROM users WHERE id IN (",
         );
         let mut ids = query.separated(", ");
         for id in &online_ids { ids.push_bind(id.to_string()); }
         ids.push_unseparated(") ORDER BY username");
-        let profiles = query.build_query_as::<(String, String, String, Option<String>, String)>().fetch_all(pool).await?;
-        for (id, username, display_name, avatar_url, role) in profiles {
+        let profiles = query.build_query_as::<(String, String, String, Option<i64>, String, String, Option<String>)>().fetch_all(pool).await?;
+        for (id, username, display_name, avatar_version, role, status_pref, status_text) in profiles {
             if let Ok(id) = Uuid::parse_str(&id) {
+                let avatar_url = crate::api::avatars::avatar_url(&id.to_string(), avatar_version);
                 online_users.push(User { id, username, display_name, avatar_url,
-                    status: UserStatus::Online,
+                    status: status_from_pref(&status_pref), status_text,
                     role: if role == "admin" { UserRole::Admin } else { UserRole::Member } });
             }
         }
@@ -59,4 +60,31 @@ pub async fn server_state(pool: &SqlitePool, sessions: &SessionManager, for_user
         None => Vec::new(),
     };
     Ok(ServerState { channels, online_users, voice_states, unread })
+}
+
+/// The status stored for a user (`online`, `idle`, `dnd`); anything else counts as online.
+pub fn status_from_pref(pref: &str) -> UserStatus {
+    match pref {
+        "idle" => UserStatus::Idle,
+        "dnd" => UserStatus::DoNotDisturb,
+        _ => UserStatus::Online,
+    }
+}
+
+/// How a status is stored.
+pub fn pref_of_status(status: UserStatus) -> &'static str {
+    match status {
+        UserStatus::Idle => "idle",
+        UserStatus::DoNotDisturb => "dnd",
+        _ => "online",
+    }
+}
+
+/// Cleaned status text: control characters removed, spaces collapsed, at most 80 characters; empty becomes `None`.
+pub fn clean_status_text(text: Option<&str>) -> Option<String> {
+    let cleaned: String = text?.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    let cut: String = collapsed.chars().take(80).collect();
+    let cut = cut.trim().to_string();
+    (!cut.is_empty()).then_some(cut)
 }

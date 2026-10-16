@@ -347,12 +347,16 @@ fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
                 serde_json::json!({ "peer_id": peer_id, "reason": reason }),
             );
         }
-        ServerMessage::PresenceUpdate { user_id, status } => {
+        ServerMessage::AvatarChanged { user_id, avatar_url } => {
+            let _ = app_handle.emit("avatar-changed", serde_json::json!({ "user_id": user_id, "avatar_url": avatar_url }));
+        }
+        ServerMessage::PresenceUpdate { user_id, status, status_text } => {
             let _ = app_handle.emit(
                 "presence-update",
                 serde_json::json!({
                     "user_id": user_id,
                     "status": status,
+                    "status_text": status_text,
                 }),
             );
         }
