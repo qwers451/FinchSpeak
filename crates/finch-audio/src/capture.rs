@@ -60,6 +60,8 @@ pub struct CaptureOutput {
     pub packets: Vec<Bytes>,
     /// VAD decision for this frame.
     pub vad: VadDecision,
+    /// Level of the processed frame in dBFS (-120 for silence): what the threshold is compared with.
+    pub level_db: f32,
 }
 
 /// Microphone-side voice pipeline for a single voice channel session.
@@ -148,6 +150,7 @@ impl VoiceCapture {
         self.echo_canceller.process_capture(frame);
         self.noise_suppressor.process_frame(frame);
 
+        let level_db = VoiceActivityDetector::compute_rms_dbfs(frame);
         let mut vad = self.vad.process(frame);
         if !self.gate_open {
             vad = VadDecision::Silence;
@@ -158,7 +161,7 @@ impl VoiceCapture {
                 self.preroll.pop_front();
             }
             self.preroll.push_back(*frame);
-            return CaptureOutput { packets: Vec::new(), vad };
+            return CaptureOutput { packets: Vec::new(), vad, level_db };
         }
 
         let mut packets = Vec::with_capacity(PREROLL_FRAMES + 1);
@@ -174,7 +177,7 @@ impl VoiceCapture {
         self.transmitting = true;
         packets.extend(self.encode_packet(frame, sender_peer_id, timestamp_ms, vad.is_silence_packet()));
 
-        CaptureOutput { packets, vad }
+        CaptureOutput { packets, vad, level_db }
     }
 
     /// Opus-encode one frame into a complete media datagram; `None` if encoding fails.
@@ -237,6 +240,24 @@ mod tests {
             ..VoiceCaptureConfig::default()
         })
         .unwrap()
+    }
+
+    #[test]
+    fn output_reports_the_level_of_the_processed_frame() {
+        let mut capture = capture_for_test();
+        let mut silence = [0.0f32; FRAME_SIZE_48K];
+        let quiet = capture.process(&mut silence, 1, 0).level_db;
+        assert!(quiet <= -100.0, "silence is reported near the floor, got {quiet}");
+
+        let mut loud = tone_frame(0);
+        let mut level = f32::MIN;
+        for i in 0..5 {
+            let mut frame = tone_frame(i);
+            level = capture.process(&mut frame, 1, (i as u32 + 1) * 20).level_db;
+            loud = frame;
+        }
+        assert!(level > -30.0 && level <= 0.0, "a tone shows up as a level, got {level}");
+        assert!((level - VoiceActivityDetector::compute_rms_dbfs(&loud)).abs() < 1.0, "it is the level the threshold sees");
     }
 
     #[test]

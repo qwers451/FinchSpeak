@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 use finch_client_core::screen::{encoded_size, AudioPacketSource, ScreenAudioForwarder, FrameSource, MonitorSource, ScreenSharer, ScreenViewer, ShareConfig, WindowSource};
 use finch_protocol::messages::ClientMessage;
 use finch_protocol::models::VideoCodec;
-use finch_screen::{list_monitors, list_windows, ScreenAudioCapturer, ScreenAudioConfig};
+use finch_screen::{capture_monitor, capture_window, list_monitors, list_windows, thumbnail_jpeg, ScreenAudioCapturer, ScreenAudioConfig, ThumbnailCache};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tracing::info;
@@ -241,4 +241,31 @@ pub async fn request_idr_keyframe(
 
     info!("Requested IDR keyframe from peer {}", target_peer_id);
     Ok(())
+}
+
+static THUMBNAILS: std::sync::OnceLock<std::sync::Mutex<ThumbnailCache>> = std::sync::OnceLock::new();
+
+/// A JPEG preview (about `max_width` px wide) of a monitor (`kind` = "monitor") or a window
+/// (`kind` = "window"), for the share picker. Repeated calls within a fraction of a second
+/// are answered from a cache.
+#[tauri::command]
+pub async fn capture_thumbnail(kind: String, id: u32, max_width: Option<u32>) -> Result<tauri::ipc::Response, String> {
+    let window = match kind.as_str() {
+        "monitor" => false,
+        "window" => true,
+        other => return Err(format!("Unknown source kind \"{other}\"")),
+    };
+    let width = max_width.unwrap_or(320);
+    let bytes = tokio::task::spawn_blocking(move || {
+        let cache = THUMBNAILS.get_or_init(|| std::sync::Mutex::new(ThumbnailCache::new()));
+        let mut cache = cache.lock().map_err(|_| "preview cache is poisoned".to_string())?;
+        cache.get_or_capture(window, id, std::time::Instant::now(), || {
+            let frame = if window { capture_window(id) } else { capture_monitor(id as usize) }
+                .map_err(|e| format!("Could not capture the preview: {e}"))?;
+            thumbnail_jpeg(&frame, width)
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
 }

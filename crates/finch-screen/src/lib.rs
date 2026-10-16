@@ -11,6 +11,7 @@ pub mod audio_loopback;
 pub mod capture;
 pub mod fragmenter;
 pub mod hw_encoder;
+pub mod thumbnail;
 pub mod yuv;
 
 pub use audio_loopback::{
@@ -24,6 +25,7 @@ pub use capture::{
     RawFrame, ScreenCaptureError, ScreenCapturer, WindowInfo,
 };
 pub use fragmenter::{slice_p_frame, slice_p_frame_with_chunk, AssembledFrame, FrameAssembler, DELTA_FRAME_TIMEOUT};
+pub use thumbnail::{thumbnail_jpeg, ThumbnailCache, MAX_THUMBNAIL_WIDTH};
 pub use hw_encoder::{
     EncodedFrame, H264EncoderError, H264VideoEncoder, VideoEncoderConfig, MAX_HEIGHT, MAX_WIDTH,
 };

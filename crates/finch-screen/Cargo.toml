@@ -11,6 +11,9 @@ finch-protocol = { workspace = true }
 # Screen capture
 xcap = "0.1"
 
+# Previews of screens and windows
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+
 # H.264 codec
 openh264 = "0.6"
 

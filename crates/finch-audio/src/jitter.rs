@@ -255,6 +255,11 @@ impl JitterBuffer {
         self.queue.len()
     }
 
+    /// Cumulative `(packets expected, packets lost)`, for loss over a recent window.
+    pub fn counters(&self) -> (u64, u64) {
+        (self.total_expected, self.total_lost)
+    }
+
     /// Current loss percentage (0.0 to 1.0).
     pub fn loss_rate(&self) -> f64 {
         if self.total_expected == 0 {

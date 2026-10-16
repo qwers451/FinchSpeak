@@ -13,7 +13,7 @@ use finch_protocol::codec::{decode_message, encode_message};
 use finch_protocol::media::{MediaHeader, MAX_KEYFRAME_BYTES, MEDIA_HEADER_SIZE};
 use finch_protocol::messages::{ClientMessage, ServerMessage};
 use finch_protocol::models::{
-    AttachmentInfo, ChannelMapping, UserStatus,
+    AttachmentInfo, ChannelMapping, ShareEndReason, UserStatus,
 };
 
 use crate::api::auth::verify_active_jwt;
@@ -382,7 +382,7 @@ pub async fn handle_connection(
     sessions.unregister_session(peer_id);
     if let Some(short_id) = was_sharing_in {
         sessions
-            .broadcast_voice(short_id, ServerMessage::ScreenShareStopped { peer_id }, None)
+            .broadcast_voice(short_id, ServerMessage::ScreenShareStopped { peer_id, reason: ShareEndReason::Disconnected }, None)
             .await;
     }
     if let Some(channel_id) = left_voice {
@@ -418,10 +418,10 @@ async fn linked_attachments(pool: &SqlitePool, message_id: Uuid) -> Vec<Attachme
 }
 
 /// If `peer_id` is sharing its screen, clear that and tell the voice room `short_id`.
-async fn stop_share_if_active(sessions: &SessionManager, peer_id: u32, short_id: u32) {
+async fn stop_share_if_active(sessions: &SessionManager, peer_id: u32, short_id: u32, reason: ShareEndReason) {
     if sessions.set_sharing(peer_id, false) {
         sessions
-            .broadcast_voice(short_id, ServerMessage::ScreenShareStopped { peer_id }, Some(peer_id))
+            .broadcast_voice(short_id, ServerMessage::ScreenShareStopped { peer_id, reason }, Some(peer_id))
             .await;
     }
 }
@@ -612,7 +612,7 @@ async fn handle_client_message(
             if let Some(short_id) = sessions.channel_to_short.get(&channel_id).map(|s| *s) {
                 let old_room = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
                 if let Some(old_room) = old_room.filter(|old| *old != short_id) {
-                    stop_share_if_active(sessions, peer_id, old_room).await;
+                    stop_share_if_active(sessions, peer_id, old_room, ShareEndReason::Left).await;
                 }
                 sessions.join_voice(peer_id, short_id);
 
@@ -637,7 +637,7 @@ async fn handle_client_message(
 
             if let Some((short_id, c_id)) = voice_info {
                 sessions.leave_voice(peer_id, short_id);
-                stop_share_if_active(sessions, peer_id, short_id).await;
+                stop_share_if_active(sessions, peer_id, short_id, ShareEndReason::Left).await;
 
                 let event = ServerMessage::UserLeftVoice {
                     user_id,
@@ -692,7 +692,7 @@ async fn handle_client_message(
             let short_id = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
             if let Some(short_id) = short_id {
                 sessions.set_sharing(peer_id, false);
-                let event = ServerMessage::ScreenShareStopped { peer_id };
+                let event = ServerMessage::ScreenShareStopped { peer_id, reason: ShareEndReason::Stopped };
                 sessions.broadcast_voice(short_id, event, Some(peer_id)).await;
             }
         }

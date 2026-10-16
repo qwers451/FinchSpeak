@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use finch_client_core::session::SessionEvent;
 use finch_protocol::media::{MediaHeader, MEDIA_HEADER_SIZE};
 use finch_protocol::messages::{ClientMessage, ServerMessage};
-use finch_protocol::models::VideoCodec;
+use finch_protocol::models::{ShareEndReason, VideoCodec};
 use finch_screen::{slice_p_frame, FrameAssembler};
 use finch_testbed::client::TestClient;
 use finch_testbed::server::TestServer;
@@ -189,7 +189,7 @@ async fn late_joiner_sees_who_is_sharing() -> anyhow::Result<()> {
 
 fn stopped_for(peer: u32) -> impl FnMut(&ServerMessage) -> Option<()> {
     move |m| match m {
-        ServerMessage::ScreenShareStopped { peer_id } if *peer_id == peer => Some(()),
+        ServerMessage::ScreenShareStopped { peer_id, .. } if *peer_id == peer => Some(()),
         _ => None,
     }
 }
@@ -214,5 +214,55 @@ async fn disconnect_stops_the_share_for_viewers() -> anyhow::Result<()> {
 
     a.session.connection.close(0u32.into(), b"gone");
     b.expect_control(Duration::from_secs(20), stopped_for(a_peer)).await?;
+    Ok(())
+}
+
+/// Viewers are told why a share ended: stopped, left the room, or the connection dropped.
+fn stopped_with_reason(peer: u32) -> impl FnMut(&ServerMessage) -> Option<ShareEndReason> {
+    move |m| match m {
+        ServerMessage::ScreenShareStopped { peer_id, reason } if *peer_id == peer => Some(*reason),
+        _ => None,
+    }
+}
+
+#[tokio::test]
+async fn share_end_reason_stopped_by_the_sharer() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let (a, mut b, _) = streamer_and_viewer(&server).await?;
+    a.send(ClientMessage::StopScreenShare).await?;
+    let reason = b.expect_control(WAIT, stopped_with_reason(a.session.session_peer_id)).await?;
+    assert_eq!(reason, ShareEndReason::Stopped);
+    Ok(())
+}
+
+#[tokio::test]
+async fn share_end_reason_left_the_room() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let (a, mut b, _) = streamer_and_viewer(&server).await?;
+    a.send(ClientMessage::LeaveVoice).await?;
+    let reason = b.expect_control(WAIT, stopped_with_reason(a.session.session_peer_id)).await?;
+    assert_eq!(reason, ShareEndReason::Left);
+    Ok(())
+}
+
+#[tokio::test]
+async fn share_end_reason_connection_dropped() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let (a, mut b, _) = streamer_and_viewer(&server).await?;
+    let a_peer = a.session.session_peer_id;
+    a.session.connection.close(0u32.into(), b"gone");
+    let reason = b.expect_control(Duration::from_secs(20), stopped_with_reason(a_peer)).await?;
+    assert_eq!(reason, ShareEndReason::Disconnected);
+    Ok(())
+}
+
+#[tokio::test]
+async fn share_end_reason_room_deleted() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let (a, mut b, voice_short) = streamer_and_viewer(&server).await?;
+    let room = a.session.channels.iter().find(|c| c.short_id == voice_short).expect("voice room").id;
+    a.api.delete_channel(room).await?;
+    let reason = b.expect_control(WAIT, stopped_with_reason(a.session.session_peer_id)).await?;
+    assert_eq!(reason, ShareEndReason::RoomClosed);
     Ok(())
 }

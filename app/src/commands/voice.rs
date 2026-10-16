@@ -188,3 +188,18 @@ pub async fn set_push_to_talk_key(key: Option<String>, app_handle: AppHandle) ->
     }
     Ok(())
 }
+
+/// Record a few seconds of the processed microphone and play them back (nothing is sent to the
+/// others meanwhile). Progress comes as `mic-test` events: `recording`, `playing`, `done`.
+#[tauri::command]
+pub async fn test_microphone(seconds: Option<u32>, state: State<'_, AppState>) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    if !state.audio_engine.lock().await.is_running() {
+        return Err("Join a voice channel first: the microphone is only open during a call".to_string());
+    }
+    if state.is_muted.load(Ordering::SeqCst) {
+        return Err("Unmute yourself first".to_string());
+    }
+    state.mic_test_request.store(seconds.unwrap_or(3).clamp(1, 10), Ordering::SeqCst);
+    Ok(())
+}

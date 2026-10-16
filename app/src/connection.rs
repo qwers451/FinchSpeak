@@ -341,10 +341,10 @@ fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
                 }),
             );
         }
-        ServerMessage::ScreenShareStopped { peer_id } => {
+        ServerMessage::ScreenShareStopped { peer_id, reason } => {
             let _ = app_handle.emit(
                 "screen-share-stopped",
-                serde_json::json!({ "peer_id": peer_id }),
+                serde_json::json!({ "peer_id": peer_id, "reason": reason }),
             );
         }
         ServerMessage::PresenceUpdate { user_id, status } => {

@@ -16,6 +16,7 @@ use finch_audio::{
     open_input_device, open_output_device, AudioMixer, DeviceChoice, InputResampler, OutputResampler, ReferenceFeeder, VadDecision, VoiceCapture,
     VoiceCaptureConfig, FRAME_SIZE_48K,
 };
+use finch_audio::quality::QualityTracker;
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::HeapRb;
 use tauri::Emitter;
@@ -134,6 +135,47 @@ impl Drop for AudioEngine {
     fn drop(&mut self) {
         self.is_running.store(false, Ordering::SeqCst);
         let _ = self.cmd_tx.send(AudioCommand::Stop);
+    }
+}
+
+/// The meter is updated every second frame: 25 times a second.
+const MIC_LEVEL_EVERY_FRAMES: u32 = 2;
+
+/// "Test my microphone": a few seconds of processed microphone are recorded, then played back.
+struct MicTest {
+    wanted_frames: usize,
+    frames: Vec<[f32; FRAME_SIZE_48K]>,
+    played: usize,
+}
+
+impl MicTest {
+    fn new(seconds: u32) -> Self {
+        let wanted_frames = (seconds.clamp(1, 10) as usize) * 50;
+        Self { wanted_frames, frames: Vec::with_capacity(wanted_frames), played: 0 }
+    }
+
+    fn record(&mut self, frame: &[f32; FRAME_SIZE_48K]) {
+        if self.frames.len() < self.wanted_frames {
+            self.frames.push(*frame);
+        }
+    }
+
+    fn recording_done(&self) -> bool {
+        self.frames.len() >= self.wanted_frames
+    }
+
+    /// The next recorded frame to play, once recording has finished.
+    fn next_playback_frame(&mut self) -> Option<[f32; FRAME_SIZE_48K]> {
+        if !self.recording_done() {
+            return None;
+        }
+        let frame = self.frames.get(self.played).copied();
+        self.played += 1;
+        frame
+    }
+
+    fn finished(&self) -> bool {
+        self.recording_done() && self.played >= self.frames.len()
     }
 }
 
@@ -376,6 +418,11 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 };
 
                 let mut is_currently_speaking = false;
+                // Meter and link quality for the UI, and the "test my microphone" loop.
+                let mut level_frames: u32 = 0;
+                let mut quality_tracker = QualityTracker::new();
+                let mut last_quality_report = Instant::now();
+                let mut mic_test: Option<MicTest> = None;
                 // The processed microphone, played back to the user while "hear myself" is on.
                 let mut monitor_queue: std::collections::VecDeque<[f32; FRAME_SIZE_48K]> = std::collections::VecDeque::new();
                 let mut playback_frame_48k = [0.0f32; FRAME_SIZE_48K];
@@ -422,6 +469,25 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         break;
                     }
 
+                    // A-. A microphone test was asked for: record a few seconds, then play them back.
+                    let requested = state.mic_test_request.swap(0, Ordering::SeqCst);
+                    if requested > 0 && mic_test.is_none() {
+                        mic_test = Some(MicTest::new(requested));
+                        let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "recording", "seconds": requested }));
+                    }
+
+                    // A-. Once a second: how good is each speaker's link (loss of the last second).
+                    if last_quality_report.elapsed() >= Duration::from_secs(1) {
+                        last_quality_report = Instant::now();
+                        let counters = state.mixer.blocking_lock().loss_counters();
+                        let report: Vec<_> = quality_tracker
+                            .update(&counters)
+                            .into_iter()
+                            .map(|(peer_id, quality, loss)| serde_json::json!({ "peer_id": peer_id, "quality": quality.as_str(), "loss": loss }))
+                            .collect();
+                        let _ = app_handle.emit("voice-quality", report);
+                    }
+
                     // A. Playback processing (mixer -> OutputResampler -> playback_prod)
                     if playback_stream.is_some() {
                         if let Some(resampler) = &mut output_resampler {
@@ -430,6 +496,17 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             {
                                 let speech_events =
                                     mix_next_frame(&state.mixer, &mut playback_frame_48k, Instant::now());
+                                if let Some(test) = &mut mic_test {
+                                    if let Some(recorded) = test.next_playback_frame() {
+                                        for (out, mine) in playback_frame_48k.iter_mut().zip(recorded.iter()) {
+                                            *out = (*out + *mine).clamp(-1.0, 1.0);
+                                        }
+                                    }
+                                    if test.finished() {
+                                        let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
+                                        mic_test = None;
+                                    }
+                                }
                                 if let Some(own) = monitor_queue.pop_front() {
                                     for (out, mine) in playback_frame_48k.iter_mut().zip(own.iter()) {
                                         *out = (*out + *mine).clamp(-1.0, 1.0);
@@ -531,9 +608,24 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     let sender_id = state.session_peer_id.load(Ordering::Relaxed);
                                     capture.set_input_gain(state.voice_settings.input_gain());
                                     capture.set_vad_threshold_db(state.voice_settings.vad_threshold_db());
-                                    capture.set_transmit_gate(state.voice_settings.transmit_open());
+                                    // While testing the microphone nothing goes out to the others.
+                                    capture.set_transmit_gate(state.voice_settings.transmit_open() && mic_test.is_none());
                                     let output =
                                         capture.process(&mut capture_frame_48k, sender_id, now_ms);
+                                    level_frames += 1;
+                                    if level_frames >= MIC_LEVEL_EVERY_FRAMES {
+                                        level_frames = 0;
+                                        let _ = app_handle.emit(
+                                            "mic-level",
+                                            serde_json::json!({ "db": output.level_db, "speaking": output.vad == VadDecision::Speaking }),
+                                        );
+                                    }
+                                    if let Some(test) = &mut mic_test {
+                                        test.record(&capture_frame_48k);
+                                        if test.recording_done() {
+                                            let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "playing" }));
+                                        }
+                                    }
                                     if state.voice_settings.monitor() {
                                         if monitor_queue.len() >= 5 {
                                             monitor_queue.pop_front();
@@ -589,6 +681,30 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mic_test_records_then_plays_every_frame_once() {
+        let mut test = MicTest::new(1);
+        assert!(test.next_playback_frame().is_none(), "nothing plays while recording");
+        for _ in 0..60 {
+            test.record(&[0.1f32; FRAME_SIZE_48K]); // extra frames are ignored
+        }
+        assert!(test.recording_done());
+        assert!(!test.finished());
+        let mut played = 0;
+        while !test.finished() {
+            assert!(test.next_playback_frame().is_some());
+            played += 1;
+        }
+        assert_eq!(played, 50, "one second is fifty 20 ms frames");
+        assert!(test.next_playback_frame().is_none());
+    }
+
+    #[test]
+    fn mic_test_length_is_limited() {
+        assert_eq!(MicTest::new(0).wanted_frames, 50);
+        assert_eq!(MicTest::new(99).wanted_frames, 500);
+    }
 
     #[test]
     fn test_audio_engine_lifecycle() {

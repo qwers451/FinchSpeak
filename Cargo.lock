@@ -1520,6 +1520,7 @@ dependencies = [
  "bytes",
  "cpal",
  "finch-protocol",
+ "image",
  "openh264",
  "ringbuf",
  "thiserror 2.0.21",

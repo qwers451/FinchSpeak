@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use finch_protocol::messages::ServerMessage;
-use finch_protocol::models::{Channel, ChannelType};
+use finch_protocol::models::{Channel, ChannelType, ShareEndReason};
 
 use crate::api::auth::{ArcSharedState, AuthUser};
 use crate::error::ServerError;
@@ -276,7 +276,7 @@ pub async fn delete_channel_handler(
     // Send everyone out of the voice room before it disappears.
     for (peer_id, user_id, was_sharing) in state.sessions.close_voice_room(channel.short_id) {
         if was_sharing {
-            state.sessions.broadcast_all(ServerMessage::ScreenShareStopped { peer_id }).await;
+            state.sessions.broadcast_all(ServerMessage::ScreenShareStopped { peer_id, reason: ShareEndReason::RoomClosed }).await;
         }
         state
             .sessions

@@ -53,6 +53,20 @@ pub enum ChannelType {
     Voice,
 }
 
+/// Why a screen share ended, as viewers are told.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShareEndReason {
+    /// The sharer pressed stop.
+    #[default]
+    Stopped,
+    /// The sharer left the voice room (or went to another one).
+    Left,
+    /// The sharer's connection dropped.
+    Disconnected,
+    /// The voice room was deleted.
+    RoomClosed,
+}
+
 /// Video codec for screen sharing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VideoCodec {

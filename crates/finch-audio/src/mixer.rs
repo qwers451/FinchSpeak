@@ -81,6 +81,18 @@ impl AudioMixer {
         self.speakers.get(&peer_id).map(|s| s.jitter_buffer.loss_rate())
     }
 
+    /// `(peer id, packets expected, packets lost)` of every remote voice (screen sound excluded).
+    pub fn loss_counters(&self) -> Vec<(u32, u64, u64)> {
+        self.speakers
+            .iter()
+            .filter(|(key, _)| **key & SCREEN_AUDIO_FLAG == 0)
+            .map(|(key, speaker)| {
+                let (expected, lost) = speaker.jitter_buffer.counters();
+                (*key, expected, lost)
+            })
+            .collect()
+    }
+
     /// Feed an incoming audio packet from the network into the appropriate speaker's jitter buffer.
     /// Returns `Some((peer_id, speaking))` if a UI speech state transition occurred.
     pub fn on_audio_packet(
@@ -277,5 +289,19 @@ mod tests {
         }
         let loss = mixer.loss_rate(7).unwrap();
         assert!(loss > 0.0 && loss < 1.0, "loss rate {loss}");
+    }
+
+    #[test]
+    fn loss_counters_list_voices_but_not_screen_sound() {
+        let mut mixer = AudioMixer::new();
+        let now = Instant::now();
+        let mut encoder = crate::opus::OpusVoiceEncoder::new(64).unwrap();
+        let payload = encoder.encode(&[0.1f32; FRAME_SIZE_48K]).unwrap();
+        let voice = MediaHeader::new_audio(1, 7, 0, 0, false, false);
+        mixer.on_audio_packet(&voice, payload.clone(), now);
+        let screen = MediaHeader::new_audio(1, 8, 0, 0, false, false);
+        mixer.on_screen_audio_packet(&screen, payload, now);
+        let peers: Vec<u32> = mixer.loss_counters().iter().map(|(peer, _, _)| *peer).collect();
+        assert_eq!(peers, vec![7]);
     }
 }

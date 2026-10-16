@@ -24,6 +24,7 @@ pub mod jitter;
 pub mod mixer;
 pub mod noise;
 pub mod opus;
+pub mod quality;
 pub mod reference;
 pub mod resampler;
 pub mod speech;

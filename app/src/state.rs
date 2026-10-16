@@ -162,6 +162,8 @@ pub struct AppState {
     /// Read by the audio worker thread when it opens devices, hence a std lock.
     pub audio_devices: Arc<std::sync::RwLock<AudioDeviceSelection>>,
     pub voice_settings: Arc<VoiceSettings>,
+    /// Seconds of microphone test requested by the UI (0 = none); the audio worker takes it.
+    pub mic_test_request: Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl Default for AppState {
@@ -222,6 +224,7 @@ impl AppState {
             audio_engine: Arc::new(Mutex::new(crate::audio_engine::AudioEngine::new())),
             audio_devices: Arc::new(std::sync::RwLock::new(AudioDeviceSelection::default())),
             voice_settings: Arc::new(VoiceSettings::default()),
+            mic_test_request: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         }
     }
 }

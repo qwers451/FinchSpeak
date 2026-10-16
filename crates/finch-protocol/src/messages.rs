@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::models::{
-    AttachmentInfo, Channel, ChannelMapping, HistoryMessage, ReplyRef, ServerState, UserStatus, VideoCodec,
+    AttachmentInfo, Channel, ChannelMapping, HistoryMessage, ReplyRef, ServerState, ShareEndReason, UserStatus, VideoCodec,
 };
 
 // ─── Client → Server ────────────────────────────────────────────────────────
@@ -188,6 +188,9 @@ pub enum ServerMessage {
     /// A user stopped sharing their screen.
     ScreenShareStopped {
         peer_id: u32,
+        /// Why it ended; servers that do not say mean "stopped".
+        #[serde(default)]
+        reason: ShareEndReason,
     },
 
     /// Instruct the streamer to immediately generate and send an IDR keyframe.
