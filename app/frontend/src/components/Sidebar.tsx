@@ -18,7 +18,7 @@ import {
 } from '../stores/voiceStore';
 import { connectionStatus, presence } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
-import { currentUser, logoutUser } from '../stores/authStore';
+import { currentUser } from '../stores/authStore';
 import type { Channel } from '../types';
 import { api } from '../services/api';
 import { moveChannel, removeChannel, renameChannel } from '../stores/channelAdminStore';
@@ -215,7 +215,6 @@ export function Sidebar() {
         <Show when={isAdmin()}>
           <Button iconOnly size="sm" variant="ghost" icon="shield" label="Administration" title="Administration" class="ty" onClick={() => setAdminOpen(true)} />
         </Show>
-        <Button iconOnly size="sm" variant="ghost" icon="logout" label="Log out" title="Log out" onClick={() => void logoutUser()} />
       </div>
 
       <Show when={dialog()}>

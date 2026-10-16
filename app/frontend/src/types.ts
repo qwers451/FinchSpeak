@@ -23,6 +23,25 @@ export interface AttachmentInfo {
   size_bytes: number;
   content_type: string;
   url: string;
+  width?: number | null;
+  height?: number | null;
+  /** The server made a 320 px preview. */
+  has_thumb?: boolean;
+}
+
+/** The message a reply answers (as the server quotes it). */
+export interface ReplyRef {
+  message_id: string;
+  author_name: string;
+  snippet: string;
+  deleted?: boolean;
+}
+
+export interface ChannelUnread {
+  channel_id: string;
+  count: number;
+  mentions: number;
+  first_unread_id?: string | null;
 }
 
 export interface Message {
@@ -37,6 +56,12 @@ export interface Message {
   client_msg_id?: string | null;
   edited_at?: number | null;
   reactions?: Reaction[];
+  reply_to?: ReplyRef | null;
+  /** Ids of the users the text mentions. */
+  mentions?: string[];
+  /** Not stored by the server yet: `sending`, or `failed` with the reason in `failure`. */
+  state?: 'sending' | 'failed';
+  failure?: string;
 }
 
 export interface Reaction {
@@ -137,6 +162,7 @@ export interface SessionEvents {
       voice_states: (Omit<VoiceParticipant, 'is_muted' | 'is_deafened' | 'is_sharing'> & {
         muted: boolean; deafened: boolean; sharing_screen: boolean;
       })[];
+      unread?: ChannelUnread[];
     };
   };
   'new-message': IncomingMessage;

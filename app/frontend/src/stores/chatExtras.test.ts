@@ -5,7 +5,7 @@ import { activeChannel, deleteMessage, editMessage, messages, setActiveChannel, 
 import { clearTyping, markRead, mentions, noteIncoming, noteTyping, notifyTyping, resetActivity, typingNames, unread } from './activityStore';
 import { setCurrentUser } from './authStore';
 import { sessionHandlers, knownUsers, setKnownUsers } from './sessionStore';
-import { attachFile, downloadAttachment, MAX_ATTACHMENT_BYTES, pendingAttachments, setPendingAttachments, takePending } from './attachmentStore';
+import { attachFile, attachFiles, downloadAttachment, MAX_ATTACHMENT_BYTES, pendingAttachments, pendingFiles, removePending, retryUpload, setPendingAttachments, takePending, thumbUrl } from './attachmentStore';
 import { saveDisplayName, savePassword } from './profileStore';
 import { setVoiceParticipants, allVoiceParticipants } from './voiceStore';
 import type { Message, User } from '../types';
@@ -75,7 +75,7 @@ it('AUD-044 edit and delete failures are shown, empty edits are not sent', async
 it('AUD-044 messages in other channels are counted as unread, mentions flagged', () => {
   noteIncoming({ channel_id: 'c2', author_id: 'bob', content: 'hi' });
   noteIncoming({ channel_id: 'c2', author_id: 'bob', content: 'hey @alice look' });
-  expect(unread()['c2']).toEqual({ count: 2, mention: true });
+  expect(unread()['c2']).toMatchObject({ count: 2, mention: true });
   markRead('c2');
   expect(unread()['c2']).toBeUndefined();
 });
@@ -155,7 +155,8 @@ it('AUD-041 an oversized file is refused before it is read', async () => {
   Object.defineProperty(big, 'size', { value: MAX_ATTACHMENT_BYTES + 1 });
   await attachFile(big);
   expect(upload).not.toHaveBeenCalled();
-  expect(appError()).toContain('big.bin');
+  expect(pendingFiles()).toMatchObject([{ name: 'big.bin', status: 'toolarge' }]);
+  expect(pendingAttachments()).toEqual([]);
 });
 
 it('AUD-041 an uploaded file waits for the next message and is sent once', async () => {
@@ -174,5 +175,43 @@ it('AUD-041 downloading fetches the bytes with our login and offers them as a fi
   await downloadAttachment({ id: 'f1', filename: 'a.txt', size_bytes: 3, content_type: 'text/plain', url: '' });
   expect(created).toEqual(['blob:1']);
   expect(click).toHaveBeenCalled();
+  vi.unstubAllGlobals();
+});
+
+it('several dropped files upload side by side, and one failure can be retried alone', async () => {
+  const upload = vi.spyOn(api, 'uploadFile')
+    .mockResolvedValueOnce({ id: 'f1', filename: 'a.txt', size_bytes: 1, content_type: 'text/plain', url: '' })
+    .mockRejectedValueOnce(new Error('connection dropped'))
+    .mockResolvedValueOnce({ id: 'f2', filename: 'b.txt', size_bytes: 1, content_type: 'text/plain', url: '' });
+  await attachFiles([new File(['a'], 'a.txt'), new File(['b'], 'b.txt')]);
+  expect(pendingFiles().map((entry) => entry.status)).toEqual(['ready', 'failed']);
+  expect(pendingFiles()[1].error).toContain('connection dropped');
+  await retryUpload(pendingFiles()[1].key);
+  expect(upload).toHaveBeenCalledTimes(3);
+  expect(takePending()).toEqual(['f1', 'f2']);
+  expect(pendingFiles()).toEqual([]);
+});
+
+it('a failed upload is dropped when the message is sent without it', async () => {
+  vi.spyOn(api, 'uploadFile').mockRejectedValue(new Error('offline'));
+  await attachFile(new File(['x'], 'x.txt'));
+  expect(takePending()).toEqual([]);
+  expect(pendingFiles()).toEqual([]);
+});
+
+it('removing a chip works by key or by file id', async () => {
+  vi.spyOn(api, 'uploadFile').mockResolvedValue({ id: 'f9', filename: 'z.txt', size_bytes: 1, content_type: 'text/plain', url: '' });
+  await attachFile(new File(['z'], 'z.txt'));
+  removePending('f9');
+  expect(pendingFiles()).toEqual([]);
+});
+
+it('a preview is fetched once and then served from the cache', async () => {
+  const fetchThumb = vi.spyOn(api, 'downloadThumb').mockResolvedValue(new Uint8Array([1, 2, 3]).buffer as ArrayBuffer);
+  vi.stubGlobal('URL', { createObjectURL: () => 'blob:thumb', revokeObjectURL: vi.fn() });
+  const info = { id: 'img-1', filename: 'p.png', size_bytes: 3, content_type: 'image/png', url: '', has_thumb: true };
+  expect(await thumbUrl(info)).toBe('blob:thumb');
+  expect(await thumbUrl(info)).toBe('blob:thumb');
+  expect(fetchThumb).toHaveBeenCalledTimes(1);
   vi.unstubAllGlobals();
 });

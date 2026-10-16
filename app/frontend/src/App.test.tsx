@@ -124,7 +124,7 @@ it('AUD-019 restores the running Rust session after a frontend reload', async ()
   });
   mount();
   await vi.waitFor(() => expect(document.querySelector('.sidebar')).not.toBeNull());
-  await vi.waitFor(() => expect(document.querySelector('.online-users')?.textContent).toContain('Alice Display'));
+  await vi.waitFor(() => expect(document.querySelector('.members')?.textContent).toContain('Alice Display'));
   expect(document.querySelector('.voice-banner')?.textContent).toContain('Voice connected');
   expect(document.querySelector('[title="Unmute"]')).not.toBeNull();
   expect(document.body.textContent).not.toContain('Connection lost');

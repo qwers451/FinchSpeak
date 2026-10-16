@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../services/api';
 import { setCurrentUser } from './authStore';
-import { handleIncomingMessage, handleMessageRejected, messages, selectChannel, sendMessage, setActiveChannel, setMessages } from './chatStore';
+import {
+  discardFailed, handleIncomingMessage, handleMessageDeleted, handleMessageRejected, hasMoreHistory, loadOlder, messages,
+  replyingTo, retryMessage, selectChannel, sendMessage, setActiveChannel, setMessages, setReplyingTo,
+} from './chatStore';
+import { readOutbox } from './outbox';
 import { appError, setAppError } from './notificationStore';
 import type { Channel } from '../types';
 
@@ -10,6 +14,7 @@ const live = (id: string, content = id) => ({ message_id: id, channel_id: 'chat'
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  localStorage.clear();
   setMessages([]);
   setActiveChannel(channel);
   setCurrentUser({ id: 'me', username: 'me', display_name: 'Me', role: 'member' });
@@ -37,11 +42,11 @@ describe('chat regressions', () => {
     expect(messages()).toMatchObject([{ id: 'older', channel_id: 'chat' }, { id: 'newer', channel_id: 'chat' }]);
   });
 
-  it('AUD-036 removes only the failed optimistic message', async () => {
+  it('AUD-036 a send that fails stays visible as not sent, with its reason', async () => {
     vi.spyOn(api, 'sendTextMessage').mockRejectedValue(new Error('offline'));
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await sendMessage('failed');
-    expect(messages()).toEqual([]);
+    expect(messages()).toMatchObject([{ content: 'failed', state: 'failed', failure: expect.stringContaining('offline') }]);
   });
 
   it('does not consume our pending message when another author sends identical text', async () => {
@@ -124,11 +129,12 @@ describe('chat regressions', () => {
     expect(messages().map((message) => message.id)).toEqual([`local-${ids[0]}`, `local-${ids[1]}`]);
   });
 
-  it('AUD-036 a rejection rolls back exactly the message it names, even with identical text', async () => {
+  it('AUD-036 a rejection marks exactly the message it names, even with identical text', async () => {
     const ids = await sendTwice();
     setAppError(null);
     handleMessageRejected({ client_msg_id: ids[1], code: 400, message: 'Message must be 1..=4000 characters' });
-    expect(messages().map((message) => message.id)).toEqual([`local-${ids[0]}`]);
+    expect(messages().map((message) => [message.id, message.state])).toEqual([[`local-${ids[0]}`, 'sending'], [`local-${ids[1]}`, 'failed']]);
+    expect(messages()[1].failure).toContain('Message must be 1..=4000 characters');
     expect(appError()).toContain('Message must be 1..=4000 characters');
   });
 
@@ -151,5 +157,86 @@ describe('chat regressions', () => {
     ] });
     await selectChannel(channel);
     expect(messages().map((message) => message.id).sort()).toEqual([`local-${ids[0]}`, 'persisted'].sort());
+  });
+
+  // ---- stage 7: replies, retry, paging
+
+  const stored = (id: string, timestamp: number, extra: object = {}) =>
+    ({ id, author_id: 'other', author_name: 'Other', content: id, attachments: [], timestamp, ...extra });
+
+  it('a reply carries a quote of the original and clears the reply target', async () => {
+    const send = vi.spyOn(api, 'sendTextMessage').mockResolvedValue();
+    handleIncomingMessage(live('original', 'Anyone up for a game tonight?'));
+    setReplyingTo(messages()[0]);
+    await sendMessage('count me in');
+    expect(replyingTo()).toBeNull();
+    expect(send).toHaveBeenCalledWith('chat', 'count me in', [], expect.any(String), 'original');
+    expect(messages()[1].reply_to).toMatchObject({ message_id: 'original', author_name: 'Other', snippet: 'Anyone up for a game tonight?' });
+  });
+
+  it('deleting the original turns the quote in its replies into "deleted"', () => {
+    handleIncomingMessage(live('original'));
+    handleIncomingMessage({ ...live('answer'), reply_to: { message_id: 'original', author_name: 'Other', snippet: 'original' } });
+    handleMessageDeleted({ message_id: 'original' });
+    expect(messages().map((message) => message.id)).toEqual(['answer']);
+    expect(messages()[0].reply_to).toEqual({ message_id: 'original', author_name: '', snippet: '', deleted: true });
+  });
+
+  it('retry sends a failed message again with the same client id, and it survives a restart', async () => {
+    const send = vi.spyOn(api, 'sendTextMessage').mockRejectedValueOnce(new Error('offline')).mockResolvedValue();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await sendMessage('try again');
+    const firstId = send.mock.calls[0][3];
+    expect(readOutbox().map((entry) => entry.client_msg_id)).toEqual([firstId]);
+
+    // "Restart": nothing in memory, the failed message comes back from storage.
+    setMessages([]);
+    vi.spyOn(api, 'fetchChannelMessages').mockResolvedValue({ channel_id: 'chat', has_more: false, messages: [] });
+    await selectChannel(channel);
+    expect(messages()).toMatchObject([{ content: 'try again', state: 'failed' }]);
+
+    await retryMessage(messages()[0].id);
+    expect(send.mock.calls[1][3]).toBe(firstId);
+    expect(messages()[0].state).toBe('sending');
+    handleIncomingMessage({ ...live('stored-after-retry', 'try again'), author_id: 'me', client_msg_id: firstId });
+    expect(messages().map((message) => message.id)).toEqual(['stored-after-retry']);
+    expect(readOutbox()).toEqual([]);
+  });
+
+  it('discarding a failed message removes it for good', async () => {
+    vi.spyOn(api, 'sendTextMessage').mockRejectedValue(new Error('offline'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await sendMessage('never mind');
+    discardFailed(messages()[0].id);
+    expect(messages()).toEqual([]);
+    expect(readOutbox()).toEqual([]);
+  });
+
+  it('a message stored by the server just before the connection dropped is not shown as failed', async () => {
+    vi.spyOn(api, 'sendTextMessage').mockRejectedValue(new Error('timeout'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await sendMessage('did it arrive?');
+    const clientMsgId = messages()[0].client_msg_id!;
+    setMessages([]);
+    vi.spyOn(api, 'fetchChannelMessages').mockResolvedValue({ channel_id: 'chat', has_more: false, messages: [
+      stored('persisted', 5, { author_id: 'me', content: 'did it arrive?', client_msg_id: clientMsgId }),
+    ] });
+    await selectChannel(channel);
+    expect(messages().map((message) => message.id)).toEqual(['persisted']);
+    expect(readOutbox()).toEqual([]);
+  });
+
+  it('scrolling up loads the next older page by cursor, without duplicates', async () => {
+    const fetch = vi.spyOn(api, 'fetchChannelMessages')
+      .mockResolvedValueOnce({ channel_id: 'chat', has_more: true, messages: [stored('m3', 3), stored('m4', 4)] })
+      .mockResolvedValueOnce({ channel_id: 'chat', has_more: false, messages: [stored('m1', 1), stored('m2', 2), stored('m3', 3)] });
+    await selectChannel(channel);
+    expect(hasMoreHistory()).toBe(true);
+    await loadOlder();
+    expect(fetch).toHaveBeenLastCalledWith('chat', undefined, 50, 'm3');
+    expect(messages().map((message) => message.id)).toEqual(['m1', 'm2', 'm3', 'm4']);
+    expect(hasMoreHistory()).toBe(false);
+    await loadOlder();
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });

@@ -119,12 +119,13 @@ export const api = {
     return resp.json();
   },
 
-  fetchChannelMessages: async (channelId: string, before?: number, limit?: number): Promise<MessageHistory> => {
+  fetchChannelMessages: async (channelId: string, before?: number, limit?: number, beforeId?: string): Promise<MessageHistory> => {
     if (isTauri()) {
-      return invoke('fetch_channel_messages', { channelId, before, limit });
+      return invoke('fetch_channel_messages', { channelId, before, beforeId, limit });
     }
     let url = `${browserServerUrl}/api/channels/${channelId}/messages?limit=${limit || 50}`;
     if (before) url += `&before=${before}`;
+    if (beforeId) url += `&before_id=${beforeId}`;
     const resp = await fetch(url, {
       headers: { Authorization: `Bearer ${browserToken}` },
     });
@@ -132,9 +133,9 @@ export const api = {
     return resp.json();
   },
 
-  sendTextMessage: async (channelId: string, content: string, attachments?: string[], clientMsgId?: string): Promise<void> => {
+  sendTextMessage: async (channelId: string, content: string, attachments?: string[], clientMsgId?: string, replyTo?: string): Promise<void> => {
     if (isTauri()) {
-      return invoke('send_text_message', { channelId, content, attachments, clientMsgId });
+      return invoke('send_text_message', { channelId, content, attachments, clientMsgId, replyTo });
     }
     // In browser environment, broadcast or notify
     console.info(`[Browser mode] Simulated message sent to ${channelId}: ${content}`);
@@ -157,6 +158,21 @@ export const api = {
   },
 
   /** The bytes of an attachment. */
+  markChannelRead: async (channelId: string, messageId: string): Promise<void> => {
+    if (isTauri()) {
+      return invoke('mark_channel_read', { channelId, messageId });
+    }
+  },
+
+  downloadThumb: async (id: string): Promise<ArrayBuffer> => {
+    if (isTauri()) {
+      return invoke('download_thumb', { id });
+    }
+    const resp = await fetch(`${browserServerUrl}/api/files/${id}/thumb`, { headers: { Authorization: `Bearer ${browserToken}` } });
+    if (!resp.ok) throw new Error(`Preview failed: ${resp.status}`);
+    return resp.arrayBuffer();
+  },
+
   downloadFile: async (id: string): Promise<ArrayBuffer> => {
     if (isTauri()) {
       return invoke('download_file', { id });

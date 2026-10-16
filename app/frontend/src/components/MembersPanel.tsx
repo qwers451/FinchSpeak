@@ -20,7 +20,7 @@ export function MembersPanel() {
   );
 
   return (
-    <aside class="members online-users" aria-label="Members">
+    <aside class="members" aria-label="Members">
       <span class="sec-label" style={{ padding: '0 8px 8px' }}>Online — {online().length}</span>
       <For each={online()}>{(user) => <Row user={user} />}</For>
       <Show when={offline().length > 0}>

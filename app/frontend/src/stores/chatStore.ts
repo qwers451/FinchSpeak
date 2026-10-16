@@ -3,17 +3,28 @@ import type { Channel, Message, IncomingMessage } from '../types';
 import { api } from '../services/api';
 import { currentUser } from './authStore';
 import { setAppError } from './notificationStore';
+import { outboxForChannel, removeFromOutbox, saveToOutbox, type OutboxEntry } from './outbox';
 
 export const [channels, setChannels] = createSignal<Channel[]>([]);
 export const [activeChannel, setActiveChannel] = createSignal<Channel | null>(null);
 export const [messages, setMessages] = createSignal<Message[]>([]);
 export const [chatLoading, setChatLoading] = createSignal<boolean>(false);
+/** Older messages exist on the server beyond the oldest one shown. */
+export const [hasMoreHistory, setHasMoreHistory] = createSignal<boolean>(false);
+export const [loadingOlder, setLoadingOlder] = createSignal<boolean>(false);
+/** The message the next sent message answers. */
+export const [replyingTo, setReplyingTo] = createSignal<Message | null>(null);
+
+export const HISTORY_PAGE = 50;
+export const MAX_MESSAGE_CHARS = 4000;
+
 let historyRequest = 0;
 const receivedMessageIds = new Set<string>();
 
+const isLocal = (id: string) => id.startsWith('local-');
+
 function chronological(items: Message[]) {
-  return items.sort((a, b) => a.timestamp - b.timestamp ||
-    (a.id.startsWith('local-') || b.id.startsWith('local-') ? 0 : a.id.localeCompare(b.id)));
+  return items.sort((a, b) => a.timestamp - b.timestamp || (isLocal(a.id) || isLocal(b.id) ? 0 : a.id.localeCompare(b.id)));
 }
 
 export function resetChatState() {
@@ -23,6 +34,9 @@ export function resetChatState() {
   setChannels([]);
   setMessages([]);
   setChatLoading(false);
+  setHasMoreHistory(false);
+  setLoadingOlder(false);
+  setReplyingTo(null);
 }
 
 export async function loadChannels() {
@@ -64,25 +78,49 @@ export function handleChannelDeleted(channelId: string) {
   }
 }
 
+function failedFromOutbox(entry: OutboxEntry): Message {
+  const user = currentUser();
+  return {
+    id: `local-${entry.client_msg_id}`,
+    channel_id: entry.channel_id,
+    author_id: user?.id || 'me',
+    author_name: user?.display_name || user?.username || 'You',
+    content: entry.content,
+    attachments: [],
+    timestamp: entry.timestamp,
+    client_msg_id: entry.client_msg_id,
+    state: 'failed',
+    failure: 'Not sent',
+  };
+}
+
 export async function selectChannel(channel: Channel) {
   const request = ++historyRequest;
   if (activeChannel()?.id !== channel.id) {
     setMessages([]);
     receivedMessageIds.clear();
+    setHasMoreHistory(false);
+    setReplyingTo(null);
   }
   setActiveChannel(channel);
   const isCurrent = () => request === historyRequest && activeChannel()?.id === channel.id;
   if (channel.channel_type === 'text') {
     setChatLoading(true);
     try {
-      const history = await api.fetchChannelMessages(channel.id, undefined, 50);
+      const history = await api.fetchChannelMessages(channel.id, undefined, HISTORY_PAGE);
       if (!isCurrent()) return;
       const historyMessages = history.messages.map((message) => ({ ...message, channel_id: channel.id }));
       const historyIds = new Set(historyMessages.map((message) => message.id));
       // Pending messages the server already stored (e.g. sent just before a reconnect).
       const stored = new Set(historyMessages.flatMap((message) => message.client_msg_id ? [`local-${message.client_msg_id}`] : []));
-      setMessages((previous) => chronological([...historyMessages,
-        ...previous.filter((message) => !historyIds.has(message.id) && !stored.has(message.id))]));
+      for (const message of historyMessages) if (message.client_msg_id) removeFromOutbox(message.client_msg_id);
+      const outbox = outboxForChannel(channel.id).map(failedFromOutbox);
+      setHasMoreHistory(history.has_more);
+      setMessages((previous) => {
+        const keep = previous.filter((message) => !historyIds.has(message.id) && !stored.has(message.id));
+        const keptIds = new Set(keep.map((message) => message.id));
+        return chronological([...historyMessages, ...keep, ...outbox.filter((message) => !keptIds.has(message.id) && !stored.has(message.id))]);
+      });
     } catch (err) {
       if (!isCurrent()) return;
       setAppError(String(err));
@@ -95,10 +133,55 @@ export async function selectChannel(channel: Channel) {
   }
 }
 
+/** Load the page of messages older than the oldest one shown (scrolling up). */
+export async function loadOlder() {
+  const channel = activeChannel();
+  if (!channel || loadingOlder() || !hasMoreHistory()) return;
+  const oldest = messages().find((message) => !isLocal(message.id));
+  if (!oldest) return;
+  setLoadingOlder(true);
+  const request = historyRequest;
+  try {
+    const page = await api.fetchChannelMessages(channel.id, undefined, HISTORY_PAGE, oldest.id);
+    if (request !== historyRequest || activeChannel()?.id !== channel.id) return;
+    const older = page.messages.map((message) => ({ ...message, channel_id: channel.id }));
+    setHasMoreHistory(page.has_more);
+    setMessages((previous) => {
+      const known = new Set(previous.map((message) => message.id));
+      return chronological([...older.filter((message) => !known.has(message.id)), ...previous]);
+    });
+  } catch (err) {
+    setAppError(String(err));
+  } finally {
+    setLoadingOlder(false);
+  }
+}
+
+function markFailed(pendingId: string, reason: string) {
+  setMessages((prev) => prev.map((message) => (message.id === pendingId ? { ...message, state: 'failed' as const, failure: reason } : message)));
+}
+
+async function deliver(pending: Message, attachmentIds: string[], replyToId: string | undefined) {
+  const clientMsgId = pending.client_msg_id!;
+  saveToOutbox({
+    client_msg_id: clientMsgId, channel_id: pending.channel_id, content: pending.content,
+    attachments: attachmentIds, reply_to: replyToId ?? null, timestamp: pending.timestamp,
+  });
+  try {
+    await api.sendTextMessage(pending.channel_id, pending.content, attachmentIds, clientMsgId, replyToId);
+  } catch (err) {
+    markFailed(pending.id, String(err));
+    setAppError(`Message not sent: ${String(err)}`);
+    console.error('Failed to send text message:', err);
+  }
+}
+
 export async function sendMessage(content: string, attachments?: string[]) {
   const current = activeChannel();
-  if (!current || !content.trim()) return;
+  const text = content.trim();
+  if (!current || !text) return;
   const user = currentUser();
+  const replied = replyingTo();
   // The server echoes this id in the stored message and in a rejection, so the pending message is
   // matched by id and never by its text.
   const clientMsgId = crypto.randomUUID();
@@ -107,24 +190,38 @@ export async function sendMessage(content: string, attachments?: string[]) {
     channel_id: current.id,
     author_id: user?.id || 'me',
     author_name: user?.display_name || user?.username || 'You',
-    content: content.trim(),
+    content: text,
     attachments: [],
     timestamp: Math.floor(Date.now() / 1000),
+    client_msg_id: clientMsgId,
+    state: 'sending',
+    reply_to: replied ? { message_id: replied.id, author_name: replied.author_name, snippet: replied.content.slice(0, 120) } : null,
   };
+  setReplyingTo(null);
   setMessages((prev) => [...prev, optimisticMsg]);
-  try {
-    await api.sendTextMessage(current.id, content.trim(), attachments, clientMsgId);
-  } catch (err) {
-    setMessages((prev) => prev.filter((message) => message.id !== optimisticMsg.id));
-    setAppError(String(err));
-    console.error('Failed to send text message:', err);
-  }
+  await deliver(optimisticMsg, attachments ?? [], replied?.id);
 }
 
-/** The server refused a message we sent: roll back exactly that one and say why. */
+/** Send a message that failed once more, with its original id. */
+export async function retryMessage(id: string) {
+  const message = messages().find((candidate) => candidate.id === id && candidate.state === 'failed');
+  if (!message?.client_msg_id) return;
+  const saved = outboxForChannel(message.channel_id).find((entry) => entry.client_msg_id === message.client_msg_id);
+  setMessages((prev) => prev.map((candidate) => (candidate.id === id ? { ...candidate, state: 'sending' as const, failure: undefined } : candidate)));
+  await deliver({ ...message, state: 'sending' }, saved?.attachments ?? [], saved?.reply_to ?? message.reply_to?.message_id);
+}
+
+/** Drop a message that was never sent. */
+export function discardFailed(id: string) {
+  const message = messages().find((candidate) => candidate.id === id);
+  if (message?.client_msg_id) removeFromOutbox(message.client_msg_id);
+  setMessages((prev) => prev.filter((candidate) => candidate.id !== id));
+}
+
+/** The server refused a message we sent: keep exactly that one, marked as not sent, and say why. */
 export function handleMessageRejected(rejection: { client_msg_id: string; code: number; message: string }) {
   const pendingId = `local-${rejection.client_msg_id}`;
-  setMessages((prev) => prev.filter((message) => message.id !== pendingId));
+  if (messages().some((message) => message.id === pendingId)) markFailed(pendingId, rejection.message);
   setAppError(`Message not sent: ${rejection.message}`);
 }
 
@@ -132,6 +229,7 @@ export function handleIncomingMessage(incoming: IncomingMessage | Message) {
   const msg: Message = 'message_id' in incoming
     ? (({ message_id, ...rest }) => ({ ...rest, id: message_id }))(incoming)
     : incoming;
+  if (msg.client_msg_id) removeFromOutbox(msg.client_msg_id);
   const current = activeChannel();
   if (current && msg.channel_id === current.id) {
     if (receivedMessageIds.has(msg.id)) return;
@@ -140,7 +238,7 @@ export function handleIncomingMessage(incoming: IncomingMessage | Message) {
       // By id when the server echoed one; by author and text only for servers that do not.
       const pendingIndex = msg.client_msg_id
         ? prev.findIndex((message) => message.id === `local-${msg.client_msg_id}`)
-        : prev.findIndex((message) => message.id.startsWith('local-') &&
+        : prev.findIndex((message) => isLocal(message.id) && message.state !== 'failed' &&
             message.author_id === msg.author_id && message.content === msg.content);
       const filtered = prev.filter((_, index) => index !== pendingIndex);
       return filtered.some((message) => message.id === msg.id) ? filtered : chronological([...filtered, msg]);
@@ -155,11 +253,21 @@ const updateMessage = (id: string, change: (message: Message) => Message) =>
 
 export function handleMessageEdited(edit: { message_id: string; content: string; edited_at: number }) {
   updateMessage(edit.message_id, (message) => ({ ...message, content: edit.content, edited_at: edit.edited_at }));
+  // A quote of the edited message follows it.
+  setMessages((previous) => previous.map((message) =>
+    message.reply_to?.message_id === edit.message_id && !message.reply_to.deleted
+      ? { ...message, reply_to: { ...message.reply_to, snippet: edit.content.replace(/\s+/g, ' ').slice(0, 120) } }
+      : message));
 }
 
 export function handleMessageDeleted(deleted: { message_id: string }) {
-  setMessages((previous) => previous.filter((message) => message.id !== deleted.message_id));
+  setMessages((previous) => previous
+    .filter((message) => message.id !== deleted.message_id)
+    .map((message) => message.reply_to?.message_id === deleted.message_id
+      ? { ...message, reply_to: { ...message.reply_to, author_name: '', snippet: '', deleted: true } }
+      : message));
   receivedMessageIds.delete(deleted.message_id);
+  if (replyingTo()?.id === deleted.message_id) setReplyingTo(null);
 }
 
 export function handleReactionChanged(change: { message_id: string; user_id: string; emoji: string; added: boolean }) {

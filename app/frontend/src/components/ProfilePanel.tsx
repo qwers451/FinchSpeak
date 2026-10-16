@@ -1,5 +1,5 @@
 import { Show, createSignal } from 'solid-js';
-import { currentUser } from '../stores/authStore';
+import { currentUser, logoutUser } from '../stores/authStore';
 import { profileMessage, profileOpen, savePassword, saveDisplayName, setProfileMessage, setProfileOpen } from '../stores/profileStore';
 
 /** Your own settings: display name and password. */
@@ -43,6 +43,9 @@ export function ProfilePanel() {
             <label>Again <input type="password" autocomplete="new-password" value={again()} onInput={(e) => setAgain(e.currentTarget.value)} /></label>
             <button type="submit" class="btn-primary">Change password</button>
           </form>
+
+          <h3>Session</h3>
+          <button type="button" class="btn-secondary" onClick={() => { close(); void logoutUser(); }}>Log out</button>
         </div>
       </div>
     </Show>
