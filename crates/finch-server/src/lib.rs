@@ -4,6 +4,7 @@
 
 pub mod api;
 pub mod backup;
+pub mod chat;
 pub mod config;
 pub mod db;
 pub mod error;

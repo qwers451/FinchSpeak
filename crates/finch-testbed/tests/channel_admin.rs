@@ -88,6 +88,7 @@ async fn deleting_a_text_channel_removes_it_with_its_messages() -> anyhow::Resul
         content: "bye".into(),
         attachments: vec![],
         client_msg_id: None,
+        reply_to: None,
     })
     .await?;
     alice

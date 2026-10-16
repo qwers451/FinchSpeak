@@ -10,11 +10,12 @@ use crate::api::auth::{ArcSharedState, AuthUser};
 use crate::error::ServerError;
 use crate::session::SessionManager;
 
-pub async fn state_handler(_auth: AuthUser, State(state): State<ArcSharedState>) -> Result<Json<ServerState>, ServerError> {
-    Ok(Json(server_state(&state.pool, &state.sessions).await?))
+pub async fn state_handler(auth: AuthUser, State(state): State<ArcSharedState>) -> Result<Json<ServerState>, ServerError> {
+    Ok(Json(server_state(&state.pool, &state.sessions, Some(auth.user_id)).await?))
 }
 
-pub async fn server_state(pool: &SqlitePool, sessions: &SessionManager) -> Result<ServerState, ServerError> {
+/// `for_user` adds the unread counts of that user.
+pub async fn server_state(pool: &SqlitePool, sessions: &SessionManager, for_user: Option<Uuid>) -> Result<ServerState, ServerError> {
     let rows = sqlx::query_as::<_, (String, i64, String, String, i64, Option<String>, i64)>(
         "SELECT id, short_id, name, channel_type, position, topic, bitrate_kbps FROM channels ORDER BY position, id",
     ).fetch_all(pool).await?;
@@ -53,5 +54,9 @@ pub async fn server_state(pool: &SqlitePool, sessions: &SessionManager) -> Resul
         let channel = channels.iter().find(|channel| Some(channel.short_id) == short_id)?;
         Some(VoiceState { user_id, peer_id, username, channel_id: channel.id, muted, deafened, sharing_screen })
     }).collect();
-    Ok(ServerState { channels, online_users, voice_states })
+    let unread = match for_user {
+        Some(user_id) => crate::chat::unread_for(pool, user_id).await?,
+        None => Vec::new(),
+    };
+    Ok(ServerState { channels, online_users, voice_states, unread })
 }

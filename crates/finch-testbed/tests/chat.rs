@@ -24,6 +24,7 @@ async fn message_broadcast_to_all() -> anyhow::Result<()> {
         content: "hello all".to_string(),
         attachments: vec![],
         client_msg_id: None,
+        reply_to: None,
     })
     .await?;
 
@@ -55,6 +56,7 @@ async fn history_persisted_in_order() -> anyhow::Result<()> {
             content: content.to_string(),
             attachments: vec![],
             client_msg_id: None,
+            reply_to: None,
         })
         .await?;
         a.expect_control(WAIT, |m| match m {
@@ -116,7 +118,7 @@ async fn invalid_messages_are_rejected_with_error() -> anyhow::Result<()> {
         (text_id, "x".repeat(4001)),
     ];
     for (channel_id, content) in cases {
-        a.send(ClientMessage::SendMessage { channel_id, content, attachments: vec![], client_msg_id: None }).await?;
+        a.send(ClientMessage::SendMessage { channel_id, content, attachments: vec![], client_msg_id: None, reply_to: None }).await?;
         a.expect_control(WAIT, |m| match m {
             ServerMessage::Error { code: 400, .. } => Some(()),
             _ => None,
@@ -136,7 +138,7 @@ async fn history_pages_by_message_id() -> anyhow::Result<()> {
     let mut a = TestClient::register(&server, "alice").await?;
     let (text_id, _) = a.channel(ChannelType::Text);
     for content in ["first", "second", "third"] {
-        a.send(ClientMessage::SendMessage { channel_id: text_id, content: content.to_string(), attachments: vec![], client_msg_id: None })
+        a.send(ClientMessage::SendMessage { channel_id: text_id, content: content.to_string(), attachments: vec![], client_msg_id: None, reply_to: None })
             .await?;
         a.expect_control(WAIT, |m| match m {
             ServerMessage::NewMessage { content: c, .. } if c == content => Some(()),
@@ -173,6 +175,7 @@ async fn rejection_names_the_rejected_message() -> anyhow::Result<()> {
             content: "same text".to_string(),
             attachments: vec![],
             client_msg_id: Some(id),
+            reply_to: None,
         })
         .await?;
     }
@@ -206,6 +209,7 @@ async fn client_message_id_is_echoed_stored_and_idempotent() -> anyhow::Result<(
         content: content.to_string(),
         attachments: vec![],
         client_msg_id: Some(id),
+        reply_to: None,
     };
     a.send(send("once")).await?;
     for client in [&mut a, &mut b] {

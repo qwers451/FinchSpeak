@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::models::{
-    AttachmentInfo, Channel, ChannelMapping, HistoryMessage, ServerState, UserStatus, VideoCodec,
+    AttachmentInfo, Channel, ChannelMapping, HistoryMessage, ReplyRef, ServerState, UserStatus, VideoCodec,
 };
 
 // ─── Client → Server ────────────────────────────────────────────────────────
@@ -52,6 +52,9 @@ pub enum ClientMessage {
         /// id the sender already used is not stored or broadcast again.
         #[serde(default)]
         client_msg_id: Option<Uuid>,
+        /// The message this one answers (same channel).
+        #[serde(default)]
+        reply_to: Option<Uuid>,
     },
 
     /// Request chat message history for a channel.
@@ -128,6 +131,11 @@ pub enum ServerMessage {
         /// The id the author gave this message, if any.
         #[serde(default)]
         client_msg_id: Option<Uuid>,
+        #[serde(default)]
+        reply_to: Option<ReplyRef>,
+        /// Users the text mentions with `@login`, so clients can notify without opening the channel.
+        #[serde(default)]
+        mentions: Vec<Uuid>,
     },
 
     /// A [`ClientMessage::SendMessage`] that carried a `client_msg_id` was refused. Without an

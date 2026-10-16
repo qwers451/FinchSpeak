@@ -22,7 +22,7 @@ fn status(error: &ClientError) -> Option<u16> {
 async fn post(author: &TestClient, watcher: &mut TestClient) -> anyhow::Result<(Uuid, Uuid)> {
     let (channel, _) = author.channel(ChannelType::Text);
     author
-        .send(ClientMessage::SendMessage { channel_id: channel, content: "original".into(), attachments: vec![], client_msg_id: None })
+        .send(ClientMessage::SendMessage { channel_id: channel, content: "original".into(), attachments: vec![], client_msg_id: None, reply_to: None })
         .await?;
     let id = watcher
         .expect_control(WAIT, |m| match m {

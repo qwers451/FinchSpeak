@@ -82,6 +82,8 @@ pub fn run() {
             commands::auth::get_session_snapshot,
             commands::auth::trust_fingerprint,
             commands::auth::forget_server_fingerprint,
+            commands::chat::mark_channel_read,
+            commands::chat::download_thumb,
             // Chat
             commands::chat::list_channels,
             commands::chat::create_channel,

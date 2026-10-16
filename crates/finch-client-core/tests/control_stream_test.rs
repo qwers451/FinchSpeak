@@ -33,7 +33,7 @@ async fn run_corrupting_server(endpoint: quinn::Endpoint) -> anyhow::Result<()> 
         user_id: uuid::Uuid::new_v4(),
         session_peer_id: 1001,
         channels: vec![],
-        initial_state: ServerState { channels: vec![], online_users: vec![], voice_states: vec![] },
+        initial_state: ServerState { channels: vec![], online_users: vec![], voice_states: vec![], unread: vec![] },
     };
     send.write_all(&encode_message(&ack)?).await?;
     // Length prefix 4, then 4 bytes that are not a valid ServerMessage.

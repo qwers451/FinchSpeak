@@ -176,6 +176,7 @@ async fn control_events_survive_datagram_flood() -> anyhow::Result<()> {
             channel_id: text_id,
             content: "after flood".to_string(),
             attachments: vec![],
+            reply_to: None,
         })
         .await?;
 

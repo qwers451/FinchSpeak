@@ -67,6 +67,7 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
             axum::routing::put(messages::add_reaction_handler).delete(messages::remove_reaction_handler),
         )
         // Messages history routes
+        .route("/api/channels/{channel_id}/read", post(channels::mark_read_handler))
         .route(
             "/api/channels/{channel_id}/messages",
             get(messages::channel_messages_handler),
@@ -77,6 +78,7 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
             post(files::upload_file_handler).layer(DefaultBodyLimit::max(upload_limit)),
         )
         .route("/api/files/{id}", get(files::download_file_handler))
+        .route("/api/files/{id}/thumb", get(files::download_thumb_handler))
         .layer(cors)
         .with_state(shared_state)
 }

@@ -104,9 +104,27 @@ pub async fn upload_file_handler(
             .unwrap_or_default()
             .as_secs() as i64;
 
+        // Images get a preview; anything that does not decode stays a plain file.
+        let preview = if content_type.starts_with("image/") {
+            let bytes = data.clone();
+            tokio::task::spawn_blocking(move || crate::chat::make_thumbnail(&bytes)).await.ok().flatten()
+        } else {
+            None
+        };
+        let (width, height, thumb_path) = match preview {
+            Some((width, height, thumb)) => {
+                let thumb_file = upload_dir.join(format!("{attachment_id}.thumb"));
+                match fs::write(&thumb_file, &thumb).await {
+                    Ok(()) => (Some(width), Some(height), Some(thumb_file.to_string_lossy().to_string())),
+                    Err(_) => (Some(width), Some(height), None),
+                }
+            }
+            None => (None, None, None),
+        };
+
         sqlx::query(
-            "INSERT INTO attachments (id, uploader_id, filename, size_bytes, content_type, storage_path, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO attachments (id, uploader_id, filename, size_bytes, content_type, storage_path, created_at, width, height, thumb_path)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(attachment_id.to_string())
         .bind(auth.user_id.to_string())
@@ -115,6 +133,9 @@ pub async fn upload_file_handler(
         .bind(&content_type)
         .bind(file_path.to_string_lossy().to_string())
         .bind(now)
+        .bind(width.map(i64::from))
+        .bind(height.map(i64::from))
+        .bind(&thumb_path)
         .execute(&state.pool)
         .await?;
 
@@ -124,6 +145,9 @@ pub async fn upload_file_handler(
             size_bytes: data.len() as u64,
             content_type,
             url: format!("/api/files/{}", attachment_id),
+            width,
+            height,
+            has_thumb: thumb_path.is_some(),
         };
 
         return Ok((StatusCode::CREATED, Json(info)));
@@ -164,5 +188,25 @@ pub async fn download_file_handler(
     headers.insert(CONTENT_TYPE, content_type_header);
     headers.insert(CONTENT_DISPOSITION, disposition_header);
 
+    Ok((headers, data))
+}
+
+/// Handler for GET /api/files/:id/thumb: the 320 px preview of an image attachment.
+pub async fn download_thumb_handler(
+    _auth: AuthUser,
+    Path(file_id_str): Path<String>,
+    State(state): State<ArcSharedState>,
+) -> Result<impl IntoResponse, ServerError> {
+    let path: Option<String> = sqlx::query_scalar("SELECT thumb_path FROM attachments WHERE id = ?")
+        .bind(&file_id_str)
+        .fetch_optional(&state.pool)
+        .await?
+        .flatten();
+    let path = path.ok_or_else(|| ServerError::NotFound("No preview for this file".to_string()))?;
+    let data = fs::read(&path).await.map_err(|_| ServerError::NotFound("Preview not found on disk".to_string()))?;
+    let content_type = if data.starts_with(&[0x89, b'P', b'N', b'G']) { "image/png" } else { "image/jpeg" };
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
+    headers.insert("X-Content-Type-Options", HeaderValue::from_static("nosniff"));
     Ok((headers, data))
 }

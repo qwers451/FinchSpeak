@@ -425,6 +425,22 @@ impl ApiClient {
         parse_json(self.send(req).await?).await
     }
 
+    /// Tell the server how far you have read `channel_id` (only moves forward).
+    pub async fn mark_read(&self, channel_id: Uuid, message_id: Uuid) -> Result<(), ClientError> {
+        let req = self
+            .authorized(self.http.post(self.url(&format!("/api/channels/{channel_id}/read"))))
+            .json(&serde_json::json!({ "message_id": message_id }));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
+    /// The 320 px preview of an image attachment.
+    pub async fn download_thumb(&self, id: Uuid) -> Result<Bytes, ClientError> {
+        let req = self.authorized(self.http.get(self.url(&format!("/api/files/{id}/thumb"))));
+        let resp = check_status(self.send(req).await?).await?;
+        Ok(resp.bytes().await?)
+    }
+
     pub async fn download_file(&self, id: Uuid) -> Result<Bytes, ClientError> {
         let req = self.authorized(self.http.get(self.url(&format!("/api/files/{id}"))));
         let resp = check_status(self.send(req).await?).await?;

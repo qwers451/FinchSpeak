@@ -62,6 +62,7 @@ async fn attachments_are_delivered_and_cannot_be_stolen() -> anyhow::Result<()> 
         channel_id: text_id,
         content: "look".to_string(),
         attachments: vec![file.id],
+        reply_to: None,
     })
     .await?;
     let delivered = b
@@ -78,6 +79,7 @@ async fn attachments_are_delivered_and_cannot_be_stolen() -> anyhow::Result<()> 
         channel_id: text_id,
         content: "mine now".to_string(),
         attachments: vec![file.id],
+        reply_to: None,
     })
     .await?;
     a.expect_control(WAIT, |m| match m {

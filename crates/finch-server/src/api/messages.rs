@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use axum::Json;
-use finch_protocol::models::{AttachmentInfo, HistoryMessage, ReactionInfo};
+use finch_protocol::models::{HistoryMessage, ReactionInfo};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -47,7 +47,7 @@ pub async fn channel_messages_handler(
 
     // Fetch messages with author display_name
     let mut rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<i64>, i64, Option<String>)>(
-        "SELECT m.id, m.author_id, u.display_name, m.content, m.reply_to_id, m.edited_at, m.created_at, m.client_msg_id
+        "SELECT m.id, m.author_id, u.display_name, m.content, m.reply_ref, m.edited_at, m.created_at, m.client_msg_id
          FROM messages m
          JOIN users u ON m.author_id = u.id
          WHERE m.channel_id = ? AND m.created_at < ?
@@ -66,38 +66,11 @@ pub async fn channel_messages_handler(
     let has_more = rows.len() > limit as usize;
     rows.truncate(limit as usize);
     let mut messages: Vec<HistoryMessage> = Vec::with_capacity(rows.len());
-    let mut attachments_by_message: HashMap<String, Vec<AttachmentInfo>> = HashMap::new();
-
-    if !rows.is_empty() {
-        // Load only the selected page, excluding the has_more lookahead row.
-        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-            "SELECT message_id, id, filename, size_bytes, content_type FROM attachments WHERE message_id IN (",
-        );
-        let mut ids = query.separated(", ");
-        for row in &rows {
-            ids.push_bind(&row.0);
-        }
-        ids.push_unseparated(")");
-        // Preserve the insertion order of the previous per-message table scans.
-        query.push(" ORDER BY rowid");
-        let attach_rows = query
-            .build_query_as::<(String, String, String, i64, String)>()
-            .fetch_all(&state.pool)
-            .await?;
-
-        for (message_id, att_id, filename, size_bytes, content_type) in attach_rows {
-            attachments_by_message
-                .entry(message_id)
-                .or_default()
-                .push(AttachmentInfo {
-                    id: Uuid::parse_str(&att_id).unwrap_or_default(),
-                    url: format!("/api/files/{att_id}"),
-                    filename,
-                    size_bytes: size_bytes as u64,
-                    content_type,
-                });
-        }
-    }
+    let page_ids: Vec<String> = rows.iter().map(|row| row.0.clone()).collect();
+    let mut attachments_by_message = crate::chat::attachments_for(&state.pool, &page_ids).await?;
+    let mut mentions_by_message = crate::chat::mentions_for(&state.pool, &page_ids).await?;
+    let references: Vec<(String, String)> = rows.iter().filter_map(|row| row.4.clone().map(|reference| (row.0.clone(), reference))).collect();
+    let mut quotes_by_message = crate::chat::reply_refs_for(&state.pool, &references).await;
 
     // Reactions of the selected page, in the order they were added.
     let mut reactions_by_message: HashMap<String, Vec<ReactionInfo>> = HashMap::new();
@@ -122,7 +95,7 @@ pub async fn channel_messages_handler(
     }
 
     for row in rows {
-        let (id_str, author_id_str, author_name, content, _reply_to_id, edited_at, timestamp, client_msg_id) = row;
+        let (id_str, author_id_str, author_name, content, _reply_ref, edited_at, timestamp, client_msg_id) = row;
 
         let msg_id = Uuid::parse_str(&id_str).unwrap_or_default();
         let author_id = Uuid::parse_str(&author_id_str).unwrap_or_default();
@@ -139,6 +112,8 @@ pub async fn channel_messages_handler(
             edited_at,
             client_msg_id: client_msg_id.and_then(|id| Uuid::parse_str(&id).ok()),
             reactions,
+            reply_to: quotes_by_message.remove(&id_str),
+            mentions: mentions_by_message.remove(&id_str).unwrap_or_default(),
         });
     }
 

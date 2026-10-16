@@ -305,3 +305,37 @@ impl From<&Channel> for ChannelDto {
         }
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct MarkReadRequest {
+    pub message_id: Uuid,
+}
+
+/// POST /api/channels/{id}/read: remember how far the caller has read; it only moves forward.
+pub async fn mark_read_handler(
+    auth: AuthUser,
+    State(state): State<ArcSharedState>,
+    Path(channel_id): Path<Uuid>,
+    Json(request): Json<MarkReadRequest>,
+) -> Result<StatusCode, ServerError> {
+    let message = sqlx::query_as::<_, (String, i64)>("SELECT id, created_at FROM messages WHERE id = ? AND channel_id = ?")
+        .bind(request.message_id.to_string())
+        .bind(channel_id.to_string())
+        .fetch_optional(&state.pool)
+        .await?;
+    let Some((message_id, created_at)) = message else {
+        return Err(ServerError::BadRequest("That message is not in this channel".into()));
+    };
+    sqlx::query(
+        "INSERT INTO read_state (user_id, channel_id, last_read_id, last_read_at) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(user_id, channel_id) DO UPDATE SET last_read_id = excluded.last_read_id, last_read_at = excluded.last_read_at
+         WHERE (excluded.last_read_at, excluded.last_read_id) > (read_state.last_read_at, read_state.last_read_id)",
+    )
+    .bind(auth.user_id.to_string())
+    .bind(channel_id.to_string())
+    .bind(message_id)
+    .bind(created_at)
+    .execute(&state.pool)
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}

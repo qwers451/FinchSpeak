@@ -21,6 +21,7 @@ async fn live_messages_carry_the_display_name() -> anyhow::Result<()> {
         content: "hi".into(),
         attachments: vec![],
         client_msg_id: None,
+        reply_to: None,
     })
     .await?;
 

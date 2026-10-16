@@ -230,6 +230,8 @@ fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
             attachments,
             timestamp,
             client_msg_id,
+            reply_to,
+            mentions,
         } => {
             let _ = app_handle.emit(
                 "new-message",
@@ -242,6 +244,8 @@ fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
                     "attachments": attachments,
                     "timestamp": timestamp,
                     "client_msg_id": client_msg_id,
+                    "reply_to": reply_to,
+                    "mentions": mentions,
                 }),
             );
         }

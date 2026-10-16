@@ -234,7 +234,7 @@ pub async fn handle_connection(
     let (control_tx, mut control_rx) = mpsc::channel::<ServerMessage>(128);
 
     // 5. Build Initial Server State
-    let initial_state = crate::api::state::server_state(&pool, &sessions).await?;
+    let initial_state = crate::api::state::server_state(&pool, &sessions, Uuid::parse_str(&claims.sub).ok()).await?;
     let mut channel_mappings = Vec::new();
     for channel in &initial_state.channels {
         channel_mappings.push(ChannelMapping { id: channel.id, short_id: channel.short_id });
@@ -410,25 +410,11 @@ pub async fn handle_connection(
 
 /// Attachments linked to a message, in the shape clients receive them.
 async fn linked_attachments(pool: &SqlitePool, message_id: Uuid) -> Vec<AttachmentInfo> {
-    let rows = sqlx::query_as::<_, (String, String, i64, String)>(
-        "SELECT id, filename, size_bytes, content_type FROM attachments WHERE message_id = ? ORDER BY created_at",
-    )
-    .bind(message_id.to_string())
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
-    rows.into_iter()
-        .filter_map(|(id, filename, size_bytes, content_type)| {
-            let uuid = Uuid::parse_str(&id).ok()?;
-            Some(AttachmentInfo {
-                id: uuid,
-                url: format!("/api/files/{id}"),
-                filename,
-                size_bytes: size_bytes as u64,
-                content_type,
-            })
-        })
-        .collect()
+    crate::chat::attachments_for(pool, &[message_id.to_string()])
+        .await
+        .unwrap_or_default()
+        .remove(&message_id.to_string())
+        .unwrap_or_default()
 }
 
 /// If `peer_id` is sharing its screen, clear that and tell the voice room `short_id`.
@@ -508,6 +494,7 @@ async fn handle_client_message(
             content,
             attachments,
             client_msg_id,
+            reply_to,
         } => {
             let content = content.trim().to_string();
             if content.is_empty() || content.chars().count() > MAX_MESSAGE_CHARS {
@@ -532,6 +519,20 @@ async fn handle_client_message(
                 return;
             }
 
+            // A reply must answer a message of the same channel.
+            if let Some(original) = reply_to {
+                let same_channel: Option<i64> = sqlx::query_scalar("SELECT 1 FROM messages WHERE id = ? AND channel_id = ?")
+                    .bind(original.to_string())
+                    .bind(channel_id.to_string())
+                    .fetch_optional(pool)
+                    .await
+                    .unwrap_or(None);
+                if same_channel.is_none() {
+                    reject_message(sessions, peer_id, client_msg_id, 400, "The message you reply to no longer exists".to_string()).await;
+                    return;
+                }
+            }
+
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -541,7 +542,7 @@ async fn handle_client_message(
             let message_id = Uuid::now_v7();
 
             let res = sqlx::query(
-                "INSERT INTO messages (id, channel_id, author_id, content, created_at, client_msg_id) VALUES (?, ?, ?, ?, ?, ?)"
+                "INSERT INTO messages (id, channel_id, author_id, content, created_at, client_msg_id, reply_ref) VALUES (?, ?, ?, ?, ?, ?, ?)"
             )
             .bind(message_id.to_string())
             .bind(channel_id.to_string())
@@ -549,6 +550,7 @@ async fn handle_client_message(
             .bind(&content)
             .bind(now)
             .bind(client_msg_id.map(|id| id.to_string()))
+            .bind(reply_to.map(|id| id.to_string()))
             .execute(pool)
             .await;
 
@@ -576,6 +578,18 @@ async fn handle_client_message(
                     .await;
                 }
                 let linked = linked_attachments(pool, message_id).await;
+                let mentions = crate::chat::resolve_mentions(pool, &content).await;
+                for mentioned in &mentions {
+                    let _ = sqlx::query("INSERT OR IGNORE INTO message_mentions (message_id, user_id) VALUES (?, ?)")
+                        .bind(message_id.to_string())
+                        .bind(mentioned.to_string())
+                        .execute(pool)
+                        .await;
+                }
+                let quote = match reply_to {
+                    Some(original) => Some(crate::chat::reply_ref(pool, original).await),
+                    None => None,
+                };
 
                 // Broadcast NewMessage to all connected users
                 let new_msg = ServerMessage::NewMessage {
@@ -587,6 +601,8 @@ async fn handle_client_message(
                     attachments: linked,
                     timestamp: now,
                     client_msg_id,
+                    reply_to: quote,
+                    mentions,
                 };
                 sessions.broadcast_all(new_msg).await;
             }

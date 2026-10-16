@@ -67,6 +67,37 @@ pub struct AttachmentInfo {
     pub size_bytes: u64,
     pub content_type: String,
     pub url: String,
+    /// Pixel size of an image attachment.
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    /// A 320 px preview exists at `{url}/thumb`.
+    #[serde(default)]
+    pub has_thumb: bool,
+}
+
+/// The message a reply answers, in the shape the client shows above the reply.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReplyRef {
+    pub message_id: Uuid,
+    pub author_name: String,
+    /// The first 120 characters of the original.
+    pub snippet: String,
+    /// The original was deleted; `author_name` and `snippet` are empty then.
+    #[serde(default)]
+    pub deleted: bool,
+}
+
+/// Unread state of one channel for the signed-in user.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChannelUnread {
+    pub channel_id: Uuid,
+    pub count: u32,
+    /// Of those, how many mention the user.
+    pub mentions: u32,
+    /// The oldest unread message: where the "New messages" divider goes.
+    pub first_unread_id: Option<Uuid>,
 }
 
 /// A chat message from history.
@@ -85,6 +116,11 @@ pub struct HistoryMessage {
     /// Emoji reactions, one entry per emoji.
     #[serde(default)]
     pub reactions: Vec<ReactionInfo>,
+    #[serde(default)]
+    pub reply_to: Option<ReplyRef>,
+    /// Users the text mentions with `@login`.
+    #[serde(default)]
+    pub mentions: Vec<Uuid>,
 }
 
 /// Who reacted to a message with one emoji.
@@ -122,4 +158,7 @@ pub struct ServerState {
     pub online_users: Vec<User>,
     /// Users currently in voice channels.
     pub voice_states: Vec<VoiceState>,
+    /// Unread messages per channel for the user who asks (empty when read or unknown).
+    #[serde(default)]
+    pub unread: Vec<ChannelUnread>,
 }

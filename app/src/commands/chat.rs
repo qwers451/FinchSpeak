@@ -47,16 +47,18 @@ pub async fn create_channel(
 pub async fn fetch_channel_messages(
     channel_id: String,
     before: Option<i64>,
+    before_id: Option<String>,
     limit: Option<u32>,
     state: State<'_, AppState>,
 ) -> Result<MessagesHistoryDto, String> {
     let ch_uuid = Uuid::parse_str(&channel_id)
         .map_err(|e| format!("Invalid channel UUID: {}", e))?;
-    api_client(&state)
-        .await?
-        .fetch_messages(ch_uuid, before, limit.unwrap_or(50))
-        .await
-        .map_err(|e| format!("Failed to fetch messages: {}", e))
+    let api = api_client(&state).await?;
+    let result = match before_id {
+        Some(id) => api.fetch_messages_page(ch_uuid, Some(parse_id(&id)?), limit.unwrap_or(50)).await,
+        None => api.fetch_messages(ch_uuid, before, limit.unwrap_or(50)).await,
+    };
+    result.map_err(|e| format!("Failed to fetch messages: {}", e))
 }
 
 #[tauri::command]
@@ -65,6 +67,7 @@ pub async fn send_text_message(
     content: String,
     attachments: Option<Vec<String>>,
     client_msg_id: Option<String>,
+    reply_to: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let ch_uuid = Uuid::parse_str(&channel_id)
@@ -72,6 +75,8 @@ pub async fn send_text_message(
     let client_msg_id = client_msg_id
         .map(|id| Uuid::parse_str(&id).map_err(|e| format!("Invalid message id: {}", e)))
         .transpose()?;
+
+    let reply_to = reply_to.map(|id| parse_id(&id)).transpose()?;
 
     let attach_uuids: Vec<Uuid> = attachments
         .unwrap_or_default()
@@ -87,6 +92,7 @@ pub async fn send_text_message(
         content,
         attachments: attach_uuids,
         client_msg_id,
+        reply_to,
     })
     .await
     .map_err(|e| format!("Failed to queue message: {}", e))?;
@@ -107,6 +113,21 @@ pub async fn upload_file(
         .upload_file(&filename, data, &content_type)
         .await
         .map_err(|e| format!("File upload failed: {}", e))
+}
+
+#[tauri::command]
+pub async fn mark_channel_read(channel_id: String, message_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    api_client(&state).await?.mark_read(parse_id(&channel_id)?, parse_id(&message_id)?).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn download_thumb(id: String, state: State<'_, AppState>) -> Result<tauri::ipc::Response, String> {
+    let bytes = api_client(&state)
+        .await?
+        .download_thumb(parse_id(&id)?)
+        .await
+        .map_err(|e| format!("Preview failed: {}", e))?;
+    Ok(tauri::ipc::Response::new(bytes.to_vec()))
 }
 
 #[tauri::command]

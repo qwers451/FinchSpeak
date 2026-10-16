@@ -267,6 +267,7 @@ async fn test_full_system_autotest() -> anyhow::Result<()> {
         channel_id: general_uuid,
         content: test_content.to_string(),
         attachments: vec![],
+        reply_to: None,
     };
     alice_send.write_all(&encode_message(&send_msg)?).await?;
 

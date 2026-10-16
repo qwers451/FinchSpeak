@@ -37,7 +37,7 @@ async fn a_new_display_name_reaches_everyone_and_later_messages() -> anyhow::Res
     // Messages and voice presence use the new name without reconnecting.
     let (channel, _) = alice.channel(ChannelType::Text);
     alice
-        .send(ClientMessage::SendMessage { channel_id: channel, content: "hi".into(), attachments: vec![], client_msg_id: None })
+        .send(ClientMessage::SendMessage { channel_id: channel, content: "hi".into(), attachments: vec![], client_msg_id: None, reply_to: None })
         .await?;
     let author = bob
         .expect_control(WAIT, |m| match m {

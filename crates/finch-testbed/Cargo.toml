@@ -32,3 +32,4 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 serde_json = { workspace = true }
 openh264 = "0.6"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
