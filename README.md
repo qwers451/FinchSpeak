@@ -1,8 +1,9 @@
 # FinchSpeak
 
-Версия 1.0.0 подготовлена для приёмки на двух ПК. Скачать установщик клиента,
+Windows-выпуск подготовлен для приёмки на двух ПК. Скачать установщик клиента,
 серверный ZIP или portable-пакет: [GitHub Releases](https://github.com/qwers451/FinchSpeak/releases).
-Результаты проверок: [RELEASE-VALIDATION](docs/RELEASE-VALIDATION.md).
+Повторная проверка запуска и упаковки: [QA-1.0.1](docs/QA-1.0.1.md).
+Исходная проверка клиента и медиасценариев: [RELEASE-VALIDATION](docs/RELEASE-VALIDATION.md).
 Проверки владельца: [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md).
 
 <p align="center">
