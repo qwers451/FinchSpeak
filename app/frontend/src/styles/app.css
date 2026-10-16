@@ -1,0 +1,30 @@
+/* Base and app-level rules on top of the design tokens/components in finch.css. */
+html, body, #root { height: 100%; margin: 0; }
+body { overflow: hidden; user-select: none; background: var(--bg-app); color: var(--text); font-family: var(--font-ui); }
+input, textarea, [contenteditable] { user-select: text; }
+.shell { display: flex; flex-direction: column; width: 100vw; height: 100vh; }
+
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+
+.overlay { position: fixed; inset: 0; z-index: 50; background: rgba(5, 8, 15, .72); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.modal { max-width: 100%; max-height: 100%; overflow: auto; padding: 24px; }
+.modal-title { margin: 0 0 16px; font: 800 20px/26px var(--font-head); }
+
+.toast-host { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: flex; flex-direction: column; gap: 8px; width: 340px; max-width: calc(100vw - 32px); }
+.link-btn { background: none; border: 0; padding: 0; margin-top: 4px; align-self: flex-start; color: var(--yellow); font: 700 13px var(--font-ui); cursor: pointer; }
+.icon-close { background: none; border: 0; color: var(--text-3); cursor: pointer; padding: 2px; border-radius: 6px; }
+.icon-close:hover { color: var(--text); background: var(--bg-hover); }
+.titlebar .wc button { width: 46px; height: 32px; display: flex; align-items: center; justify-content: center; color: var(--text-2); background: none; border: 0; cursor: pointer; }
+.titlebar .wc button:hover { background: var(--bg-hover); }
+.titlebar .wc button.close:hover { background: var(--red); color: var(--bg-app); }
+
+/* Native range input, filled up to --fill. */
+input.range { -webkit-appearance: none; appearance: none; width: 100%; height: 20px; background: transparent; margin: 0; cursor: pointer; --track: var(--yellow); }
+input.range.cool { --track: var(--cyan); }
+input.range::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(to right, var(--track) var(--fill, 0%), var(--bg-hover) var(--fill, 0%)); }
+input.range::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -5px; border-radius: 50%; background: #fff; border: 3px solid var(--track); }
+input.range:focus-visible { outline: none; }
+input.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgba(255, 194, 14, .35); }
+input.range:disabled { opacity: .45; cursor: not-allowed; }
