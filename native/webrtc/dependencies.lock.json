@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "upstream": "PulseAudio standalone original C++ WebRTC M131, release 2.1",
+  "route": "upstream Meson static libraries, narrow C ABI DLL with private static CRT",
+  "wrapperRevision": "c14d7af1760baff83e8210fee336a0cae0faaa7d",
+  "upstreamRevision": "d0569cfa50c1858ee279d77b3fc8870be6902441",
+  "python": "3.13.3",
+  "meson": "1.9.1",
+  "ninja": "1.13.0",
+  "compiler": "MSVC cl.exe, x64; actual compiler/SDK/CRT identity recorded per build",
+  "crt": "MT inside native DLL and native probe; Rust uses its existing CRT; no C++ ownership crosses DLL",
+  "downloads": [
+    {
+      "file": "webrtc-sys.crate",
+      "url": "https://static.crates.io/crates/webrtc-audio-processing-sys/webrtc-audio-processing-sys-2.1.0.crate",
+      "sha256": "f8f6c2b4b20a03b165378172f0dbe23c49b2630b70091026589afbe04e79cd3e"
+    },
+    {
+      "file": "abseil-cpp-20240722.0.tar.gz",
+      "url": "https://github.com/abseil/abseil-cpp/releases/download/20240722.0/abseil-cpp-20240722.0.tar.gz",
+      "sha256": "f50e5ac311a81382da7fa75b97310e4b9006474f9560ac46f54a9967f07d4ae3"
+    },
+    {
+      "file": "abseil-cpp_20240722.0-3_patch.zip",
+      "url": "https://wrapdb.mesonbuild.com/v2/abseil-cpp_20240722.0-3/get_patch",
+      "sha256": "12dd8df1488a314c53e3751abd2750cf233b830651d168b6a9f15e7d0cf71f7b"
+    },
+    {
+      "file": "meson-1.9.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/9c/07/b48592d325cb86682829f05216e4efb2dc881762b8f1bafb48b57442307a/meson-1.9.1-py3-none-any.whl",
+      "sha256": "f824ab770c041a202f532f69e114c971918ed2daff7ea56583d80642564598d0"
+    },
+    {
+      "file": "ninja-1.13.0-py3-none-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/29/45/c0adfbfb0b5895aa18cec400c535b4f7ff3e52536e0403602fc1a23f7de9/ninja-1.13.0-py3-none-win_amd64.whl",
+      "sha256": "fb8ee8719f8af47fed145cced4a85f0755dd55d45b2bddaf7431fa89803c5f3e"
+    }
+  ]
+}

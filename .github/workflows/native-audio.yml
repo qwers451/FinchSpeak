@@ -1,0 +1,47 @@
+name: Native audio
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/voice-enhancement']
+    paths: ['native/webrtc/**', 'scripts/prepare-webrtc.ps1', '.github/workflows/native-audio.yml']
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.3'
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - uses: actions/cache@v4
+        with:
+          path: target/native-cache
+          key: native-v1-${{ runner.os }}-${{ hashFiles('native/webrtc/dependencies.lock.json', 'scripts/prepare-webrtc.ps1', 'native/webrtc/meson.build') }}
+      - name: Original WebRTC release probe
+        shell: pwsh
+        run: ./scripts/prepare-webrtc.ps1 -Configuration Release
+      - name: Original WebRTC debug probe
+        shell: pwsh
+        run: ./scripts/prepare-webrtc.ps1 -Configuration Debug -Offline
+      - name: Offline warm cache and runtime without developer PATH
+        shell: pwsh
+        run: |
+          ./scripts/prepare-webrtc.ps1 -Configuration Release -Offline
+          $savedPath = $env:PATH
+          try {
+            $env:PATH = "$env:SystemRoot\System32"
+            & ./target/native/Release/finch-webrtc-probe.exe
+            if ($LASTEXITCODE -ne 0) { throw 'Native probe requires developer runtime' }
+          } finally { $env:PATH = $savedPath }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-provenance
+          path: |
+            target/native/*/provenance.json
+            target/native-cache/*/meson-logs/meson-log.txt
