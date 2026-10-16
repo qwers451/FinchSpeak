@@ -45,3 +45,5 @@ pub use resampler::{InputResampler, OutputResampler, FRAME_SIZE_48K, INTERNAL_SA
 pub use speech::SpeechClassifier;
 pub use vad::DEFAULT_VAD_THRESHOLD_DB;
 pub use vad::{VadDecision, VadMode, VoiceActivityDetector};
+
+pub mod dynamics;
