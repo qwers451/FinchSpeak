@@ -60,6 +60,12 @@ voice 294294/294294 (100%), video 18036/18036 (100%), chat 5000/5000;
 chat p50/p95/max 20/63/68 ms; zero disconnects; whole-process RSS 48 MB;
 CPU average/max 109%/272% of one core. Same localhost/synthetic-payload limits apply.
 
+Final jitter correction (2026-10-16): signed timestamp deltas for reordered
+packets and preserving missing PLC slots unless a real backlog is trimmed.
+Netem 5% loss / 0–60 ms jitter: probe latencies 96.44 / 96.42 / 96.44 ms,
+maximum buffer 5 packets, longest silent run 0 frames, 268/284 received.
+The three probe matching checks and the 200 ms / six-packet limits are unchanged.
+
 ## Voice under loss and jitter: made repeatable (stage 7)
 
 The test failed in about 1 of 3 runs because the loss pattern still depended on connection set-up timing and on how

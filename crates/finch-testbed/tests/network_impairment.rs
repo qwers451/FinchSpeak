@@ -6,7 +6,6 @@ use std::time::Duration;
 use finch_audio::{VadMode, FRAME_SIZE_48K};
 use finch_testbed::audio::{babble, chirp};
 use finch_testbed::client::TestClient;
-use finch_testbed::metrics::delay_samples;
 use finch_testbed::netem::{NetemConfig, UdpImpairmentProxy};
 use finch_testbed::server::TestServer;
 use finch_testbed::voice::run_voice_link_with;
@@ -15,71 +14,9 @@ use tokio::net::UdpSocket;
 const SR: usize = 48_000;
 const MAX_BUFFER_PACKETS: usize = 6;
 
-/// Measure each probe against the receiver's wall-clock timeline, not the previous probe.
-fn probe_latencies(input: &[f32], output: &[f32], starts: &[usize]) -> anyhow::Result<Vec<usize>> {
-    probe_latencies_of(input, output, starts, SR / 10)
-}
-
-/// Like [`probe_latencies`] for probes of `len` samples.
-fn probe_latencies_of(input: &[f32], output: &[f32], starts: &[usize], len: usize) -> anyhow::Result<Vec<usize>> {
-    starts
-        .iter()
-        .map(|&start| {
-            let reference = &input[start..start + len];
-            let end = (start + reference.len() + SR / 2).min(output.len());
-            let delay = delay_samples(reference, &output[start..end], SR / 2)
-                .ok_or_else(|| anyhow::anyhow!("probe at sample {start} not found in receiver output"))?;
-            anyhow::ensure!(
-                delay <= SR / 5,
-                "probe at sample {start}: latency {} ms > 200 ms",
-                delay * 1000 / SR
-            );
-            Ok(delay)
-        })
-        .collect()
-}
-
-#[test]
-fn latency_probes_reject_late_second_probe_after_timely_first() {
-    let starts = [SR / 5, 2 * SR + SR / 5];
-    let mut input = vec![0.0; 3 * SR];
-    let probe = chirp(SR / 10, 300.0, 3_000.0);
-    let mut output = vec![0.0; 4 * SR];
-    for (&start, delay) in starts.iter().zip([SR / 10, 3 * SR / 10]) {
-        input[start..start + probe.len()].copy_from_slice(&probe);
-        output[start + delay..start + delay + probe.len()].copy_from_slice(&probe);
-    }
-    let error = probe_latencies(&input, &output, &starts).expect_err("later latency must be checked");
-    assert!(error.to_string().contains("latency 300 ms > 200 ms"), "{error}");
-}
-
-#[test]
-fn latency_probes_reject_missing_second_probe() {
-    let starts = [SR / 5, 2 * SR + SR / 5];
-    let mut input = vec![0.0; 3 * SR];
-    let probe = chirp(SR / 10, 300.0, 3_000.0);
-    let mut output = vec![0.0; 4 * SR];
-    for &start in &starts {
-        input[start..start + probe.len()].copy_from_slice(&probe);
-    }
-    output[starts[0] + SR / 10..starts[0] + SR / 10 + probe.len()].copy_from_slice(&probe);
-    let error = probe_latencies(&input, &output, &starts).expect_err("missing later probe must fail");
-    assert!(error.to_string().contains("not found"), "{error}");
-}
-
-#[test]
-fn latency_probes_measure_independent_delays() -> anyhow::Result<()> {
-    let starts = [SR / 5, 2 * SR + SR / 5, 4 * SR + SR / 5];
-    let mut input = vec![0.0; 5 * SR];
-    let probe = chirp(SR / 10, 300.0, 3_000.0);
-    let mut output = vec![0.0; 6 * SR];
-    for (&start, delay) in starts.iter().zip([4_800, 7_200, 9_600]) {
-        input[start..start + probe.len()].copy_from_slice(&probe);
-        output[start + delay..start + delay + probe.len()].copy_from_slice(&probe);
-    }
-    assert_eq!(probe_latencies(&input, &output, &starts)?, [4_800, 7_200, 9_600]);
-    Ok(())
-}
+#[path = "support/latency_probes.rs"]
+mod latency_probes;
+use latency_probes::probe_latencies_of;
 
 #[tokio::test]
 async fn proxy_drops_and_delays() -> anyhow::Result<()> {
@@ -124,7 +61,7 @@ fn longest_silent_run(output: &[f32], from: usize, to: usize) -> usize {
     longest
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn voice_under_loss_and_jitter() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
     // The impairment starts only once both are in the room: connection set-up (whose packet count
@@ -157,6 +94,8 @@ async fn voice_under_loss_and_jitter() -> anyhow::Result<()> {
     }
 
     let run = run_voice_link_with(&a, &mut b, &input, 15, VadMode::Energy, -100.0).await?;
+
+    eprintln!("NETEM timing: max_tick_lateness_ms = {:.1}, max_capture_ms = {:.1}, delivered = {}/{}", run.max_tick_lateness.as_secs_f64() * 1000.0, run.max_capture_time.as_secs_f64() * 1000.0, run.received_headers.len(), run.sent_packets);
 
     assert!(!run.received_headers.is_empty(), "receiver got no audio");
     let latencies = probe_latencies_of(&input, &run.output, &probe_starts, probe_len)?;

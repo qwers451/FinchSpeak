@@ -44,6 +44,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace
+        # DSP/metric tests must not steal CPU from wall-clock audio latency checks.
+        run: cargo test --workspace -- --test-threads=1
         env:
           RUST_BACKTRACE: 1

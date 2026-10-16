@@ -23,6 +23,10 @@ pub struct VoiceRun {
     pub max_buffered_packets: usize,
     /// Receiver-side loss rate for the sender at the end of the run.
     pub loss_rate: Option<f64>,
+    /// Scheduling delay in the test harness (not a product latency measurement).
+    pub max_tick_lateness: Duration,
+    /// Longest synchronous DSP call in the test harness.
+    pub max_capture_time: Duration,
 }
 
 /// Stream `input` (48 kHz mono) from `sender` to `receiver` in real time, 20 ms per frame,
@@ -64,7 +68,8 @@ pub async fn run_voice_link_with(
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
 
     for frame_index in 0..total_frames {
-        ticker.tick().await;
+        let scheduled = ticker.tick().await;
+        run.max_tick_lateness = run.max_tick_lateness.max(tokio::time::Instant::now().saturating_duration_since(scheduled));
 
         let mut frame = [0.0f32; FRAME_SIZE_48K];
         let start = frame_index * FRAME_SIZE_48K;
@@ -72,7 +77,9 @@ pub async fn run_voice_link_with(
             let end = (start + FRAME_SIZE_48K).min(input.len());
             frame[..end - start].copy_from_slice(&input[start..end]);
         }
+        let capture_started = Instant::now();
         let out = capture.process(&mut frame, sender_peer, (frame_index * 20) as u32);
+        run.max_capture_time = run.max_capture_time.max(capture_started.elapsed());
         for packet in out.packets {
             sender.session.send_datagram(packet)?;
             run.sent_packets += 1;

@@ -54,7 +54,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Rust tests
-        run: cargo test --workspace --locked
+        # Keep wall-clock media checks independent of CPU-heavy signal metrics.
+        run: cargo test --workspace --locked -- --test-threads=1
 
       - name: Installer
         working-directory: app
