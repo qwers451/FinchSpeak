@@ -686,3 +686,7 @@ body {
 .channel-unread { font-weight: 700; color: var(--text-main); }
 .unread-badge { margin-left: auto; min-width: 18px; text-align: center; border-radius: 9px; background: var(--text-dim); color: #fff; font-size: 0.7rem; padding: 0 5px; }
 .unread-badge.mention { background: #d83c3e; }
+
+.voice-settings { display: flex; flex-direction: column; gap: 8px; padding: 0 16px 8px; }
+.ptt-row { flex-direction: row; align-items: center; gap: 8px; }
+.ptt-live { color: var(--accent-teal); }

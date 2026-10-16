@@ -108,6 +108,18 @@ export interface Invite {
   uses: number;
 }
 
+export interface VoiceSettings {
+  /** Microphone volume multiplier, 1 = unchanged. */
+  input_gain: number;
+  /** Speech detector loudness threshold in dBFS. */
+  vad_threshold_db: number;
+  push_to_talk: boolean;
+  /** The push-to-talk key is held down right now. */
+  key_down: boolean;
+  /** Hear your own microphone in the speakers. */
+  monitor: boolean;
+}
+
 export interface AudioDevice {
   name: string;
   is_default: boolean;

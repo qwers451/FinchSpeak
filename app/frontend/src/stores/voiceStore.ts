@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import type { AudioDevice, Channel, VoiceParticipant } from '../types';
+import type { AudioDevice, Channel, VoiceParticipant, VoiceSettings } from '../types';
 import { api } from '../services/api';
 import { setAppError } from './notificationStore';
 import { resetScreenState } from './screenState';
@@ -84,8 +84,104 @@ async function restoreAudioDevices() {
   }
 }
 
+// --- microphone settings -------------------------------------------------------------------
+
+export const DEFAULT_VOICE_SETTINGS: VoiceSettings = { input_gain: 1, vad_threshold_db: -45, push_to_talk: false, key_down: false, monitor: false };
+export const [voiceSettings, setVoiceSettings] = createSignal<VoiceSettings>(DEFAULT_VOICE_SETTINGS);
+/** The push-to-talk key, e.g. "F8". */
+export const [pushToTalkKey, setPushToTalkKey] = createSignal<string | null>(null);
+
+const VOICE_SETTINGS_KEY = 'finchspeak.voiceSettings';
+
+type SavedVoice = { settings: Omit<VoiceSettings, 'key_down'>; key: string | null };
+
+function readSavedVoice(): SavedVoice | null {
+  try {
+    const raw = localStorage.getItem(VOICE_SETTINGS_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as Partial<SavedVoice>;
+    const number = (value: unknown, fallback: number) => (typeof value === 'number' && Number.isFinite(value) ? value : fallback);
+    const s = saved.settings ?? ({} as Partial<SavedVoice['settings']>);
+    return {
+      settings: {
+        input_gain: number(s.input_gain, 1),
+        vad_threshold_db: number(s.vad_threshold_db, -45),
+        push_to_talk: s.push_to_talk === true,
+        monitor: s.monitor === true,
+      },
+      key: typeof saved.key === 'string' && saved.key ? saved.key : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveVoice() {
+  try {
+    const { key_down: _down, ...settings } = voiceSettings();
+    localStorage.setItem(VOICE_SETTINGS_KEY, JSON.stringify({ settings, key: pushToTalkKey() }));
+  } catch {
+    /* not remembered */
+  }
+}
+
+/** Change some microphone settings; applied at once and remembered. */
+export async function changeVoiceSettings(change: Partial<VoiceSettings>) {
+  const next = { ...voiceSettings(), ...change };
+  if (next.push_to_talk && !pushToTalkKey()) {
+    setAppError('Choose a push-to-talk key first');
+    return;
+  }
+  try {
+    await api.setVoiceSettings(next);
+  } catch (err) {
+    setAppError(String(err));
+    return;
+  }
+  setVoiceSettings(next);
+  saveVoice();
+}
+
+export async function choosePushToTalkKey(key: string | null) {
+  try {
+    await api.setPushToTalkKey(key);
+  } catch (err) {
+    setAppError(String(err));
+    return;
+  }
+  setPushToTalkKey(key);
+  if (!key && voiceSettings().push_to_talk) await changeVoiceSettings({ push_to_talk: false });
+  saveVoice();
+}
+
+/** Turn a key press into the shortcut text the backend understands ("Control+Shift+K"); null for a bare modifier. */
+export function shortcutFromEvent(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey'>): string | null {
+  const code = event.code;
+  if (/^(Control|Alt|Shift|Meta|OS)(Left|Right)$/.test(code)) return null;
+  const key = code.startsWith('Key') ? code.slice(3) : code.startsWith('Digit') ? code.slice(5) : code;
+  if (!key) return null;
+  const parts = [event.ctrlKey && 'Control', event.altKey && 'Alt', event.shiftKey && 'Shift', event.metaKey && 'Super'].filter(Boolean) as string[];
+  return [...parts, key].join('+');
+}
+
+/** Push the remembered microphone settings and key to the backend (it forgets them on restart). */
+export async function restoreVoiceSettings() {
+  const saved = readSavedVoice();
+  if (!saved) return;
+  try {
+    if (saved.key) await api.setPushToTalkKey(saved.key);
+    setPushToTalkKey(saved.key);
+    const settings = { ...saved.settings, key_down: false, push_to_talk: saved.settings.push_to_talk && !!saved.key };
+    await api.setVoiceSettings(settings);
+    setVoiceSettings(settings);
+  } catch (err) {
+    setAppError(String(err));
+  }
+}
+
 export async function joinVoice(channel: Channel) {
   await restoreAudioDevices();
+  await restoreVoiceSettings();
   try {
     await api.joinVoiceChannel(channel.id, channel.short_id);
     setActiveVoiceChannel(channel);

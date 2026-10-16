@@ -19,6 +19,9 @@ use crate::vad::{VadDecision, VadMode, VoiceActivityDetector, DEFAULT_VAD_THRESH
 /// voices); one extra frame is kept as margin. Without this the start of every word is clipped.
 pub const PREROLL_FRAMES: usize = 4;
 
+/// Largest microphone boost (+18 dB).
+pub const MAX_INPUT_GAIN: f32 = 8.0;
+
 /// Largest output-device delay passed on to the echo canceller.
 pub const MAX_STREAM_DELAY_MS: u32 = 500;
 
@@ -71,6 +74,10 @@ pub struct VoiceCapture {
     preroll: VecDeque<[f32; FRAME_SIZE_48K]>,
     /// True from the moment the VAD opens until it is back to `Silence`.
     transmitting: bool,
+    /// Microphone volume multiplier (1.0 = unchanged).
+    input_gain: f32,
+    /// Push-to-talk: while false nothing is transmitted.
+    gate_open: bool,
 }
 
 impl VoiceCapture {
@@ -84,12 +91,30 @@ impl VoiceCapture {
             seq: 0,
             preroll: VecDeque::with_capacity(PREROLL_FRAMES),
             transmitting: false,
+            input_gain: 1.0,
+            gate_open: true,
         })
     }
 
     /// Forget the echo path (reference stream interrupted, device changed).
     pub fn reset_echo_canceller(&mut self) {
         self.echo_canceller.reset();
+    }
+
+    /// Microphone volume multiplier, limited to 0..=[`MAX_INPUT_GAIN`]. Applied before echo
+    /// cancellation and the speech detector, so a quiet microphone can be brought above the VAD threshold.
+    pub fn set_input_gain(&mut self, gain: f32) {
+        self.input_gain = if gain.is_finite() { gain.clamp(0.0, MAX_INPUT_GAIN) } else { 1.0 };
+    }
+
+    /// Push-to-talk gate: `false` stops all transmission (the pipeline keeps adapting).
+    pub fn set_transmit_gate(&mut self, open: bool) {
+        self.gate_open = open;
+    }
+
+    /// Change the loudness threshold of the speech detector (dBFS).
+    pub fn set_vad_threshold_db(&mut self, threshold_db: f32) {
+        self.vad.set_threshold(threshold_db);
     }
 
     /// Tell the echo canceller how long played audio takes to reach the speakers (the output
@@ -115,10 +140,18 @@ impl VoiceCapture {
         sender_peer_id: u32,
         timestamp_ms: u32,
     ) -> CaptureOutput {
+        if (self.input_gain - 1.0).abs() > f32::EPSILON {
+            for sample in frame.iter_mut() {
+                *sample = (*sample * self.input_gain).clamp(-1.0, 1.0);
+            }
+        }
         self.echo_canceller.process_capture(frame);
         self.noise_suppressor.process_frame(frame);
 
-        let vad = self.vad.process(frame);
+        let mut vad = self.vad.process(frame);
+        if !self.gate_open {
+            vad = VadDecision::Silence;
+        }
         if !vad.should_transmit() {
             self.transmitting = false;
             if self.preroll.len() == PREROLL_FRAMES {
@@ -366,5 +399,107 @@ mod tests {
         // Staying open does not repeat the pre-roll.
         let mut next = tone_frame(1);
         assert_eq!(capture.process(&mut next, 42, (silent_frames + 1) * 20).packets.len(), 1);
+    }
+
+    // ---- microphone gain, push-to-talk gate, VAD threshold
+
+    fn rms_of(frame: &[f32; FRAME_SIZE_48K]) -> f32 {
+        (frame.iter().map(|s| s * s).sum::<f32>() / frame.len() as f32).sqrt()
+    }
+
+    /// A source at about -23 dBFS: well below a -15 dBFS threshold, loud enough for the noise
+    /// suppressor to leave it alone.
+    fn quiet_frame(frame_index: usize) -> [f32; FRAME_SIZE_48K] {
+        let mut frame = tone_frame(frame_index);
+        frame.iter_mut().for_each(|s| *s /= 3.0);
+        frame
+    }
+
+    /// Mean level of the processed signal after a few frames of warm-up.
+    fn processed_level(gain: f32) -> f32 {
+        let mut capture = capture_for_test();
+        capture.set_input_gain(gain);
+        let mut total = 0.0;
+        for i in 0..20 {
+            let mut frame = quiet_frame(i);
+            capture.process(&mut frame, 1, i as u32 * 20);
+            if i >= 10 {
+                total += rms_of(&frame);
+            }
+        }
+        total / 10.0
+    }
+
+    #[test]
+    fn input_gain_scales_the_signal_and_is_limited() {
+        let (normal, doubled) = (processed_level(1.0), processed_level(2.0));
+        assert!(doubled > normal * 1.4, "gain 2.0: {doubled} vs {normal}");
+        let silent = processed_level(0.0);
+        assert!(silent < normal * 0.05, "gain 0 mutes: {silent} vs {normal}");
+
+        let mut capture = capture_for_test();
+        capture.set_input_gain(100.0); // absurd values are limited
+        let mut loud = tone_frame(1);
+        capture.process(&mut loud, 1, 20);
+        assert!(loud.iter().all(|s| s.abs() <= 1.0), "boosted audio is clipped, never wraps");
+        capture.set_input_gain(f32::NAN);
+        let mut frame = quiet_frame(2);
+        capture.process(&mut frame, 1, 40);
+        assert!(frame.iter().all(|s| s.is_finite()));
+    }
+
+    #[test]
+    fn a_boosted_quiet_microphone_starts_to_transmit() {
+        let mut capture = VoiceCapture::new(VoiceCaptureConfig {
+            vad_mode: VadMode::Energy,
+            vad_threshold_db: -15.0,
+            ..VoiceCaptureConfig::default()
+        })
+        .unwrap();
+        let mut silent_packets = 0;
+        for i in 0..10 {
+            let mut frame = quiet_frame(i);
+            silent_packets += capture.process(&mut frame, 1, i as u32 * 20).packets.len();
+        }
+        assert_eq!(silent_packets, 0, "a -23 dBFS source is below the -15 dBFS threshold");
+
+        capture.set_input_gain(4.0); // +12 dB
+        let mut packets = 0;
+        for i in 10..20 {
+            let mut frame = quiet_frame(i);
+            packets += capture.process(&mut frame, 1, i as u32 * 20).packets.len();
+        }
+        assert!(packets > 0, "after the boost the same source is heard");
+    }
+
+    #[test]
+    fn a_closed_gate_sends_nothing_and_an_open_one_does() {
+        let mut capture = capture_for_test();
+        capture.set_transmit_gate(false);
+        for i in 0..10 {
+            let mut frame = tone_frame(i);
+            let out = capture.process(&mut frame, 1, i as u32 * 20);
+            assert!(out.packets.is_empty(), "push-to-talk released: nothing leaves the machine");
+            assert_eq!(out.vad, VadDecision::Silence, "and the speaking indicator stays dark");
+        }
+        capture.set_transmit_gate(true);
+        let mut frame = tone_frame(10);
+        let out = capture.process(&mut frame, 1, 200);
+        assert!(!out.packets.is_empty());
+    }
+
+    #[test]
+    fn the_vad_threshold_can_be_changed_while_running() {
+        let mut capture = VoiceCapture::new(VoiceCaptureConfig {
+            vad_mode: VadMode::Energy,
+            vad_threshold_db: -15.0,
+            ..VoiceCaptureConfig::default()
+        })
+        .unwrap();
+        let mut frame = quiet_frame(0);
+        assert!(capture.process(&mut frame, 1, 0).packets.is_empty());
+        capture.set_vad_threshold_db(-60.0);
+        let mut frame = quiet_frame(1);
+        assert!(!capture.process(&mut frame, 1, 20).packets.is_empty(), "now it is loud enough");
     }
 }

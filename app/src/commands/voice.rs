@@ -8,7 +8,7 @@ use tauri::{AppHandle, State};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::state::{AppState, AudioDeviceSelection};
+use crate::state::{AppState, AudioDeviceSelection, VoiceSettingsDto};
 
 #[derive(serde::Serialize)]
 pub struct AudioDeviceDto {
@@ -161,5 +161,30 @@ pub async fn set_speaker_volume(
 ) -> Result<(), String> {
     let mut mixer = state.mixer.lock().await;
     mixer.set_speaker_volume(peer_id, volume);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_voice_settings(state: State<'_, AppState>) -> Result<VoiceSettingsDto, String> {
+    Ok(state.voice_settings.snapshot())
+}
+
+/// Microphone volume, speech threshold, push-to-talk on/off and "hear myself".
+#[tauri::command]
+pub async fn set_voice_settings(settings: VoiceSettingsDto, state: State<'_, AppState>) -> Result<(), String> {
+    state.voice_settings.apply(&settings);
+    Ok(())
+}
+
+/// Choose the push-to-talk key (e.g. "F8", "Control+Space"); works while the app is in the
+/// background. Passing `None` removes the key.
+#[tauri::command]
+pub async fn set_push_to_talk_key(key: Option<String>, app_handle: AppHandle) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let shortcuts = app_handle.global_shortcut();
+    shortcuts.unregister_all().map_err(|e| format!("Could not clear the old key: {e}"))?;
+    if let Some(key) = key.filter(|k| !k.trim().is_empty()) {
+        shortcuts.register(key.as_str()).map_err(|e| format!("Could not use \"{key}\" as the push-to-talk key: {e}"))?;
+    }
     Ok(())
 }

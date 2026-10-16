@@ -44,6 +44,15 @@ pub fn run() {
     let state = AppState::new();
 
     if let Err(e) = tauri::Builder::default()
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    use tauri_plugin_global_shortcut::ShortcutState;
+                    let settings = app.state::<AppState>().voice_settings.clone();
+                    settings.set_key_down(event.state() == ShortcutState::Pressed);
+                })
+                .build(),
+        )
         .manage(state)
         .setup(|app| {
             tracing::info!("Tauri setup initialized");
@@ -92,6 +101,9 @@ pub fn run() {
             commands::voice::get_audio_devices,
             commands::voice::set_audio_devices,
             commands::voice::set_speaker_volume,
+            commands::voice::get_voice_settings,
+            commands::voice::set_voice_settings,
+            commands::voice::set_push_to_talk_key,
             // Administration
             commands::admin::create_invite,
             commands::admin::list_invites,

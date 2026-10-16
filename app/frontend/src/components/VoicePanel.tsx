@@ -9,6 +9,7 @@ import { currentUser } from '../stores/authStore';
 import { api } from '../services/api';
 import { localPeerId } from '../stores/sessionStore';
 import { DeviceSettings } from './DeviceSettings';
+import { VoiceSettingsPanel } from './VoiceSettingsPanel';
 import { ScreenSharePicker } from './ScreenSharePicker';
 import { ScreenViewer } from './ScreenViewer';
 import { screenAudioKey, stopWatching, watchShare, watching } from '../stores/screenStore';
@@ -29,6 +30,7 @@ export function VoicePanel() {
       </div>
 
       <DeviceSettings />
+      <VoiceSettingsPanel />
       <ScreenSharePicker />
 
       <Show when={watching()}>

@@ -376,6 +376,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 };
 
                 let mut is_currently_speaking = false;
+                // The processed microphone, played back to the user while "hear myself" is on.
+                let mut monitor_queue: std::collections::VecDeque<[f32; FRAME_SIZE_48K]> = std::collections::VecDeque::new();
                 let mut playback_frame_48k = [0.0f32; FRAME_SIZE_48K];
                 let mut capture_frame_48k = [0.0f32; FRAME_SIZE_48K];
                 let mut capture_raw_buf = Vec::with_capacity(4096);
@@ -428,6 +430,11 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             {
                                 let speech_events =
                                     mix_next_frame(&state.mixer, &mut playback_frame_48k, Instant::now());
+                                if let Some(own) = monitor_queue.pop_front() {
+                                    for (out, mine) in playback_frame_48k.iter_mut().zip(own.iter()) {
+                                        *out = (*out + *mine).clamp(-1.0, 1.0);
+                                    }
+                                }
 
                                 for (peer_id, speaking) in speech_events {
                                     let _ = app_handle.emit(
@@ -522,8 +529,19 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         Err(_) => 0,
                                     };
                                     let sender_id = state.session_peer_id.load(Ordering::Relaxed);
+                                    capture.set_input_gain(state.voice_settings.input_gain());
+                                    capture.set_vad_threshold_db(state.voice_settings.vad_threshold_db());
+                                    capture.set_transmit_gate(state.voice_settings.transmit_open());
                                     let output =
                                         capture.process(&mut capture_frame_48k, sender_id, now_ms);
+                                    if state.voice_settings.monitor() {
+                                        if monitor_queue.len() >= 5 {
+                                            monitor_queue.pop_front();
+                                        }
+                                        monitor_queue.push_back(capture_frame_48k);
+                                    } else {
+                                        monitor_queue.clear();
+                                    }
 
                                     if output.vad == VadDecision::Speaking {
                                         if !is_currently_speaking {

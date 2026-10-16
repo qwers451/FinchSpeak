@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
+import type { AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -338,6 +338,26 @@ export const api = {
   setSpeakerVolume: async (peerId: number, volume: number): Promise<void> => {
     if (isTauri()) {
       return invoke('set_speaker_volume', { peerId, volume });
+    }
+  },
+
+  getVoiceSettings: async (): Promise<VoiceSettings> => {
+    if (isTauri()) {
+      return invoke('get_voice_settings');
+    }
+    return { input_gain: 1, vad_threshold_db: -45, push_to_talk: false, key_down: false, monitor: false };
+  },
+
+  setVoiceSettings: async (settings: VoiceSettings): Promise<void> => {
+    if (isTauri()) {
+      return invoke('set_voice_settings', { settings });
+    }
+  },
+
+  /** Push-to-talk key such as "F8" or "Control+Space"; null removes it. Works in the background. */
+  setPushToTalkKey: async (key: string | null): Promise<void> => {
+    if (isTauri()) {
+      return invoke('set_push_to_talk_key', { key });
     }
   },
 
