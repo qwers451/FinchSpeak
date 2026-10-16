@@ -14,6 +14,11 @@ pub fn mark_started() {
     STARTED.get_or_init(Instant::now);
 }
 
+/// Seconds since the router was built.
+pub fn uptime_secs() -> u64 {
+    STARTED.get().map_or(0, |started| started.elapsed().as_secs())
+}
+
 /// Reports `ok` only when the database answers. Nothing about users or channels is exposed.
 pub async fn health_handler(State(state): State<ArcSharedState>) -> (StatusCode, Json<Value>) {
     let database_ok = sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(&state.pool).await.is_ok();

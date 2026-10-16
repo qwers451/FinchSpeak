@@ -69,9 +69,7 @@ pub async fn create_channel_handler(
     Json(payload): Json<CreateChannelRequest>,
 ) -> Result<impl IntoResponse, ServerError> {
     // Check permission (only admin can create channels)
-    if auth.role != "admin" {
-        return Err(ServerError::Forbidden);
-    }
+    crate::permissions::require(&auth, crate::permissions::Permission::ManageChannels)?;
 
     let name = payload.name.trim().to_lowercase();
     if name.is_empty() || name.len() > 32 {
@@ -142,6 +140,7 @@ pub async fn create_channel_handler(
         bitrate_kbps: bitrate,
     };
 
+    crate::audit::record(&state.pool, &auth, "channel_created", Some(&created.name), Some(&created.channel_type)).await;
     Ok((StatusCode::CREATED, Json(created)))
 }
 
@@ -159,11 +158,7 @@ pub struct ReorderRequest {
 }
 
 fn require_admin(auth: &AuthUser) -> Result<(), ServerError> {
-    if auth.role == "admin" {
-        Ok(())
-    } else {
-        Err(ServerError::Forbidden)
-    }
+    crate::permissions::require(auth, crate::permissions::Permission::ManageChannels)
 }
 
 /// Load one channel as the protocol model, or 404.
@@ -289,6 +284,7 @@ pub async fn delete_channel_handler(
         let _ = std::fs::remove_file(path);
     }
     state.sessions.broadcast_all(ServerMessage::ChannelDeleted { channel_id: id }).await;
+    crate::audit::record(&state.pool, &auth, "channel_deleted", Some(&channel.name), None).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

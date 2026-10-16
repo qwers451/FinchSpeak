@@ -47,7 +47,7 @@ pub async fn server_state(pool: &SqlitePool, sessions: &SessionManager, for_user
                 let avatar_url = crate::api::avatars::avatar_url(&id.to_string(), avatar_version);
                 online_users.push(User { id, username, display_name, avatar_url,
                     status: status_from_pref(&status_pref), status_text,
-                    role: if role == "admin" { UserRole::Admin } else { UserRole::Member } });
+                    role: match role.as_str() { "admin" => UserRole::Admin, "moderator" => UserRole::Moderator, _ => UserRole::Member } });
             }
         }
     }

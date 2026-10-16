@@ -39,11 +39,7 @@ pub(crate) fn now_secs() -> i64 {
 }
 
 fn require_admin(auth: &AuthUser) -> Result<(), ServerError> {
-    if auth.role == "admin" {
-        Ok(())
-    } else {
-        Err(ServerError::Forbidden)
-    }
+    crate::permissions::require(auth, crate::permissions::Permission::ManageInvites)
 }
 
 fn random_code() -> String {
@@ -78,6 +74,7 @@ pub async fn create_invite_handler(
         .bind(invite.max_uses)
         .execute(&state.pool)
         .await?;
+    crate::audit::record(&state.pool, &auth, "invite_created", Some(&invite.code), Some(&format!("{} uses", invite.max_uses))).await;
     Ok((StatusCode::CREATED, Json(invite)))
 }
 
@@ -106,5 +103,6 @@ pub async fn revoke_invite_handler(
     if result.rows_affected() == 0 {
         return Err(ServerError::NotFound("No such invite".into()));
     }
+    crate::audit::record(&state.pool, &auth, "invite_revoked", Some(&code), None).await;
     Ok(StatusCode::NO_CONTENT)
 }

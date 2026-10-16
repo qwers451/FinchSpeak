@@ -247,7 +247,7 @@ pub async fn register_handler(
 
     // One transaction: spending the invite and creating the account stand or fall together.
     let mut tx = state.pool.begin_with("BEGIN IMMEDIATE").await?;
-    if state.config.auth.registration == crate::config::RegistrationMode::Invite {
+    if crate::settings::registration_mode(&state.pool, state.config.auth.registration).await == crate::config::RegistrationMode::Invite {
         let first_user = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users").fetch_one(&mut *tx).await? == 0;
         if !first_user {
             let code = payload.invite_code.as_deref().map(|c| c.trim().to_uppercase()).unwrap_or_default();
@@ -344,7 +344,13 @@ pub async fn login_handler(
     }
 
     if banned_at.is_some() {
-        return Err(ServerError::Banned);
+        let until: Option<i64> = sqlx::query_scalar("SELECT banned_until FROM users WHERE username = ?").bind(&username).fetch_one(&state.pool).await?;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+        if until.is_none_or(|end| end > now) {
+            return Err(ServerError::Banned);
+        }
+        // A timed ban that ran out lifts itself.
+        sqlx::query("UPDATE users SET banned_at = NULL, banned_until = NULL WHERE username = ?").bind(&username).execute(&state.pool).await?;
     }
 
     let user_id = Uuid::parse_str(&user_id_str).map_err(|_| ServerError::Unauthorized)?;

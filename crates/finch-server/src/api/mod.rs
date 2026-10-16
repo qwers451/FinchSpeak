@@ -49,6 +49,10 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .route("/api/admin/users/{id}/kick", post(admin::kick_handler))
         .route("/api/admin/users/{id}/ban", post(admin::ban_handler))
         .route("/api/admin/users/{id}/unban", post(admin::unban_handler))
+        .route("/api/admin/audit", get(admin::audit_handler))
+        .route("/api/admin/server", get(admin::overview_handler))
+        .route("/api/admin/registration", axum::routing::put(admin::set_registration_handler))
+        .route("/api/admin/backup", post(admin::backup_now_handler))
         // Invitations
         .route("/api/invites", post(invites::create_invite_handler).get(invites::list_invites_handler))
         .route("/api/invites/{code}", axum::routing::delete(invites::revoke_invite_handler))

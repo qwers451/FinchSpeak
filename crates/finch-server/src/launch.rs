@@ -50,6 +50,8 @@ pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
     let (cert, key) = quic::load_or_create_cert(std::path::Path::new(&config.server.tls_dir))
         .context("Failed to load TLS certificate")?;
     let certificate_fingerprint = quic::certificate_fingerprint(&cert);
+    // The admin page shows it so people can compare what their app asks them to trust.
+    let _ = crate::settings::set(&pool, "cert_fingerprint", &certificate_fingerprint).await;
     let https_config = https::make_tls_config(cert.clone(), key.clone_key())?;
     let server_config = quic::make_server_config_with(cert, key).context("failed to create server config")?;
     let endpoint = quinn::Endpoint::server(server_config, quic_bind)

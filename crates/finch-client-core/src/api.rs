@@ -57,9 +57,37 @@ pub struct AdminUserDto {
     pub display_name: String,
     pub role: String,
     pub banned: bool,
+    #[serde(default)]
+    pub banned_until: Option<i64>,
     pub online: bool,
     #[serde(default)]
     pub last_seen: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditEntryDto {
+    pub id: i64,
+    pub at: i64,
+    pub actor_name: String,
+    pub action: String,
+    pub target: Option<String>,
+    pub details: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerOverviewDto {
+    pub version: String,
+    pub uptime_secs: u64,
+    pub certificate_fingerprint: Option<String>,
+    pub quic_port: u16,
+    pub http_port: u16,
+    pub registration: String,
+    pub backups_count: usize,
+    pub last_backup_at: Option<i64>,
+    pub last_backup_bytes: Option<u64>,
+    pub backup_dir: String,
+    pub uploads_bytes: u64,
+    pub log_dir: String,
 }
 
 /// An invitation code as listed by the server.
@@ -296,6 +324,39 @@ impl ApiClient {
     /// Admin: disconnect a user and refuse their logins.
     pub async fn ban_user(&self, user_id: Uuid) -> Result<(), ClientError> {
         self.admin_action(user_id, "ban").await
+    }
+
+    /// Ban for `duration_secs` seconds (`None`: for good).
+    pub async fn ban_user_for(&self, user_id: Uuid, duration_secs: Option<i64>) -> Result<(), ClientError> {
+        let req = self
+            .authorized(self.http.post(self.url(&format!("/api/admin/users/{user_id}/ban"))))
+            .json(&serde_json::json!({ "duration_secs": duration_secs }));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
+    /// The log of administrative actions, newest first.
+    pub async fn audit_log(&self, before: Option<i64>, limit: u32) -> Result<Vec<AuditEntryDto>, ClientError> {
+        let mut path = format!("/api/admin/audit?limit={limit}");
+        if let Some(before) = before {
+            path.push_str(&format!("&before={before}"));
+        }
+        parse_json(self.send(self.authorized(self.http.get(self.url(&path)))).await?).await
+    }
+
+    pub async fn server_overview(&self) -> Result<ServerOverviewDto, ClientError> {
+        parse_json(self.send(self.authorized(self.http.get(self.url("/api/admin/server")))).await?).await
+    }
+
+    pub async fn set_registration(&self, mode: &str) -> Result<(), ClientError> {
+        let req = self.authorized(self.http.put(self.url("/api/admin/registration"))).json(&serde_json::json!({ "mode": mode }));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
+    pub async fn backup_now(&self) -> Result<(), ClientError> {
+        check_status(self.send(self.authorized(self.http.post(self.url("/api/admin/backup")))).await?).await?;
+        Ok(())
     }
 
     pub async fn unban_user(&self, user_id: Uuid) -> Result<(), ClientError> {

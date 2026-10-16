@@ -182,7 +182,8 @@ pub async fn delete_message_handler(
     Path(id): Path<Uuid>,
 ) -> Result<axum::http::StatusCode, ServerError> {
     let (channel_id, author_id) = message_owner(&state, id).await?;
-    if author_id != auth.user_id && auth.role != "admin" {
+    let others = author_id != auth.user_id;
+    if others && !crate::permissions::allows(&auth.role, crate::permissions::Permission::DeleteAnyMessage) {
         return Err(ServerError::Forbidden);
     }
     let files: Vec<String> = sqlx::query_scalar("SELECT storage_path FROM attachments WHERE message_id = ?")
@@ -192,6 +193,9 @@ pub async fn delete_message_handler(
     sqlx::query("DELETE FROM messages WHERE id = ?").bind(id.to_string()).execute(&state.pool).await?;
     for path in files {
         let _ = std::fs::remove_file(path);
+    }
+    if others {
+        crate::audit::record(&state.pool, &auth, "message_deleted", Some(&id.to_string()), Some(&format!("channel {channel_id}"))).await;
     }
     state
         .sessions
