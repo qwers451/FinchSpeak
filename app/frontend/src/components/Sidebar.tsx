@@ -203,7 +203,7 @@ export function Sidebar() {
       </Show>
 
       <div class="upanel user-panel">
-        <button type="button" class="row g10 grow profile-open" style={{ gap: '10px', 'min-width': 0 }} aria-label="Open profile" title={currentUser()?.display_name || currentUser()?.username} onClick={() => setProfileOpen(true)}>
+        <button type="button" class="row g12 grow profile-open" style={{ gap: '10px', 'min-width': 0 }} aria-label="Open profile" title={currentUser()?.display_name || currentUser()?.username} onClick={() => setProfileOpen(true)}>
           <Avatar name={currentUser()?.display_name ?? currentUser()?.username} id={currentUser()?.id} size={40} status={myStatus()} speaking={isLocalSpeaking()} src={currentUser()?.avatar_url} />
           <div class="col grow" style={{ 'min-width': 0, 'text-align': 'left' }}>
             <span class="b trunc fs13">{currentUser()?.display_name || currentUser()?.username}</span>

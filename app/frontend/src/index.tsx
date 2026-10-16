@@ -1,7 +1,6 @@
 /* @refresh reload */
 import { render } from 'solid-js/web';
 import './styles/finch.css';
-import './styles/legacy.css';
 import './styles/app.css';
 import { App } from './App';
 

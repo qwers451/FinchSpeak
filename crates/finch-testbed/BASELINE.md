@@ -34,3 +34,29 @@ Debug WAVs of the last run: `target/testbed-out/`.
 Network results vary between runs (real-time scheduling); three runs are recorded.
 
 Speech fixtures are TTS-synthesized (see `fixtures/ATTRIBUTION.md`); real recordings may score slightly lower.
+
+## Load: 50 people at once (stage 7, release build)
+
+`cargo test -p finch-testbed --test load_50 --release -- --ignored --nocapture` (lines `LOAD ...`).
+50 clients in one voice room, 6 of them talking (50 packets/s each), 5 chatting (1 message/s each), 2 screen shares
+(about 30 pictures/s, 3 fragments each) with 6 viewers each, 20 s. Server and all clients share one process on one PC,
+over localhost, synthetic audio and video payloads (no real Opus or H.264 work).
+
+| Metric | Required | Measured (2026-10-16) | Status |
+|---|---|---|---|
+| Sign-in of 50 clients | info | 1.4 s | info |
+| Voice packets delivered (6 speakers x 49 listeners) | >= 97 % | 294294 / 294294 = 100.00 % | pass |
+| Video packets delivered (2 shares x 6 viewers) | >= 90 % | 18036 / 18036 = 100.00 % | pass |
+| Chat messages delivered (5 chatters x 50 receivers) | >= 99 % | 5000 / 5000 | pass |
+| Chat latency p50 / p95 / max | p95 < 500 ms | 18 / 62 / 64 ms | pass |
+| Connections dropped | 0 | 0 | pass |
+| CPU, whole process (server + 50 clients) | info | avg 63 %, max 188 % of one core | info |
+| Memory, whole process | info | 47 MB | info |
+
+Not measured here: real microphones and decoders on 50 machines, internet latency, TLS handshakes from 50 different addresses.
+
+## Voice under loss and jitter: made repeatable (stage 7)
+
+The test failed in about 1 of 3 runs because the loss pattern still depended on connection set-up timing and on how
+the two directions interleaved. The proxy now starts impairing after both clients are in the room and uses one random
+sequence per direction. Result: 8 of 8 runs identical in delivery (268 of 284 packets), all passing.

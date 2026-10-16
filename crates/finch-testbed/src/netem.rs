@@ -32,20 +32,40 @@ pub struct NetemConfig {
 pub struct UdpImpairmentProxy {
     pub listen_addr: SocketAddr,
     tasks: Vec<JoinHandle<()>>,
+    enabled: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl UdpImpairmentProxy {
     pub async fn start(upstream: SocketAddr, cfg: NetemConfig) -> anyhow::Result<Self> {
+        Self::start_with(upstream, cfg, true).await
+    }
+
+    /// Like `start`, but the impairment only begins when `set_enabled(true)` is called. Until then
+    /// every packet passes untouched and no random number is used, so the loss pattern that follows
+    /// starts from the same point whatever the connection set-up looked like.
+    pub async fn start_paused(upstream: SocketAddr, cfg: NetemConfig) -> anyhow::Result<Self> {
+        Self::start_with(upstream, cfg, false).await
+    }
+
+    pub fn set_enabled(&self, enabled: bool) {
+        self.enabled.store(enabled, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    async fn start_with(upstream: SocketAddr, cfg: NetemConfig, enabled: bool) -> anyhow::Result<Self> {
+        let enabled = Arc::new(std::sync::atomic::AtomicBool::new(enabled));
         let listen = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
         let up = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
         up.connect(upstream).await?;
         let listen_addr = listen.local_addr()?;
         let client_addr: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
+        // One random sequence per direction: how the two directions interleave in time changes from
+        // run to run, and sharing one sequence would let that decide which packets are dropped.
         let rng = Arc::new(Mutex::new(StdRng::seed_from_u64(cfg.seed)));
+        let rng_back = Arc::new(Mutex::new(StdRng::seed_from_u64(cfg.seed ^ 0x9E37_79B9_7F4A_7C15)));
 
         // Client → upstream
         let to_server = {
-            let (listen, up, client_addr, rng) = (listen.clone(), up.clone(), client_addr.clone(), rng.clone());
+            let (listen, up, client_addr, rng, enabled) = (listen.clone(), up.clone(), client_addr.clone(), rng.clone(), enabled.clone());
             tokio::spawn(async move {
                 let mut buf = vec![0u8; 65_536];
                 // Own delayed sends so dropping the proxy also cancels them.
@@ -69,7 +89,7 @@ impl UdpImpairmentProxy {
                     if let Ok(mut addr) = client_addr.lock() {
                         *addr = Some(from);
                     }
-                    if let Some(delay) = impair(&rng, &cfg, n) {
+                    if let Some(delay) = impair(&rng, &cfg, n, &enabled) {
                         let up = up.clone();
                         let data = buf[..n].to_vec();
                         delayed.spawn(async move {
@@ -83,7 +103,7 @@ impl UdpImpairmentProxy {
 
         // Upstream → client
         let to_client = {
-            let (listen, up, client_addr, rng) = (listen, up, client_addr, rng);
+            let (listen, up, client_addr, rng, enabled) = (listen, up, client_addr, rng_back, enabled.clone());
             tokio::spawn(async move {
                 let mut buf = vec![0u8; 65_536];
                 let mut delayed = JoinSet::new();
@@ -106,7 +126,7 @@ impl UdpImpairmentProxy {
                     let Some(dest) = client_addr.lock().ok().and_then(|a| *a) else {
                         continue;
                     };
-                    if let Some(delay) = impair(&rng, &cfg, n) {
+                    if let Some(delay) = impair(&rng, &cfg, n, &enabled) {
                         let listen = listen.clone();
                         let data = buf[..n].to_vec();
                         delayed.spawn(async move {
@@ -121,6 +141,7 @@ impl UdpImpairmentProxy {
         Ok(Self {
             listen_addr,
             tasks: vec![to_server, to_client],
+            enabled,
         })
     }
 }
@@ -149,8 +170,8 @@ async fn retry_receive(error: io::Error, direction: &str, delay: &mut Duration) 
 }
 
 /// `None` = drop the packet, otherwise the delay before forwarding it.
-fn impair(rng: &Mutex<StdRng>, cfg: &NetemConfig, packet_len: usize) -> Option<Duration> {
-    if packet_len < cfg.min_packet_size {
+fn impair(rng: &Mutex<StdRng>, cfg: &NetemConfig, packet_len: usize, enabled: &std::sync::atomic::AtomicBool) -> Option<Duration> {
+    if packet_len < cfg.min_packet_size || !enabled.load(std::sync::atomic::Ordering::SeqCst) {
         return Some(Duration::ZERO);
     }
     let mut rng = rng.lock().ok()?;

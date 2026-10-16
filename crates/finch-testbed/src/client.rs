@@ -202,6 +202,16 @@ impl TestClient {
         self.datagrams.drain(..).collect()
     }
 
+    /// Hand every event to `on_event` until `until`; used by load tests where many clients run at once.
+    pub async fn pump_events(&mut self, until: tokio::time::Instant, mut on_event: impl FnMut(&SessionEvent)) {
+        for datagram in self.datagrams.drain(..) {
+            on_event(&SessionEvent::Datagram(datagram));
+        }
+        while let Ok(Some(event)) = tokio::time::timeout_at(until, self.events.recv()).await {
+            on_event(&event);
+        }
+    }
+
     /// Wait up to `timeout` for the next media datagram.
     pub async fn wait_datagram(&mut self, timeout: Duration) -> anyhow::Result<Bytes> {
         let deadline = tokio::time::Instant::now() + timeout;

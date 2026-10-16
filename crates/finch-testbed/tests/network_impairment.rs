@@ -127,7 +127,9 @@ fn longest_silent_run(output: &[f32], from: usize, to: usize) -> usize {
 #[tokio::test]
 async fn voice_under_loss_and_jitter() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
-    let proxy = UdpImpairmentProxy::start(
+    // The impairment starts only once both are in the room: connection set-up (whose packet count
+    // varies from run to run) then cannot shift which media packets are lost.
+    let proxy = UdpImpairmentProxy::start_paused(
         server.quic_addr,
         NetemConfig { loss: 0.05, delay_ms: (0, 60), seed: 42, min_packet_size: 100 },
     )
@@ -138,6 +140,7 @@ async fn voice_under_loss_and_jitter() -> anyhow::Result<()> {
     a.join_voice().await?;
     b.join_voice().await?;
     b.drain_datagrams();
+    proxy.set_enabled(true);
 
     // Probes near the start, middle and end, laid over continuous speech-like noise (no silent
     // breaks). The stream runs for 0.6 s before the first probe so the noise suppressor has
