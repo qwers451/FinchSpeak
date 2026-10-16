@@ -1,4 +1,4 @@
-import { For, Show, createSignal, onMount } from 'solid-js';
+import { For, Show, createEffect, createSignal } from 'solid-js';
 import { adminOpen, createInvite, invites, loadInvites, loadMembers, members, moderate, revokeInvite, setAdminOpen } from '../stores/adminStore';
 import { currentUser } from '../stores/authStore';
 
@@ -10,9 +10,12 @@ export function AdminPanel() {
   const [hours, setHours] = createSignal(72);
   const [fresh, setFresh] = createSignal<string | null>(null);
 
-  onMount(() => {
-    void loadInvites();
-    void loadMembers();
+  // Load the lists when the window is opened (not at app start, when nobody is signed in yet).
+  createEffect(() => {
+    if (adminOpen()) {
+      void loadInvites();
+      void loadMembers();
+    }
   });
 
   const create = async () => setFresh(await createInvite(maxUses(), hours()));

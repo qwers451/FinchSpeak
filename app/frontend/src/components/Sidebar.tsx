@@ -1,5 +1,7 @@
 import { For, Show } from 'solid-js';
 import { setAdminOpen } from '../stores/adminStore';
+import { markRead, unread } from '../stores/activityStore';
+import { setProfileOpen } from '../stores/profileStore';
 import {
   channels,
   activeChannel,
@@ -84,10 +86,17 @@ export function Sidebar() {
             <div
               class={`channel-item ${activeChannel()?.id === channel.id ? 'active' : ''}`}
               style={{ cursor: "pointer" }}
-              onClick={() => selectChannel(channel)}
+              onClick={() => { selectChannel(channel); markRead(channel.id); }}
             >
               <span style={{ "font-size": "1.1rem", color: "var(--text-dim)" }}>#</span>
-              <span>{channel.name}</span>
+              <span class={unread()[channel.id] ? 'channel-unread' : ''}>{channel.name}</span>
+              <Show when={unread()[channel.id]}>
+                {(entry) => (
+                  <span class={`unread-badge ${entry().mention ? 'mention' : ''}`} title={entry().mention ? 'You were mentioned' : 'Unread messages'}>
+                    {entry().count}
+                  </span>
+                )}
+              </Show>
               <ChannelAdminButtons channel={channel} />
             </div>
           )}
@@ -200,6 +209,7 @@ export function Sidebar() {
           >
             {isDeafened() ? '🚫' : '🎧'}
           </button>
+          <button class="icon-btn" title="Profile and password" onClick={() => setProfileOpen(true)}>⚙</button>
           <Show when={currentUser()?.role === 'admin'}>
             <button class="icon-btn" title="Administration" onClick={() => setAdminOpen(true)}>🛠</button>
           </Show>

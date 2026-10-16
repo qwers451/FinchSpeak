@@ -10,6 +10,7 @@ import { VoicePanel } from './components/VoicePanel';
 import { AuthModal } from './components/AuthModal';
 import { TofuModal } from './components/TofuModal';
 import { AdminPanel } from './components/AdminPanel';
+import { ProfilePanel } from './components/ProfilePanel';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 
 export function App() {
@@ -76,6 +77,7 @@ export function App() {
       {/* Trust On First Use Certificate Modal */}
       <TofuModal />
       <AdminPanel />
+      <ProfilePanel />
     </div>
     </Show>
     </>

@@ -152,6 +152,54 @@ export const api = {
     return resp.json();
   },
 
+  /** The bytes of an attachment. */
+  downloadFile: async (id: string): Promise<ArrayBuffer> => {
+    if (isTauri()) {
+      return invoke('download_file', { id });
+    }
+    const resp = await fetch(`${browserServerUrl}/api/files/${id}`, { headers: { Authorization: `Bearer ${browserToken}` } });
+    if (!resp.ok) throw new Error(`Download failed: ${resp.status}`);
+    return resp.arrayBuffer();
+  },
+
+  editMessage: async (messageId: string, content: string): Promise<void> => {
+    if (isTauri()) {
+      return invoke('edit_message', { messageId, content });
+    }
+  },
+
+  deleteMessage: async (messageId: string): Promise<void> => {
+    if (isTauri()) {
+      return invoke('delete_message', { messageId });
+    }
+  },
+
+  setReaction: async (messageId: string, emoji: string, on: boolean): Promise<void> => {
+    if (isTauri()) {
+      return invoke('set_reaction', { messageId, emoji, on });
+    }
+  },
+
+  sendTyping: async (channelId: string): Promise<void> => {
+    if (isTauri()) {
+      return invoke('send_typing', { channelId });
+    }
+  },
+
+  updateProfile: async (displayName: string): Promise<User> => {
+    if (isTauri()) {
+      return invoke('update_profile', { displayName });
+    }
+    throw new Error('Profile changes need the desktop app');
+  },
+
+  changePassword: async (currentPassword: string, newPassword: string): Promise<void> => {
+    if (isTauri()) {
+      return invoke('change_password', { currentPassword, newPassword });
+    }
+    throw new Error('Password changes need the desktop app');
+  },
+
   // Voice
   joinVoiceChannel: async (channelId: string, shortId: number): Promise<void> => {
     if (isTauri()) {

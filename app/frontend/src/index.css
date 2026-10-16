@@ -666,3 +666,23 @@ body {
 .channel-admin { margin-left: auto; display: none; gap: 2px; }
 .channel-item:hover .channel-admin { display: inline-flex; }
 .channel-admin button { padding: 0 4px; font-size: 0.75rem; }
+
+.message-item { position: relative; }
+.message-item.mentioned { background: rgba(250, 200, 60, 0.08); border-left: 3px solid #f0b232; }
+.message-edited { color: var(--text-dim); font-size: 0.7rem; margin-left: 6px; }
+.message-actions { position: absolute; top: -10px; right: 12px; display: none; gap: 2px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; padding: 1px 4px; }
+.message-item:hover .message-actions { display: inline-flex; }
+.message-actions button { padding: 0 4px; }
+.message-edit { display: flex; gap: 6px; align-items: center; }
+.reactions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.reaction { padding: 1px 8px; border-radius: 10px; border: 1px solid var(--border-color); background: var(--bg-card); cursor: pointer; }
+.reaction.mine { border-color: var(--accent-teal); }
+.reaction-picker { display: flex; gap: 4px; margin-top: 4px; }
+.attachment { display: flex; align-items: center; gap: 6px; background: var(--bg-card); border: 1px solid var(--border-color); padding: 6px 12px; border-radius: 6px; font-size: 0.85rem; cursor: pointer; color: inherit; }
+.attachment-size { color: var(--text-dim); font-size: 0.75rem; }
+.typing-line { min-height: 1.2em; padding: 0 16px; color: var(--text-dim); font-size: 0.8rem; }
+.pending-attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 0; }
+.pending-attachment { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; padding: 2px 8px; font-size: 0.8rem; }
+.channel-unread { font-weight: 700; color: var(--text-main); }
+.unread-badge { margin-left: auto; min-width: 18px; text-align: center; border-radius: 9px; background: var(--text-dim); color: #fff; font-size: 0.7rem; padding: 0 5px; }
+.unread-badge.mention { background: #d83c3e; }

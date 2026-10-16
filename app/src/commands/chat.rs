@@ -108,3 +108,60 @@ pub async fn upload_file(
         .await
         .map_err(|e| format!("File upload failed: {}", e))
 }
+
+#[tauri::command]
+pub async fn download_file(id: String, state: State<'_, AppState>) -> Result<tauri::ipc::Response, String> {
+    let id = Uuid::parse_str(&id).map_err(|e| format!("Invalid file id: {}", e))?;
+    let bytes = api_client(&state)
+        .await?
+        .download_file(id)
+        .await
+        .map_err(|e| format!("Download failed: {}", e))?;
+    Ok(tauri::ipc::Response::new(bytes.to_vec()))
+}
+
+fn parse_id(id: &str) -> Result<Uuid, String> {
+    Uuid::parse_str(id).map_err(|e| format!("Invalid id: {}", e))
+}
+
+#[tauri::command]
+pub async fn edit_message(message_id: String, content: String, state: State<'_, AppState>) -> Result<(), String> {
+    api_client(&state).await?.edit_message(parse_id(&message_id)?, &content).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_message(message_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    api_client(&state).await?.delete_message(parse_id(&message_id)?).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_reaction(message_id: String, emoji: String, on: bool, state: State<'_, AppState>) -> Result<(), String> {
+    let api = api_client(&state).await?;
+    let id = parse_id(&message_id)?;
+    let result = if on { api.add_reaction(id, &emoji).await } else { api.remove_reaction(id, &emoji).await };
+    result.map_err(|e| e.to_string())
+}
+
+/// Tell the others we are typing in a channel (the server throttles it).
+#[tauri::command]
+pub async fn send_typing(channel_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let channel_id = parse_id(&channel_id)?;
+    let tx = state.control_tx.read().await.clone().ok_or_else(|| "Not connected".to_string())?;
+    tx.send(ClientMessage::Typing { channel_id }).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_profile(display_name: String, state: State<'_, AppState>) -> Result<finch_client_core::api::UserDto, String> {
+    let user = api_client(&state).await?.update_profile(&display_name).await.map_err(|e| e.to_string())?;
+    *state.current_user.write().await = Some(user.clone());
+    Ok(user)
+}
+
+#[tauri::command]
+pub async fn change_password(current_password: String, new_password: String, state: State<'_, AppState>) -> Result<(), String> {
+    api_client(&state)
+        .await?
+        .change_password(&current_password, &new_password)
+        .await
+        .map_err(|e| e.to_string())
+}

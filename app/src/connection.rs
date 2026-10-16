@@ -353,6 +353,27 @@ fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
         ServerMessage::ChannelCreated { channel } => {
             let _ = app_handle.emit("channel-created", serde_json::json!({ "channel": channel }));
         }
+        ServerMessage::MessageEdited { message_id, channel_id, content, edited_at } => {
+            let _ = app_handle.emit(
+                "message-edited",
+                serde_json::json!({ "message_id": message_id, "channel_id": channel_id, "content": content, "edited_at": edited_at }),
+            );
+        }
+        ServerMessage::MessageDeleted { message_id, channel_id } => {
+            let _ = app_handle.emit("message-deleted", serde_json::json!({ "message_id": message_id, "channel_id": channel_id }));
+        }
+        ServerMessage::ReactionChanged { message_id, channel_id, user_id, emoji, added } => {
+            let _ = app_handle.emit(
+                "reaction-changed",
+                serde_json::json!({ "message_id": message_id, "channel_id": channel_id, "user_id": user_id, "emoji": emoji, "added": added }),
+            );
+        }
+        ServerMessage::UserTyping { channel_id, user_id, username } => {
+            let _ = app_handle.emit("user-typing", serde_json::json!({ "channel_id": channel_id, "user_id": user_id, "username": username }));
+        }
+        ServerMessage::UserProfileChanged { user_id, display_name } => {
+            let _ = app_handle.emit("user-profile-changed", serde_json::json!({ "user_id": user_id, "display_name": display_name }));
+        }
         ServerMessage::ChannelUpdated { channel } => {
             let _ = app_handle.emit("channel-updated", serde_json::json!({ "channel": channel }));
         }

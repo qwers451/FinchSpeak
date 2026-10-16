@@ -78,6 +78,13 @@ pub fn run() {
             commands::chat::fetch_channel_messages,
             commands::chat::send_text_message,
             commands::chat::upload_file,
+            commands::chat::download_file,
+            commands::chat::edit_message,
+            commands::chat::delete_message,
+            commands::chat::set_reaction,
+            commands::chat::send_typing,
+            commands::chat::update_profile,
+            commands::chat::change_password,
             // Voice
             commands::voice::join_voice_channel,
             commands::voice::leave_voice_channel,

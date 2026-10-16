@@ -4,6 +4,9 @@ import { setPendingTofu } from './tofuStore';
 import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
 import { activeVoiceChannel, handleUserSpeaking, leaveVoice, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
+import { clearTyping, noteIncoming, noteTyping, resetActivity } from './activityStore';
+import { handleMessageDeleted, handleMessageEdited, handleReactionChanged, renameAuthor } from './chatStore';
+import { currentUser, setCurrentUser } from './authStore';
 import { resetScreenState, resetScreenStateOnDisconnect, setWatching, watching } from './screenState';
 import { screenHandlers } from './screenStore';
 export { appError, setAppError } from './notificationStore';
@@ -28,6 +31,7 @@ export function resetSessionState() {
   setIsLocalSpeaking(false);
   setPingRtt(null);
   resetScreenState();
+  resetActivity();
   setAppError(null);
 }
 
@@ -50,7 +54,22 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
       else setWatching(null);
     }
   },
-  'new-message': handleIncomingMessage,
+  'new-message': (incoming) => {
+    handleIncomingMessage(incoming);
+    clearTyping(incoming.channel_id, incoming.author_id);
+    noteIncoming(incoming);
+  },
+  'message-edited': handleMessageEdited,
+  'message-deleted': handleMessageDeleted,
+  'reaction-changed': handleReactionChanged,
+  'user-typing': (event) => noteTyping(event),
+  'user-profile-changed': ({ user_id, display_name }) => {
+    setKnownUsers((previous) => previous.map((user) => (user.id === user_id ? { ...user, display_name } : user)));
+    setVoiceParticipants((previous) => previous.map((p) => (p.user_id === user_id ? { ...p, username: display_name } : p)));
+    renameAuthor(user_id, display_name);
+    const me = currentUser();
+    if (me && me.id === user_id) setCurrentUser({ ...me, display_name });
+  },
   'message-rejected': handleMessageRejected,
   'user-speaking': (data) => handleUserSpeaking(data.peer_id, data.is_speaking),
   'local-speaking': setIsLocalSpeaking,

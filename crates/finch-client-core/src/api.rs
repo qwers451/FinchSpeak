@@ -451,7 +451,7 @@ async fn check_status(resp: reqwest::Response) -> Result<reqwest::Response, Clie
         let body = resp.text().await.unwrap_or_default();
         Err(ClientError::Http {
             status: status.as_u16(),
-            body,
+            body: error_text(&body),
         })
     }
 }
@@ -503,3 +503,28 @@ pub fn resolve_quic_addr(server_url: &str) -> Result<(SocketAddr, String), Clien
     Ok((addr, host.to_string()))
 }
 
+
+/// The server answers errors as `{"error": "...", "status": N}`; show people the sentence.
+fn error_text(body: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|json| json.get("error").and_then(|e| e.as_str()).map(str::to_string))
+        .unwrap_or_else(|| body.to_string())
+}
+
+#[cfg(test)]
+mod error_text_tests {
+    use super::error_text;
+
+    #[test]
+    fn the_servers_json_error_becomes_its_sentence() {
+        assert_eq!(error_text(r#"{"error":"A valid invite code is required to register","status":403}"#), "A valid invite code is required to register");
+    }
+
+    #[test]
+    fn anything_else_is_shown_as_it_is() {
+        assert_eq!(error_text("Bad Gateway"), "Bad Gateway");
+        assert_eq!(error_text(r#"{"message":"x"}"#), r#"{"message":"x"}"#);
+        assert_eq!(error_text(""), "");
+    }
+}

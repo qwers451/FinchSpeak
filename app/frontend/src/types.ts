@@ -35,6 +35,13 @@ export interface Message {
   timestamp: number;
   /** The id the author chose when sending; ties a pending message to the stored one. */
   client_msg_id?: string | null;
+  edited_at?: number | null;
+  reactions?: Reaction[];
+}
+
+export interface Reaction {
+  emoji: string;
+  user_ids: string[];
 }
 
 export type IncomingMessage = Omit<Message, 'id'> & { message_id: string };
@@ -129,6 +136,11 @@ export interface SessionEvents {
   'channel-created': { channel: Channel };
   'user-joined-voice': VoiceParticipant;
   'user-left-voice': { user_id: string; peer_id: number; channel_id: string };
+  'message-edited': { message_id: string; channel_id: string; content: string; edited_at: number };
+  'message-deleted': { message_id: string; channel_id: string };
+  'reaction-changed': { message_id: string; channel_id: string; user_id: string; emoji: string; added: boolean };
+  'user-typing': { channel_id: string; user_id: string; username: string };
+  'user-profile-changed': { user_id: string; display_name: string };
   'channel-updated': { channel: Channel };
   'channel-deleted': { channel_id: string };
   'user-voice-state-changed': { peer_id: number; muted: boolean; deafened: boolean };
