@@ -112,7 +112,9 @@ impl JitterBuffer {
         if let Some((last_arrival, last_timestamp)) = self.last_transit {
             let arrival_diff_ms = now.duration_since(last_arrival).as_secs_f64() * 1000.0;
             // MediaHeader timestamps are in milliseconds.
-            let timestamp_diff_ms = (header.timestamp.wrapping_sub(last_timestamp)) as f64;
+            // Reordered packets have a negative timestamp delta. Keep wrapping at
+            // u32 rollover without interpreting a backwards step as years of jitter.
+            let timestamp_diff_ms = header.timestamp.wrapping_sub(last_timestamp) as i32 as f64;
 
             let d = (arrival_diff_ms - timestamp_diff_ms).abs();
             self.jitter_ms += (d - self.jitter_ms) / 16.0;
@@ -142,10 +144,15 @@ impl JitterBuffer {
         );
 
         // Bound latency: if the sender runs ahead of playout, drop the oldest packets.
+        let mut trimmed = false;
         while self.queue.len() > MAX_BUFFER_PACKETS {
             self.queue.pop_first();
+            trimmed = true;
         }
-        if let (Some(next), Some(&oldest)) = (self.next_playout_seq, self.queue.keys().next())
+        // Missing packets still own a playout slot (PLC). Advance over them only
+        // when intentionally discarding a real backlog, not on every new arrival.
+        if trimmed
+            && let (Some(next), Some(&oldest)) = (self.next_playout_seq, self.queue.keys().next())
             && next < oldest
         {
             self.next_playout_seq = Some(oldest);
@@ -274,6 +281,42 @@ impl JitterBuffer {
 mod tests {
     use super::*;
     use crate::opus::OpusVoiceEncoder;
+
+    #[test]
+    fn a_new_arrival_does_not_skip_a_missing_playout_slot() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let mut output = [0.0; FRAME_SIZE_48K];
+        push_seq(&mut buffer, 0, false, &payload);
+        push_seq(&mut buffer, 2, false, &payload);
+        assert_eq!(buffer.pop_frame(&mut output), PlayoutResult::Normal); // slot 0
+        push_seq(&mut buffer, 3, false, &payload);
+        assert_eq!(buffer.pop_frame(&mut output), PlayoutResult::Concealed); // slot 1
+        assert_eq!(buffer.pop_frame(&mut output), PlayoutResult::Normal); // slot 2
+    }
+
+    #[test]
+    fn reordered_timestamps_do_not_look_like_a_multi_year_delay() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let start = Instant::now();
+        for (index, (seq, timestamp)) in [(0, 100), (2, 140), (1, 120), (3, 160)].into_iter().enumerate() {
+            buffer.push(&MediaHeader::new_audio(1, 1, seq, timestamp, false, false), payload.clone(), start + std::time::Duration::from_millis(index as u64 * 20));
+        }
+        assert!(buffer.jitter_ms < 20.0, "reordering produced {} ms jitter", buffer.jitter_ms);
+        assert_eq!(buffer.target_packets, MIN_BUFFER_PACKETS);
+    }
+
+    #[test]
+    fn timestamp_rollover_preserves_twenty_millisecond_spacing() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let start = Instant::now();
+        for (index, timestamp) in [u32::MAX - 19, 0, 20].into_iter().enumerate() {
+            buffer.push(&MediaHeader::new_audio(1, 1, index as u16, timestamp, false, false), payload.clone(), start + std::time::Duration::from_millis(index as u64 * 20));
+        }
+        assert!(buffer.jitter_ms < 0.01);
+    }
 
     #[test]
     fn test_jitter_buffer_sequence_rollover() {
