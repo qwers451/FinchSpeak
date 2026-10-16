@@ -1,4 +1,4 @@
-//! Voice capture pipeline: AEC → noise suppression → VAD → Opus → media packet.
+//! Voice capture pipeline: AEC → noise suppression → trim → VAD → dynamics → Opus → media packet.
 //!
 //! Pure processing without audio I/O, so the same code runs inside the cpal
 //! worker thread of the client and inside headless test harnesses.
@@ -9,6 +9,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use finch_protocol::media::{MediaHeader, MEDIA_HEADER_SIZE};
 
 use crate::aec::EchoCanceller;
+use crate::dynamics::VoiceDynamics;
 use crate::noise::NoiseSuppressor;
 use crate::opus::{AudioOpusError, OpusVoiceEncoder};
 use crate::resampler::FRAME_SIZE_48K;
@@ -39,6 +40,8 @@ pub struct VoiceCaptureConfig {
     pub vad_threshold_db: f32,
     /// How speech is detected. The default is the speech classifier.
     pub vad_mode: VadMode,
+    /// Natural speech leveling and peak protection.
+    pub voice_enhancement: bool,
 }
 
 impl Default for VoiceCaptureConfig {
@@ -48,6 +51,7 @@ impl Default for VoiceCaptureConfig {
             bitrate_kbps: 64,
             vad_threshold_db: DEFAULT_VAD_THRESHOLD_DB,
             vad_mode: VadMode::default(),
+            voice_enhancement: true,
         }
     }
 }
@@ -70,6 +74,7 @@ pub struct VoiceCapture {
     echo_canceller: EchoCanceller,
     noise_suppressor: NoiseSuppressor,
     vad: VoiceActivityDetector,
+    dynamics: VoiceDynamics,
     encoder: OpusVoiceEncoder,
     seq: u16,
     /// Last silent frames, oldest first (at most [`PREROLL_FRAMES`]).
@@ -84,6 +89,9 @@ pub struct VoiceCapture {
 
 impl VoiceCapture {
     pub fn new(config: VoiceCaptureConfig) -> Result<Self, AudioOpusError> {
+        let mut dynamics = VoiceDynamics::new();
+        dynamics.set_enabled(config.voice_enhancement);
+        dynamics.reset();
         Ok(Self {
             config,
             echo_canceller: EchoCanceller::new(),
@@ -91,6 +99,7 @@ impl VoiceCapture {
             vad: VoiceActivityDetector::with_mode(config.vad_mode, config.vad_threshold_db),
             encoder: OpusVoiceEncoder::new(config.bitrate_kbps)?,
             seq: 0,
+            dynamics,
             preroll: VecDeque::with_capacity(PREROLL_FRAMES),
             transmitting: false,
             input_gain: 1.0,
@@ -112,6 +121,15 @@ impl VoiceCapture {
     /// Push-to-talk gate: `false` stops all transmission (the pipeline keeps adapting).
     pub fn set_transmit_gate(&mut self, open: bool) {
         self.gate_open = open;
+        if !open {
+            self.preroll.clear();
+            self.transmitting = false;
+        }
+    }
+
+    /// Toggle natural speech leveling without restarting capture.
+    pub fn set_voice_enhancement(&mut self, enabled: bool) {
+        self.dynamics.set_enabled(enabled);
     }
 
     /// Change the loudness threshold of the speech detector (dBFS).
@@ -142,19 +160,26 @@ impl VoiceCapture {
         sender_peer_id: u32,
         timestamp_ms: u32,
     ) -> CaptureOutput {
-        if (self.input_gain - 1.0).abs() > f32::EPSILON {
-            for sample in frame.iter_mut() {
-                *sample = (*sample * self.input_gain).clamp(-1.0, 1.0);
-            }
+        // Protect the AEC state from invalid device samples; preserve headroom after trim.
+        for sample in frame.iter_mut() {
+            *sample = if sample.is_finite() { sample.clamp(-1.0, 1.0) } else { 0.0 };
         }
         self.echo_canceller.process_capture(frame);
         self.noise_suppressor.process_frame(frame);
-
-        let level_db = VoiceActivityDetector::compute_rms_dbfs(frame);
-        let mut vad = self.vad.process(frame);
-        if !self.gate_open {
-            vad = VadDecision::Silence;
+        for sample in frame.iter_mut() {
+            *sample *= self.input_gain;
         }
+        let analysis = frame.map(|sample| sample.clamp(-1.0, 1.0));
+        let level_db = VoiceActivityDetector::compute_rms_dbfs(&analysis);
+        let activity = self.vad.process(&analysis);
+        self.dynamics.process(frame, activity);
+        // Local monitoring receives processed audio, even while transmission is private.
+        if !self.gate_open {
+            self.preroll.clear();
+            self.transmitting = false;
+            return CaptureOutput { packets: Vec::new(), vad: VadDecision::Silence, level_db };
+        }
+        let vad = activity;
         if !vad.should_transmit() {
             self.transmitting = false;
             if self.preroll.len() == PREROLL_FRAMES {
@@ -245,6 +270,7 @@ mod tests {
     #[test]
     fn output_reports_the_level_of_the_processed_frame() {
         let mut capture = capture_for_test();
+        capture.set_voice_enhancement(false); // Meter is deliberately before dynamics.
         let mut silence = [0.0f32; FRAME_SIZE_48K];
         let quiet = capture.process(&mut silence, 1, 0).level_db;
         assert!(quiet <= -100.0, "silence is reported near the floor, got {quiet}");
@@ -439,6 +465,7 @@ mod tests {
     /// Mean level of the processed signal after a few frames of warm-up.
     fn processed_level(gain: f32) -> f32 {
         let mut capture = capture_for_test();
+        capture.set_voice_enhancement(false); // Isolate the manual trim control.
         capture.set_input_gain(gain);
         let mut total = 0.0;
         for i in 0..20 {
@@ -523,4 +550,70 @@ mod tests {
         let mut frame = quiet_frame(1);
         assert!(!capture.process(&mut frame, 1, 20).packets.is_empty(), "now it is loud enough");
     }
-}
+    #[test]
+    fn enhancement_defaults_on_and_can_be_bypassed() {
+        assert!(VoiceCaptureConfig::default().voice_enhancement);
+        let mut on = capture_for_test();
+        let mut off = VoiceCapture::new(VoiceCaptureConfig { voice_enhancement: false, vad_mode: VadMode::Energy, ..Default::default() }).unwrap();
+        let mut on_level = 0.0;
+        let mut off_level = 0.0;
+        for i in 0..150 {
+            let mut a = tone_frame(i);
+            let mut b = a;
+            let out = on.process(&mut a, 1, i as u32 * 20);
+            off.process(&mut b, 1, i as u32 * 20);
+            assert!(a.iter().all(|s| s.is_finite() && s.abs() <= 0.891252));
+            if i >= 100 { on_level += rms_of(&a); off_level += rms_of(&b); }
+            assert!(out.level_db.is_finite());
+        }
+        assert!(on_level < off_level * 0.7, "loud input is gently reduced");
+        on.set_voice_enhancement(false);
+    }
+
+    #[test]
+    fn private_audio_never_enters_network_preroll() {
+        let mut capture = capture_for_test();
+        capture.set_transmit_gate(false);
+        for i in 0..100 {
+            let mut frame = tone_frame(i);
+            assert!(capture.process(&mut frame, 1, i as u32 * 20).packets.is_empty());
+        }
+        assert!(capture.preroll.is_empty(), "PTT/mute/mic-test audio must not be retained for sending");
+        capture.set_transmit_gate(true);
+        let mut frame = tone_frame(100);
+        let out = capture.process(&mut frame, 1, 2000);
+        assert_eq!(out.packets.len(), 1, "no frames captured while private are sent later");
+        assert_eq!(MediaHeader::from_slice(&out.packets[0]).unwrap().timestamp, 2000);
+    }
+
+    #[test]
+    fn enhancement_does_not_override_threshold_and_meter() {
+        let mut capture = VoiceCapture::new(VoiceCaptureConfig { vad_mode: VadMode::Energy, vad_threshold_db: -15.0, ..Default::default() }).unwrap();
+        let mut bypass = VoiceCapture::new(VoiceCaptureConfig { voice_enhancement: false, vad_mode: VadMode::Energy, vad_threshold_db: -15.0, ..Default::default() }).unwrap();
+        for i in 0..150 {
+            let mut a = quiet_frame(i);
+            let mut b = a;
+            let out = capture.process(&mut a, 1, i as u32 * 20);
+            bypass.process(&mut b, 1, i as u32 * 20);
+            assert!(out.packets.is_empty(), "AGC must not open a threshold-closed microphone");
+            assert!((out.level_db - VoiceActivityDetector::compute_rms_dbfs(&b)).abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn trim_and_invalid_input_are_safe_in_full_pipeline() {
+        let mut capture = capture_for_test();
+        capture.set_input_gain(3.0);
+        for i in 0..100 {
+            let mut frame = tone_frame(i).map(|s| s * 3.0);
+            if i == 0 { frame[0] = f32::NAN; frame[1] = f32::INFINITY; }
+            capture.process(&mut frame, 1, i as u32 * 20);
+            assert!(frame.iter().all(|s| s.is_finite() && s.abs() <= 0.891252));
+        }
+        capture.set_input_gain(0.0);
+        for i in 100..110 {
+            let mut frame = tone_frame(i);
+            capture.process(&mut frame, 1, i as u32 * 20);
+            assert!(frame.iter().all(|s| *s == 0.0));
+        }
+    }}
