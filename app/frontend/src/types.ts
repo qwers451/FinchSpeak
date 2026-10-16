@@ -234,6 +234,8 @@ export interface SessionEvents {
   'screen-audio-failed': string;
   'presence-update': { user_id: string; status: UserStatus; status_text?: string | null };
   'avatar-changed': { user_id: string; avatar_url: string | null };
+  /** The tray menu asked to mute or unmute. */
+  'tray-toggle-mute': null;
   'server-mute-changed': { peer_id: number; server_muted: boolean };
   'voice-kicked': { channel_id: string };
   /** Level of the processed microphone, about 25 times a second during a call. */

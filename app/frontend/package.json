@@ -11,11 +11,13 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/plugin-notification": "^2.7.0",
     "@tauri-apps/plugin-opener": "^2.7.2",
     "lucide-solid": "^0.475.0",
     "solid-js": "^1.9.4"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.3",
     "happy-dom": "^21.0.1",
     "typescript": "^5.7.3",
     "vite": "^6.1.0",

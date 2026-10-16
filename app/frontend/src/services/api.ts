@@ -411,6 +411,28 @@ export const api = {
     }
   },
 
+  setTrayState: async (state: 'idle' | 'voice' | 'muted' | 'live'): Promise<void> => {
+    if (isTauri()) return invoke('set_tray_state', { state });
+  },
+
+  setCloseToTray: async (enabled: boolean): Promise<void> => {
+    if (isTauri()) return invoke('set_close_to_tray', { enabled });
+  },
+
+  appVersion: async (): Promise<string> => {
+    if (isTauri()) return invoke('app_version');
+    return 'dev';
+  },
+
+  checkUpdate: async (): Promise<{ version: string; notes: string } | null> => {
+    if (isTauri()) return invoke('check_update');
+    return null;
+  },
+
+  installUpdate: async (): Promise<void> => {
+    if (isTauri()) return invoke('install_update');
+  },
+
   testMicrophone: async (seconds = 3): Promise<void> => {
     if (isTauri()) {
       return invoke('test_microphone', { seconds });

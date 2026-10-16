@@ -25,6 +25,12 @@
           "url": "http://*"
         }
       ]
-    }
+    },
+    "notification:default",
+    "core:window:allow-request-user-attention",
+    "core:window:allow-set-focus",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-unminimize"
   ]
 }

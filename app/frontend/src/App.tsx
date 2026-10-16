@@ -6,12 +6,15 @@ import { subscribeSessionEvents } from './services/sessionEvents';
 import { api } from './services/api';
 import { Sidebar } from './components/Sidebar';
 import { prefs } from './stores/settingsStore';
+import { startDesktopSync } from './stores/desktop';
 import { MembersPanel } from './components/MembersPanel';
 import { ChatArea } from './components/ChatArea';
 import { VoicePanel } from './components/VoicePanel';
 import { AuthModal } from './components/AuthModal';
 import { CertChangedModal, TofuModal } from './components/TofuModal';
 import { ConnectionBanner, Splash } from './components/ConnectionBanner';
+import { Overlays, SessionEndedScreen } from './components/overlays/Overlays';
+import { sessionEnded } from './stores/sessionEnd';
 import { IconSprite, Titlebar, ToastHost } from './ui';
 import { AdminModal } from './components/admin/AdminModal';
 import { SettingsModal } from './components/settings/SettingsModal';
@@ -23,6 +26,7 @@ export function App() {
   const [eventsReady, setEventsReady] = createSignal(false);
 
   onMount(async () => {
+    startDesktopSync();
     try {
       const subscriptions = await subscribeSessionEvents();
       if (disposed) { subscriptions.dispose(); return; }
@@ -53,6 +57,7 @@ export function App() {
       <Titlebar />
       <ConnectionBanner />
       <Show when={eventsReady()} fallback={<Splash />}>
+        <Show when={!sessionEnded()} fallback={<SessionEndedScreen />}>
         <Show when={currentUser()} fallback={<AuthModal />}>
           <div class="app-layout">
             <Sidebar />
@@ -70,7 +75,9 @@ export function App() {
             <Show when={prefs().appearance.showMembers}><MembersPanel /></Show>
           </div>
         </Show>
+        </Show>
       </Show>
+      <Overlays />
       <TofuModal />
       <CertChangedModal />
       <AdminModal />

@@ -1,0 +1,76 @@
+name: Release
+
+# Push a tag such as v1.0.0 to build the installer and the server package and publish them.
+# The updater signing key is a repository secret that only the owner sets:
+#   TAURI_SIGNING_PRIVATE_KEY (the content of the private key file) and TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - name: The tag must match the version in the code
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $cargo = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          $tauri = (Get-Content app/tauri.conf.json | ConvertFrom-Json).version
+          if ($tag -ne $cargo -or $tag -ne $tauri) { throw "Tag $tag, Cargo.toml $cargo, tauri.conf.json $tauri must be the same" }
+
+      - name: Frontend dependencies
+        working-directory: app/frontend
+        run: npm ci
+
+      - name: Installer
+        working-directory: app
+        run: ./frontend/node_modules/.bin/tauri build --bundles nsis
+
+      - name: Server package
+        shell: pwsh
+        run: |
+          cargo build --release -p finch-server
+          New-Item -ItemType Directory -Force dist/FinchSpeak-server | Out-Null
+          Copy-Item target/release/finch-server.exe dist/FinchSpeak-server/
+          Copy-Item deploy/finch-server.windows.toml dist/FinchSpeak-server/finch-server.toml.example
+          Copy-Item deploy/README-PACKAGE.txt dist/FinchSpeak-server/README.txt
+          Compress-Archive -Path dist/FinchSpeak-server/* -DestinationPath dist/FinchSpeak-server-windows.zip -Force
+
+      - name: Sign the installer and write latest.json
+        shell: pwsh
+        working-directory: app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "The secret TAURI_SIGNING_PRIVATE_KEY is not set: updates cannot be signed" }
+          $installer = Get-ChildItem ../target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          ./frontend/node_modules/.bin/tauri signer sign $installer.FullName
+          node ../scripts/make-latest-json.mjs $installer.FullName "${{ github.ref_name }}" "${{ github.repository }}" ../dist/latest.json
+
+      - name: Publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $installer = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          gh release create "${{ github.ref_name }}" --title "FinchSpeak ${{ github.ref_name }}" --generate-notes `
+            $installer.FullName "$($installer.FullName).sig" dist/FinchSpeak-server-windows.zip dist/latest.json

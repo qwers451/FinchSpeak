@@ -48,7 +48,7 @@ it('a channel can be muted for a while, for good, and turned back on', () => {
 
 it('the looks are put on the page', () => {
   const root = document.createElement('div');
-  applyAppearance({ density: 'compact', textSize: 'large', reduceMotion: true, showMembers: true }, root);
+  applyAppearance({ density: 'compact', textSize: 'large', reduceMotion: true, showMembers: true, closeToTray: true }, root);
   expect(root.dataset.density).toBe('compact');
   expect(root.dataset.reduceMotion).toBe('true');
   expect(root.style.getPropertyValue('--zoom')).toBe(String(TEXT_ZOOM.large));

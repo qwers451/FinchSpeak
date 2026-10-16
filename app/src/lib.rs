@@ -2,7 +2,9 @@
 #![allow(clippy::collapsible_if, clippy::large_enum_variant, clippy::new_without_default)]
 
 pub mod audio_engine;
+pub mod updater;
 pub mod commands;
+mod tray;
 pub mod connection;
 pub mod state;
 
@@ -45,6 +47,7 @@ pub fn run() {
 
     if let Err(e) = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -58,6 +61,9 @@ pub fn run() {
         .setup(|app| {
             tracing::info!("Tauri setup initialized");
             load_known_servers(app);
+            if let Err(e) = tray::setup(app.handle()) {
+                tracing::warn!("Could not create the tray icon: {e}");
+            }
             if let Some(window) = app.get_webview_window("main") {
                 tracing::info!("Main window found, ensuring show and focus");
                 let _ = window.show();
@@ -74,7 +80,23 @@ pub fn run() {
             }
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                use std::sync::atomic::Ordering;
+                let state = window.app_handle().state::<AppState>();
+                if state.close_to_tray.load(Ordering::SeqCst) && !state.quitting.load(Ordering::SeqCst) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            commands::update::app_version,
+            commands::update::check_update,
+            commands::update::install_update,
+            commands::window::set_close_to_tray,
+            commands::window::set_tray_state,
+            commands::window::show_main_window,
             // Auth
             commands::auth::login,
             commands::auth::register,

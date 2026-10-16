@@ -2,9 +2,11 @@ import { createSignal } from 'solid-js';
 import type { SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
 import { setPendingMismatch, setPendingTofu } from './tofuStore';
 import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
-import { activeVoiceChannel, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
+import { activeVoiceChannel, toggleMute, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
-import { clearTyping, noteIncoming, noteTyping, resetActivity, setUnreadFromServer } from './activityStore';
+import { classifyEnd, sessionEnded, setSessionEnded } from './sessionEnd';
+import { reactToMessage, reactToVoiceMovement } from './desktop';
+import { clearTyping, isMentioned, noteIncoming, noteTyping, resetActivity, setUnreadFromServer } from './activityStore';
 import { handleMessageDeleted, handleMessageEdited, handleReactionChanged, renameAuthor } from './chatStore';
 import { currentUser, setCurrentUser } from './authStore';
 import { resetScreenState, resetScreenStateOnDisconnect, setWatching, watching } from './screenState';
@@ -70,6 +72,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     handleIncomingMessage(incoming);
     clearTyping(incoming.channel_id, incoming.author_id);
     noteIncoming(incoming);
+    reactToMessage(incoming, isMentioned(incoming));
   },
   'message-edited': handleMessageEdited,
   'message-deleted': handleMessageDeleted,
@@ -103,6 +106,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
       ...previous.filter((participant) => participant.peer_id !== data.peer_id), data,
     ]);
     void applySavedVolume(data.user_id, data.peer_id);
+    if (activeVoiceChannel()?.id === data.channel_id) reactToVoiceMovement('join', data.username, data.user_id);
   },
   'user-left-voice': (data) => {
     // Say why the watched share ended while the sharer's name is still known.
@@ -122,6 +126,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     const me = currentUser();
     if (me && me.id === data.user_id) setCurrentUser({ ...me, status: data.status, status_text: data.status_text ?? null });
   },
+  'tray-toggle-mute': () => { void toggleMute(); },
   'server-mute-changed': ({ peer_id, server_muted }) => setVoiceParticipants((previous) => previous.map((participant) =>
     participant.peer_id === peer_id ? { ...participant, server_muted } : participant)),
   'voice-kicked': () => {
@@ -134,6 +139,8 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     if (me && me.id === user_id) setCurrentUser({ ...me, avatar_url });
   },
   'connection-lost': (reason) => {
+    const ended = classifyEnd(reason);
+    if (ended) setSessionEnded(ended);
     setConnectionStatus('disconnected');
     setConnectionError(reason);
     setVoiceParticipants([]);
@@ -148,7 +155,13 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     const channel = activeChannel();
     if (channel?.channel_type === 'text') void selectChannel(channel);
   },
-  'reconnect-failed': (reason) => { setConnectionStatus('failed'); setConnectionError(reason); },
+  'reconnect-failed': (reason) => {
+    setConnectionStatus('failed');
+    setConnectionError(reason);
+    // Keep the more specific reason we may already have (banned, kicked).
+    const ended = classifyEnd(reason);
+    if (ended && !sessionEnded()) setSessionEnded(ended);
+  },
   'server-error': (error) => setAppError(`${error.code}: ${error.message}`),
   'audio-device-lost': () => setAppError('An audio device was disconnected; reopening the audio devices...'),
   'audio-device-failed': () => setAppError('The audio devices keep failing. Check them, then rejoin the voice channel.'),

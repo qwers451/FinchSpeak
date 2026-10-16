@@ -5,6 +5,7 @@ import { loadChannels, resetChatState } from './chatStore';
 import { resetSessionState } from './sessionStore';
 import { setActiveVoiceChannel } from './voiceStore';
 import { setAppError } from './notificationStore';
+import { setSessionEnded } from './sessionEnd';
 import { pendingMismatch, pendingTofu, setPendingMismatch, setPendingTofu } from './tofuStore';
 
 export const [currentUser, setCurrentUser] = createSignal<User | null>(null);
@@ -75,6 +76,7 @@ export async function logoutUser() {
   resetChatState();
   setPendingTofu(null);
   setPendingMismatch(null);
+  setSessionEnded(null);
   setCurrentUser(null);
   if (failure) setAppError(String(failure));
 }

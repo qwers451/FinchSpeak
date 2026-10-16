@@ -1,7 +1,7 @@
 # ==============================================================================
 # Stage 1: Build stage
 # ==============================================================================
-FROM rust:1.85-slim-bookworm AS builder
+FROM rust:1-slim-bookworm AS builder
 
 WORKDIR /usr/src/finchspeak
 
@@ -28,6 +28,7 @@ FROM debian:bookworm-slim AS runtime
 # Install runtime dependencies: TLS certificates and OpenSSL runtime library
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    curl \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -48,6 +49,10 @@ USER finch:finch
 # Expose QUIC SFU (UDP) and REST API (TCP)
 EXPOSE 4433/udp
 EXPOSE 8443/tcp
+
+# The server answers /health (database reachable) without a login; its certificate is self-signed.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -kfsS https://localhost:8443/health || exit 1
 
 # Server entrypoint
 ENTRYPOINT ["/usr/local/bin/finch-server"]

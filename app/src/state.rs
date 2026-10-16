@@ -163,6 +163,12 @@ pub struct AppState {
     pub audio_devices: Arc<std::sync::RwLock<AudioDeviceSelection>>,
     pub voice_settings: Arc<VoiceSettings>,
     /// Seconds of microphone test requested by the UI (0 = none); the audio worker takes it.
+    /// An update found by `check_update`, waiting for the person to accept it.
+    pub pending_update: Arc<tokio::sync::Mutex<Option<(crate::updater::UpdateInfo, crate::updater::PlatformEntry)>>>,
+    /// Closing the window hides it to the tray instead of quitting.
+    pub close_to_tray: Arc<std::sync::atomic::AtomicBool>,
+    /// The user chose Quit: really close.
+    pub quitting: Arc<std::sync::atomic::AtomicBool>,
     pub mic_test_request: Arc<std::sync::atomic::AtomicU32>,
 }
 
@@ -224,6 +230,9 @@ impl AppState {
             audio_engine: Arc::new(Mutex::new(crate::audio_engine::AudioEngine::new())),
             audio_devices: Arc::new(std::sync::RwLock::new(AudioDeviceSelection::default())),
             voice_settings: Arc::new(VoiceSettings::default()),
+            pending_update: Arc::new(tokio::sync::Mutex::new(None)),
+            close_to_tray: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            quitting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             mic_test_request: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         }
     }

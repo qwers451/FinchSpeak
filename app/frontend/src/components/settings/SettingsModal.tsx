@@ -182,6 +182,7 @@ function AppearancePage() {
       <Row title="Density" hint="Compact fits more messages on the screen." control={seg('Density', a().density, [['comfortable', 'Comfortable'], ['compact', 'Compact']], (density) => updateAppearance({ density }))} />
       <Row title="Text size" control={seg('Text size', a().textSize, [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], (textSize) => updateAppearance({ textSize }))} />
       <Row title="Reduce motion" hint="Turns off pulsing rings and slides." control={<Toggle label="Reduce motion" checked={a().reduceMotion} onChange={(v) => updateAppearance({ reduceMotion: v })} />} />
+      <Row title="Close button hides to the tray" hint="FinchSpeak keeps running (and keeps you in the call). Quit from the tray menu." control={<Toggle label="Close button hides to the tray" checked={a().closeToTray} onChange={(v) => updateAppearance({ closeToTray: v })} />} />
       <Row title="Members panel" hint="The list of people on the right." control={<Toggle label="Members panel" checked={a().showMembers} onChange={(v) => updateAppearance({ showMembers: v })} />} />
     </div>
   );
@@ -190,7 +191,30 @@ function AppearancePage() {
 function KeysPage() {
   const [capturing, setCapturing] = createSignal(false);
   const [info, setInfo] = createSignal<{ server_url: string | null; hostname: string | null; fingerprint: string | null }>({ server_url: null, hostname: null, fingerprint: null });
-  onMount(async () => { try { setInfo(await api.serverInfo()); } catch { /* shown as unknown */ } });
+  const [version, setVersion] = createSignal(APP_VERSION);
+  const [update, setUpdate] = createSignal<{ version: string; notes: string } | null>(null);
+  const [checking, setChecking] = createSignal(false);
+  const [upToDate, setUpToDate] = createSignal(false);
+  onMount(async () => {
+    try { setInfo(await api.serverInfo()); } catch { /* shown as unknown */ }
+    try { setVersion(await api.appVersion()); } catch { /* keep the built-in text */ }
+  });
+  const checkForUpdate = async () => {
+    setChecking(true);
+    setUpToDate(false);
+    try {
+      const found = await api.checkUpdate();
+      setUpdate(found);
+      setUpToDate(!found);
+    } catch (err) {
+      pushToast({ kind: 'error', title: 'Could not check for updates', text: String(err).replace(/^Error:\s*/, '') });
+    } finally {
+      setChecking(false);
+    }
+  };
+  const install = async () => {
+    try { await api.installUpdate(); } catch (err) { pushToast({ kind: 'error', title: 'The update was not installed', text: String(err).replace(/^Error:\s*/, '') }); }
+  };
 
   const capture = (event: KeyboardEvent) => {
     event.preventDefault();
@@ -201,7 +225,7 @@ function KeysPage() {
     void choosePushToTalkKey(shortcut);
   };
   const diagnostics = createMemo(() => [
-    `FinchSpeak ${APP_VERSION}`,
+    `FinchSpeak ${version()}`,
     `Server: ${info().server_url ?? 'unknown'}`,
     `Certificate: ${info().fingerprint ?? 'unknown'}`,
     `Agent: ${navigator.userAgent}`,
@@ -226,7 +250,14 @@ function KeysPage() {
 
       <span class="field-label" style={{ 'margin-top': '8px' }}>About</span>
       <div class="col g8">
-        <div class="row g12 between"><span class="t2">Version</span><strong>{APP_VERSION}</strong></div>
+        <div class="row g12 between"><span class="t2">Version</span><strong>{version()}</strong></div>
+        <div class="row g12 between">
+          <span class="t2">Updates</span>
+          <Show when={update()} fallback={<Button size="sm" variant="secondary" icon="refresh" loading={checking()} onClick={() => void checkForUpdate()}>{upToDate() ? 'You have the newest version' : 'Check for updates'}</Button>}>
+            {(found) => <Button size="sm" variant="primary" icon="dl" onClick={() => void install()}>Install {found().version}</Button>}
+          </Show>
+        </div>
+        <Show when={update()?.notes}><span class="t3 fs12">{update()!.notes}</span></Show>
         <div class="row g12 between"><span class="t2">Server</span><strong class="trunc">{info().server_url ?? 'unknown'}</strong></div>
         <div class="col g4">
           <span class="t2">Certificate fingerprint (SHA-256)</span>
