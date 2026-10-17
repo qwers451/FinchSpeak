@@ -1,0 +1,27 @@
+/* Emil: fast utility feedback. Jakub: quiet, interruptible arrival/departure. */
+:root { --motion-enter:220ms; --motion-exit:140ms; --motion-small:120ms; }
+[data-theme="custom"] { --motion-enter:180ms; --motion-small:90ms; }
+.btn,.ctl,.ch,.mem,.si,.react,.tab,.input,.source .thumb { transition:background-color var(--motion-small) var(--ease-out),border-color var(--motion-small) var(--ease-out),color var(--motion-small) var(--ease-out),transform 100ms var(--ease-out); }
+.btn:active:not(:disabled),.ctl:active { transform:translateY(1px) scale(.98); }
+.btn:focus-visible:active,.ctl:focus-visible:active { transform:none; }
+.overlay { animation:scrim-in 150ms var(--ease-out) both; }
+.modal { animation:dialog-in var(--motion-enter) var(--ease-out) both; transform-origin:50% 45%; }
+.overlay[data-exiting="true"] { pointer-events:none; animation:scrim-out var(--motion-exit) var(--ease-in) both; }
+.overlay[data-exiting="true"] .modal { animation:dialog-out var(--motion-exit) var(--ease-in) both; }
+.toast { animation:toast-in 220ms var(--ease-out) both; }
+.emoji-picker,.search-results,.mention-menu { animation:popover-in 140ms var(--ease-out) both; transform-origin:top right; }
+.composer-picker .emoji-picker,.picker-anchor.up .emoji-picker { transform-origin:bottom right; }
+.vc { transition:border-color 120ms var(--ease-out),box-shadow 120ms var(--ease-out); }
+.toggle::after { transition:transform 150ms var(--ease-out); }
+.toggle { transition:background-color 120ms var(--ease-out),border-color 120ms var(--ease-out); }
+.av.speaking,.typing i { animation:none; }
+@keyframes dialog-in { from { opacity:0; transform:translateY(10px) scale(.985); } to { opacity:1; transform:none; } }
+@keyframes dialog-out { to { opacity:0; transform:translateY(3px) scale(.995); } }
+@keyframes scrim-in { from { opacity:0; } to { opacity:1; } }
+@keyframes scrim-out { to { opacity:0; } }
+@keyframes toast-in { from { opacity:0; transform:translateX(12px); } to { opacity:1; transform:none; } }
+@keyframes popover-in { from { opacity:0; transform:translateY(4px) scale(.985); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion:reduce) {
+  *,*::before,*::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; }
+}
+[data-reduce-motion="true"] *,[data-reduce-motion="true"] *::before,[data-reduce-motion="true"] *::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; }

@@ -1,0 +1,158 @@
+/* ═══════════════════════════════════════════════════════════════════
+   FINCHSPEAK · tokens.css
+   Monumental space brutalism. Dark is the only theme.
+   Every surface is opaque. No blur, no glow, no radius > 2px.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Fonts (bundled, OFL) ─────────────────────────────────────────── */
+@font-face { font-family: 'Finch Mono'; font-weight: 400; font-display: swap; src: url('/custom/styles/fonts/jetbrains-mono-latin-400-normal.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2190-22FF, U+25A0-25FF; }
+@font-face { font-family: 'Finch Mono'; font-weight: 400; font-display: swap; src: url('/custom/styles/fonts/jetbrains-mono-cyrillic-400-normal.woff2') format('woff2'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'Finch Mono'; font-weight: 500; font-display: swap; src: url('/custom/styles/fonts/jetbrains-mono-latin-500-normal.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2190-22FF, U+25A0-25FF; }
+@font-face { font-family: 'Finch Mono'; font-weight: 500; font-display: swap; src: url('/custom/styles/fonts/jetbrains-mono-cyrillic-500-normal.woff2') format('woff2'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'Finch Mono'; font-weight: 600; font-display: swap; src: url('/custom/styles/fonts/jetbrains-mono-latin-600-normal.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2190-22FF, U+25A0-25FF; }
+@font-face { font-family: 'Finch Mono'; font-weight: 600; font-display: swap; src: url('/custom/styles/fonts/jetbrains-mono-cyrillic-600-normal.woff2') format('woff2'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'Finch Mono'; font-weight: 700; font-display: swap; src: url('/custom/styles/fonts/jetbrains-mono-latin-700-normal.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2190-22FF, U+25A0-25FF; }
+@font-face { font-family: 'Finch Mono'; font-weight: 700; font-display: swap; src: url('/custom/styles/fonts/jetbrains-mono-cyrillic-700-normal.woff2') format('woff2'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'Finch Mono'; font-weight: 800; font-display: swap; src: url('/custom/styles/fonts/jetbrains-mono-latin-800-normal.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2190-22FF, U+25A0-25FF; }
+@font-face { font-family: 'Finch Mono'; font-weight: 800; font-display: swap; src: url('/custom/styles/fonts/jetbrains-mono-cyrillic-800-normal.woff2') format('woff2'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'Finch Read'; font-weight: 400; font-display: swap; src: url('/custom/styles/fonts/inter-latin-400-normal.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2190-22FF; }
+@font-face { font-family: 'Finch Read'; font-weight: 400; font-display: swap; src: url('/custom/styles/fonts/inter-cyrillic-400-normal.woff2') format('woff2'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'Finch Read'; font-weight: 500; font-display: swap; src: url('/custom/styles/fonts/inter-latin-500-normal.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2190-22FF; }
+@font-face { font-family: 'Finch Read'; font-weight: 500; font-display: swap; src: url('/custom/styles/fonts/inter-cyrillic-500-normal.woff2') format('woff2'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'Finch Read'; font-weight: 600; font-display: swap; src: url('/custom/styles/fonts/inter-latin-600-normal.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2190-22FF; }
+@font-face { font-family: 'Finch Read'; font-weight: 600; font-display: swap; src: url('/custom/styles/fonts/inter-cyrillic-600-normal.woff2') format('woff2'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+
+[data-theme="custom"] {
+  color-scheme: dark;
+
+  /* ── 4.1 Surfaces · headset navy ──────────────────────────────── */
+  --bg-void:   #06080F;   /* window base                       */
+  --bg-hull:   #0B0F1B;   /* Sidebar, MembersPanel             */
+  --bg-deck:   #0F1524;   /* chat & voice stage                */
+  --bg-deck-hi: #121A2B; /* hover row on deck                 */
+  --bg-module: #161E31;   /* raised cards, inputs              */
+  --bg-module-hi: #21293B; /* hover on module (opaque)         */
+  --bg-module-press: #2A3143;
+  --border-grid: #222E4A; /* 1px structure lines               */
+  --border-grid-hi: #3B465F;
+
+  /* ── 4.2 Command accents · amber body, ignition wing ──────────── */
+  --accent-amber:    #FFC400;
+  --accent-gold:     #EB9800;
+  --accent-ignition: #FF4500;
+  --accent-red:      #E62E00;
+  --on-amber:        #06080F; /* text on amber/gold plates     */
+
+  /* ── 4.3 Signal · ultramarine chest, cyan waves ───────────────── */
+  --signal-ultramarine: #2E38FF;
+  --signal-cyan:        #00D0FF;
+  --on-ultramarine:     #F0F4FA;
+
+  /* Opaque tints (precomputed — no alpha, no color-mix dependency) */
+  --tint-amber-hull:    #322C17;
+  --tint-amber-module:  #32322B;
+  --tint-amber-void:    #3D310C;
+  --tint-ignition-hull: #321817;
+  --tint-ignition-void: #3D150C;
+  --tint-ignition-deep: #6A2009;
+  --tint-ultra-hull:    #11163F;
+  --tint-ultra-module:  #19214A;
+  --tint-ultra-deep:    #161B6F;
+  --tint-cyan-hull:     #092E3F;
+  --tint-cyan-module:   #13334A;
+
+  /* ── 4.4 Text ─────────────────────────────────────────────────── */
+  --text-primary:   #F0F4FA;
+  --text-secondary: #8C9BB8;
+  --text-telemetry: #526280;
+
+  /* Semantic aliases */
+  --state-online:  var(--signal-cyan);
+  --state-speak:   var(--signal-cyan);
+  --state-voice:   var(--signal-ultramarine);
+  --state-idle:    var(--accent-gold);
+  --state-dnd:     var(--accent-ignition);
+  --state-offline: var(--text-telemetry);
+  --state-ok:      var(--signal-cyan);
+  --state-warn:    var(--accent-amber);
+  --state-danger:  var(--accent-ignition);
+  --focus-ring:    var(--accent-amber);
+
+  /* ── Geometry · 45° chamfers ──────────────────────────────────── */
+  --radius-0: 0px;
+  --radius-panel: 2px;           /* the only radius allowed           */
+  --cut-xs: 6px;                 /* LEDs, chips, badges               */
+  --cut-sm: 8px;                 /* buttons, inputs, status plates    */
+  --cut-md: 12px;                /* cards, tiles, attachments         */
+  --cut-lg: 16px;                /* modals, video frames              */
+  --bracket: 10px;               /* length of corner targeting ticks  */
+  --frame-width: 1px;                   /* structural line weight            */
+  --bus: 3px;                    /* active channel amber bus          */
+
+  /* Fixed-size clip presets (literal px, safe to inherit). For per-element
+     sizes use the .ch / .fx utilities in finch-brutalist.css, which read --cut. */
+  --clip-tr-bl-6:  polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 6px 100%, 0 calc(100% - 6px));
+  --clip-tr-bl-8:  polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+  --clip-tr-bl-12: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  --clip-tr-bl-16: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+  --clip-all-6:    polygon(6px 0, calc(100% - 6px) 0, 100% 6px, 100% calc(100% - 6px), calc(100% - 6px) 100%, 6px 100%, 0 calc(100% - 6px), 0 6px);
+  --clip-all-8:    polygon(8px 0, calc(100% - 8px) 0, 100% 8px, 100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%, 0 calc(100% - 8px), 0 8px);
+  --clip-right-8:  polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%);
+  --clip-br-8:     polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%);
+  --clip-octagon:  polygon(29.3% 0, 70.7% 0, 100% 29.3%, 100% 70.7%, 70.7% 100%, 29.3% 100%, 0 70.7%, 0 29.3%);
+  --clip-diamond:  polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+
+  /* ── Typography ───────────────────────────────────────────────── */
+  --font-tech: 'Finch Mono', ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, monospace;
+  --font-read: 'Finch Read', 'Segoe UI', system-ui, -apple-system, sans-serif;
+
+  --fs-micro: 10px;   /* telemetry indices, tick labels   */
+  --fs-xs:    11px;   /* section headers, badges          */
+  --fs-sm:    12px;   /* buttons, channel names, meta     */
+  --fs-md:    14px;   /* message body (Inter)             */
+  --fs-lg:    16px;   /* modal titles                     */
+  --fs-xl:    20px;   /* panel display                    */
+  --fs-hash:  18px;   /* SHA-256 fingerprints in TOFU     */
+  --fs-hero:  28px;
+
+  --lh-tight: 1.15;
+  --lh-ui:    1.35;
+  --lh-read:  1.55;
+  --track-caps: 0.08em;  /* uppercase section headers       */
+  --track-wide: 0.14em;  /* micro telemetry                 */
+
+  /* ── Spacing (4px base) ───────────────────────────────────────── */
+  --sp-0: 0; --sp-1: 2px; --sp-2: 4px; --sp-3: 6px; --sp-4: 8px; --sp-5: 12px;
+  --sp-6: 16px; --sp-7: 20px; --sp-8: 24px; --sp-9: 32px; --sp-10: 48px;
+
+  /* ── Layout ───────────────────────────────────────────────────── */
+  --titlebar-h: 32px;
+  --banner-h: 32px;
+  --sidebar-w: 264px;
+  --members-w: 248px;
+  --header-h: 48px;
+  --userdock-h: 64px;
+  --dock-h: 88px;
+  --composer-min-h: 48px;
+  --avatar-xs: 20px; --avatar-sm: 28px; --avatar-md: 36px; --avatar-lg: 64px; --avatar-xl: 112px;
+  --control-h: 32px; --control-h-lg: 40px; --control-h-sm: 24px;
+
+  /* ── Depth (z) ────────────────────────────────────────────────── */
+  --z-base: 0; --z-panel: 10; --z-popover: 100; --z-overlay: 200; --z-modal: 300; --z-toast: 400; --z-titlebar: 500;
+
+  /* ── Motion · mechanical, never floaty ────────────────────────── */
+  --ease-snap: cubic-bezier(.2, 0, 0, 1);
+  --ease-servo: steps(4, end);
+  --dur-1: 80ms; --dur-2: 140ms; --dur-3: 220ms;
+
+  /* Scrim behind modals: opaque-leaning, scanlined, never blurred */
+  --scrim: rgba(6, 8, 15, 0.9);
+  --scanlines: repeating-linear-gradient(0deg, rgba(34, 46, 74, .35) 0 1px, transparent 1px 3px);
+  --hazard: repeating-linear-gradient(-45deg, var(--accent-ignition) 0 10px, var(--accent-red) 10px 20px);
+  --hazard-amber: repeating-linear-gradient(-45deg, var(--accent-amber) 0 8px, var(--bg-void) 8px 16px);
+  --spectrum: linear-gradient(0deg, var(--signal-ultramarine), var(--signal-cyan));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="custom"] { --dur-1: 0ms; --dur-2: 0ms; --dur-3: 0ms; }
+}

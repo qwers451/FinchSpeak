@@ -2,6 +2,9 @@
 import { render } from 'solid-js/web';
 import './styles/finch.css';
 import './styles/app.css';
+import './styles/custom-tokens.css';
+import './styles/themes.css';
+import './styles/motion.css';
 import { App } from './App';
 
 const root = document.getElementById('root');
