@@ -32,7 +32,7 @@ foreach ($entry in $lock.downloads) {
 # Tools are build-only and kept local to the cache; the application does not invoke them.
 $python = if ($env:FINCH_NATIVE_PYTHON) { $env:FINCH_NATIVE_PYTHON } else { (Get-Command python -ErrorAction Stop).Source }
 $tools = Join-Path $cache 'tools'
-if (!(Test-Path -LiteralPath (Join-Path $tools 'mesonbuild/__main__.py'))) {
+if (!(Test-Path -LiteralPath (Join-Path $tools 'mesonbuild/mesonmain.py'))) {
     Invoke-Checked $python @('-m','pip','install','--no-index','--no-deps','--target',$tools,(Join-Path $cache 'meson-1.9.1-py3-none-any.whl'),(Join-Path $cache 'ninja-1.13.0-py3-none-win_amd64.whl'))
 }
 $oldPath = $env:PATH
@@ -62,7 +62,8 @@ try {
         $extract = Join-Path $cache 'extract'
         New-Item -ItemType Directory -Force -Path $extract, "$source/subprojects" | Out-Null
         Invoke-Checked 'tar' @('-xf',(Join-Path $cache 'webrtc-sys.crate'),'-C',$extract)
-        Copy-Item -LiteralPath (Join-Path $extract 'webrtc-audio-processing-sys-2.1.0/webrtc-audio-processing') -Destination "$source/subprojects/apm" -Recurse
+        New-Item -ItemType Directory -Force -Path "$source/subprojects/apm" | Out-Null
+        Get-ChildItem -LiteralPath (Join-Path $extract 'webrtc-audio-processing-sys-2.1.0/webrtc-audio-processing') -Force | Copy-Item -Destination "$source/subprojects/apm" -Recurse -Force
         New-Item -ItemType Directory -Force -Path "$source/subprojects/packagecache" | Out-Null
         foreach ($name in @('abseil-cpp-20240722.0.tar.gz','abseil-cpp_20240722.0-3_patch.zip')) { Copy-Item -LiteralPath (Join-Path $cache $name) -Destination "$source/subprojects/packagecache/$name" }
         Set-Content -LiteralPath $sourceStamp -Value $upstreamHash -Encoding ascii
@@ -70,7 +71,8 @@ try {
     if ((Get-Content -LiteralPath $sourceStamp -Raw).Trim() -ne $upstreamHash) { throw 'Native source cache belongs to a different lock; use a fresh cache directory' }
     Copy-Item -LiteralPath (Join-Path $definition 'meson.build') -Destination "$source/meson.build"
     New-Item -ItemType Directory -Force -Path "$source/probe" | Out-Null
-    Copy-Item -LiteralPath (Join-Path $definition 'probe/main.cc') -Destination "$source/probe/main.cc"
+    Get-ChildItem -LiteralPath (Join-Path $definition 'probe') -File | Copy-Item -Destination "$source/probe"
+    if (Test-Path -LiteralPath (Join-Path $definition 'probe/bridge_test.cc')) { Copy-Item -LiteralPath (Join-Path $definition 'probe/bridge_test.cc') -Destination "$source/probe/bridge_test.cc" }
     foreach ($name in @('bridge.cc','bridge.h')) { if (Test-Path -LiteralPath (Join-Path $definition $name)) { Copy-Item -LiteralPath (Join-Path $definition $name) -Destination "$source/$name" } }
     $identityText = (Get-FileHash -LiteralPath $compiler).Hash + (Get-FileHash -LiteralPath $lockPath).Hash + $env:INCLUDE + $env:LIB + 'c++20-MT'
     $fingerprint = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($identityText))).Substring(0,12).ToLowerInvariant()
@@ -81,6 +83,7 @@ try {
     Invoke-Checked $python $setup
     Invoke-Checked (Join-Path $tools 'bin/ninja.exe') @('-C',$build,'-j','6')
     Invoke-Checked (Join-Path $build 'finch-webrtc-probe.exe') @()
+    if (Test-Path -LiteralPath (Join-Path $build 'finch-webrtc-bridge-test.exe')) { Invoke-Checked (Join-Path $build 'finch-webrtc-bridge-test.exe') @() }
     $stage = Join-Path $repo "target/native/$Configuration"
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
     foreach ($name in @('finch_webrtc.dll','finch_webrtc.lib','finch_webrtc.dll.lib','finch-webrtc-probe.exe')) { if (Test-Path -LiteralPath "$build/$name") { Copy-Item -LiteralPath "$build/$name" -Destination "$stage/$name" } }

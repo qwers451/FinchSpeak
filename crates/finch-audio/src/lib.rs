@@ -47,3 +47,4 @@ pub use vad::DEFAULT_VAD_THRESHOLD_DB;
 pub use vad::{VadDecision, VadMode, VoiceActivityDetector};
 
 pub mod dynamics;
+pub mod webrtc;

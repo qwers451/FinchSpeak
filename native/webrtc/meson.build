@@ -5,5 +5,6 @@ platform_args = ['-DWEBRTC_WIN', '-DNOMINMAX', '-D_USE_MATH_DEFINES']
 executable('finch-webrtc-probe', 'probe/main.cc', dependencies: apm_dep, cpp_args: platform_args)
 fs = import('fs')
 if fs.is_file('bridge.cc')
+  executable('finch-webrtc-bridge-test', ['probe/bridge_test.cc', 'probe/allocation_counter.cc', 'bridge.cc'], dependencies: apm_dep, cpp_args: platform_args)
   shared_library('finch_webrtc', 'bridge.cc', dependencies: apm_dep, cpp_args: platform_args, install: false)
 endif
