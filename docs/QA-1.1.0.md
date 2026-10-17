@@ -20,7 +20,15 @@
 | Обратная совместимость с опубликованным1.0.1 | SHA256 verified; pinned TLS→admin/invite/member→chat→двусторонний native Opus, on/off PASS |
 | Свежий сервер1.1.0 | Те же сценарии PASS,144/144packets в каждом направлении/режиме,maxbuffer5 |
 | PE closure свежего клиента и APM DLL | PASS, только системные Windows imports; native DLL static CRT |
-| Полный Rust suite,30min soak,NSIS install/upgrade,signing/publication | PENDING |
+| Локальный NSIS: fresh1.1.0 /published1.0.1→1.1.0 /uninstall | PASS; installed EXE/DLL hashes match fresh; isolated marker preserved |
+| Оба ZIP:actual BAT/Cyrillic/spaces/foreigncwd/error cases;API/invite/backup/restore | PASS |
+| Полный Rust workspace suite | 404 PASS,0fail;1load test ignored в общем запуске,отдельно PASS |
+| cargo check/clippy all-targets, -Dwarnings | PASS |
+|30min real-time production capture soak |90000frames,18000privateframes,59recreations,0processingerrors; bounded output |
+| Private working set на5й/30ймин |3497984→3715072bytes,+217088bytes(0.21MiB),порог20MiB PASS |
+| Soak DSP/scheduling diagnostics |p95=7.91ms,max=45.162ms;268late20msdeadlines под параллельными сборками,это не zero-deadline или physical-device guarantee |
+| Локальная подпись/manifest/tamper и update offer |PASS: встроенный ключ,genuine accepted,tamper rejected;1.0.1offer,равный/новый неoffer |
+| Облачный Release candidate /public stable assets |PENDING |
 
 Объективные сигналы синтезированы и не являются MOS. AGC не приписан выигрыш шумоподавления: gain-calibrated residual SNR использует одинаковые voiced windows и фиксированный RNNoise lag480samples; on/off отличаются≤0.03dB на stationary-noise fixtures. Уже clipped исходный сигнал учтён отдельно и не считается восстановленным. Полные таблицы и воспроизводимые команды: [BASELINE](../crates/finch-testbed/BASELINE.md).
 
@@ -31,7 +39,7 @@
 - Настройки фронтенда сериализованы, чтобы быстрые toggle/gain изменения не затирали подтверждённые значения. Native failure останавливает capture и сообщает UI, без raw bypass.
 
 ## Нативный клиент
-Два release-клиента1.1.0 с раздельными WebView2/pin profiles вошли на сервер1.0.1 и в одну голосовую комнату. Проверены default-on/off/on, meter,3s microphone test, mute/unmute,deafen/undeafen,hear-myself warning. Остальные UI-сценарии и подтверждение итоговой сборки будут дополнены после завершения QA. Настройки/данные владельца не использовались; тестовые профили задаются FINCHSPEAK_PROFILE_DIR и WEBVIEW2_USER_DATA_FOLDER.
+Два release-клиента1.1.0 с раздельными WebView2/pin profiles вошли на сервер1.0.1 и в одну голосовую комнату. Проверены default-on/off/on, meter,3s microphone test, mute/unmute,deafen/undeafen,hear-myself warning. Повторный вход в голос PASS; демонстрация собственного тестового окна со звуком включилась, второй клиент декодировал1280×800/30FPS, просмотр/демонстрация остановлены. Скриншот и accessibility tree сохранены под target/voice-enhancement-ui в основном checkout. Назначение глобальной клавиши и именованного устройства не объявлены PASS: keyboard delivery не подтвердился, popup устройства оказался отдельным окном WebView2, затем системное окно Windows Security перекрыло клиент. Автоматизация системных разрешений не выполнялась; эти пункты требуют ручной проверки. Настройки/данные владельца не использовались; тестовые профили задаются FINCHSPEAK_PROFILE_DIR и WEBVIEW2_USER_DATA_FOLDER.
 
 ## Отдельная ручная приёмка владельцем
 Два физических ПК/LAN/NAT; акустический feedback колонок/разные микрофоны; субъективная естественность голоса; физическое отключение/возвращение аудиоустройства. Эти пункты не объявляются PASS по одному локальному стенду.

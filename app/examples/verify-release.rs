@@ -16,6 +16,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !updater::download_allowed(&entry.url) {
         return Err(io::Error::other("installer download URL is not allowed").into());
     }
+    let expected_suffix = format!("/v{0}/FinchSpeak_{0}_x64-setup.exe", manifest.version);
+    if !entry.url.ends_with(&expected_suffix) {
+        return Err(io::Error::other("installer URL does not match release version/name").into());
+    }
+    if updater::offer("1.0.1", &manifest).is_none()
+        || updater::offer(env!("CARGO_PKG_VERSION"), &manifest).is_some()
+        || updater::offer("999.0.0", &manifest).is_some() {
+        return Err(io::Error::other("actual manifest update offer/downgrade policy failed").into());
+    }
     let signature_path = PathBuf::from(format!("{}.sig", installer.display()));
     if fs::read_to_string(signature_path)?.trim() != entry.signature.trim() {
         return Err(io::Error::other("manifest signature differs from installer signature").into());
@@ -29,6 +38,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if updater::verify(&tampered, &entry.signature, updater::PUBLIC_KEY_BASE64).is_ok() {
         return Err(io::Error::other("tampered installer was accepted").into());
     }
-    println!("PASS: release manifest matches client version; installer signature verified with built-in public key; modified installer rejected");
+    println!("PASS: release manifest matches client version; installer signature verified with built-in public key; modified installer rejected; old-client offer/equal-or-newer suppression verified");
     Ok(())
 }

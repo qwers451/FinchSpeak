@@ -34,7 +34,7 @@ try {
         if ($growth -gt 20MB) { throw "Private-working-set growth exceeds20MiB: $growth" }
         [pscustomobject]@{baseline=$baseline;final=$final;growth_bytes=$growth} | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $OutputDirectory 'memory-verdict.json') -Encoding utf8
     }
-    Write-Output "PASS: capture soak $seconds seconds; $($capture.frames) frames, $($capture.private_frames) private frames, $($capture.rejoins) recreations; p95 DSP $($capture.p95_dsp_us_upper)us, max $($capture.max_dsp_us)us."
+    Write-Output "PASS: capture soak $seconds seconds; $($capture.frames) frames, $($capture.private_frames) private frames, $($capture.rejoins) recreations; p95 DSP $($capture.p95_dsp_us_upper)us (null means histogram overflow), max $($capture.max_dsp_us)us."
 } finally {
     if (!$process.HasExited) { Stop-Process -Id $process.Id; $process.WaitForExit() }
 }

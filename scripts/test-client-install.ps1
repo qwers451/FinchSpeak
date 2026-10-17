@@ -39,7 +39,7 @@ try {
  Smoke
  $freshHash=(Get-FileHash "$install/finch-app.exe").Hash
  $freshDllHash=(Get-FileHash "$install/finch_webrtc.dll").Hash
- foreach($name in @('native-audio-provenance.json','native-audio-dependencies.json','THIRD-PARTY-NOTICES.md','licenses/webrtc-webrtc-PATENTS')){if(!(Test-Path (Join-Path $install $name))){throw "Installed resource missing: $name"}}
+ foreach($name in @('native-audio-provenance.json','native-audio-dependencies.json','THIRD-PARTY-NOTICES.md','licenses/webrtc-webrtc-PATENTS','licenses/earshot-LICENSE-MIT','licenses/nnnoiseless-COPYING','licenses/opus-COPYING')){if(!(Test-Path (Join-Path $install $name))){throw "Installed resource missing: $name"}}
  if((Get-Item "$install/finch-app.exe").VersionInfo.ProductVersion -ne $version){throw 'Fresh install version mismatch'}
  Uninstall
  $old=Join-Path $work 'published-1.0.1'

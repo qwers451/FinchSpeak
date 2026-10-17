@@ -2,7 +2,7 @@
 
 Windows-выпуск подготовлен для приёмки на двух ПК. Скачать установщик клиента,
 серверный ZIP или portable-пакет: [GitHub Releases](https://github.com/qwers451/FinchSpeak/releases).
-Повторная проверка запуска и упаковки: [QA-1.0.1](docs/QA-1.0.1.md).
+Текущая проверка звука и выпуска: [QA-1.1.0](docs/QA-1.1.0.md). Предыдущая проверка запуска: [QA-1.0.1](docs/QA-1.0.1.md).
 Исходная проверка клиента и медиасценариев: [RELEASE-VALIDATION](docs/RELEASE-VALIDATION.md).
 Проверки владельца: [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md).
 

@@ -4,3 +4,5 @@ FinchSpeak1.1.0 uses the original WebRTC Audio Processing Module (standalone2.1,
 RNNoise is provided by nnnoiseless0.5.2 (BSD3-Clause); its bundled default pretrained model is used unchanged, without third-party/custom weights. Copyrights and license are in licenses/nnnoiseless-COPYING and AUTHORS. Earshot1.2.2 supplies speech detection; Opus supplies voice encoding. These existing Rust dependencies retain their upstream licenses. Cargo.lock pins the full Rust dependency graph.
 
 The licenses directory contains upstream WebRTC notices, third-party notices, PATENTS, Abseil LICENSE and RNNoise notices. Runtime/compiler sources are not required on the recipient PC. No Microsoft Visual C++ redistributable is intentionally required by the native APM DLL (static CRT); release validation inspects the actual payload imports.
+
+Earshot1.2.2: MIT OR Apache-2.0; license texts acquired from the exact published crate source revision c400f15bd232dda30a297eec90235bd09066cab7 (the crate omits root license files). See licenses/earshot-LICENSE-MIT and earshot-LICENSE-APACHE. Opus BSD notice is licenses/opus-COPYING.
