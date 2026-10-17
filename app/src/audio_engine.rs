@@ -138,6 +138,20 @@ impl Drop for AudioEngine {
     }
 }
 
+fn capture_config(channel_id: u32, settings: &crate::state::VoiceSettings) -> VoiceCaptureConfig {
+    VoiceCaptureConfig { channel_short_id: channel_id, voice_enhancement: settings.voice_enhancement(), vad_threshold_db: settings.vad_threshold_db(), ..Default::default() }
+}
+#[derive(Default)]
+struct ProcessingFailures { consecutive: u8, reported: bool }
+impl ProcessingFailures {
+    fn failed(&mut self) -> bool {
+        if self.reported { return false; }
+        self.consecutive += 1;
+        if self.consecutive >= 3 { self.reported = true; true } else { false }
+    }
+    fn succeeded(&mut self) { if !self.reported { self.consecutive = 0; } }
+}
+
 /// The meter is updated every second frame: 25 times a second.
 const MIC_LEVEL_EVERY_FRAMES: u32 = 2;
 
@@ -406,18 +420,18 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 }
 
                 // 3. DSP pipeline for worker thread processing
-                let mut voice_capture = match VoiceCapture::new(VoiceCaptureConfig {
-                    channel_short_id: channel_id,
-                    ..VoiceCaptureConfig::default()
-                }) {
-                    Ok(capture) => Some(capture),
+                let mut voice_capture = match VoiceCapture::new(capture_config(channel_id, &state.voice_settings)) {
+                    Ok(mut capture) => { capture.set_transmit_gate(false); Some(capture) },
                     Err(e) => {
+                        is_running.store(false, Ordering::SeqCst);
                         error!("Failed to create microphone processing: {}", e);
                         let _ = app_handle.emit("audio-processing-failed", serde_json::json!({ "message": e.to_string() }));
                         None
                     }
                 };
 
+                let mut transmit_gate = false;
+                let mut processing_failures = ProcessingFailures::default();
                 let mut is_currently_speaking = false;
                 // Meter and link quality for the UI, and the "test my microphone" loop.
                 let mut level_frames: u32 = 0;
@@ -447,6 +461,12 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         Err(std::sync::mpsc::TryRecvError::Empty) => {}
                     }
 
+                    if state.is_muted.load(Ordering::Relaxed) {
+                        monitor_queue.clear();
+                        if mic_test.take().is_some() {
+                            let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
+                        }
+                    }
                     // A0. A device stream died (headset unplugged, driver reset): reopen the devices,
                     // falling back to the defaults, instead of leaving the call silent.
                     if stream_failed.swap(false, Ordering::SeqCst) {
@@ -558,7 +578,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             feeder.clear();
                             if let Err(error) = capture.reset_echo_canceller() {
                                 error!(%error, "Could not reset echo canceller");
+                                is_running.store(false, Ordering::SeqCst);
                                 let _ = app_handle.emit("audio-processing-failed", serde_json::json!({ "message": error.to_string() }));
+                                break;
                             }
                         }
                         let mut played = [0.0f32; 1024];
@@ -575,6 +597,18 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         }
                     }
 
+                    // Fence device/resampler history before reopening a private microphone.
+                    let requested_gate = !state.is_muted.load(Ordering::Relaxed)
+                        && state.voice_settings.transmit_open() && mic_test.is_none();
+                    if requested_gate != transmit_gate {
+                        if requested_gate {
+                            capture_cons.clear();
+                            capture_raw_buf.clear();
+                            if let Some(resampler) = &mut input_resampler { resampler.reset(); }
+                        }
+                        if let Some(capture) = &mut voice_capture { capture.set_transmit_gate(requested_gate); }
+                        transmit_gate = requested_gate;
+                    }
                     // B. Capture processing (capture_cons -> InputResampler -> AEC -> Noise -> VAD -> Opus)
                     if capture_stream.is_some() {
                         if let Some(resampler) = &mut input_resampler {
@@ -596,6 +630,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         if let Some(capture) = &mut voice_capture {
                                             capture.set_transmit_gate(false);
                                         }
+                                        transmit_gate = false;
                                         if is_currently_speaking {
                                             is_currently_speaking = false;
                                             let _ = app_handle.emit("local-speaking", false);
@@ -623,20 +658,36 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         .and_then(|_| capture.set_input_gain(state.voice_settings.input_gain()));
                                     if let Err(error) = settings {
                                         capture.set_transmit_gate(false);
-                                        let _ = app_handle.emit("audio-processing-failed", serde_json::json!({ "message": error.to_string() }));
+                                        monitor_queue.clear();
+                                        if processing_failures.failed() {
+                                            is_running.store(false, Ordering::SeqCst);
+                                            let _ = app_handle.emit("audio-processing-failed", serde_json::json!({ "message": error.to_string() }));
+                                            break;
+                                        }
                                         continue;
                                     }
                                     capture.set_vad_threshold_db(state.voice_settings.vad_threshold_db());
                                     // While testing the microphone nothing goes out to the others.
-                                    capture.set_transmit_gate(state.voice_settings.transmit_open() && mic_test.is_none());
+                                    // Closing can take effect within a batch, opening must pass
+                                    // the device/resampler fence on the next outer iteration.
+                                    let frame_gate = transmit_gate && !state.is_muted.load(Ordering::Relaxed)
+                                        && state.voice_settings.transmit_open() && mic_test.is_none();
+                                    if !frame_gate { transmit_gate = false; }
+                                    capture.set_transmit_gate(frame_gate);
                                     let output = match capture.process(&mut capture_frame_48k, sender_id, now_ms) {
                                         Ok(output) => output,
                                         Err(error) => {
                                             error!(%error, "Microphone processing failed");
-                                            let _ = app_handle.emit("audio-processing-failed", serde_json::json!({ "message": error.to_string() }));
+                                            monitor_queue.clear();
+                                            if processing_failures.failed() {
+                                                is_running.store(false, Ordering::SeqCst);
+                                                let _ = app_handle.emit("audio-processing-failed", serde_json::json!({ "message": error.to_string() }));
+                                                break;
+                                            }
                                             continue;
                                         }
                                     };
+                                    processing_failures.succeeded();
                                     level_frames += 1;
                                     if level_frames >= MIC_LEVEL_EVERY_FRAMES {
                                         level_frames = 0;
@@ -797,5 +848,27 @@ mod tests {
         mix_next_frame(&mixer, &mut frame, now);
         handle.join().unwrap();
         assert!(frame.iter().any(|&s| s != 0.0), "a silent frame was inserted while the mixer was busy");
+    }
+
+    #[test]
+    fn native_failures_stop_once_after_three_consecutive_frames() {
+        let mut failures = ProcessingFailures::default();
+        assert!(!failures.failed()); assert!(!failures.failed());
+        failures.succeeded();
+        assert!(!failures.failed()); assert!(!failures.failed());
+        assert!(failures.failed());
+        assert!(!failures.failed());
+    }
+    #[test]
+    fn capture_source_uses_saved_mode_and_threshold_at_creation() {
+        let settings = crate::state::VoiceSettings::default();
+        let mut wanted = settings.snapshot();
+        wanted.voice_enhancement = false;
+        wanted.vad_threshold_db = -52.0;
+        settings.apply(&wanted);
+        let config = capture_config(7, &settings);
+        assert!(!config.voice_enhancement);
+        assert_eq!(config.vad_threshold_db, -52.0);
+        assert_eq!(config.channel_short_id, 7);
     }
 }

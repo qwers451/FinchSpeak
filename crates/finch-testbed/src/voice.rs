@@ -52,14 +52,18 @@ pub async fn run_voice_link_with(
     vad_mode: VadMode,
     vad_threshold_db: f32,
 ) -> anyhow::Result<VoiceRun> {
+    run_voice_link_with_config(sender, receiver, input, tail_frames, VoiceCaptureConfig { vad_mode, vad_threshold_db, ..Default::default() }).await
+}
+
+/// Full production capture configuration; old helpers retain default-on enhancement.
+pub async fn run_voice_link_with_config(
+    sender: &TestClient, receiver: &mut TestClient, input: &[f32], tail_frames: usize,
+    mut config: VoiceCaptureConfig,
+) -> anyhow::Result<VoiceRun> {
     let (_, short_id) = sender.channel(ChannelType::Voice);
     let sender_peer = sender.session.session_peer_id;
-    let mut capture = VoiceCapture::new(VoiceCaptureConfig {
-        channel_short_id: short_id,
-        vad_threshold_db,
-        vad_mode,
-        ..VoiceCaptureConfig::default()
-    })?;
+    config.channel_short_id = short_id;
+    let mut capture = VoiceCapture::new(config)?;
     let mut mixer = AudioMixer::new();
     let mut run = VoiceRun::default();
 

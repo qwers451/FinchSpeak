@@ -91,6 +91,7 @@ pub struct VoiceCapture {
     input_gain: f32,
     /// Push-to-talk: while false nothing is transmitted.
     gate_open: bool,
+    pending_error: Option<ProcessingError>,
 }
 
 impl VoiceCapture {
@@ -110,6 +111,7 @@ impl VoiceCapture {
             transmitting: false,
             input_gain: 1.0,
             gate_open: true,
+            pending_error: None,
         })
     }
 
@@ -126,6 +128,17 @@ impl VoiceCapture {
 
     /// Push-to-talk gate: `false` stops all transmission (the pipeline keeps adapting).
     pub fn set_transmit_gate(&mut self, open: bool) {
+        if open && !self.gate_open {
+            // A private frame may still be in AEC/NS filter history even with an empty preroll.
+            self.noise_suppressor.reset();
+            self.vad = VoiceActivityDetector::with_mode(self.config.vad_mode, self.config.vad_threshold_db);
+            if let Err(error) = self.echo_canceller.reset() {
+                self.pending_error = Some(error);
+                self.preroll.clear();
+                self.transmitting = false;
+                return; // Stay closed; a later requested opening retries initialization.
+            }
+        }
         self.gate_open = open;
         if !open {
             self.preroll.clear();
@@ -138,6 +151,7 @@ impl VoiceCapture {
 
     /// Change the loudness threshold of the speech detector (dBFS).
     pub fn set_vad_threshold_db(&mut self, threshold_db: f32) {
+        self.config.vad_threshold_db = threshold_db;
         self.vad.set_threshold(threshold_db);
     }
 
@@ -147,7 +161,9 @@ impl VoiceCapture {
         self.echo_canceller.set_stream_delay_ms(delay_ms.min(MAX_STREAM_DELAY_MS) as i32)
     }
     pub fn push_playback_reference(&mut self, frame: &[f32; FRAME_SIZE_48K]) -> Result<(), ProcessingError> {
-        self.echo_canceller.push_reference(frame)
+        let result = self.echo_canceller.push_reference(frame);
+        if let Err(error) = result { self.pending_error = Some(error); }
+        result
     }
 
     /// Process one 48 kHz mono capture frame in place and build the outgoing packet.
@@ -168,6 +184,7 @@ impl VoiceCapture {
         result
     }
     fn process_frame(&mut self, frame: &mut [f32; FRAME_SIZE_48K], sender_peer_id: u32, timestamp_ms: u32) -> Result<CaptureOutput, CaptureError> {
+        if let Some(error) = self.pending_error.take() { return Err(error.into()); }
         // Protect the AEC state from invalid device samples; preserve headroom after trim.
         for sample in frame.iter_mut() {
             *sample = if sample.is_finite() { sample.clamp(-1.0, 1.0) } else { 0.0 };
@@ -636,5 +653,34 @@ mod tests {
         assert!(capture.preroll.is_empty());
         assert!(!capture.transmitting);
         assert!(frame.iter().all(|s| *s == 0.0));
+    }
+
+    #[test]
+    fn reopening_gate_cannot_send_noise_suppressor_private_history() {
+        for enabled in [false, true] {
+            let mut capture = VoiceCapture::new(VoiceCaptureConfig {
+                voice_enhancement: enabled, vad_mode: VadMode::Energy, vad_threshold_db: -140.0,
+                ..Default::default()
+            }).unwrap();
+            capture.set_transmit_gate(false);
+            for index in 0..100 {
+                let mut private = tone_frame(index);
+                assert!(capture.process(&mut private, 1, index as u32 * 20).unwrap().packets.is_empty());
+            }
+            capture.set_transmit_gate(true);
+            let mut public_silence = [0.0; FRAME_SIZE_48K];
+            let out = capture.process(&mut public_silence, 1, 2000).unwrap();
+            assert!(public_silence.iter().all(|s| s.abs() < 1e-8), "private buffered PCM leaked with enabled={enabled}");
+            assert_eq!(out.packets.len(), 1);
+            let mut decoded = [0.0; FRAME_SIZE_48K];
+            OpusVoiceDecoder::new().unwrap().decode(&out.packets[0][MEDIA_HEADER_SIZE..], &mut decoded).unwrap();
+            let control = OpusVoiceEncoder::new(64).unwrap().encode(&[0.0; FRAME_SIZE_48K]).unwrap();
+            // Opus produces a small deterministic silence residue: compare against a fresh
+            // zero-input encoder/decoder, not an impossible bit-zero lossy-codec output.
+            assert_eq!(&out.packets[0][MEDIA_HEADER_SIZE..], control.as_ref(), "private audio changed the encoded silence");
+            let mut expected = [0.0; FRAME_SIZE_48K];
+            OpusVoiceDecoder::new().unwrap().decode(&control, &mut expected).unwrap();
+            assert_eq!(decoded, expected);
+        }
     }
 }

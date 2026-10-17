@@ -24,6 +24,14 @@ pub enum InputResampler {
 }
 
 impl InputResampler {
+    /// Discard microphone samples captured before a privacy boundary.
+    pub fn reset(&mut self) {
+        if let Self::Resampling { resampler, input_needed } = self {
+            resampler.reset();
+            *input_needed = resampler.input_frames_next();
+        }
+    }
+
     /// Create a new input resampler from `source_rate` to 48,000 Hz.
     pub fn new(source_rate: u32) -> Result<Self, rubato::ResamplerConstructionError> {
         if source_rate == INTERNAL_SAMPLE_RATE {
@@ -206,5 +214,15 @@ mod tests {
             }
         }
         assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[test]
+    fn input_reset_discards_private_filter_history() {
+        let mut resampler = InputResampler::new(44_100).unwrap();
+        let mut frame = [0.0; FRAME_SIZE_48K];
+        for _ in 0..10 { resampler.process(&vec![0.2; resampler.input_frames_needed()], &mut frame).unwrap(); }
+        resampler.reset();
+        resampler.process(&vec![0.0; resampler.input_frames_needed()], &mut frame).unwrap();
+        assert!(frame.iter().all(|s| s.abs() < 1e-8));
     }
 }
