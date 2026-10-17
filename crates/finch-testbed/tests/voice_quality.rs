@@ -36,9 +36,9 @@ fn process_capture(input: &[f32], far_end: Option<&[f32]>) -> Vec<f32> {
                 let end = (start + FRAME_SIZE_48K).min(far.len());
                 reference[..end - start].copy_from_slice(&far[start..end]);
             }
-            capture.push_playback_reference(&reference);
+            capture.push_playback_reference(&reference).unwrap();
         }
-        capture.process(&mut frame, 1, (i * 20) as u32);
+        capture.process(&mut frame, 1, (i * 20) as u32).unwrap();
         out.extend_from_slice(&frame[..chunk.len()]);
     }
     out
@@ -211,7 +211,7 @@ fn transmitted(input: &[f32], mode: VadMode) -> Vec<u32> {
     let (chunks, _) = input.as_chunks::<FRAME_SIZE_48K>();
     for (i, chunk) in chunks.iter().enumerate() {
         let mut frame = *chunk;
-        let out = capture.process(&mut frame, 1, (i * 20) as u32);
+        let out = capture.process(&mut frame, 1, (i * 20) as u32).unwrap();
         for packet in out.packets {
             let header = finch_protocol::media::MediaHeader::from_slice(&packet[..20]).expect("header");
             timestamps.push(header.timestamp);

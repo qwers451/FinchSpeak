@@ -31,7 +31,7 @@ pub mod speech;
 pub mod vad;
 
 pub use aec::EchoCanceller;
-pub use capture::{CaptureOutput, VoiceCapture, VoiceCaptureConfig, MAX_INPUT_GAIN, PREROLL_FRAMES};
+pub use capture::{CaptureError, CaptureOutput, VoiceCapture, VoiceCaptureConfig, MAX_INPUT_GAIN, PREROLL_FRAMES};
 pub use devices::{
     list_input_devices, list_output_devices, open_input_device, open_output_device, resolve_device_choice,
     AudioDeviceInfo, DeviceChoice,
@@ -46,5 +46,5 @@ pub use speech::SpeechClassifier;
 pub use vad::DEFAULT_VAD_THRESHOLD_DB;
 pub use vad::{VadDecision, VadMode, VoiceActivityDetector};
 
-pub mod dynamics;
+
 pub mod webrtc;

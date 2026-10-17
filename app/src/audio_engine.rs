@@ -412,7 +412,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 }) {
                     Ok(capture) => Some(capture),
                     Err(e) => {
-                        error!("Failed to create Opus voice encoder: {}", e);
+                        error!("Failed to create microphone processing: {}", e);
+                        let _ = app_handle.emit("audio-processing-failed", serde_json::json!({ "message": e.to_string() }));
                         None
                     }
                 };
@@ -544,7 +545,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     if let (Some(feeder), Some(capture)) = (&mut reference_feeder, &mut voice_capture) {
                         let latency = output_latency_ms.load(Ordering::Relaxed);
                         if latency.abs_diff(applied_latency_ms) >= 10 {
-                            capture.set_stream_delay_ms(latency);
+                            if let Err(error) = capture.set_stream_delay_ms(latency) {
+                                error!(%error, "Could not apply microphone echo delay");
+                            }
                             applied_latency_ms = latency;
                         }
                         if reference_cons.occupied_len() >= RING_BUFFER_CAPACITY - REFERENCE_OVERFLOW_MARGIN {
@@ -553,7 +556,10 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             warn!("Playout reference overflow; resetting echo canceller");
                             reference_cons.clear();
                             feeder.clear();
-                            capture.reset_echo_canceller();
+                            if let Err(error) = capture.reset_echo_canceller() {
+                                error!(%error, "Could not reset echo canceller");
+                                let _ = app_handle.emit("audio-processing-failed", serde_json::json!({ "message": error.to_string() }));
+                            }
                         }
                         let mut played = [0.0f32; 1024];
                         loop {
@@ -561,7 +567,11 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             if n == 0 {
                                 break;
                             }
-                            feeder.push(&played[..n], |frame| capture.push_playback_reference(frame));
+                            feeder.push(&played[..n], |frame| {
+                                if let Err(error) = capture.push_playback_reference(frame) {
+                                    error!(%error, "Could not process echo reference");
+                                }
+                            });
                         }
                     }
 
@@ -609,13 +619,24 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         Err(_) => 0,
                                     };
                                     let sender_id = state.session_peer_id.load(Ordering::Relaxed);
-                                    capture.set_voice_enhancement(state.voice_settings.voice_enhancement());
-                                    capture.set_input_gain(state.voice_settings.input_gain());
+                                    let settings = capture.set_voice_enhancement(state.voice_settings.voice_enhancement())
+                                        .and_then(|_| capture.set_input_gain(state.voice_settings.input_gain()));
+                                    if let Err(error) = settings {
+                                        capture.set_transmit_gate(false);
+                                        let _ = app_handle.emit("audio-processing-failed", serde_json::json!({ "message": error.to_string() }));
+                                        continue;
+                                    }
                                     capture.set_vad_threshold_db(state.voice_settings.vad_threshold_db());
                                     // While testing the microphone nothing goes out to the others.
                                     capture.set_transmit_gate(state.voice_settings.transmit_open() && mic_test.is_none());
-                                    let output =
-                                        capture.process(&mut capture_frame_48k, sender_id, now_ms);
+                                    let output = match capture.process(&mut capture_frame_48k, sender_id, now_ms) {
+                                        Ok(output) => output,
+                                        Err(error) => {
+                                            error!(%error, "Microphone processing failed");
+                                            let _ = app_handle.emit("audio-processing-failed", serde_json::json!({ "message": error.to_string() }));
+                                            continue;
+                                        }
+                                    };
                                     level_frames += 1;
                                     if level_frames >= MIC_LEVEL_EVERY_FRAMES {
                                         level_frames = 0;

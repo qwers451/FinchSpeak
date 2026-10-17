@@ -19,7 +19,6 @@ audiopus = "0.3.0-rc.0"
 
 # Noise suppression
 nnnoiseless = "0.5"
-sonora = { version = "=0.2.0", default-features = false }
 earshot = "=1.2.2"
 
 # Ring buffer for real-time audio

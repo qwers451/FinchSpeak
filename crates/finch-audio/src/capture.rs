@@ -9,7 +9,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use finch_protocol::media::{MediaHeader, MEDIA_HEADER_SIZE};
 
 use crate::aec::EchoCanceller;
-use crate::dynamics::VoiceDynamics;
+use crate::webrtc::{WebRtcGain, ProcessingError};
 use crate::noise::NoiseSuppressor;
 use crate::opus::{AudioOpusError, OpusVoiceEncoder};
 use crate::resampler::FRAME_SIZE_48K;
@@ -68,13 +68,19 @@ pub struct CaptureOutput {
     pub level_db: f32,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum CaptureError {
+    #[error(transparent)] Processing(#[from] ProcessingError),
+    #[error(transparent)] Opus(#[from] AudioOpusError),
+}
+
 /// Microphone-side voice pipeline for a single voice channel session.
 pub struct VoiceCapture {
     config: VoiceCaptureConfig,
     echo_canceller: EchoCanceller,
     noise_suppressor: NoiseSuppressor,
     vad: VoiceActivityDetector,
-    dynamics: VoiceDynamics,
+    gain: WebRtcGain,
     encoder: OpusVoiceEncoder,
     seq: u16,
     /// Last silent frames, oldest first (at most [`PREROLL_FRAMES`]).
@@ -88,18 +94,18 @@ pub struct VoiceCapture {
 }
 
 impl VoiceCapture {
-    pub fn new(config: VoiceCaptureConfig) -> Result<Self, AudioOpusError> {
-        let mut dynamics = VoiceDynamics::new();
-        dynamics.set_enabled(config.voice_enhancement);
-        dynamics.reset();
+    pub fn new(config: VoiceCaptureConfig) -> Result<Self, CaptureError> {
+        let mut gain = WebRtcGain::new()?;
+        gain.set_enabled(config.voice_enhancement)?;
+        gain.reset()?;
         Ok(Self {
             config,
-            echo_canceller: EchoCanceller::new(),
+            echo_canceller: EchoCanceller::new()?,
             noise_suppressor: NoiseSuppressor::new(),
             vad: VoiceActivityDetector::with_mode(config.vad_mode, config.vad_threshold_db),
             encoder: OpusVoiceEncoder::new(config.bitrate_kbps)?,
             seq: 0,
-            dynamics,
+            gain,
             preroll: VecDeque::with_capacity(PREROLL_FRAMES),
             transmitting: false,
             input_gain: 1.0,
@@ -108,14 +114,14 @@ impl VoiceCapture {
     }
 
     /// Forget the echo path (reference stream interrupted, device changed).
-    pub fn reset_echo_canceller(&mut self) {
-        self.echo_canceller.reset();
-    }
+    pub fn reset_echo_canceller(&mut self) -> Result<(), ProcessingError> { self.echo_canceller.reset() }
 
-    /// Microphone volume multiplier, limited to 0..=[`MAX_INPUT_GAIN`]. Applied before echo
-    /// cancellation and the speech detector, so a quiet microphone can be brought above the VAD threshold.
-    pub fn set_input_gain(&mut self, gain: f32) {
-        self.input_gain = if gain.is_finite() { gain.clamp(0.0, MAX_INPUT_GAIN) } else { 1.0 };
+    /// Manual trim after AEC/NS; analysis sees trim before the user threshold.
+    pub fn set_input_gain(&mut self, gain: f32) -> Result<(), ProcessingError> {
+        let gain = if gain.is_finite() { gain.clamp(0.0, MAX_INPUT_GAIN) } else { 1.0 };
+        self.gain.set_input_gain(gain)?;
+        self.input_gain = gain;
+        Ok(())
     }
 
     /// Push-to-talk gate: `false` stops all transmission (the pipeline keeps adapting).
@@ -128,9 +134,7 @@ impl VoiceCapture {
     }
 
     /// Toggle natural speech leveling without restarting capture.
-    pub fn set_voice_enhancement(&mut self, enabled: bool) {
-        self.dynamics.set_enabled(enabled);
-    }
+    pub fn set_voice_enhancement(&mut self, enabled: bool) -> Result<(), ProcessingError> { self.gain.set_enabled(enabled) }
 
     /// Change the loudness threshold of the speech detector (dBFS).
     pub fn set_vad_threshold_db(&mut self, threshold_db: f32) {
@@ -139,16 +143,11 @@ impl VoiceCapture {
 
     /// Tell the echo canceller how long played audio takes to reach the speakers (the output
     /// device's buffer). Clamped to [`MAX_STREAM_DELAY_MS`]; the canceller still tracks the rest.
-    pub fn set_stream_delay_ms(&mut self, delay_ms: u32) {
-        let delay = delay_ms.min(MAX_STREAM_DELAY_MS) as i32;
-        if let Err(error) = self.echo_canceller.set_stream_delay_ms(delay) {
-            tracing::warn!(%error, delay, "echo canceller rejected the stream delay");
-        }
+    pub fn set_stream_delay_ms(&mut self, delay_ms: u32) -> Result<(), ProcessingError> {
+        self.echo_canceller.set_stream_delay_ms(delay_ms.min(MAX_STREAM_DELAY_MS) as i32)
     }
-
-    /// Feed the 48 kHz frame that is being sent to the speakers (AEC far-end reference).
-    pub fn push_playback_reference(&mut self, frame: &[f32; FRAME_SIZE_48K]) {
-        self.echo_canceller.push_reference(frame);
+    pub fn push_playback_reference(&mut self, frame: &[f32; FRAME_SIZE_48K]) -> Result<(), ProcessingError> {
+        self.echo_canceller.push_reference(frame)
     }
 
     /// Process one 48 kHz mono capture frame in place and build the outgoing packet.
@@ -159,25 +158,31 @@ impl VoiceCapture {
         frame: &mut [f32; FRAME_SIZE_48K],
         sender_peer_id: u32,
         timestamp_ms: u32,
-    ) -> CaptureOutput {
+    ) -> Result<CaptureOutput, CaptureError> {
+        let result = self.process_frame(frame, sender_peer_id, timestamp_ms);
+        if result.is_err() {
+            self.preroll.clear();
+            self.transmitting = false;
+            frame.fill(0.0);
+        }
+        result
+    }
+    fn process_frame(&mut self, frame: &mut [f32; FRAME_SIZE_48K], sender_peer_id: u32, timestamp_ms: u32) -> Result<CaptureOutput, CaptureError> {
         // Protect the AEC state from invalid device samples; preserve headroom after trim.
         for sample in frame.iter_mut() {
             *sample = if sample.is_finite() { sample.clamp(-1.0, 1.0) } else { 0.0 };
         }
-        self.echo_canceller.process_capture(frame);
+        self.echo_canceller.process_capture(frame)?;
         self.noise_suppressor.process_frame(frame);
-        for sample in frame.iter_mut() {
-            *sample *= self.input_gain;
-        }
-        let analysis = frame.map(|sample| sample.clamp(-1.0, 1.0));
+        let analysis = frame.map(|sample| (sample * self.input_gain).clamp(-1.0, 1.0));
         let level_db = VoiceActivityDetector::compute_rms_dbfs(&analysis);
         let activity = self.vad.process(&analysis);
-        self.dynamics.process(frame, activity);
+        self.gain.process(frame)?;
         // Local monitoring receives processed audio, even while transmission is private.
         if !self.gate_open {
             self.preroll.clear();
             self.transmitting = false;
-            return CaptureOutput { packets: Vec::new(), vad: VadDecision::Silence, level_db };
+            return Ok(CaptureOutput { packets: Vec::new(), vad: VadDecision::Silence, level_db });
         }
         let vad = activity;
         if !vad.should_transmit() {
@@ -186,7 +191,7 @@ impl VoiceCapture {
                 self.preroll.pop_front();
             }
             self.preroll.push_back(*frame);
-            return CaptureOutput { packets: Vec::new(), vad, level_db };
+            return Ok(CaptureOutput { packets: Vec::new(), vad, level_db });
         }
 
         let mut packets = Vec::with_capacity(PREROLL_FRAMES + 1);
@@ -202,7 +207,7 @@ impl VoiceCapture {
         self.transmitting = true;
         packets.extend(self.encode_packet(frame, sender_peer_id, timestamp_ms, vad.is_silence_packet()));
 
-        CaptureOutput { packets, vad, level_db }
+        Ok(CaptureOutput { packets, vad, level_db })
     }
 
     /// Opus-encode one frame into a complete media datagram; `None` if encoding fails.
@@ -270,16 +275,16 @@ mod tests {
     #[test]
     fn output_reports_the_level_of_the_processed_frame() {
         let mut capture = capture_for_test();
-        capture.set_voice_enhancement(false); // Meter is deliberately before dynamics.
+        capture.set_voice_enhancement(false).unwrap(); // Meter is deliberately before dynamics.
         let mut silence = [0.0f32; FRAME_SIZE_48K];
-        let quiet = capture.process(&mut silence, 1, 0).level_db;
+        let quiet = capture.process(&mut silence, 1, 0).unwrap().level_db;
         assert!(quiet <= -100.0, "silence is reported near the floor, got {quiet}");
 
         let mut loud = tone_frame(0);
         let mut level = f32::MIN;
         for i in 0..5 {
             let mut frame = tone_frame(i);
-            level = capture.process(&mut frame, 1, (i as u32 + 1) * 20).level_db;
+            level = capture.process(&mut frame, 1, (i as u32 + 1) * 20).unwrap().level_db;
             loud = frame;
         }
         assert!(level > -30.0 && level <= 0.0, "a tone shows up as a level, got {level}");
@@ -290,10 +295,10 @@ mod tests {
     fn stream_delay_hint_is_accepted_and_clamped() {
         let mut capture = capture_for_test();
         for delay in [0, 40, 500, 10_000, u32::MAX] {
-            capture.set_stream_delay_ms(delay); // must not panic or poison the canceller
+            capture.set_stream_delay_ms(delay).unwrap(); // must not panic or poison the canceller
         }
         let mut frame = tone_frame(0);
-        capture.process(&mut frame, 1, 0);
+        capture.process(&mut frame, 1, 0).unwrap();
         assert!(frame.iter().all(|sample| sample.is_finite()), "the canceller still produces sane audio");
     }
 
@@ -305,7 +310,7 @@ mod tests {
         for i in 0..5 {
             let mut frame = tone_frame(i);
             let timestamp_ms = 1_000 + i as u32 * 20;
-            let out = capture.process(&mut frame, 42, timestamp_ms);
+            let out = capture.process(&mut frame, 42, timestamp_ms).unwrap();
             let packet = out.packets.last().expect("tone frame must be transmitted").clone();
 
             assert!(packet.len() > MEDIA_HEADER_SIZE);
@@ -328,13 +333,13 @@ mod tests {
         let mut capture = capture_for_test();
         for i in 0..5 {
             let mut frame = tone_frame(i);
-            capture.process(&mut frame, 42, 0);
+            capture.process(&mut frame, 42, 0).unwrap();
         }
 
         let mut outputs = Vec::new();
         for _ in 0..10 {
             let mut frame = [0.0f32; FRAME_SIZE_48K];
-            outputs.push(capture.process(&mut frame, 42, 0));
+            outputs.push(capture.process(&mut frame, 42, 0).unwrap());
         }
 
         // Hangover frames are still sent and the last one carries the silence flag
@@ -358,17 +363,17 @@ mod tests {
         let mut last_seq_before_pause = None;
         for i in 0..5 {
             let mut frame = tone_frame(i);
-            capture.process(&mut frame, 42, 0);
+            capture.process(&mut frame, 42, 0).unwrap();
         }
         for _ in 0..10 {
             let mut frame = [0.0f32; FRAME_SIZE_48K];
-            for p in capture.process(&mut frame, 42, 0).packets {
+            for p in capture.process(&mut frame, 42, 0).unwrap().packets {
                 last_seq_before_pause = Some(MediaHeader::from_slice(&p[..MEDIA_HEADER_SIZE]).unwrap().sequence);
             }
         }
 
         let mut frame = tone_frame(100);
-        let packet = capture.process(&mut frame, 42, 0).packets.into_iter().next().expect("speech resumes");
+        let packet = capture.process(&mut frame, 42, 0).unwrap().packets.into_iter().next().expect("speech resumes");
         let seq_after = MediaHeader::from_slice(&packet[..MEDIA_HEADER_SIZE]).unwrap().sequence;
         assert_eq!(Some(seq_after.wrapping_sub(1)), last_seq_before_pause);
     }
@@ -410,7 +415,7 @@ mod tests {
         let (chunks, _) = noise.as_chunks::<FRAME_SIZE_48K>();
         for (i, chunk) in chunks.iter().enumerate() {
             let mut frame = *chunk;
-            let out = capture.process(&mut frame, 42, i as u32 * 20);
+            let out = capture.process(&mut frame, 42, i as u32 * 20).unwrap();
             packets += out.packets.len();
             speaking += usize::from(out.vad == VadDecision::Speaking);
         }
@@ -426,11 +431,11 @@ mod tests {
         let silent_frames = PREROLL_FRAMES as u32 + 3;
         for i in 0..silent_frames {
             let mut silence = [0.0f32; FRAME_SIZE_48K];
-            assert!(capture.process(&mut silence, 42, i * 20).packets.is_empty());
+            assert!(capture.process(&mut silence, 42, i * 20).unwrap().packets.is_empty());
         }
 
         let mut frame = tone_frame(0);
-        let out = capture.process(&mut frame, 42, silent_frames * 20);
+        let out = capture.process(&mut frame, 42, silent_frames * 20).unwrap();
         assert_eq!(out.packets.len(), PREROLL_FRAMES + 1, "pre-roll + the frame itself");
 
         let headers: Vec<MediaHeader> = out
@@ -445,7 +450,7 @@ mod tests {
 
         // Staying open does not repeat the pre-roll.
         let mut next = tone_frame(1);
-        assert_eq!(capture.process(&mut next, 42, (silent_frames + 1) * 20).packets.len(), 1);
+        assert_eq!(capture.process(&mut next, 42, (silent_frames + 1) * 20).unwrap().packets.len(), 1);
     }
 
     // ---- microphone gain, push-to-talk gate, VAD threshold
@@ -465,12 +470,12 @@ mod tests {
     /// Mean level of the processed signal after a few frames of warm-up.
     fn processed_level(gain: f32) -> f32 {
         let mut capture = capture_for_test();
-        capture.set_voice_enhancement(false); // Isolate the manual trim control.
-        capture.set_input_gain(gain);
+        capture.set_voice_enhancement(false).unwrap(); // Isolate the manual trim control.
+        capture.set_input_gain(gain).unwrap();
         let mut total = 0.0;
         for i in 0..20 {
             let mut frame = quiet_frame(i);
-            capture.process(&mut frame, 1, i as u32 * 20);
+            capture.process(&mut frame, 1, i as u32 * 20).unwrap();
             if i >= 10 {
                 total += rms_of(&frame);
             }
@@ -486,13 +491,13 @@ mod tests {
         assert!(silent < normal * 0.05, "gain 0 mutes: {silent} vs {normal}");
 
         let mut capture = capture_for_test();
-        capture.set_input_gain(100.0); // absurd values are limited
+        capture.set_input_gain(100.0).unwrap(); // absurd values are limited
         let mut loud = tone_frame(1);
-        capture.process(&mut loud, 1, 20);
+        capture.process(&mut loud, 1, 20).unwrap();
         assert!(loud.iter().all(|s| s.abs() <= 1.0), "boosted audio is clipped, never wraps");
-        capture.set_input_gain(f32::NAN);
+        capture.set_input_gain(f32::NAN).unwrap();
         let mut frame = quiet_frame(2);
-        capture.process(&mut frame, 1, 40);
+        capture.process(&mut frame, 1, 40).unwrap();
         assert!(frame.iter().all(|s| s.is_finite()));
     }
 
@@ -507,15 +512,15 @@ mod tests {
         let mut silent_packets = 0;
         for i in 0..10 {
             let mut frame = quiet_frame(i);
-            silent_packets += capture.process(&mut frame, 1, i as u32 * 20).packets.len();
+            silent_packets += capture.process(&mut frame, 1, i as u32 * 20).unwrap().packets.len();
         }
         assert_eq!(silent_packets, 0, "a -23 dBFS source is below the -15 dBFS threshold");
 
-        capture.set_input_gain(4.0); // +12 dB
+        capture.set_input_gain(4.0).unwrap(); // +12 dB
         let mut packets = 0;
         for i in 10..20 {
             let mut frame = quiet_frame(i);
-            packets += capture.process(&mut frame, 1, i as u32 * 20).packets.len();
+            packets += capture.process(&mut frame, 1, i as u32 * 20).unwrap().packets.len();
         }
         assert!(packets > 0, "after the boost the same source is heard");
     }
@@ -526,13 +531,13 @@ mod tests {
         capture.set_transmit_gate(false);
         for i in 0..10 {
             let mut frame = tone_frame(i);
-            let out = capture.process(&mut frame, 1, i as u32 * 20);
+            let out = capture.process(&mut frame, 1, i as u32 * 20).unwrap();
             assert!(out.packets.is_empty(), "push-to-talk released: nothing leaves the machine");
             assert_eq!(out.vad, VadDecision::Silence, "and the speaking indicator stays dark");
         }
         capture.set_transmit_gate(true);
         let mut frame = tone_frame(10);
-        let out = capture.process(&mut frame, 1, 200);
+        let out = capture.process(&mut frame, 1, 200).unwrap();
         assert!(!out.packets.is_empty());
     }
 
@@ -545,10 +550,10 @@ mod tests {
         })
         .unwrap();
         let mut frame = quiet_frame(0);
-        assert!(capture.process(&mut frame, 1, 0).packets.is_empty());
+        assert!(capture.process(&mut frame, 1, 0).unwrap().packets.is_empty());
         capture.set_vad_threshold_db(-60.0);
         let mut frame = quiet_frame(1);
-        assert!(!capture.process(&mut frame, 1, 20).packets.is_empty(), "now it is loud enough");
+        assert!(!capture.process(&mut frame, 1, 20).unwrap().packets.is_empty(), "now it is loud enough");
     }
     #[test]
     fn enhancement_defaults_on_and_can_be_bypassed() {
@@ -560,14 +565,14 @@ mod tests {
         for i in 0..150 {
             let mut a = tone_frame(i);
             let mut b = a;
-            let out = on.process(&mut a, 1, i as u32 * 20);
-            off.process(&mut b, 1, i as u32 * 20);
+            let out = on.process(&mut a, 1, i as u32 * 20).unwrap();
+            off.process(&mut b, 1, i as u32 * 20).unwrap();
             assert!(a.iter().all(|s| s.is_finite() && s.abs() <= 0.891252));
             if i >= 100 { on_level += rms_of(&a); off_level += rms_of(&b); }
             assert!(out.level_db.is_finite());
         }
-        assert!(on_level < off_level * 0.7, "loud input is gently reduced");
-        on.set_voice_enhancement(false);
+        assert!(on_level <= off_level * 10.0f32.powf(3.0 / 20.0), "AGC2 does not make loud input more than 3 dB louder");
+        on.set_voice_enhancement(false).unwrap();
     }
 
     #[test]
@@ -576,12 +581,12 @@ mod tests {
         capture.set_transmit_gate(false);
         for i in 0..100 {
             let mut frame = tone_frame(i);
-            assert!(capture.process(&mut frame, 1, i as u32 * 20).packets.is_empty());
+            assert!(capture.process(&mut frame, 1, i as u32 * 20).unwrap().packets.is_empty());
         }
         assert!(capture.preroll.is_empty(), "PTT/mute/mic-test audio must not be retained for sending");
         capture.set_transmit_gate(true);
         let mut frame = tone_frame(100);
-        let out = capture.process(&mut frame, 1, 2000);
+        let out = capture.process(&mut frame, 1, 2000).unwrap();
         assert_eq!(out.packets.len(), 1, "no frames captured while private are sent later");
         assert_eq!(MediaHeader::from_slice(&out.packets[0]).unwrap().timestamp, 2000);
     }
@@ -593,8 +598,8 @@ mod tests {
         for i in 0..150 {
             let mut a = quiet_frame(i);
             let mut b = a;
-            let out = capture.process(&mut a, 1, i as u32 * 20);
-            bypass.process(&mut b, 1, i as u32 * 20);
+            let out = capture.process(&mut a, 1, i as u32 * 20).unwrap();
+            bypass.process(&mut b, 1, i as u32 * 20).unwrap();
             assert!(out.packets.is_empty(), "AGC must not open a threshold-closed microphone");
             assert!((out.level_db - VoiceActivityDetector::compute_rms_dbfs(&b)).abs() < 0.001);
         }
@@ -603,17 +608,33 @@ mod tests {
     #[test]
     fn trim_and_invalid_input_are_safe_in_full_pipeline() {
         let mut capture = capture_for_test();
-        capture.set_input_gain(3.0);
+        capture.set_input_gain(3.0).unwrap();
         for i in 0..100 {
             let mut frame = tone_frame(i).map(|s| s * 3.0);
             if i == 0 { frame[0] = f32::NAN; frame[1] = f32::INFINITY; }
-            capture.process(&mut frame, 1, i as u32 * 20);
+            capture.process(&mut frame, 1, i as u32 * 20).unwrap();
             assert!(frame.iter().all(|s| s.is_finite() && s.abs() <= 0.891252));
         }
-        capture.set_input_gain(0.0);
+        capture.set_input_gain(0.0).unwrap();
         for i in 100..110 {
             let mut frame = tone_frame(i);
-            capture.process(&mut frame, 1, i as u32 * 20);
+            capture.process(&mut frame, 1, i as u32 * 20).unwrap();
             assert!(frame.iter().all(|s| *s == 0.0));
         }
-    }}
+    }
+    #[test]
+    fn native_failure_clears_pending_audio_and_returns_error() {
+        let mut capture = capture_for_test();
+        for i in 0..4 {
+            let mut quiet = [0.0; FRAME_SIZE_48K];
+            capture.process(&mut quiet, 1, i * 20).unwrap();
+        }
+        assert!(!capture.preroll.is_empty());
+        capture.gain.fail_next_capture_for_test();
+        let mut frame = tone_frame(4);
+        assert!(capture.process(&mut frame, 1, 80).is_err());
+        assert!(capture.preroll.is_empty());
+        assert!(!capture.transmitting);
+        assert!(frame.iter().all(|s| *s == 0.0));
+    }
+}

@@ -193,6 +193,8 @@ pub struct WebRtcGain {
     wet: f32,
 }
 impl WebRtcGain {
+    #[cfg(test)]
+    pub(crate) fn fail_next_capture_for_test(&mut self) { self.native.fail_after_capture = Some(0); }
     pub fn new() -> Result<Self, ProcessingError> {
         Ok(Self {
             native: NativeHandle::new(1)?,

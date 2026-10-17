@@ -1,127 +1,65 @@
-//! Acoustic echo cancellation using Sonora's pure Rust WebRTC AEC3 port.
-//!
-//! The public pipeline consumes 20 ms mono frames; AEC3 consumes two 10 ms
-//! planar blocks at 48 kHz. Render history and acoustic delay estimation are
-//! owned by AEC3, rather than a frame-local scalar correlation filter.
-//!
-//! Note: AEC3 is tuned for speech. Perfectly stationary or purely synthetic near-end signals
-//! (pure tones, white noise) can be attenuated heavily in double talk; use speech to judge it.
-
-use crate::resampler::FRAME_SIZE_48K;
-use sonora::{AudioProcessing, Config, StreamConfig};
-
-const BLOCK_SIZE: usize = FRAME_SIZE_48K / 2;
+//! Original C++ WebRTC AEC3 with the actual playout reference.
+use crate::{resampler::FRAME_SIZE_48K, webrtc::{WebRtcAec, ProcessingError}};
 
 pub struct EchoCanceller {
-    processor: AudioProcessing,
-    /// Render-plus-capture device latency hint in ms (kept across `reset`).
+    processor: WebRtcAec,
     stream_delay_ms: i32,
-    render_block: [f32; BLOCK_SIZE],
+    render_block: [f32; FRAME_SIZE_48K],
     render_len: usize,
     has_reference: bool,
     enabled: bool,
 }
-
-impl Default for EchoCanceller {
-    fn default() -> Self { Self::new() }
-}
-
 impl EchoCanceller {
-    pub fn new() -> Self {
-        // Device buffering is unknown to this pure DSP adapter; until the caller supplies a
-        // measured latency, AEC3 estimates the acoustic path delay itself.
-        Self::with_delay(0)
+    pub fn new() -> Result<Self, ProcessingError> { Self::with_delay(0) }
+    fn with_delay(stream_delay_ms: i32) -> Result<Self, ProcessingError> {
+        let mut processor = WebRtcAec::new()?;
+        processor.set_delay_ms(stream_delay_ms as u32)?;
+        Ok(Self { processor, stream_delay_ms, render_block: [0.0; FRAME_SIZE_48K], render_len: 0, has_reference: false, enabled: true })
     }
-
-    fn with_delay(stream_delay_ms: i32) -> Self {
-        let stream = StreamConfig::new(48_000, 1);
-        let config = Config {
-            echo_canceller: Some(sonora::config::EchoCanceller::default()),
-            ..Config::default()
-        };
-        let mut processor = AudioProcessing::builder()
-            .config(config)
-            .capture_config(stream)
-            .render_config(stream)
-            .build();
-        if let Err(error) = processor.set_stream_delay_ms(stream_delay_ms) {
-            tracing::warn!(%error, stream_delay_ms, "AEC3 rejected the stream delay; using its default");
-        }
-        Self {
-            processor,
-            stream_delay_ms,
-            render_block: [0.0; BLOCK_SIZE],
-            render_len: 0,
-            has_reference: false,
-            enabled: true,
-        }
+    pub fn set_enabled(&mut self, enabled: bool) -> Result<(), ProcessingError> {
+        if self.enabled != enabled { self.reset()?; self.enabled = enabled; }
+        Ok(())
     }
-
-    pub fn set_enabled(&mut self, enabled: bool) {
-        if self.enabled != enabled {
-            self.reset();
-            self.enabled = enabled;
-        }
-    }
-
     pub fn is_enabled(&self) -> bool { self.enabled }
-
-    /// Supply measured render-device plus capture-device buffering latency.
-    /// Sonora clamps values outside 0..=500 ms and returns a parameter warning.
-    pub fn set_stream_delay_ms(&mut self, delay: i32) -> Result<(), sonora::Error> {
-        self.processor.set_stream_delay_ms(delay)?;
+    pub fn set_stream_delay_ms(&mut self, delay: i32) -> Result<(), ProcessingError> {
+        let delay = delay.clamp(0, 500);
+        self.processor.set_delay_ms(delay as u32)?;
         self.stream_delay_ms = delay;
         Ok(())
     }
-
-    /// Reset render history, delay estimation and the adaptive echo path.
-    pub fn reset(&mut self) {
-        let enabled = self.enabled;
-        *self = Self::with_delay(self.stream_delay_ms);
-        self.enabled = enabled;
+    pub fn reset(&mut self) -> Result<(), ProcessingError> {
+        self.processor.reset()?;
+        self.processor.set_delay_ms(self.stream_delay_ms as u32)?;
+        self.render_len = 0;
+        self.render_block.fill(0.0);
+        self.has_reference = false;
+        Ok(())
     }
-
-    /// Supply the mono signal actually played to speakers, in time order.
-    pub fn push_reference(&mut self, frame: &[f32; FRAME_SIZE_48K]) {
-        for &sample in frame { self.push_reference_sample(sample); }
+    pub fn push_reference(&mut self, frame: &[f32; FRAME_SIZE_48K]) -> Result<(), ProcessingError> {
+        for &sample in frame { self.push_reference_sample(sample)?; }
+        Ok(())
     }
-
-    /// Accumulate device-sized render callbacks into complete AEC3 blocks.
-    pub fn push_reference_sample(&mut self, sample: f32) {
+    pub fn push_reference_sample(&mut self, sample: f32) -> Result<(), ProcessingError> {
         self.render_block[self.render_len] = sanitize(sample);
         self.render_len += 1;
-        if self.render_len == BLOCK_SIZE {
-            let mut output = [0.0; BLOCK_SIZE];
-            if let Err(error) = self.processor.process_render_f32(
-                &[&self.render_block], &mut [&mut output],
-            ) {
-                tracing::error!(%error, "AEC3 render processing failed");
-            }
+        if self.render_len == FRAME_SIZE_48K {
             self.render_len = 0;
+            self.processor.push_render(&self.render_block)?;
             self.has_reference |= self.render_block.iter().any(|s| s.abs() > 1e-7);
         }
+        Ok(())
     }
-
-    /// Cancel echo on a 20 ms mono capture frame, retaining AEC3 state across calls.
-    pub fn process_capture(&mut self, frame: &mut [f32; FRAME_SIZE_48K]) {
-        if !self.enabled { return; }
-        for sample in frame.iter_mut() { *sample = sanitize(*sample); }
-        // Keep the AEC clock moving through silent render preroll too.
-        let (first, second) = frame.split_at_mut(BLOCK_SIZE);
-        for block in [first, second] {
-            let mut output = [0.0; BLOCK_SIZE];
-            match self.processor.process_capture_f32(&[block], &mut [&mut output]) {
-                Ok(()) if self.has_reference => block.copy_from_slice(&output),
-                Ok(()) => {},
-                Err(error) => tracing::error!(%error, "AEC3 capture processing failed"),
-            }
-        }
+    pub fn process_capture(&mut self, frame: &mut [f32; FRAME_SIZE_48K]) -> Result<(), ProcessingError> {
+        if !self.enabled { return Ok(()); }
+        let original = frame.map(sanitize);
+        let mut processed = original;
+        self.processor.process(&mut processed)?;
+        // Preserve headphone/no-reference transparency, while keeping the AEC clock running.
+        *frame = if self.has_reference { processed } else { original };
+        Ok(())
     }
 }
-
-fn sanitize(sample: f32) -> f32 {
-    if sample.is_finite() { sample.clamp(-1.0, 1.0) } else { 0.0 }
-}
+fn sanitize(sample: f32) -> f32 { if sample.is_finite() { sample.clamp(-1.0, 1.0) } else { 0.0 } }
 
 #[cfg(test)]
 mod tests {
@@ -129,43 +67,43 @@ mod tests {
 
     #[test]
     fn test_aec_disabled_passthrough() {
-        let mut aec = EchoCanceller::new();
-        aec.set_enabled(false);
+        let mut aec = EchoCanceller::new().unwrap();
+        aec.set_enabled(false).unwrap();
         assert!(!aec.is_enabled());
 
         let ref_frame = [0.5f32; FRAME_SIZE_48K];
-        aec.push_reference(&ref_frame);
+        aec.push_reference(&ref_frame).unwrap();
 
         let original = [0.3f32; FRAME_SIZE_48K];
         let mut capture = original;
-        aec.process_capture(&mut capture);
+        aec.process_capture(&mut capture).unwrap();
 
         assert_eq!(capture, original);
     }
 
     #[test]
     fn test_aec_silent_reference() {
-        let mut aec = EchoCanceller::new();
+        let mut aec = EchoCanceller::new().unwrap();
         let ref_frame = [0.0f32; FRAME_SIZE_48K];
-        aec.push_reference(&ref_frame);
+        aec.push_reference(&ref_frame).unwrap();
 
         let original = [0.25f32; FRAME_SIZE_48K];
         let mut capture = original;
-        aec.process_capture(&mut capture);
+        aec.process_capture(&mut capture).unwrap();
 
         assert_eq!(capture, original);
     }
 
     #[test]
     fn test_aec_echo_suppression() {
-        let mut aec = EchoCanceller::new();
+        let mut aec = EchoCanceller::new().unwrap();
 
         // Reference: synthetic tone
         let mut ref_frame = [0.0f32; FRAME_SIZE_48K];
         for (i, sample) in ref_frame.iter_mut().enumerate() {
             *sample = (i as f32 * 0.1).sin() * 0.5;
         }
-        aec.push_reference(&ref_frame);
+        aec.push_reference(&ref_frame).unwrap();
 
         // Capture: pure echo with 50% coupling
         let mut capture = [0.0f32; FRAME_SIZE_48K];
@@ -176,7 +114,14 @@ mod tests {
         let initial_energy: f32 = capture.iter().map(|&s| s * s).sum();
         assert!(initial_energy > 1.0);
 
-        aec.process_capture(&mut capture);
+        // Measure actual cancellation after the documented two-second adaptive warm-up,
+        // rather than treating startup buffering/zeros as echo suppression.
+        for _ in 0..100 {
+            let mut warmup = capture;
+            aec.process_capture(&mut warmup).unwrap();
+            aec.push_reference(&ref_frame).unwrap();
+        }
+        aec.process_capture(&mut capture).unwrap();
 
         let final_energy: f32 = capture.iter().map(|&s| s * s).sum();
 
@@ -186,13 +131,13 @@ mod tests {
 
     #[test]
     fn test_aec_with_delay_lag() {
-        let mut aec = EchoCanceller::new();
+        let mut aec = EchoCanceller::new().unwrap();
 
         let mut ref_frame = [0.0f32; FRAME_SIZE_48K];
         for (i, sample) in ref_frame.iter_mut().enumerate() {
             *sample = (i as f32 * 0.05).sin() * 0.4;
         }
-        aec.push_reference(&ref_frame);
+        aec.push_reference(&ref_frame).unwrap();
 
         // Capture: echo delayed by 10 samples
         let lag = 10;
@@ -204,7 +149,14 @@ mod tests {
         let initial_energy: f32 = capture.iter().map(|&s| s * s).sum();
         assert!(initial_energy > 0.5);
 
-        aec.process_capture(&mut capture);
+        // Measure actual cancellation after the documented two-second adaptive warm-up,
+        // rather than treating startup buffering/zeros as echo suppression.
+        for _ in 0..100 {
+            let mut warmup = capture;
+            aec.process_capture(&mut warmup).unwrap();
+            aec.push_reference(&ref_frame).unwrap();
+        }
+        aec.process_capture(&mut capture).unwrap();
 
         let final_energy: f32 = capture.iter().map(|&s| s * s).sum();
         assert!(final_energy < 0.2 * initial_energy);
@@ -224,15 +176,15 @@ mod tests {
     /// cancelled by at least 20 dB (the spec threshold).
     #[test]
     fn test_aec_cancels_echo_after_convergence() {
-        let mut aec = EchoCanceller::new();
+        let mut aec = EchoCanceller::new().unwrap();
         let mut rng = 12_345u32;
         let (mut echo_energy, mut residual_energy) = (0.0f32, 0.0f32);
         for frame_index in 0..120 {
             let reference = far_end_frame(&mut rng);
-            aec.push_reference(&reference);
+            aec.push_reference(&reference).unwrap();
             let mut capture = reference.map(|s| 0.3 * s);
             let energy_in: f32 = capture.iter().map(|&s| s * s).sum();
-            aec.process_capture(&mut capture);
+            aec.process_capture(&mut capture).unwrap();
             if frame_index >= 100 {
                 echo_energy += energy_in;
                 residual_energy += capture.iter().map(|&s| s * s).sum::<f32>();
@@ -251,12 +203,12 @@ mod tests {
 
     #[test]
     fn test_aec_non_finite_inputs_safe() {
-        let mut aec = EchoCanceller::new();
+        let mut aec = EchoCanceller::new().unwrap();
         let ref_frame = [f32::NAN; FRAME_SIZE_48K];
-        aec.push_reference(&ref_frame);
+        aec.push_reference(&ref_frame).unwrap();
 
         let mut capture = [f32::INFINITY; FRAME_SIZE_48K];
-        aec.process_capture(&mut capture);
+        aec.process_capture(&mut capture).unwrap();
 
         for &s in &capture {
             assert!(s.is_finite());
@@ -266,18 +218,18 @@ mod tests {
 
     #[test]
     fn test_aec_sample_by_sample_push_and_reset() {
-        let mut aec = EchoCanceller::new();
+        let mut aec = EchoCanceller::new().unwrap();
         for i in 0..FRAME_SIZE_48K {
-            aec.push_reference_sample((i as f32 * 0.1).sin());
+            aec.push_reference_sample((i as f32 * 0.1).sin()).unwrap();
         }
 
         let mut capture = [0.0f32; FRAME_SIZE_48K];
-        aec.process_capture(&mut capture);
+        aec.process_capture(&mut capture).unwrap();
 
-        aec.reset();
+        aec.reset().unwrap();
         let original = [0.25; FRAME_SIZE_48K];
         capture = original;
-        aec.process_capture(&mut capture);
+        aec.process_capture(&mut capture).unwrap();
         assert_eq!(capture, original, "reset must discard the render/echo history");
     }
 }

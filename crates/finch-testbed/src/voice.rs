@@ -78,7 +78,7 @@ pub async fn run_voice_link_with(
             frame[..end - start].copy_from_slice(&input[start..end]);
         }
         let capture_started = Instant::now();
-        let out = capture.process(&mut frame, sender_peer, (frame_index * 20) as u32);
+        let out = capture.process(&mut frame, sender_peer, (frame_index * 20) as u32)?;
         run.max_capture_time = run.max_capture_time.max(capture_started.elapsed());
         for packet in out.packets {
             sender.session.send_datagram(packet)?;
