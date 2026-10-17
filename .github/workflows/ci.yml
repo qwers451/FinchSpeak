@@ -22,6 +22,23 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.3'
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - uses: actions/cache@v4
+        with:
+          path: target/native-cache
+          key: native-release-v2-${{ runner.os }}-${{ env.VCToolsVersion }}-${{ hashFiles('native/webrtc/dependencies.lock.json', 'scripts/prepare-webrtc.ps1', 'native/webrtc/meson.build') }}
+      - name: Prepare and verify original C++ audio
+        shell: pwsh
+        run: |
+          ./scripts/prepare-webrtc.ps1 -Configuration Release
+          "FINCH_WEBRTC_ROOT=$env:FINCH_WEBRTC_ROOT" >> $env:GITHUB_ENV
+          ./native/webrtc/probe/prepare-tests.ps1
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22

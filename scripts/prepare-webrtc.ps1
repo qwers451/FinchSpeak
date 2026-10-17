@@ -87,7 +87,7 @@ try {
     $stage = Join-Path $repo "target/native/$Configuration"
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
     foreach ($name in @('finch_webrtc.dll','finch_webrtc.lib','finch_webrtc.dll.lib','finch-webrtc-probe.exe')) { if (Test-Path -LiteralPath "$build/$name") { Copy-Item -LiteralPath "$build/$name" -Destination "$stage/$name" } }
-    $provenance = [ordered]@{ lock_sha256=(Get-FileHash $lockPath).Hash; configuration=$Configuration; build_fingerprint=$fingerprint; compiler=(& $compiler 2>&1 | Out-String).Trim(); include=$env:INCLUDE; crt='MT native DLL'; python=(& $python --version); probe='PASS'; upstream_revision=$lock.upstreamRevision; wrapper_revision=$lock.wrapperRevision }
+    $provenance = [ordered]@{ lock_sha256=(Get-FileHash $lockPath).Hash; configuration=$Configuration; build_fingerprint=$fingerprint; compiler=(& $compiler 2>&1 | Out-String).Trim(); include=$env:INCLUDE; crt='MT native DLL'; dll_sha256=(Get-FileHash "$stage/finch_webrtc.dll").Hash; python=(& $python --version); probe='PASS'; upstream_revision=$lock.upstreamRevision; wrapper_revision=$lock.wrapperRevision }
     $provenance | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$stage/provenance.json" -Encoding utf8
     $env:FINCH_WEBRTC_ROOT = $stage
     $global:LASTEXITCODE = 0

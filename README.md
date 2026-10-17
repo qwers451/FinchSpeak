@@ -284,3 +284,6 @@ cargo test -p finch-testbed -- --include-ignored --nocapture
 ## 📄 Лицензия
 
 Проект распространяется под лицензией MIT. Подробности см. в файле [LICENSE](LICENSE).
+
+## Обработка голоса1.1.0
+Оригинальный WebRTC AGC2 выравнивает речь вместе с AEC3 и RNNoise. В голосовом канале откройте Voice and audio → Voice enhancement (включено по умолчанию). Начните с Input volume100%, подберите Speech threshold по индикатору и нажмите Test microphone. Подробности: [release notes](docs/RELEASE-NOTES-1.1.0.md), [QA](docs/QA-1.1.0.md), [native build](docs/NATIVE-AUDIO.md).

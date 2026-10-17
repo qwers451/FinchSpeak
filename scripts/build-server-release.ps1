@@ -1,3 +1,4 @@
+param([string]$TargetDirectory = "target/server-static")
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $previousFlags = $env:RUSTFLAGS
@@ -8,9 +9,9 @@ try {
     # prevents a later client build from replacing the validated server artifact.
     $env:RUSTFLAGS = $null
     $env:CARGO_ENCODED_RUSTFLAGS = "-C" + [char]31 + "target-feature=+crt-static"
-    cargo build --release --locked -p finch-server --target x86_64-pc-windows-msvc --target-dir target/server-static
+    cargo build --release --locked -p finch-server --target x86_64-pc-windows-msvc --target-dir $TargetDirectory
     if ($LASTEXITCODE -ne 0) { throw "Static server build failed ($LASTEXITCODE)" }
-    & "$PSScriptRoot/test-server-runtime.ps1" -Executable "target/server-static/x86_64-pc-windows-msvc/release/finch-server.exe"
+    & "$PSScriptRoot/test-server-runtime.ps1" -Executable (Join-Path $TargetDirectory "x86_64-pc-windows-msvc/release/finch-server.exe")
 } finally {
     $env:RUSTFLAGS = $previousFlags
     $env:CARGO_ENCODED_RUSTFLAGS = $previousEncoded
