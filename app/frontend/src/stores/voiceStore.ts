@@ -23,6 +23,8 @@ export const [pingRtt, setPingRtt] = createSignal<number | null>(null);
 /** Quietest level the meter shows; also what "nothing" is. */
 export const MIC_FLOOR_DB = -70;
 export const [micLevelDb, setMicLevelDb] = createSignal<number>(MIC_FLOOR_DB);
+/** Actual local voice activation decision from the Rust capture pipeline. */
+export const [micActivation, setMicActivation] = createSignal(false);
 export const [micTestPhase, setMicTestPhase] = createSignal<'idle' | 'recording' | 'playing'>('idle');
 export type LinkQuality = 'good' | 'fair' | 'poor';
 export const [voiceQuality, setVoiceQuality] = createSignal<Record<number, { quality: LinkQuality; loss: number }>>({});
@@ -30,8 +32,9 @@ export const [voiceQuality, setVoiceQuality] = createSignal<Record<number, { qua
 /** Meter fill, 0..1, for a level in dBFS. */
 export const levelFraction = (db: number) => Math.min(1, Math.max(0, (db - MIC_FLOOR_DB) / -MIC_FLOOR_DB));
 
-export function handleMicLevel(level: { db: number }) {
+export function handleMicLevel(level: { db: number; speaking?: boolean }) {
   setMicLevelDb(Number.isFinite(level.db) ? level.db : MIC_FLOOR_DB);
+  setMicActivation(level.speaking === true);
 }
 
 export function handleMicTest(test: { phase: 'recording' | 'playing' | 'done' }) {
@@ -242,6 +245,7 @@ export async function leaveVoice() {
     setActiveVoiceChannel(null);
     setSpeakingPeers(new Set<number>());
     setMicLevelDb(MIC_FLOOR_DB);
+    setMicActivation(false);
     setMicTestPhase('idle');
     setVoiceQuality({});
   } catch (err) {

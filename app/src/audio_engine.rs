@@ -5,6 +5,7 @@
 //! The audio hardware callbacks communicate with the worker thread strictly via lock-free
 //! SPSC ring buffers (`ringbuf::HeapRb`) without mutex locks or memory allocations.
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -142,6 +143,10 @@ impl Drop for AudioEngine {
 fn capture_config(channel_id: u32, settings: &crate::state::VoiceSettings) -> VoiceCaptureConfig {
     VoiceCaptureConfig { channel_short_id: channel_id, voice_enhancement: settings.voice_enhancement(), vad_threshold_db: settings.vad_threshold_db(), ..Default::default() }
 }
+
+fn effective_monitor(settings: &crate::state::VoiceSettings, mic_test_active: bool) -> bool {
+    settings.monitor() && !mic_test_active
+}
 #[derive(Default)]
 struct ProcessingFailures { consecutive: u8, reported: bool }
 impl ProcessingFailures {
@@ -161,17 +166,30 @@ struct MicTest {
     wanted_frames: usize,
     frames: Vec<[f32; FRAME_SIZE_48K]>,
     played: usize,
+    preroll: VecDeque<(usize, [f32; FRAME_SIZE_48K])>,
 }
 
 impl MicTest {
     fn new(seconds: u32) -> Self {
         let wanted_frames = (seconds.clamp(1, 10) as usize) * 50;
-        Self { wanted_frames, frames: Vec::with_capacity(wanted_frames), played: 0 }
+        Self { wanted_frames, frames: Vec::with_capacity(wanted_frames), played: 0, preroll: VecDeque::with_capacity(finch_audio::PREROLL_FRAMES) }
     }
 
-    fn record(&mut self, frame: &[f32; FRAME_SIZE_48K]) {
-        if self.frames.len() < self.wanted_frames {
-            self.frames.push(*frame);
+    /// Keep a private onset buffer for the local preview; the network encoder never sees it.
+    fn record(&mut self, frame: &[f32; FRAME_SIZE_48K], active: bool, ptt_open: bool) {
+        if self.recording_done() { return; }
+        let active = active && ptt_open;
+        let index = self.frames.len();
+        self.frames.push(if active { *frame } else { [0.0; FRAME_SIZE_48K] });
+        if !ptt_open {
+            self.preroll.clear();
+        } else if active {
+            for (old_index, old_frame) in self.preroll.drain(..) {
+                self.frames[old_index] = old_frame;
+            }
+        } else {
+            if self.preroll.len() == finch_audio::PREROLL_FRAMES { self.preroll.pop_front(); }
+            self.preroll.push_back((index, *frame));
         }
     }
 
@@ -503,9 +521,14 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     // A-. A microphone test was asked for: record a few seconds, then play them back.
                     let requested = state.mic_test_request.swap(0, Ordering::SeqCst);
                     if requested > 0 && mic_test.is_none() {
-                        state.voice_settings.set_mic_test(true);
-                        mic_test = Some(MicTest::new(requested));
-                        let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "recording", "seconds": requested }));
+                        if capture_stream.is_some() && playback_stream.is_some() && !state.is_muted.load(Ordering::Relaxed) {
+                            state.voice_settings.set_mic_test(true);
+                            monitor_queue.clear();
+                            mic_test = Some(MicTest::new(requested));
+                            let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "recording", "seconds": requested }));
+                        } else {
+                            let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
+                        }
                     }
 
                     // A-. Once a second: how good is each speaker's link (loss of the last second).
@@ -540,9 +563,11 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         state.voice_settings.set_mic_test(false);
                                     }
                                 }
-                                if let Some(own) = monitor_queue.pop_front() {
-                                    for (out, mine) in playback_frame_48k.iter_mut().zip(own.iter()) {
-                                        *out = (*out + *mine).clamp(-1.0, 1.0);
+                                if effective_monitor(&state.voice_settings, mic_test.is_some()) {
+                                    if let Some(own) = monitor_queue.pop_front() {
+                                        for (out, mine) in playback_frame_48k.iter_mut().zip(own.iter()) {
+                                            *out = (*out + *mine).clamp(-1.0, 1.0);
+                                        }
                                     }
                                 }
 
@@ -703,21 +728,26 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         }
                                     };
                                     processing_failures.succeeded();
+                                    let ptt_open = state.voice_settings.transmit_open()
+                                        && !state.is_muted.load(Ordering::Relaxed);
+                                    let preview_active = output.activity.should_transmit() && ptt_open;
                                     level_frames += 1;
                                     if level_frames >= MIC_LEVEL_EVERY_FRAMES {
                                         level_frames = 0;
                                         let _ = app_handle.emit(
                                             "mic-level",
-                                            serde_json::json!({ "db": output.level_db, "speaking": output.vad == VadDecision::Speaking }),
+                                            serde_json::json!({ "db": output.level_db, "speaking": preview_active }),
                                         );
                                     }
                                     if let Some(test) = &mut mic_test {
-                                        test.record(&capture_frame_48k);
-                                        if test.recording_done() {
-                                            let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "playing" }));
+                                        if !test.recording_done() {
+                                            test.record(&capture_frame_48k, preview_active, ptt_open);
+                                            if test.recording_done() {
+                                                let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "playing" }));
+                                            }
                                         }
                                     }
-                                    if state.voice_settings.monitor() {
+                                    if effective_monitor(&state.voice_settings, mic_test.is_some()) {
                                         if monitor_queue.len() >= 5 {
                                             monitor_queue.pop_front();
                                         }
@@ -760,6 +790,10 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 if is_currently_speaking {
                     let _ = app_handle.emit("local-speaking", false);
                 }
+                if mic_test.is_some() {
+                    state.voice_settings.set_mic_test(false);
+                    let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
+                }
 
                 info!("Audio streams for channel {} stopped", channel_id);
             }
@@ -780,7 +814,7 @@ mod tests {
         let mut test = MicTest::new(1);
         assert!(test.next_playback_frame().is_none(), "nothing plays while recording");
         for _ in 0..60 {
-            test.record(&[0.1f32; FRAME_SIZE_48K]); // extra frames are ignored
+            test.record(&[0.1f32; FRAME_SIZE_48K], true, true); // extra frames are ignored
         }
         assert!(test.recording_done());
         assert!(!test.finished());
@@ -797,6 +831,39 @@ mod tests {
     fn mic_test_length_is_limited() {
         assert_eq!(MicTest::new(0).wanted_frames, 50);
         assert_eq!(MicTest::new(99).wanted_frames, 500);
+    }
+
+    #[test]
+    fn mic_test_silences_rejected_frames_and_keeps_local_onset() {
+        let mut test = MicTest::new(1);
+        for _ in 0..4 { test.record(&[0.25; FRAME_SIZE_48K], false, true); }
+        test.record(&[0.5; FRAME_SIZE_48K], true, true);
+        test.record(&[0.75; FRAME_SIZE_48K], true, false);
+        for _ in 6..50 { test.record(&[0.8; FRAME_SIZE_48K], false, true); }
+        assert_eq!(test.next_playback_frame().unwrap()[0], 0.25);
+        for _ in 1..4 { assert_eq!(test.next_playback_frame().unwrap()[0], 0.25); }
+        assert_eq!(test.next_playback_frame().unwrap()[0], 0.5);
+        assert_eq!(test.next_playback_frame().unwrap()[0], 0.0, "PTT-closed frame stays silent");
+        assert_eq!(test.next_playback_frame().unwrap()[0], 0.0, "rejected frames stay silent");
+    }
+
+    #[test]
+    fn microphone_test_suspends_monitor_without_changing_saved_choice() {
+        let settings = crate::state::VoiceSettings::default();
+        let mut requested = settings.snapshot();
+        requested.monitor = true;
+        settings.apply(&requested);
+        assert!(effective_monitor(&settings, false));
+        assert!(!effective_monitor(&settings, true));
+        assert!(settings.snapshot().monitor);
+        requested.monitor = false;
+        settings.apply(&requested);
+        assert!(!effective_monitor(&settings, true));
+        assert!(!effective_monitor(&settings, false));
+        requested.monitor = true;
+        settings.apply(&requested);
+        assert!(!effective_monitor(&settings, true));
+        assert!(effective_monitor(&settings, false), "the user's latest choice takes effect when the test ends");
     }
 
     #[test]

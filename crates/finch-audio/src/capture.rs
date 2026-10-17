@@ -64,6 +64,8 @@ pub struct CaptureOutput {
     pub packets: Vec<Bytes>,
     /// VAD decision for this frame.
     pub vad: VadDecision,
+    /// Detector decision before the network privacy gate, for local activation preview only.
+    pub activity: VadDecision,
     /// Level of the processed frame in dBFS (-120 for silence): what the threshold is compared with.
     pub level_db: f32,
 }
@@ -199,7 +201,7 @@ impl VoiceCapture {
         if !self.gate_open {
             self.preroll.clear();
             self.transmitting = false;
-            return Ok(CaptureOutput { packets: Vec::new(), vad: VadDecision::Silence, level_db });
+            return Ok(CaptureOutput { packets: Vec::new(), vad: VadDecision::Silence, activity, level_db });
         }
         let vad = activity;
         if !vad.should_transmit() {
@@ -208,7 +210,7 @@ impl VoiceCapture {
                 self.preroll.pop_front();
             }
             self.preroll.push_back(*frame);
-            return Ok(CaptureOutput { packets: Vec::new(), vad, level_db });
+            return Ok(CaptureOutput { packets: Vec::new(), vad, activity, level_db });
         }
 
         let mut packets = Vec::with_capacity(PREROLL_FRAMES + 1);
@@ -224,7 +226,7 @@ impl VoiceCapture {
         self.transmitting = true;
         packets.extend(self.encode_packet(frame, sender_peer_id, timestamp_ms, vad.is_silence_packet()));
 
-        Ok(CaptureOutput { packets, vad, level_db })
+        Ok(CaptureOutput { packets, vad, activity, level_db })
     }
 
     /// Opus-encode one frame into a complete media datagram; `None` if encoding fails.
@@ -306,6 +308,25 @@ mod tests {
         }
         assert!(level > -30.0 && level <= 0.0, "a tone shows up as a level, got {level}");
         assert!((level - VoiceActivityDetector::compute_rms_dbfs(&loud)).abs() < 1.0, "it is the level the threshold sees");
+    }
+
+    #[test]
+    fn private_capture_reports_local_speech_without_encoding_it() {
+        let mut capture = VoiceCapture::new(VoiceCaptureConfig {
+            vad_mode: VadMode::Energy,
+            vad_threshold_db: -70.0,
+            ..Default::default()
+        }).unwrap();
+        capture.set_transmit_gate(false);
+        let mut heard_speech = false;
+        for index in 0..10 {
+            let mut frame = tone_frame(index);
+            let output = capture.process(&mut frame, 1, index as u32 * 20).unwrap();
+            heard_speech |= output.activity == VadDecision::Speaking;
+            assert!(output.packets.is_empty(), "local preview must not encode private audio");
+            assert_eq!(output.vad, VadDecision::Silence);
+        }
+        assert!(heard_speech, "local preview uses the real detector while network gate is closed");
     }
 
     #[test]
@@ -438,6 +459,20 @@ mod tests {
         }
         assert_eq!(speaking, 0, "noise was classified as speech");
         assert_eq!(packets, 0, "noise was transmitted");
+    }
+
+    #[test]
+    fn private_speech_preview_rejects_loud_non_speech_noise() {
+        let mut capture = VoiceCapture::new(VoiceCaptureConfig::default()).unwrap();
+        capture.set_transmit_gate(false);
+        let noise = pink_noise(3 * 48_000, -35.0);
+        let (chunks, _) = noise.as_chunks::<FRAME_SIZE_48K>();
+        for (index, chunk) in chunks.iter().enumerate() {
+            let mut frame = *chunk;
+            let output = capture.process(&mut frame, 42, index as u32 * 20).unwrap();
+            assert_eq!(output.activity, VadDecision::Silence, "local preview must respect Speech VAD");
+            assert!(output.packets.is_empty(), "microphone test stays private");
+        }
     }
 
     /// When the gate opens, the frames just before it are sent first, so the start of a word

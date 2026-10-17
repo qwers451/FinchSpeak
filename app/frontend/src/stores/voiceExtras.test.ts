@@ -5,7 +5,7 @@ import { resetSessionState, sessionHandlers } from './sessionStore';
 import { setAppError, appError } from './notificationStore';
 import { setVolumes } from './volumeStore';
 import {
-  levelFraction, MIC_FLOOR_DB, micLevelDb, micTestPhase, setVoiceParticipants, startMicTest, voiceQuality,
+  levelFraction, MIC_FLOOR_DB, micLevelDb, micActivation, micTestPhase, setVoiceParticipants, startMicTest, voiceQuality,
 } from './voiceStore';
 
 beforeEach(() => {
@@ -35,8 +35,10 @@ it('maps a level in dB onto the meter', () => {
 it('keeps the live level, the test phase and link quality from backend events', () => {
   sessionHandlers['mic-level']({ db: -23.5, speaking: true });
   expect(micLevelDb()).toBe(-23.5);
+  expect(micActivation()).toBe(true);
   sessionHandlers['mic-level']({ db: Number.NaN, speaking: false });
   expect(micLevelDb()).toBe(MIC_FLOOR_DB);
+  expect(micActivation()).toBe(false);
 
   sessionHandlers['mic-test']({ phase: 'recording' });
   expect(micTestPhase()).toBe('recording');

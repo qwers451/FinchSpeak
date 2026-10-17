@@ -8,13 +8,14 @@ import { setCurrentUser } from '../../stores/authStore';
 import { setWatching } from '../../stores/screenState';
 import { sessionHandlers, setKnownUsers, setLocalPeerId, setConnectionStatus, resetSessionState } from '../../stores/sessionStore';
 import {
-  availableDevices, setActiveVoiceChannel, setAvailableDevices, setIsDeafened, setIsLocalSpeaking, setIsMuted, setMicLevelDb, setMicTestPhase,
+  availableDevices, setActiveVoiceChannel, setAvailableDevices, setIsDeafened, setIsLocalSpeaking, setIsMuted, setMicLevelDb, setMicActivation, setMicTestPhase,
   setPushToTalkKey, setSelectedDevices, setSpeakingPeers, setVoiceParticipants, setVoiceSettings, DEFAULT_VOICE_SETTINGS,
 } from '../../stores/voiceStore';
 import { setVolumes } from '../../stores/volumeStore';
 import { clearToasts } from '../../ui';
 import { VoicePanel } from '../VoicePanel';
 import { VoiceSettingsModal } from './VoiceSettingsModal';
+import { DEFAULT_PREFS, setPrefs } from '../../stores/settingsStore';
 
 const me = { id: 'me', username: 'alice', display_name: 'Alice Cooper', role: 'member' as const };
 const bob = { id: 'bob', username: 'bob', display_name: 'Bob Marley', role: 'member' as const };
@@ -34,6 +35,7 @@ const byLabel = (host: ParentNode, label: string) => host.querySelector<HTMLElem
 beforeEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'en' } });
   resetSessionState();
   clearToasts();
   setVolumes({});
@@ -51,6 +53,7 @@ beforeEach(() => {
   setVoiceSettings(DEFAULT_VOICE_SETTINGS);
   setPushToTalkKey(null);
   setMicLevelDb(-70);
+  setMicActivation(false);
   setMicTestPhase('idle');
 });
 afterEach(() => {
@@ -188,7 +191,9 @@ it('the meter follows the microphone and the threshold line follows the slider',
   expect(fill()).toBe('50%');
   setVoiceSettings({ ...DEFAULT_VOICE_SETTINGS, vad_threshold_db: -45 });
   expect((meter.querySelector('.thr') as HTMLElement).style.left).toBe('36%');
-  expect(document.body.textContent).toContain('above the line');
+  expect(document.body.textContent).toContain('Voice activation: closed');
+  setMicActivation(true);
+  expect(document.body.textContent).toContain('Voice activation: open');
   setIsMuted(true);
   expect(fill()).toBe('0%');
   expect(document.body.textContent).toContain('You are muted');
