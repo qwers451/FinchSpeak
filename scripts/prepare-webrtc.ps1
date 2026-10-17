@@ -72,9 +72,11 @@ try {
     New-Item -ItemType Directory -Force -Path "$source/probe" | Out-Null
     Copy-Item -LiteralPath (Join-Path $definition 'probe/main.cc') -Destination "$source/probe/main.cc"
     foreach ($name in @('bridge.cc','bridge.h')) { if (Test-Path -LiteralPath (Join-Path $definition $name)) { Copy-Item -LiteralPath (Join-Path $definition $name) -Destination "$source/$name" } }
-    $build = Join-Path $cache $Configuration
+    $identityText = (Get-FileHash -LiteralPath $compiler).Hash + (Get-FileHash -LiteralPath $lockPath).Hash + $env:INCLUDE + $env:LIB + 'c++20-MT'
+    $fingerprint = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($identityText))).Substring(0,12).ToLowerInvariant()
+    $build = Join-Path $cache "$Configuration-$fingerprint"
     $buildType = if ($Configuration -eq 'Debug') { 'debug' } else { 'release' }
-    $setup = @('-m','mesonbuild.mesonmain','setup',$build,$source,"--buildtype=$buildType",'--wrap-mode=nodownload')
+    $setup = @('-m','mesonbuild.mesonmain','setup',$build,$source,"--buildtype=$buildType",'--wrap-mode=nodownload','-Dcpp_std=c++20','-Dapm:cpp_std=c++20','-Dabseil-cpp:cpp_std=c++20')
     if (Test-Path -LiteralPath "$build/build.ninja") { $setup += '--reconfigure' }
     Invoke-Checked $python $setup
     Invoke-Checked (Join-Path $tools 'bin/ninja.exe') @('-C',$build,'-j','6')
@@ -82,7 +84,7 @@ try {
     $stage = Join-Path $repo "target/native/$Configuration"
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
     foreach ($name in @('finch_webrtc.dll','finch_webrtc.lib','finch_webrtc.dll.lib','finch-webrtc-probe.exe')) { if (Test-Path -LiteralPath "$build/$name") { Copy-Item -LiteralPath "$build/$name" -Destination "$stage/$name" } }
-    $provenance = [ordered]@{ lock_sha256=(Get-FileHash $lockPath).Hash; configuration=$Configuration; compiler=(& $compiler 2>&1 | Out-String).Trim(); include=$env:INCLUDE; crt='MT native DLL'; python=(& $python --version); probe='PASS'; upstream_revision=$lock.upstreamRevision; wrapper_revision=$lock.wrapperRevision }
+    $provenance = [ordered]@{ lock_sha256=(Get-FileHash $lockPath).Hash; configuration=$Configuration; build_fingerprint=$fingerprint; compiler=(& $compiler 2>&1 | Out-String).Trim(); include=$env:INCLUDE; crt='MT native DLL'; python=(& $python --version); probe='PASS'; upstream_revision=$lock.upstreamRevision; wrapper_revision=$lock.wrapperRevision }
     $provenance | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$stage/provenance.json" -Encoding utf8
     $env:FINCH_WEBRTC_ROOT = $stage
     $global:LASTEXITCODE = 0

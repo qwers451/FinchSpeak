@@ -1,4 +1,4 @@
-project('finch-webrtc', 'cpp', version: '1.0', default_options: ['cpp_std=c++17', 'default_library=static', 'b_vscrt=mt'])
+project('finch-webrtc', 'cpp', version: '1.0', default_options: ['cpp_std=c++20', 'default_library=static', 'b_vscrt=mt'])
 apm = subproject('apm')
 apm_dep = apm.get_variable('audio_processing_dep')
 platform_args = ['-DWEBRTC_WIN', '-DNOMINMAX', '-D_USE_MATH_DEFINES']
