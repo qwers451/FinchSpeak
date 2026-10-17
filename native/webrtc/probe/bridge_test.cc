@@ -42,6 +42,14 @@ int main() {
       }
       CHECK(finch_test_allocations() == 0);
       CHECK(finch_webrtc_reset(processor) == 0);
+      if (stage == 1 && cycle == 0) {
+        int refused = 0;
+        for (int update = 0; update < 1000; ++update) {
+          refused += finch_webrtc_set_fixed_gain(processor, update % 2 ? 18.0f : 0.0f) != 0;
+        }
+        CHECK(refused > 0); // Native queue failure must be observable, never a false success.
+        CHECK(finch_webrtc_reset(processor) == 0);
+      }
       finch_webrtc_destroy(processor);
     }
   }

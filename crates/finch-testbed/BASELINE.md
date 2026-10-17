@@ -71,3 +71,30 @@ The three probe matching checks and the 200 ms / six-packet limits are unchanged
 The test failed in about 1 of 3 runs because the loss pattern still depended on connection set-up timing and on how
 the two directions interleaved. The proxy now starts impairing after both clients are in the room and uses one random
 sequence per direction. Result: 8 of 8 runs identical in delivery (268 of 284 packets), all passing.
+
+## Native WebRTC 1.1.0 candidate (2026-10-17)
+Original C++ WebRTC APM M131/standalone2.1 + existing RNNoise/nnnoiseless0.5.2. No own compressor or Sonora in production. AGC2: headroom6dB, adaptive gain0…12dB, rate6dB/s, noise cap−50dBFS, initial0dB; fixed digital gain follows manual trim, final constant−1dB headroom.
+A/B uses 15s repeated fixtures, identical common voiced windows in the last5s after10s adaptation. Nominal input is whole-signal RMS; output columns are voiced-window RMS, so their absolute values differ. No output/VAD-selected windows are discarded. Source clipping is explicitly counted before processing.
+| Fixture | Nominal input dBFS | Enhancement off dBFS | On dBFS | Change dB | Source clipped samples |
+|---|---:|---:|---:|---:|---:|
+| speech_1 | -38 | -34.79 | -23.83 | +10.95 | 0 |
+| speech_1 | -26 | -22.83 | -23.82 | -0.99 | 0 |
+| speech_1 | -12 | -9.55 | -10.66 | -1.11 | 8955 |
+| speech_2 | -38 | -36.54 | -25.54 | +11.00 | 0 |
+| speech_2 | -26 | -24.54 | -23.52 | +1.02 | 0 |
+| speech_2 | -12 | -10.95 | -11.99 | -1.04 | 8118 |
+| speech_3 | -38 | -36.73 | -25.73 | +11.00 | 0 |
+| speech_3 | -26 | -24.74 | -23.90 | +0.83 | 0 |
+| speech_3 | -12 | -11.02 | -12.10 | -1.07 | 6441 |
+
+All three quiet sources gain10.95–11.00dB; inter-source level spread is reduced by more than12dB. Loud sources are not boosted. Peak≤−1dBFS in steady enabled mode; full-bypass peak≤0dBFS, transitions20ms. Already clipped input is not claimed to be restored.
+
+Isolated unchanged AEC/NS gates: ERLE74.4dB, double-talk−25.8 versus near−23.3dBFS; full default-on ERLE75.4dB, double-talk−26.8dBFS. White/pink NS improvements+22.2/+15.7dB, segmental SNR preserved; babble measured only. Default-on onset starts40/20/60ms before Energy detector for the three voices; pink−35 and white−45dBFS produce no noise-only packets. Headless localhost latency76.4ms (excludes physical device buffers).
+
+New least-squares gain-calibrated residual SNR is invariant to a constant output gain (0.25x/4x control within0.1dB), uses the same voiced windows and fixed calibrated RNNoise lag480samples, and includes signal distortion in residual. It is diagnostic fidelity, not a human MOS score. On/off stationary-noise results differ by at most0.03dB; AGC is not credited with extra noise suppression. Separate-pause SNR is used only for the AEC/NS component with AGC off; full default-on is checked separately.
+
+Artifacts: target/voice-enhancement-out (input/off/on WAVs, levels.json, stationary.json, pause/transient WAVs). Commands: cargo test -p finch-testbed --test voice_enhancement -- --test-threads=1 --nocapture; cargo test -p finch-testbed --test voice_quality -- --test-threads=1 --nocapture. Debug gain-adapter60s signal cost1.827s with zero Rust allocations; native C++ operator-new counter also remains zero after warm-up (does not instrument legacy C malloc).
+
+Regression fixes exposed by these cases: bound the Earshot analysis after FFT resampling overshoot; coalesce manual gain changes before native processing and propagate a full native runtime queue as an error. Physical microphones, listening on two PCs and NAT remain owner acceptance, not inferred from synthesized-fixture metrics.
+
+Repeatability: three sequential idle-host latency runs each76.4ms. Pause noise first/last full second: pink -66.14/-92.71dBFS; white -73.35/-95.58dBFS. Windows/MSVC debug host, candidate based on6d14ecd plus quality regression fixes; physical-device latency is excluded.

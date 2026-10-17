@@ -194,7 +194,9 @@ pub struct WebRtcGain {
 }
 impl WebRtcGain {
     #[cfg(test)]
-    pub(crate) fn fail_next_capture_for_test(&mut self) { self.native.fail_after_capture = Some(0); }
+    pub(crate) fn fail_next_capture_for_test(&mut self) {
+        self.native.fail_after_capture = Some(0);
+    }
     pub fn new() -> Result<Self, ProcessingError> {
         Ok(Self {
             native: NativeHandle::new(1)?,
@@ -212,7 +214,8 @@ impl WebRtcGain {
         if gain == self.input_gain {
             return Ok(());
         }
-        self.native.set_gain(20.0 * gain.max(1.0).log10())?;
+        // Keep the latest requested trim; enqueue at most one native update per frame.
+        // In bypass mode the native processor does not drain runtime-setting messages.
         self.input_gain = gain;
         Ok(())
     }
@@ -239,6 +242,8 @@ impl WebRtcGain {
             return Ok(());
         }
         let mut processed = source.map(|s| s * self.input_gain.min(1.0));
+        self.native
+            .set_gain(20.0 * self.input_gain.max(1.0).log10())?;
         self.native.process(&mut processed)?;
         let target = if self.enabled { 1.0 } else { 0.0 };
         let start = self.wet;
@@ -391,5 +396,29 @@ mod tests {
             "NATIVE_DSP: 60 s processed in {:?}; zero Rust adapter allocations",
             started.elapsed()
         );
+    }
+
+    #[test]
+    fn rapid_trim_changes_apply_the_latest_value_without_filling_native_queue() {
+        let mut rapid = WebRtcGain::new().unwrap();
+        let mut reference = WebRtcGain::new().unwrap();
+        for index in 0..1000 {
+            rapid
+                .set_input_gain(if index % 2 == 0 { 1.0 } else { 3.0 })
+                .unwrap();
+        }
+        reference.set_input_gain(3.0).unwrap();
+        for index in 0..5 {
+            let mut actual = tone(index, 0.01);
+            let mut expected = actual;
+            rapid.process(&mut actual).unwrap();
+            reference.process(&mut expected).unwrap();
+            if index == 4 {
+                assert_eq!(
+                    actual, expected,
+                    "obsolete queued gains replaced the latest trim"
+                );
+            }
+        }
     }
 }

@@ -24,7 +24,13 @@ fn debug_wav(name: &str, samples: &[f32]) {
 
 /// Run `input` through a fresh capture pipeline frame by frame and return the processed signal.
 fn process_capture(input: &[f32], far_end: Option<&[f32]>) -> Vec<f32> {
-    let mut capture = VoiceCapture::new(VoiceCaptureConfig::default()).expect("capture pipeline");
+    process_capture_with(input, far_end, true)
+}
+
+// Isolated AEC/NS controls exclude AGC, whose changing gain biases separate-pause SNR.
+// Full default-on A/B uses the fixed common voiced windows in voice_enhancement.rs.
+fn process_capture_with(input: &[f32], far_end: Option<&[f32]>, voice_enhancement: bool) -> Vec<f32> {
+    let mut capture = VoiceCapture::new(VoiceCaptureConfig { voice_enhancement, ..Default::default() }).expect("capture pipeline");
     let mut out = Vec::with_capacity(input.len());
     for (i, chunk) in input.chunks(FRAME_SIZE_48K).enumerate() {
         let mut frame = [0.0f32; FRAME_SIZE_48K];
@@ -87,7 +93,7 @@ fn check_noise_suppression(kind: &str, noise: Vec<f32>, enforce: bool) {
 
     let mut input: Vec<f32> = noise[..lead].iter().map(|s| s * g).collect();
     input.extend_from_slice(&noisy_speech);
-    let output = process_capture(&input, None);
+    let output = process_capture_with(&input, None, false);
     debug_wav(&format!("ns_{kind}_in"), &input);
     debug_wav(&format!("ns_{kind}_out"), &output);
 
@@ -142,7 +148,7 @@ fn echo_cancelled_after_convergence() {
         capture_in[4 * SR + i] += near[i];
     }
 
-    let output = process_capture(&capture_in, Some(&far));
+    let output = process_capture_with(&capture_in, Some(&far), false);
     debug_wav("aec_in", &capture_in);
     debug_wav("aec_out", &output);
 
@@ -157,6 +163,13 @@ fn echo_cancelled_after_convergence() {
         double_talk_level >= near_level - 6.0,
         "near-end speech attenuated to {double_talk_level:.1} dBFS (near {near_level:.1})"
     );
+    let full = process_capture(&capture_in, Some(&far));
+    let full_erle = erle_db(&capture_in[2 * SR..4 * SR], &full[2 * SR..4 * SR]);
+    let full_near = rms_dbfs(&full[4 * SR..6 * SR]);
+    eprintln!("BASELINE aec_default_on: erle={full_erle:.1} dB, double_talk={full_near:.1} dBFS, near={near_level:.1}");
+    assert!(full_erle >= 20.0, "default-on ERLE {full_erle:.1} <20dB");
+    assert!(full_near >= near_level - 6.0, "default-on near speech lost more than6dB");
+    debug_wav("aec_default_on", &full);
 }
 
 #[tokio::test]

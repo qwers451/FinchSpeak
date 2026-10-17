@@ -35,8 +35,11 @@ impl SpeechClassifier {
     /// classifier always has fresh evidence. On an internal resampling error the frame counts as
     /// speech, so a failure never silences the microphone.
     pub fn score(&mut self, frame: &[f32; FRAME_SIZE_48K]) -> f32 {
-        match self.to_16k.process(frame) {
-            Ok(samples) => self.pending.extend_from_slice(&samples),
+        let analysis = frame.map(|s| if s.is_finite() { s.clamp(-1.0, 1.0) } else { 0.0 });
+        match self.to_16k.process(&analysis) {
+            // FFT resampling can overshoot even when every 48k input sample is bounded.
+            // This is the detector's analysis copy; preserve the actual capture headroom.
+            Ok(samples) => self.pending.extend(samples.into_iter().map(|s| if s.is_finite() { s.clamp(-1.0, 1.0) } else { 0.0 })),
             Err(error) => {
                 tracing::error!(%error, "Speech classifier resampling failed; assuming speech");
                 return 1.0;
@@ -78,6 +81,19 @@ mod tests {
         for _ in 0..200 {
             classifier.score(&[0.0; FRAME_SIZE_48K]);
             assert!(classifier.pending.len() < EARSHOT_BLOCK, "leftover grows without bound");
+        }
+    }
+
+    #[test]
+    fn loud_clipped_analysis_is_bounded_after_resampling() {
+        let mut classifier = SpeechClassifier::new().unwrap();
+        for index in 0..100 {
+            let frame = std::array::from_fn(|i| {
+                let phase = 2.0 * std::f32::consts::PI * 200.0 * (index * FRAME_SIZE_48K + i) as f32 / 48_000.0;
+                (8.0 * phase.sin()).clamp(-1.0, 1.0)
+            });
+            let score = classifier.score(&frame);
+            assert!(score.is_finite() && (0.0..=1.0).contains(&score));
         }
     }
 }

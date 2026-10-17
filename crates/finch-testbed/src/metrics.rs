@@ -16,6 +16,49 @@ pub fn rms_dbfs(x: &[f32]) -> f32 {
     (10.0 * power(x).max(1e-12).log10()) as f32
 }
 
+/// Gain-invariant aligned residual SNR over fixed common voiced windows.
+/// Fits one least-squares gain, so AGC amplification cannot masquerade as noise suppression.
+/// Returns an error for empty/out-of-range/nonfinite or zero-energy reference windows.
+pub fn gain_calibrated_snr_db(
+    clean: &[f32],
+    processed: &[f32],
+    windows: &[std::ops::Range<usize>],
+    lag: usize,
+) -> anyhow::Result<f32> {
+    anyhow::ensure!(!windows.is_empty(), "no common voiced windows");
+    let (mut clean_energy, mut processed_energy, mut dot) = (0.0f64, 0.0f64, 0.0f64);
+    for window in windows {
+        anyhow::ensure!(
+            window.start < window.end && window.end <= clean.len(),
+            "invalid clean window"
+        );
+        let end = window
+            .end
+            .checked_add(lag)
+            .ok_or_else(|| anyhow::anyhow!("alignment overflow"))?;
+        anyhow::ensure!(end <= processed.len(), "processed window is missing");
+        for (&c, &p) in clean[window.clone()]
+            .iter()
+            .zip(&processed[window.start + lag..end])
+        {
+            anyhow::ensure!(
+                c.is_finite() && p.is_finite(),
+                "nonfinite measurement sample"
+            );
+            clean_energy += f64::from(c).powi(2);
+            processed_energy += f64::from(p).powi(2);
+            dot += f64::from(c) * f64::from(p);
+        }
+    }
+    anyhow::ensure!(
+        clean_energy > 0.0 && processed_energy > 0.0,
+        "no measurable signal energy"
+    );
+    let projected = dot * dot / clean_energy;
+    let residual = (processed_energy - projected).max(processed_energy * 1e-12);
+    Ok((10.0 * (projected.max(processed_energy * 1e-12) / residual).log10()) as f32)
+}
+
 /// SNR of a signal+noise segment given a noise-only segment:
 /// `10·log10((P(signal_segment) − P(noise_segment)) / P(noise_segment))`.
 pub fn snr_db(signal_segment: &[f32], noise_segment: &[f32]) -> f32 {
@@ -72,7 +115,8 @@ pub fn delay_samples(reference: &[f32], recorded: &[f32], max_lag: usize) -> Opt
             best = Some((lag, normalized));
         }
     }
-    best.filter(|&(_, c)| c >= MIN_DELAY_CORRELATION).map(|(lag, _)| lag)
+    best.filter(|&(_, c)| c >= MIN_DELAY_CORRELATION)
+        .map(|(lag, _)| lag)
 }
 
 /// Echo return loss enhancement: `10·log10(P(echo_in) / P(residual_out))`.
@@ -139,7 +183,29 @@ mod tests {
     fn fixtures_load_at_48k() {
         let speech = load_speech_48k("speech_1").unwrap();
         let expected = 5 * 48_000;
-        assert!(speech.len().abs_diff(expected) <= 960, "len {}", speech.len());
+        assert!(
+            speech.len().abs_diff(expected) <= 960,
+            "len {}",
+            speech.len()
+        );
         assert!(rms_dbfs(&speech) > -35.0, "rms {}", rms_dbfs(&speech));
+    }
+
+    #[test]
+    fn calibrated_snr_is_invariant_to_gain_and_handles_invalid_windows() {
+        let clean = tone(48_000);
+        let noise = white_noise(clean.len(), -30.0, 77);
+        let mixed = mix_at_snr(&clean, &noise, 5.0);
+        let windows: Vec<_> = (0..50).map(|i| i * 960..(i + 1) * 960).collect();
+        let reference = gain_calibrated_snr_db(&clean, &mixed, &windows, 0).unwrap();
+        assert!((4.5..=5.5).contains(&reference), "known SNR {reference}");
+        for gain in [0.25, 4.0] {
+            let scaled: Vec<_> = mixed.iter().map(|s| s * gain).collect();
+            let actual = gain_calibrated_snr_db(&clean, &scaled, &windows, 0).unwrap();
+            assert!((actual - reference).abs() < 0.1);
+        }
+        assert!(gain_calibrated_snr_db(&[], &[], &[], 0).is_err());
+        assert!(gain_calibrated_snr_db(&[0.0; 960], &[0.0; 960], &windows[..1], 0).is_err());
+        assert!(gain_calibrated_snr_db(&clean, &mixed, &windows, mixed.len()).is_err());
     }
 }

@@ -683,4 +683,27 @@ mod tests {
             assert_eq!(decoded, expected);
         }
     }
+
+    #[test]
+    fn private_audio_cannot_change_packets_after_prior_public_speech() {
+        for enabled in [false, true] {
+            let config = VoiceCaptureConfig { voice_enhancement: enabled, vad_mode: VadMode::Energy, vad_threshold_db: -140.0, ..Default::default() };
+            let mut a = VoiceCapture::new(config).unwrap(); let mut b = VoiceCapture::new(config).unwrap();
+            for index in 0..100 {
+                let mut first = tone_frame(index); let mut second = first;
+                assert_eq!(a.process(&mut first,1,index as u32*20).unwrap().packets,b.process(&mut second,1,index as u32*20).unwrap().packets);
+            }
+            a.set_transmit_gate(false); b.set_transmit_gate(false);
+            for index in 100..200 {
+                let mut private = tone_frame(index); let mut silent = [0.0;FRAME_SIZE_48K];
+                assert!(a.process(&mut private,1,index as u32*20).unwrap().packets.is_empty());
+                assert!(b.process(&mut silent,1,index as u32*20).unwrap().packets.is_empty());
+            }
+            a.set_transmit_gate(true); b.set_transmit_gate(true);
+            for index in 200..210 {
+                let mut first = [0.0;FRAME_SIZE_48K]; let mut second = first;
+                assert_eq!(a.process(&mut first,1,index as u32*20).unwrap().packets,b.process(&mut second,1,index as u32*20).unwrap().packets,"private history affected a later packet");
+            }
+        }
+    }
 }

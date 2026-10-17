@@ -96,7 +96,7 @@ int finch_webrtc_set_fixed_gain(void* handle, float decibels) {
     auto& state = *static_cast<State*>(handle);
     if (state.stage != 1) return kInvalid;
     if (state.fixed_gain != decibels) {
-      state.processor->SetRuntimeSetting(webrtc::AudioProcessing::RuntimeSetting::CreateCaptureFixedPostGain(decibels));
+      if (!state.processor->PostRuntimeSetting(webrtc::AudioProcessing::RuntimeSetting::CreateCaptureFixedPostGain(decibels))) return -1004;
       state.fixed_gain = decibels;
     }
     return 0;
