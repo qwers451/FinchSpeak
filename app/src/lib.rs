@@ -2,6 +2,7 @@
 #![allow(clippy::collapsible_if, clippy::large_enum_variant, clippy::new_without_default)]
 
 pub mod audio_engine;
+mod capture_privacy;
 pub mod updater;
 pub mod commands;
 mod tray;

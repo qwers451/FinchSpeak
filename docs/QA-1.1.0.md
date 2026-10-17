@@ -1,6 +1,6 @@
 # QA FinchSpeak1.1.0
 
-Статус: кандидат, публикация и итоговое независимое ревью ещё не завершены. Все результаты относятся к Windows x64 на одном ПК; два физических ПК, NAT и прослушивание человеком не имитировались.
+Статус: кандидат; независимое ревью завершено, P1 исправлен, полный повторный набор проверок зелёный; публикация ещё не завершена. Все результаты относятся к Windows x64 на одном ПК; два физических ПК, NAT и прослушивание человеком не имитировались.
 
 ## Звук
 Оригинальный C++ WebRTC APM M131/standalone2.1, AEC3 и AGC2; RNNoise/nnnoiseless0.5.2 и Earshot1.2.2 сохранены. Свои compressor/DSP и Sonora удалены. Порядок: AEC → RNNoise → независимая pre-AGC оценка порога → AGC2/limiter → Opus. Ручное усиление передаётся оригинальному gain controller, нормализованный вход не превышает±1. Enabled ceiling−1dBFS, переключение20ms, без новой очереди кадров.
@@ -22,7 +22,7 @@
 | PE closure свежего клиента и APM DLL | PASS, только системные Windows imports; native DLL static CRT |
 | Локальный NSIS: fresh1.1.0 /published1.0.1→1.1.0 /uninstall | PASS; installed EXE/DLL hashes match fresh; isolated marker preserved |
 | Оба ZIP:actual BAT/Cyrillic/spaces/foreigncwd/error cases;API/invite/backup/restore | PASS |
-| Полный Rust workspace suite | 404 PASS,0fail;1load test ignored в общем запуске,отдельно PASS |
+| Полный Rust workspace suite | 408 PASS,0fail;2 ignored (load50 и physical microphone probe),оба отдельно PASS |
 | cargo check/clippy all-targets, -Dwarnings | PASS |
 |30min real-time production capture soak |90000frames,18000privateframes,59recreations,0processingerrors; bounded output |
 | Private working set на5й/30ймин |3497984→3715072bytes,+217088bytes(0.21MiB),порог20MiB PASS |
@@ -43,3 +43,32 @@
 
 ## Отдельная ручная приёмка владельцем
 Два физических ПК/LAN/NAT; акустический feedback колонок/разные микрофоны; субъективная естественность голоса; физическое отключение/возвращение аудиоустройства. Эти пункты не объявляются PASS по одному локальному стенду.
+
+
+## Итоговое независимое ревью и исправление P1
+Один независимый reviewer проверил всю ветку a973bfc..c502b82, спецификацию, план и измерения. Найден один P1: очистка consumer-очереди не отсекает остаток уже работающего callback, старый аппаратный буфер и быстрое закрытие/открытие между опросами worker. Два новых теста сначала упали (p1-red.log), затем прошли с исправлением.
+
+Теперь mute/PTT/mic-test публикуют controls и монотонное поколение одной атомарной операцией. Callback фиксирует поколение один раз, не переименовывает старые сэмплы и проверяет capture/callback timestamps в часах устройства. Первый callback нового поколения отбрасывается; второй задаёт временную границу и тоже отбрасывается; последующие блоки разрешены только если целиком записаны после границы. Неверные/непродвигающиеся часы закрывают передачу. Worker отвергает смешанные/старые поколения, очищает FFT/AEC/NS/VAD/pre-roll перед первым публичным блоком и проверяет поколение перед отправкой. Локальный mic-test/monitor продолжает получать private PCM. Ни locks, ни аллокации, ни DSP в callback не добавлены; метаданные увеличивают capture ring примерно на192KiB.
+
+Регрессии проверяют детерминированный in-flight producer, поздний hardware backlog, rapid mute/PTT/test transitions, mixed partial input на48/44.1kHz и identifiable private marker через настоящий VoiceCapture/Opus (on/off, с предшествующей публичной речью и без), сравнивая пакеты с zero-input control. Дополнительная явная проверка настоящего WASAPI микрофона: три закрытия/открытия, разрешённые блоки после каждого открытия, ни одного во время закрытого состояния, ошибок устройства0 — PASS. Это проверка provenance/часов устройства, не субъективного звучания.
+
+Цена защиты: после открытия теряются первые два callback и весь непроверенный аппаратный backlog; длинные буферы устройства могут задержать начало передачи. Новая постоянная очередь не добавляется; задержка установившегося тракта измеряется отдельно. Gain/toggle не меняют privacy generation и не сбрасывают AEC.
+
+### Решения по замечаниям и пределам ревью
+P1 исправляется до публикации; других важных или мелких code findings нет. Все12 решений ledger приняты reviewer, кроме неполной producer-границы Task4, дополненной описанным исправлением:
+1. Standalone original APM/Meson вместо полного GN; риск ошибки ABI/сборки проверен native probes.
+2. MSVC cl вместо clang-cl после реального SIMD build failure; риск SIMD/runtime проверен x64 probes.
+3. Exact source/tools pins + записанный host MSVC/SDK вместо требования локального Mozilla toolchain на CI; риск неверного cache/ABI ограничен fingerprint/hash validation.
+4. C++20 последовательно для всех native subprojects; риск несовместимой сборки ограничен одним standard/CRT.
+5. Synthetic AEC assertions после2s адаптации; риск более долгого стартового эха остаётся в акустической приёмке, post-convergence gates не ослаблены.
+6. Старый unreleased compressor assertion заменён утверждёнными AGC2 quiet/spread/loud gates; риск слабого выравнивания проверен на трёх голосах.
+7. Privacy opening сбрасывает delayed AEC/NS/VAD/resampler, сохраняя gain adaptation; producer/timestamp gap закрыт P1. Риск — повторная адаптация AEC и onset loss, нужны реальные колонки.
+8. Opus silence сравнивается с codec zero-control; риск скрытого codec-state leak проверен также после public/private sequences.
+9. Невалидные gain-calibrated windows возвращают Result; риск неверного caller handling проверен metric tests.
+10. Исторические NS gates сохранены в AGC-off controls, плюс full enabled A/B; риск маскировки gain проверен identical windows/fixed lag.
+11. Version/resource staging выполнен до GUI QA, чтобы проверять настоящий1.1.0; риск stale payload ограничен final artifact hashes.
+12. Независимые package/install builds шли параллельно soak; риск влияния нагрузки отражён числом поздних deadlines, а не выдан за dropout-free physical PASS.
+
+Не объявляются PASS без подходящего стенда: subjective naturalness, реальные колонки/микрофоны и AEC reconvergence, два физических ПК/LAN/NAT/unplug; acoustic recapture хвоста mic-test (done означает постановку последнего кадра в output queue, а не гарантированную тишину колонок); назначение глобальной PTT-клавиши и явный выбор устройства в native UI; полный updater confirmation/download/installer/relaunch UI из1.0.1 и сохранение реальных старых voice preferences (проверенный isolated marker — более узкое доказательство); dropout-free physical capture по headless soak. Эти пределы сохраняют OWNER CHECK, а не ослабляют автоматические quality/privacy gates. Облачные проверки, stable publication и свежие публичные assets должны получить отдельные реальные результаты ниже.
+
+Итог исправления P1: p1-red.log —2 FAIL до реализации; p1-green.log —34 app tests PASS; p1-device-final.log —1 explicit physical probe PASS; p1-workspace.log —408 PASS/0FAIL/2ignored,64suite results; p1-check.log и p1-clippy.log all-targets PASS; frontend271 PASS/build PASS. Второе ревью не запускалось, один предусмотренный планом fix pass закрыт регрессиями и полным набором тестов.

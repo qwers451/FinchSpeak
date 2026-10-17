@@ -77,6 +77,7 @@ pub async fn set_voice_state(
     deafened: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    state.voice_settings.set_muted(muted);
     state.is_muted.store(muted, Ordering::SeqCst);
     state.is_deafened.store(deafened, Ordering::SeqCst);
 

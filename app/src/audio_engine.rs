@@ -27,6 +27,7 @@ const MAX_DEVICE_RESTARTS: usize = 5;
 const RESTART_WINDOW: Duration = Duration::from_secs(10);
 
 use crate::state::AppState;
+use crate::capture_privacy::{CaptureClock, CapturedSample, InputBoundary};
 
 /// Capacity of lock-free ring buffers (16384 samples ~ 341 ms at 48 kHz).
 const RING_BUFFER_CAPACITY: usize = 16384;
@@ -346,7 +347,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 }
 
                 // 2. Input (Capture) Ring Buffer & cpal Stream
-                let capture_rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
+                let capture_rb = HeapRb::<CapturedSample>::new(RING_BUFFER_CAPACITY);
                 let (mut capture_prod, mut capture_cons) = capture_rb.split();
 
                 let mut capture_stream: Option<Stream> = None;
@@ -373,9 +374,14 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                 error!("Audio input error: {}", err);
                                 failed.store(true, Ordering::SeqCst);
                             };
+                            let privacy = state.voice_settings.clone();
+                            let mut capture_clock = CaptureClock::default();
                             let stream_res = device.build_input_stream(
                                 &config.into(),
-                                move |data: &[f32], _| {
+                                move |data: &[f32], info: &cpal::InputCallbackInfo| {
+                                    let (generation, open) = privacy.privacy_snapshot();
+                                    let timestamp = info.timestamp();
+                                    let tag = capture_clock.tag(generation, open, timestamp.capture, timestamp.callback);
                                     if channels == 0 {
                                         return;
                                     }
@@ -385,7 +391,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                             sum += s;
                                         }
                                         let mono = sum / (channels as f32);
-                                        let _ = capture_prod.try_push(mono);
+                                        let _ = capture_prod.try_push(CapturedSample { sample: mono, generation: tag });
                                     }
                                 },
                                 err_fn,
@@ -430,7 +436,10 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     }
                 };
 
-                let mut transmit_gate = false;
+                let mut observed_generation = 0;
+                let mut input_boundary = InputBoundary::default();
+                let mut capture_tagged_buf = Vec::with_capacity(4096);
+                state.voice_settings.set_mic_test(false);
                 let mut processing_failures = ProcessingFailures::default();
                 let mut is_currently_speaking = false;
                 // Meter and link quality for the UI, and the "test my microphone" loop.
@@ -464,6 +473,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     if state.is_muted.load(Ordering::Relaxed) {
                         monitor_queue.clear();
                         if mic_test.take().is_some() {
+                            state.voice_settings.set_mic_test(false);
                             let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
                         }
                     }
@@ -493,6 +503,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     // A-. A microphone test was asked for: record a few seconds, then play them back.
                     let requested = state.mic_test_request.swap(0, Ordering::SeqCst);
                     if requested > 0 && mic_test.is_none() {
+                        state.voice_settings.set_mic_test(true);
                         mic_test = Some(MicTest::new(requested));
                         let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "recording", "seconds": requested }));
                     }
@@ -526,6 +537,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     if test.finished() {
                                         let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
                                         mic_test = None;
+                                        state.voice_settings.set_mic_test(false);
                                     }
                                 }
                                 if let Some(own) = monitor_queue.pop_front() {
@@ -597,17 +609,14 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         }
                     }
 
-                    // Fence device/resampler history before reopening a private microphone.
-                    let requested_gate = !state.is_muted.load(Ordering::Relaxed)
-                        && state.voice_settings.transmit_open() && mic_test.is_none();
-                    if requested_gate != transmit_gate {
-                        if requested_gate {
-                            capture_cons.clear();
-                            capture_raw_buf.clear();
-                            if let Some(resampler) = &mut input_resampler { resampler.reset(); }
-                        }
-                        if let Some(capture) = &mut voice_capture { capture.set_transmit_gate(requested_gate); }
-                        transmit_gate = requested_gate;
+                    // Epoch changes are observable even if close/open both occurred between polls.
+                    let (generation, requested_gate) = state.voice_settings.privacy_snapshot();
+                    if observed_generation != generation {
+                        observed_generation = generation;
+                        capture_cons.clear();
+                        capture_raw_buf.clear();
+                        if let Some(resampler) = &mut input_resampler { resampler.reset(); }
+                        if let Some(capture) = &mut voice_capture { capture.set_transmit_gate(false); }
                     }
                     // B. Capture processing (capture_cons -> InputResampler -> AEC -> Noise -> VAD -> Opus)
                     if capture_stream.is_some() {
@@ -616,9 +625,11 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             if needed > 0 {
                                 while capture_cons.occupied_len() >= needed {
                                     capture_raw_buf.clear();
+                                    capture_tagged_buf.clear();
                                     for _ in 0..needed {
                                         if let Some(s) = capture_cons.try_pop() {
-                                            capture_raw_buf.push(s);
+                                            capture_tagged_buf.push(s);
+                                            capture_raw_buf.push(s.sample);
                                         }
                                     }
 
@@ -630,12 +641,18 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         if let Some(capture) = &mut voice_capture {
                                             capture.set_transmit_gate(false);
                                         }
-                                        transmit_gate = false;
                                         if is_currently_speaking {
                                             is_currently_speaking = false;
                                             let _ = app_handle.emit("local-speaking", false);
                                         }
                                         continue;
+                                    }
+
+                                    let current = state.voice_settings.privacy_snapshot();
+                                    let fresh = input_boundary.prepare(&capture_tagged_buf, generation,
+                                        requested_gate && current == (generation, true), resampler);
+                                    if let Some(capture) = &mut voice_capture {
+                                        capture.set_transmit_gate(fresh);
                                     }
 
                                     if let Err(e) =
@@ -667,12 +684,10 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         continue;
                                     }
                                     capture.set_vad_threshold_db(state.voice_settings.vad_threshold_db());
-                                    // While testing the microphone nothing goes out to the others.
-                                    // Closing can take effect within a batch, opening must pass
-                                    // the device/resampler fence on the next outer iteration.
-                                    let frame_gate = transmit_gate && !state.is_muted.load(Ordering::Relaxed)
-                                        && state.voice_settings.transmit_open() && mic_test.is_none();
-                                    if !frame_gate { transmit_gate = false; }
+                                    // Recheck after processing/configuration work; opening requires
+                                    // a complete chunk proven newer than the device-clock cutoff.
+                                    let frame_gate = fresh
+                                        && state.voice_settings.privacy_snapshot() == (generation, true);
                                     capture.set_transmit_gate(frame_gate);
                                     let output = match capture.process(&mut capture_frame_48k, sender_id, now_ms) {
                                         Ok(output) => output,
@@ -723,10 +738,12 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         }
                                     }
 
-                                    if !output.packets.is_empty() {
+                                    if !output.packets.is_empty()
+                                        && state.voice_settings.privacy_snapshot() == (generation, true) {
                                         if let Ok(conn_guard) = state.quic_connection.try_read() {
                                             if let Some(conn) = &*conn_guard {
                                                 for packet in output.packets {
+                                                    if state.voice_settings.privacy_snapshot() != (generation, true) { break; }
                                                     let _ = conn.send_datagram(packet);
                                                 }
                                             }

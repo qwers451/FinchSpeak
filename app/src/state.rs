@@ -41,8 +41,9 @@ impl AudioDeviceSelection {
 pub struct VoiceSettings {
     input_gain: AtomicU32,
     vad_threshold_db: AtomicU32,
-    push_to_talk: AtomicBool,
-    key_down: AtomicBool,
+    // Low bits: PTT, key, muted, mic-test; high bits: monotonic generation.
+    // One CAS publishes controls and epoch together, including rapid close/open.
+    privacy: AtomicU64,
     monitor: AtomicBool,
     voice_enhancement: AtomicBool,
 }
@@ -52,8 +53,7 @@ impl Default for VoiceSettings {
         Self {
             input_gain: AtomicU32::new(1.0f32.to_bits()),
             vad_threshold_db: AtomicU32::new(finch_audio::DEFAULT_VAD_THRESHOLD_DB.to_bits()),
-            push_to_talk: AtomicBool::new(false),
-            key_down: AtomicBool::new(false),
+            privacy: AtomicU64::new(16),
             monitor: AtomicBool::new(false),
             voice_enhancement: AtomicBool::new(true),
         }
@@ -94,11 +94,32 @@ impl VoiceSettings {
 
     /// May the microphone be transmitted right now? Always, unless push-to-talk wants a key held.
     pub fn transmit_open(&self) -> bool {
-        !self.push_to_talk.load(Ordering::Relaxed) || self.key_down.load(Ordering::Relaxed)
+        let bits = self.privacy.load(Ordering::SeqCst);
+        bits & 1 == 0 || bits & 2 != 0
     }
 
     pub fn set_key_down(&self, down: bool) {
-        self.key_down.store(down, Ordering::Relaxed);
+        self.update_privacy(|bits| if down && bits & 1 != 0 { bits | 2 } else { bits & !2 });
+    }
+
+    fn update_privacy(&self, change: impl Fn(u64) -> u64) {
+        let _ = self.privacy.try_update(Ordering::SeqCst, Ordering::SeqCst, |old| {
+            let flags = change(old) & 15;
+            if flags == old & 15 { None } else { Some(((old & !15) + 16) | flags) }
+        });
+    }
+
+    pub(crate) fn privacy_snapshot(&self) -> (u64, bool) {
+        let bits = self.privacy.load(Ordering::SeqCst);
+        (bits, bits & 12 == 0 && (bits & 1 == 0 || bits & 2 != 0))
+    }
+
+    pub(crate) fn set_muted(&self, muted: bool) {
+        self.update_privacy(|bits| if muted { bits | 4 } else { bits & !4 });
+    }
+
+    pub(crate) fn set_mic_test(&self, active: bool) {
+        self.update_privacy(|bits| if active { bits | 8 } else { bits & !8 });
     }
 
     /// Apply the UI's values; out-of-range numbers are brought into range.
@@ -107,20 +128,18 @@ impl VoiceSettings {
         let threshold = if new.vad_threshold_db.is_finite() { new.vad_threshold_db.clamp(-80.0, 0.0) } else { finch_audio::DEFAULT_VAD_THRESHOLD_DB };
         self.input_gain.store(gain.to_bits(), Ordering::Relaxed);
         self.vad_threshold_db.store(threshold.to_bits(), Ordering::Relaxed);
-        self.push_to_talk.store(new.push_to_talk, Ordering::Relaxed);
+        self.update_privacy(|bits| if new.push_to_talk { bits | 1 } else { bits & !3 });
         self.monitor.store(new.monitor, Ordering::Relaxed);
         self.voice_enhancement.store(new.voice_enhancement, Ordering::Relaxed);
-        if !new.push_to_talk {
-            self.key_down.store(false, Ordering::Relaxed);
-        }
     }
 
     pub fn snapshot(&self) -> VoiceSettingsDto {
+        let privacy = self.privacy.load(Ordering::SeqCst);
         VoiceSettingsDto {
             input_gain: self.input_gain(),
             vad_threshold_db: self.vad_threshold_db(),
-            push_to_talk: self.push_to_talk.load(Ordering::Relaxed),
-            key_down: self.key_down.load(Ordering::Relaxed),
+            push_to_talk: privacy & 1 != 0,
+            key_down: privacy & 2 != 0,
             monitor: self.monitor(),
             voice_enhancement: self.voice_enhancement(),
         }
