@@ -16,8 +16,8 @@ pub async fn set_close_to_tray(enabled: bool, state: State<'_, AppState>) -> Res
 
 /// What the tray icon shows: `idle`, `voice`, `muted` or `live`.
 #[tauri::command]
-pub async fn set_tray_state(state: TrayState, app: AppHandle) -> Result<(), String> {
-    tray::set_state(&app, state);
+pub async fn set_tray_state(state: TrayState, language: Option<String>, app: AppHandle) -> Result<(), String> {
+    tray::set_state(&app, state, language.as_deref());
     Ok(())
 }
 

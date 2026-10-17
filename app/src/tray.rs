@@ -24,8 +24,34 @@ pub enum TrayState {
     Live,
 }
 
+struct TrayLabels {
+    open: MenuItem<tauri::Wry>,
+    mute: MenuItem<tauri::Wry>,
+    quit: MenuItem<tauri::Wry>,
+}
+
+struct TrayCopy {
+    open: &'static str,
+    mute: &'static str,
+    quit: &'static str,
+}
+
+fn tray_copy(language: &str) -> TrayCopy {
+    if language == "en" {
+        TrayCopy { open: "Open FinchSpeak", mute: "Mute / unmute", quit: "Quit" }
+    } else {
+        TrayCopy { open: "Открыть FinchSpeak", mute: "Включить / выключить микрофон", quit: "Выйти" }
+    }
+}
+
 impl TrayState {
-    fn tooltip(self) -> &'static str {
+    fn tooltip(self, language: &str) -> &'static str {
+        if language != "en" { return match self {
+            TrayState::Idle => "FinchSpeak",
+            TrayState::Voice => "FinchSpeak: в голосовой комнате",
+            TrayState::Muted => "FinchSpeak: микрофон выключен",
+            TrayState::Live => "FinchSpeak: идёт демонстрация экрана",
+        }; }
         match self {
             TrayState::Idle => "FinchSpeak",
             TrayState::Voice => "FinchSpeak: in a voice room",
@@ -77,12 +103,19 @@ fn icon_for(app: &AppHandle, state: TrayState) -> Option<Image<'static>> {
     Some(Image::new_owned(with_dot(base.rgba(), base.width(), base.height(), color), base.width(), base.height()))
 }
 
-pub fn set_state(app: &AppHandle, state: TrayState) {
+pub fn set_state(app: &AppHandle, state: TrayState, language: Option<&str>) {
+    let language = language.unwrap_or("ru");
+    let copy = tray_copy(language);
+    if let Some(labels) = app.try_state::<TrayLabels>() {
+        let _ = labels.open.set_text(copy.open);
+        let _ = labels.mute.set_text(copy.mute);
+        let _ = labels.quit.set_text(copy.quit);
+    }
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         if let Some(icon) = icon_for(app, state) {
             let _ = tray.set_icon(Some(icon));
         }
-        let _ = tray.set_tooltip(Some(state.tooltip()));
+        let _ = tray.set_tooltip(Some(state.tooltip(language)));
     }
 }
 
@@ -96,12 +129,14 @@ pub fn show_window(app: &AppHandle) {
 
 /// Build the icon and its menu.
 pub fn setup(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open FinchSpeak", true, None::<&str>)?;
-    let mute = MenuItem::with_id(app, "mute", "Mute / unmute", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let copy = tray_copy("ru");
+    let open = MenuItem::with_id(app, "open", copy.open, true, None::<&str>)?;
+    let mute = MenuItem::with_id(app, "mute", copy.mute, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", copy.quit, true, None::<&str>)?;
+    app.manage(TrayLabels { open: open.clone(), mute: mute.clone(), quit: quit.clone() });
     let menu = Menu::with_items(app, &[&open, &mute, &quit])?;
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip(TrayState::Idle.tooltip())
+        .tooltip(TrayState::Idle.tooltip("ru"))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -132,6 +167,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn native_tray_copy_supports_russian_english_and_safe_default() {
+        let russian = tray_copy("ru");
+        let english = tray_copy("en");
+        assert_eq!(russian.open, "Открыть FinchSpeak");
+        assert_eq!(russian.mute, "Включить / выключить микрофон");
+        assert_eq!(english.open, "Open FinchSpeak");
+        assert_eq!(english.quit, "Quit");
+        assert_eq!(tray_copy("invalid").quit, russian.quit);
+        assert_ne!(russian.quit, english.quit);
+    }
+
+    #[test]
     fn the_dot_lands_in_the_bottom_right_corner_and_only_there() {
         let base = vec![10u8; 32 * 32 * 4];
         let marked = with_dot(&base, 32, 32, [255, 51, 0]);
@@ -152,7 +199,7 @@ mod tests {
     #[test]
     fn every_state_has_a_tooltip_and_only_idle_has_no_dot() {
         for state in [TrayState::Idle, TrayState::Voice, TrayState::Muted, TrayState::Live] {
-            assert!(state.tooltip().starts_with("FinchSpeak"));
+            assert!(state.tooltip("en").starts_with("FinchSpeak"));
             assert_eq!(state.dot().is_none(), state == TrayState::Idle);
         }
     }
