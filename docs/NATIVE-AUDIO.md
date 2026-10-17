@@ -52,3 +52,5 @@ Native audio workflow runs Debug/Release, offline warm-cache and a stripped
 PATH subprocess. Passing the probe establishes build/initialization/ownership,
 not subjective audio quality; the full production capture and real-time media
 checks remain required before publishing.
+
+Build gate verified: GitHub Native audio run39013530184 succeeded (clean Windows Release/Debug, offline warm-cache, system PATH). Local Debug/Release and a source/cache path containing spaces and Cyrillic also passed. This is a build gate, not release-quality acceptance.
