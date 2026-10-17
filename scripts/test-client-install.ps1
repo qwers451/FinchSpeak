@@ -1,7 +1,13 @@
-param([string]$Installer='', [string]$OutputDirectory='target/install-qa')
+param([string]$Installer='', [string]$OutputDirectory='target/install-qa', [string]$PreviousVersion='1.1.0')
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 $version=(Get-Content "$root/app/tauri.conf.json" | ConvertFrom-Json).version
+if($PreviousVersion -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'){
+ throw "PreviousVersion must be a stable semantic version (for example 1.1.0): $PreviousVersion"
+}
+try {$previousParsed=[version]::Parse($PreviousVersion);$currentParsed=[version]::Parse($version)}
+catch {throw "Could not compare previous version $PreviousVersion with current version ${version}: $_"}
+if($previousParsed -ge $currentParsed){throw "PreviousVersion $PreviousVersion must be older than current version $version"}
 if(!$Installer){$target=if($env:CARGO_TARGET_DIR){$env:CARGO_TARGET_DIR}else{Join-Path $root 'target'};$Installer=Join-Path $target "release/bundle/nsis/FinchSpeak_${version}_x64-setup.exe"}
 $Installer=(Resolve-Path -LiteralPath $Installer).Path
 $uninstallKey='HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\FinchSpeak'
@@ -42,15 +48,18 @@ try {
  foreach($name in @('native-audio-provenance.json','native-audio-dependencies.json','THIRD-PARTY-NOTICES.md','licenses/webrtc-webrtc-PATENTS','licenses/earshot-LICENSE-MIT','licenses/nnnoiseless-COPYING','licenses/opus-COPYING')){if(!(Test-Path (Join-Path $install $name))){throw "Installed resource missing: $name"}}
  if((Get-Item "$install/finch-app.exe").VersionInfo.ProductVersion -ne $version){throw 'Fresh install version mismatch'}
  Uninstall
- $old=Join-Path $work 'published-1.0.1'
+ $old=Join-Path $work "published-$PreviousVersion"
  New-Item -ItemType Directory -Force $old | Out-Null
- gh release download v1.0.1 --repo qwers451/FinchSpeak --pattern 'FinchSpeak_1.0.1_x64-setup.exe' --pattern SHA256SUMS.txt --dir $old --clobber
+ $oldName="FinchSpeak_${PreviousVersion}_x64-setup.exe"
+ gh release download "v$PreviousVersion" --repo qwers451/FinchSpeak --pattern $oldName --pattern SHA256SUMS.txt --dir $old --clobber
  if($LASTEXITCODE){throw 'Published old installer download failed'}
- $oldInstaller=Join-Path $old 'FinchSpeak_1.0.1_x64-setup.exe'
- $expected=((Get-Content "$old/SHA256SUMS.txt" | Where-Object {$_ -match '  FinchSpeak_1.0.1_x64-setup.exe$'}) -split '  ')[0]
+ $oldInstaller=Join-Path $old $oldName
+ $checksumLines=@(Get-Content "$old/SHA256SUMS.txt" | Where-Object {$_ -match "^[a-fA-F0-9]{64}  $([regex]::Escape($oldName))$"})
+ if($checksumLines.Count -ne 1){throw "Published checksum for $oldName is missing or duplicated"}
+ $expected=$checksumLines[0].Substring(0,64)
  if((Get-FileHash $oldInstaller).Hash -ne $expected){throw 'Published old installer checksum mismatch'}
  Install $oldInstaller
- if((Get-Item "$install/finch-app.exe").VersionInfo.ProductVersion -ne '1.0.1'){throw 'Old install version mismatch'}
+ if((Get-Item "$install/finch-app.exe").VersionInfo.ProductVersion -ne $PreviousVersion){throw 'Old install version mismatch'}
  Install $Installer
  Smoke
  if((Get-FileHash "$install/finch-app.exe").Hash -ne $freshHash -or (Get-FileHash "$install/finch_webrtc.dll").Hash -ne $freshDllHash){throw 'Upgrade differs from fresh installation'}
@@ -58,6 +67,6 @@ try {
  Uninstall
  if(Test-Path "$install/finch-app.exe"){throw 'Uninstall left application binary'}
  if(!(Test-Path $marker)){throw 'Uninstall removed isolated profile data'}
- [pscustomobject]@{fresh_install='PASS';upgrade_1_0_1='PASS';native_runtime='PASS';installed_exe_sha256=$freshHash;installed_dll_sha256=$freshDllHash;isolated_marker_preserved='PASS';uninstall='PASS';auto_update_ui='NOT RUN: installer path tested, not the old client confirmation UI'} | ConvertTo-Json | Set-Content "$work/report.json" -Encoding utf8
- Write-Output 'PASS fresh installation,1.0.1 upgrade,installed runtime,resource hashes,data marker preservation,uninstall'
+ [pscustomobject]@{fresh_install='PASS';previous_version=$PreviousVersion;upgrade='PASS';native_runtime='PASS';installed_exe_sha256=$freshHash;installed_dll_sha256=$freshDllHash;isolated_marker_preserved='PASS';uninstall='PASS';auto_update_ui='NOT RUN: installer path tested, not the old client confirmation UI'} | ConvertTo-Json | Set-Content "$work/report.json" -Encoding utf8
+ Write-Output "PASS fresh installation,$PreviousVersion upgrade,installed runtime,resource hashes,data marker preservation,uninstall"
 }finally{Uninstall}
