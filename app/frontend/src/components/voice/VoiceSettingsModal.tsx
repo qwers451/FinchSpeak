@@ -1,4 +1,4 @@
-import { createSignal, For, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, For, on, Show } from 'solid-js';
 import {
   availableDevices, changeVoiceSettings, chooseAudioDevice, choosePushToTalkKey, isMuted, levelFraction, loadAudioDevices, micLevelDb, micActivation,
   micTestPhase, pushToTalkKey, selectedDevices, shortcutFromEvent, startMicTest, voiceSettings, type DeviceSelection,
@@ -35,7 +35,7 @@ function DevicePicker(props: { kind: keyof DeviceSelection; label: string; devic
 /** D3: devices, microphone level with the speech threshold, push-to-talk, hear myself, test. */
 export function VoiceSettingsModal(props: { open: boolean; onClose: () => void }) {
   const [capturing, setCapturing] = createSignal(false);
-  onMount(() => void loadAudioDevices());
+  createEffect(on(() => props.open, (open) => { if (open) void loadAudioDevices(); }));
 
   const captureKey = (event: KeyboardEvent) => {
     event.preventDefault();

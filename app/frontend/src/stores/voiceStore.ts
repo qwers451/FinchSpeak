@@ -1,4 +1,5 @@
 import { createSignal } from 'solid-js';
+import { t } from '../i18n';
 import type { AudioDevice, Channel, VoiceParticipant, VoiceSettings } from '../types';
 import { api } from '../services/api';
 import { setAppError } from './notificationStore';
@@ -35,6 +36,13 @@ export const levelFraction = (db: number) => Math.min(1, Math.max(0, (db - MIC_F
 export function handleMicLevel(level: { db: number; speaking?: boolean }) {
   setMicLevelDb(Number.isFinite(level.db) ? level.db : MIC_FLOOR_DB);
   setMicActivation(level.speaking === true);
+}
+
+/** Drop preview state when capture can no longer supply fresh frames. */
+export function resetMicPreview() {
+  setMicLevelDb(MIC_FLOOR_DB);
+  setMicActivation(false);
+  setMicTestPhase('idle');
 }
 
 export function handleMicTest(test: { phase: 'recording' | 'playing' | 'done' }) {
@@ -100,7 +108,7 @@ export async function chooseAudioDevice(kind: keyof DeviceSelection, name: strin
   try {
     await api.setAudioDevices(next.input, next.output);
   } catch (err) {
-    setAppError(`Could not switch audio device: ${String(err)}`);
+    setAppError(t('Could not switch audio device: {error}', { error: String(err) }));
     return;
   }
   setSelectedDevices(next);
@@ -174,7 +182,7 @@ export function changeVoiceSettings(change: Partial<VoiceSettings>) {
   return queueSettingsWrite(async () => {
     const next = { ...voiceSettings(), ...change };
     if (next.push_to_talk && !pushToTalkKey()) {
-      setAppError('Choose a push-to-talk key first');
+      setAppError(t('Choose a push-to-talk key first'));
       return;
     }
     try {
@@ -235,6 +243,7 @@ export async function joinVoice(channel: Channel) {
     setActiveVoiceChannel(channel);
   } catch (err) {
     console.error('Failed to join voice channel:', err);
+    setAppError(t('Could not join voice: {error}', { error: String(err).replace(/^Error:\s*/, '') }));
   }
 }
 
@@ -244,9 +253,7 @@ export async function leaveVoice() {
     resetScreenState();
     setActiveVoiceChannel(null);
     setSpeakingPeers(new Set<number>());
-    setMicLevelDb(MIC_FLOOR_DB);
-    setMicActivation(false);
-    setMicTestPhase('idle');
+    resetMicPreview();
     setVoiceQuality({});
   } catch (err) {
     console.error('Failed to leave voice channel:', err);

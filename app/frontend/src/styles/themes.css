@@ -327,3 +327,16 @@ button:disabled { cursor:not-allowed; }
 [data-theme="custom"] .empty-chat > img { content:url('/custom/assets/illustrations/empty-chat.svg'); }
 
 [data-theme="custom"] .modal[data-tone="danger"] { --edge:var(--red); --edge-width:2px; }
+
+[data-theme="claude"] .cat { text-transform:none; letter-spacing:.01em; font-size:12px; }
+.cat-toggle { white-space:nowrap; }
+@media (max-width:940px) { .cat { font-size:10px; padding-left:4px; padding-right:4px; } }
+
+.auth-form-side { justify-content:flex-start; }
+.auth-form { margin-block:auto; }
+.settings { min-height:0; height:min(520px,calc(100dvh - 200px)); }
+.settings-page { max-height:100%; }
+
+.tbl td:nth-child(2) .row.g4 { flex-wrap:wrap; max-width:174px; min-width:120px; }
+.tbl td:last-child .row.g8 { flex-wrap:wrap; gap:4px; min-width:100px; }
+[data-theme="custom"] :is(.pill,.role-pill) { border-radius:0; }
