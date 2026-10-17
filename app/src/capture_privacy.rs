@@ -7,7 +7,7 @@ pub(crate) struct CapturedSample {
 
 pub(crate) struct CaptureClock<T> {
     generation: u64,
-    first_seen: bool,
+    first_callback: Option<T>,
     cutoff: Option<T>,
     previous: Option<(T, T)>,
 }
@@ -15,7 +15,7 @@ impl<T: Copy + Ord> Default for CaptureClock<T> {
     fn default() -> Self {
         Self {
             generation: 0,
-            first_seen: false,
+            first_callback: None,
             cutoff: None,
             previous: None,
         }
@@ -25,7 +25,7 @@ impl<T: Copy + Ord> CaptureClock<T> {
     pub fn tag(&mut self, generation: u64, open: bool, capture: T, callback: T) -> u64 {
         if self.generation != generation || !open {
             self.generation = generation;
-            self.first_seen = false;
+            self.first_callback = None;
             self.cutoff = None;
             self.previous = None;
         }
@@ -33,19 +33,24 @@ impl<T: Copy + Ord> CaptureClock<T> {
             return 0;
         }
         if let Some((last_capture, last_callback)) = self.previous {
-            if capture <= last_capture || callback <= last_callback {
+            // WASAPI's audio clock can report the same callback instant for
+            // consecutive buffers even while their capture positions advance.
+            if capture <= last_capture || callback < last_callback {
                 return 0;
             }
         }
         self.previous = Some((capture, callback));
-        if !self.first_seen {
+        let Some(first_callback) = self.first_callback else {
             // This callback's timestamp may have been taken before the control transition.
-            self.first_seen = true;
+            self.first_callback = Some(callback);
             return 0;
-        }
+        };
         let Some(cutoff) = self.cutoff else {
-            // Callbacks of one stream are serial. This timestamp was taken after the
-            // preceding handler observed this generation. Discard this block too.
+            // The clock must advance beyond the first handler before it can
+            // provide a device-clock cutoff for the reopened generation.
+            if callback <= first_callback {
+                return 0;
+            }
             self.cutoff = Some(callback);
             return 0;
         };
@@ -104,6 +109,19 @@ mod tests {
         assert_eq!(clock.tag(48, true, 30, 40), 0); // new epoch, even still open
         assert_eq!(clock.tag(48, true, 31, 41), 0);
         assert_eq!(clock.tag(48, true, 41, 42), 48);
+    }
+    #[test]
+    fn capture_privacy_repeating_callback_clock_waits_for_new_cutoff_then_accepts_fresh_buffers() {
+        let mut clock = CaptureClock::default();
+        assert_eq!(clock.tag(32, true, 1, 90), 0);
+        assert_eq!(clock.tag(32, true, 2, 90), 0);
+        assert_eq!(clock.tag(32, true, 3, 100), 0);
+        assert_eq!(clock.tag(32, true, 95, 110), 0, "the first clock tick is still backlog");
+        assert_eq!(clock.tag(32, true, 100, 120), 32);
+        assert_eq!(clock.tag(32, true, 101, 120), 32, "an equal callback timestamp does not make newer capture private");
+        assert_eq!(clock.tag(32, true, 100, 121), 0, "a regressing capture timestamp stays private");
+        assert_eq!(clock.tag(32, true, 102, 119), 0, "a regressing callback clock stays private");
+        assert_eq!(clock.tag(32, true, 103, 122), 32);
     }
     #[test]
     fn capture_privacy_inflight_callback_keeps_its_original_generation() {
@@ -223,7 +241,10 @@ mod tests {
                             let time = index as u64 * 100;
                             // Callback 122 arrives after reopening but still carries pre-cutoff audio.
                             let capture_time = if index == 122 { 12050 } else { time };
-                            let tag = clocks[side].tag(generation, open, capture_time, time + 50);
+                            // Two 10 ms hardware callbacks form one 20 ms
+                            // resampler input. Their callback clock may repeat.
+                            let first_tag = clocks[side].tag(generation, open, capture_time, time + 50);
+                            let second_tag = clocks[side].tag(generation, open, capture_time + 10, time + 50);
                             let samples: Vec<_> = (0..needed)
                                 .map(|sample| {
                                     let private = index >= 100 && !public;
@@ -245,8 +266,10 @@ mod tests {
                                         // Mixed partial chunk cannot inherit the new public tag.
                                         generation: if index == 123 && sample < needed / 2 {
                                             0
+                                        } else if sample < needed / 2 {
+                                            first_tag
                                         } else {
-                                            tag
+                                            second_tag
                                         },
                                     }
                                 })
@@ -349,5 +372,119 @@ mod tests {
         }
         drop(stream);
         assert_eq!(errors.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    #[ignore = "requires an actual microphone; processes live samples only in memory"]
+    fn capture_privacy_real_device_reaches_level_and_opus_after_reopening() {
+        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+        use finch_audio::{InputResampler, VadMode, VoiceCapture, VoiceCaptureConfig, FRAME_SIZE_48K};
+        use ringbuf::{traits::*, HeapRb};
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        use std::time::{Duration, Instant};
+
+        let settings = Arc::new(crate::state::VoiceSettings::default());
+        let device = cpal::default_host().default_input_device().expect("microphone required");
+        let config = device.default_input_config().unwrap();
+        let channels = config.channels() as usize;
+        let mut resampler = InputResampler::new(config.sample_rate().0).unwrap();
+        let (mut producer, mut consumer) = HeapRb::<CapturedSample>::new(16_384).split();
+        let callback_settings = settings.clone();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let accepted_callback = accepted.clone();
+        let callbacks = Arc::new(AtomicUsize::new(0));
+        let callbacks_callback = callbacks.clone();
+        let stale_capture = Arc::new(AtomicUsize::new(0));
+        let stale_capture_callback = stale_capture.clone();
+        let repeated_callback = Arc::new(AtomicUsize::new(0));
+        let repeated_callback_callback = repeated_callback.clone();
+        let ahead = Arc::new(AtomicUsize::new(0));
+        let ahead_callback = ahead.clone();
+        let errors = Arc::new(AtomicUsize::new(0));
+        let errors_callback = errors.clone();
+        let mut clock = CaptureClock::default();
+        let stream = device
+            .build_input_stream(
+                &config.into(),
+                move |data: &[f32], info: &cpal::InputCallbackInfo| {
+                    let (generation, open) = callback_settings.privacy_snapshot();
+                    let ts = info.timestamp();
+                    callbacks_callback.fetch_add(1, Ordering::Relaxed);
+                    if ts.capture > ts.callback { ahead_callback.fetch_add(1, Ordering::Relaxed); }
+                    if let Some((last_capture, last_callback)) = clock.previous {
+                        if ts.capture <= last_capture { stale_capture_callback.fetch_add(1, Ordering::Relaxed); }
+                        if ts.callback == last_callback { repeated_callback_callback.fetch_add(1, Ordering::Relaxed); }
+                    }
+                    let tag = clock.tag(generation, open, ts.capture, ts.callback);
+                    if tag != 0 { accepted_callback.fetch_add(1, Ordering::Relaxed); }
+                    for frame in data.chunks_exact(channels) {
+                        let mono = frame.iter().copied().sum::<f32>() / channels as f32;
+                        let _ = producer.try_push(CapturedSample { sample: mono, generation: tag });
+                    }
+                },
+                move |_| { errors_callback.fetch_add(1, Ordering::Relaxed); },
+                None,
+            )
+            .unwrap();
+        let mut capture = VoiceCapture::new(VoiceCaptureConfig {
+            vad_mode: VadMode::Energy,
+            vad_threshold_db: -140.0,
+            ..Default::default()
+        }).unwrap();
+        capture.set_transmit_gate(false);
+        let mut boundary = InputBoundary::default();
+        let mut processed = [0usize; 2];
+        let mut public_frames = [0usize; 2];
+        let mut tagged_frames = [0usize; 2];
+        let mut packets = [0usize; 2];
+        let mut max_raw = 0.0f32;
+        let mut max_processed = 0.0f32;
+        let start = Instant::now();
+        stream.play().unwrap();
+        let mut muted = false;
+        let mut reopened = false;
+        while start.elapsed() < Duration::from_millis(2600) {
+            let elapsed = start.elapsed();
+            if elapsed >= Duration::from_millis(900) && !muted {
+                settings.set_muted(true);
+                muted = true;
+            }
+            if elapsed >= Duration::from_millis(1200) && !reopened {
+                settings.set_muted(false);
+                reopened = true;
+            }
+            let needed = resampler.input_frames_needed();
+            if consumer.occupied_len() < needed {
+                std::thread::sleep(Duration::from_millis(2));
+                continue;
+            }
+            let samples: Vec<_> = consumer.pop_iter().take(needed).collect();
+            if samples.len() != needed { continue; }
+            max_raw = max_raw.max(samples.iter().map(|s| s.sample.abs()).fold(0.0, f32::max));
+            let (generation, open) = settings.privacy_snapshot();
+            let phase = usize::from(reopened);
+            if samples.iter().all(|s| s.generation == generation) { tagged_frames[phase] += 1; }
+            let public = boundary.prepare(&samples, generation, open, &mut resampler);
+            if public { public_frames[phase] += 1; }
+            capture.set_transmit_gate(public);
+            let raw: Vec<_> = samples.iter().map(|s| s.sample).collect();
+            let mut frame = [0.0; FRAME_SIZE_48K];
+            resampler.process(&raw, &mut frame).unwrap();
+            let output = capture.process(&mut frame, 1, elapsed.as_millis() as u32).unwrap();
+            max_processed = max_processed.max(frame.iter().map(|s| s.abs()).fold(0.0, f32::max));
+            processed[phase] += 1;
+            packets[phase] += output.packets.len();
+            if !open { assert!(output.packets.is_empty(), "muted samples reached Opus"); }
+            assert!(output.level_db.is_finite());
+        }
+        drop(stream);
+        eprintln!("actual microphone: callbacks={}, accepted={}, stale_capture={}, repeated_callback={}, ahead={}, processed={processed:?}, tagged={tagged_frames:?}, public={public_frames:?}, opus_packets={packets:?}, max_raw={max_raw}, max_processed={max_processed}", callbacks.load(Ordering::SeqCst), accepted.load(Ordering::SeqCst), stale_capture.load(Ordering::SeqCst), repeated_callback.load(Ordering::SeqCst), ahead.load(Ordering::SeqCst));
+        assert_eq!(errors.load(Ordering::SeqCst), 0);
+        assert!(accepted.load(Ordering::SeqCst) > 0);
+        assert!(processed.iter().all(|count| *count > 0), "both epochs must reach the level calculation");
+        assert!(packets.iter().all(|count| *count > 0), "both epochs must reach the Opus encoder");
     }
 }
