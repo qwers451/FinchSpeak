@@ -1,5 +1,6 @@
 import { Show } from 'solid-js';
 import { Icon } from './Icon';
+import { t } from '../i18n';
 
 const inTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -17,13 +18,13 @@ export function Titlebar(props: { title?: string }) {
       <span data-tauri-drag-region>{props.title ?? 'FinchSpeak'}</span>
       <Show when={inTauri()}>
         <div class="wc">
-          <button type="button" aria-label="Minimize" onClick={() => void windowCall('minimize')}>
+          <button type="button" aria-label={t('Minimize')} onClick={() => void windowCall('minimize')}>
             <Icon name="min" size="sm" />
           </button>
-          <button type="button" aria-label="Maximize" onClick={() => void windowCall('toggleMaximize')}>
+          <button type="button" aria-label={t('Maximize')} onClick={() => void windowCall('toggleMaximize')}>
             <Icon name="box" size="sm" />
           </button>
-          <button type="button" aria-label="Close" class="close" onClick={() => void windowCall('close')}>
+          <button type="button" aria-label={t('Close')} class="close" onClick={() => void windowCall('close')}>
             <Icon name="x" size="sm" />
           </button>
         </div>

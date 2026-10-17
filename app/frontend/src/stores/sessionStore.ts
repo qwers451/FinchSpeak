@@ -2,8 +2,9 @@ import { createSignal } from 'solid-js';
 import type { SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
 import { setPendingMismatch, setPendingTofu } from './tofuStore';
 import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
-import { activeVoiceChannel, toggleMute, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
+import { activeVoiceChannel, toggleMute, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
+import { t } from '../i18n';
 import { classifyEnd, sessionEnded, setSessionEnded } from './sessionEnd';
 import { reactToMessage, reactToVoiceMovement } from './desktop';
 import { clearTyping, isMentioned, noteIncoming, noteTyping, resetActivity, setUnreadFromServer } from './activityStore';
@@ -28,6 +29,7 @@ export const [statusTexts, setStatusTexts] = createSignal<Record<string, string>
 export const onlineUsers = () => knownUsers().filter((user) => (presence()[user.id] ?? user.status) !== 'offline');
 
 export function resetSessionState() {
+  resetMicPreview();
   setConnectionStatus('disconnected');
   setConnectionError(null);
   setReconnectInfo(null);
@@ -131,7 +133,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     participant.peer_id === peer_id ? { ...participant, server_muted } : participant)),
   'voice-kicked': () => {
     void leaveVoice();
-    pushToast({ kind: 'warn', title: 'You were removed from the voice room', text: 'A moderator sent you out. You can join again.' });
+    pushToast({ kind: 'warn', title: t('You were removed from the voice room'), text: t('A moderator sent you out. You can join again.') });
   },
   'avatar-changed': ({ user_id, avatar_url }) => {
     setKnownUsers((previous) => previous.map((user) => (user.id === user_id ? { ...user, avatar_url } : user)));
@@ -139,6 +141,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     if (me && me.id === user_id) setCurrentUser({ ...me, avatar_url });
   },
   'connection-lost': (reason) => {
+    resetMicPreview();
     const ended = classifyEnd(reason);
     if (ended) setSessionEnded(ended);
     setConnectionStatus('disconnected');
@@ -163,16 +166,23 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     if (ended && !sessionEnded()) setSessionEnded(ended);
   },
   'server-error': (error) => setAppError(`${error.code}: ${error.message}`),
-  'audio-device-lost': () => setAppError('An audio device was disconnected; reopening the audio devices...'),
+  'audio-device-lost': () => {
+    resetMicPreview();
+    setAppError(t('An audio device was disconnected; reopening the audio devices...'));
+  },
   'audio-processing-failed': ({ message }) => {
+    resetMicPreview();
     setIsLocalSpeaking(false);
     handleMicTest({ phase: 'done' });
     handleMicLevel({ db: -120 });
-    setAppError(`Voice processing stopped: ${message}. Rejoin the voice channel to retry.`);
+    setAppError(t('Voice processing stopped: {message}. Rejoin the voice channel to retry.', { message }));
   },
-  'audio-device-failed': () => setAppError('The audio devices keep failing. Check them, then rejoin the voice channel.'),
+  'audio-device-failed': () => {
+    resetMicPreview();
+    setAppError(t('The audio devices keep failing. Check them, then rejoin the voice channel.'));
+  },
   'audio-device-fallback': ({ kind, wanted }) =>
-    setAppError(`"${wanted}" is not available; using the system default ${kind} device instead.`),
+    setAppError(t('"{wanted}" is not available; using the system default {kind} device instead.', { wanted, kind: t(kind) })),
 };
 
 export function restoreSessionSnapshot(snapshot: SessionSnapshot) {
@@ -180,6 +190,7 @@ export function restoreSessionSnapshot(snapshot: SessionSnapshot) {
     sessionHandlers.authenticated({ user_id: snapshot.user_id, session_peer_id: snapshot.session_peer_id,
       channels: snapshot.initial_state.channels, initial_state: snapshot.initial_state });
   } else {
+    resetMicPreview();
     setConnectionStatus('disconnected');
   }
   setIsMuted(snapshot.muted);

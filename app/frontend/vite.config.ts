@@ -1,7 +1,8 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import solidPlugin from 'vite-plugin-solid';
 
 export default defineConfig({
+  test: { setupFiles: ['./src/testSetup.ts'] },
   base: './',
   plugins: [solidPlugin()],
   server: {

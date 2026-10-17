@@ -411,8 +411,8 @@ export const api = {
     }
   },
 
-  setTrayState: async (state: 'idle' | 'voice' | 'muted' | 'live'): Promise<void> => {
-    if (isTauri()) return invoke('set_tray_state', { state });
+  setTrayState: async (state: 'idle' | 'voice' | 'muted' | 'live', language: 'ru' | 'en' = 'ru'): Promise<void> => {
+    if (isTauri()) return invoke('set_tray_state', { state, language });
   },
 
   setCloseToTray: async (enabled: boolean): Promise<void> => {

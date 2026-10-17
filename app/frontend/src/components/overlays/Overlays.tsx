@@ -6,6 +6,7 @@ import { END_TEXT, sessionEnded, setSessionEnded } from '../../stores/sessionEnd
 import { activeVoiceChannel, joinVoice } from '../../stores/voiceStore';
 import type { Channel } from '../../types';
 import { Button, Icon, Modal } from '../../ui';
+import { t } from '../../i18n';
 
 /** Is the keyboard focus somewhere text is typed? Then single-key shortcuts must keep out. */
 export function typingNow(target: EventTarget | null = document.activeElement): boolean {
@@ -61,28 +62,28 @@ export function Overlays() {
 
   return (
     <>
-      <Modal open={help()} onClose={() => setHelp(false)} title="Keyboard shortcuts" width="480px">
+    <Modal open={help()} onClose={() => setHelp(false)} title={t('Keyboard shortcuts')} width="480px">
         <div class="col g12">
           <For each={SHORTCUTS}>
             {([keys, what]) => (
               <div class="row g12">
                 <span class="row g4" style={{ width: '170px', flex: 'none' }}><For each={keys}>{(key) => <span class="kbd">{key}</span>}</For></span>
-                <span class="t2 fs13">{what}</span>
+            <span class="t2 fs13">{t(what)}</span>
               </div>
             )}
           </For>
-          <div class="row" style={{ 'justify-content': 'flex-end' }}><Button variant="primary" onClick={() => setHelp(false)}>Close</Button></div>
+          <div class="row" style={{ 'justify-content': 'flex-end' }}><Button variant="primary" onClick={() => setHelp(false)}>{t('Close')}</Button></div>
         </div>
       </Modal>
 
-      <Modal open={switcher()} onClose={() => setSwitcher(false)} title="Jump to a channel" width="440px">
+      <Modal open={switcher()} onClose={() => setSwitcher(false)} title={t('Jump to a channel')} width="440px">
         <div class="col g8">
           <div class="input">
             <Icon name="search" size="sm" class="t3" />
             <input
               data-autofocus
-              aria-label="Channel name"
-              placeholder="general"
+              aria-label={t('Channel name')}
+              placeholder={t('general')}
               value={query()}
               onInput={(event) => { setQuery(event.currentTarget.value); setSelected(0); }}
               onKeyDown={(event) => {
@@ -93,13 +94,13 @@ export function Overlays() {
               }}
             />
           </div>
-          <div class="col" role="listbox" aria-label="Channels">
-            <For each={matches()} fallback={<span class="t3 fs13" style={{ padding: '8px' }}>No channel like that.</span>}>
+          <div class="col" role="listbox" aria-label={t('Channels')}>
+            <For each={matches()} fallback={<span class="t3 fs13" style={{ padding: '8px' }}>{t('No channel like that.')}</span>}>
               {(channel, index) => (
                 <button type="button" role="option" aria-selected={index() === selected()} class={`ch${index() === selected() ? ' on' : ''}`} style={{ 'text-align': 'left' }} onClick={() => go(channel)}>
                   <Icon name={channel.channel_type === 'voice' ? 'vol' : 'hash'} size="sm" />
                   <span class="trunc">{channel.name}</span>
-                  <Show when={activeChannel()?.id === channel.id}><span class="t3 fs12" style={{ 'margin-left': 'auto' }}>open</span></Show>
+                  <Show when={activeChannel()?.id === channel.id}><span class="t3 fs12" style={{ 'margin-left': 'auto' }}>{t('open')}</span></Show>
                 </button>
               )}
             </For>
@@ -117,9 +118,9 @@ export function SessionEndedScreen() {
       {(kind) => (
         <div class="splash session-ended" role="alertdialog" aria-labelledby="session-ended-title">
           <img src="./mascot.svg" alt="" width="220" />
-          <h2 id="session-ended-title">{END_TEXT[kind()].headline}</h2>
-          <p class="t2" style={{ 'max-width': '420px', 'text-align': 'center' }}>{END_TEXT[kind()].body}</p>
-          <Button variant="primary" size="lg" onClick={() => { setSessionEnded(null); void logoutUser(); }}>Back to sign in</Button>
+          <h2 id="session-ended-title">{t(END_TEXT[kind()].headline)}</h2>
+          <p class="t2" style={{ 'max-width': '420px', 'text-align': 'center' }}>{t(END_TEXT[kind()].body)}</p>
+          <Button variant="primary" size="lg" onClick={() => { setSessionEnded(null); void logoutUser(); }}>{t('Back to sign in')}</Button>
         </div>
       )}
     </Show>

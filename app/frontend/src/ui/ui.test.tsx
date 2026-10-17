@@ -1,6 +1,7 @@
 import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_PREFS, setPrefs } from '../stores/settingsStore';
 import { Avatar, Button, ConfirmDialog, Icon, Modal, Slider, ToastHost, Toggle, clearToasts, pushToast, toasts, MAX_TOASTS } from './index';
 import { avatarColor, initialOf } from './avatarColor';
 
@@ -19,6 +20,8 @@ afterEach(() => {
   clearToasts();
   vi.useRealTimers();
 });
+
+beforeEach(() => setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'en' } }));
 
 describe('avatar helpers', () => {
   it('picks a stable colour in 1..8', () => {

@@ -2,6 +2,7 @@ import { createResource, createSignal, For, Show } from 'solid-js';
 import { downloadAttachment, formatSize, imageUrl, isImage, thumbUrl } from '../../stores/attachmentStore';
 import type { AttachmentInfo } from '../../types';
 import { Button, Icon, Modal } from '../../ui';
+import { t } from '../../i18n';
 
 /** Longest side of a preview on screen. */
 const PREVIEW_MAX_WIDTH = 320;
@@ -52,13 +53,13 @@ function ImageViewer(props: { attachment: AttachmentInfo; onClose: () => void })
     <Modal open onClose={props.onClose} title={props.attachment.filename} width="min(92vw, 1100px)">
       <div class="col g12">
         <div class="img-viewer">
-          <Show when={url()} fallback={url.error ? <span class="tr">The picture could not be loaded.</span> : <span class="spin" />}>
+          <Show when={url()} fallback={url.error ? <span class="tr">{t('The picture could not be loaded.')}</span> : <span class="spin" />}>
             <img src={url()} alt={props.attachment.filename} />
           </Show>
         </div>
         <div class="row g8" style={{ 'justify-content': 'flex-end' }}>
-          <Button variant="secondary" icon="dl" onClick={() => void downloadAttachment(props.attachment)}>Download</Button>
-          <Button variant="primary" onClick={props.onClose}>Close</Button>
+          <Button variant="secondary" icon="dl" onClick={() => void downloadAttachment(props.attachment)}>{t('Download')}</Button>
+          <Button variant="primary" onClick={props.onClose}>{t('Close')}</Button>
         </div>
       </div>
     </Modal>

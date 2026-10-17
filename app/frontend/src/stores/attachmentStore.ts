@@ -2,6 +2,7 @@ import { createMemo, createSignal } from 'solid-js';
 import { api } from '../services/api';
 import type { AttachmentInfo } from '../types';
 import { setAppError } from './notificationStore';
+import { formatNumber, t } from '../i18n';
 
 /** Files go over the IPC channel as a byte array; keep them small enough for that. */
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
@@ -51,7 +52,7 @@ async function upload(key: string, file: File) {
 export async function attachFile(file: File) {
   const key = crypto.randomUUID();
   if (pendingFiles().length >= MAX_ATTACHMENTS_PER_MESSAGE) {
-    setAppError(`At most ${MAX_ATTACHMENTS_PER_MESSAGE} files fit in one message`);
+    setAppError(t('At most {count} files fit in one message', { count: MAX_ATTACHMENTS_PER_MESSAGE }));
     return;
   }
   if (file.size > MAX_ATTACHMENT_BYTES) {
@@ -133,12 +134,12 @@ export async function downloadAttachment(attachment: AttachmentInfo) {
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
   } catch (err) {
-    setAppError(`Download failed: ${String(err)}`);
+    setAppError(t('Download failed: {error}', { error: String(err) }));
   }
 }
 
 export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes < 1024) return `${formatNumber(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${formatNumber(Math.max(1, Math.round(bytes / 1024)))} KB`;
+  return `${formatNumber(bytes / 1024 / 1024, 1)} MB`;
 }

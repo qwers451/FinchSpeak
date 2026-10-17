@@ -22,7 +22,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
   resetSessionState();
-  setPrefs(DEFAULT_PREFS);
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'en' } });
   setSessionEnded(null);
   setCurrentUser(me);
   setChannels([general, games]);
@@ -55,7 +55,7 @@ it('nothing for my own messages, the channel I am looking at, muted channels or 
   expect(reactToMessage(message({ channel_id: 'c1' }), true)).toBe('none');
   muteChannel('c2', null);
   expect(reactToMessage(message(), true)).toBe('none');
-  setPrefs(DEFAULT_PREFS);
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'en' } });
   updateNotifications({ mentions: false });
   expect(reactToMessage(message(), true)).toBe('none');
 });

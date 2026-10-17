@@ -3,6 +3,7 @@ import { api } from '../../services/api';
 import { loadScreenSources, screenSources, startSharing } from '../../stores/screenStore';
 import type { MonitorSource, WindowSource } from '../../types';
 import { Button, Icon, Modal, Toggle } from '../../ui';
+import { t } from '../../i18n';
 
 /** Windows names a monitor with a device path in front of DISPLAY1; people call it DISPLAY1. */
 export const monitorName = (name: string) => name.replace(/^\\\\\.\\/, '');
@@ -98,27 +99,27 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
   const pickWindow = (window: WindowSource) => setPicked({ kind: 'window', id: window.id, label: window.title });
 
   return (
-    <Modal open={props.open} onClose={props.onClose} title="Share your screen" width="860px">
+    <Modal open={props.open} onClose={props.onClose} title={t('Share your screen')} width="860px">
       <div class="col g16">
         <div class="tabs" role="tablist">
           <button type="button" role="tab" aria-selected={tab() === 'monitor'} class={`tab${tab() === 'monitor' ? ' on' : ''}`} onClick={() => setTab('monitor')}>
-            <Icon name="monitor" size="sm" />Screens
+            <Icon name="monitor" size="sm" />{t('Screens')}
           </button>
           <button type="button" role="tab" aria-selected={tab() === 'window'} class={`tab${tab() === 'window' ? ' on' : ''}`} onClick={() => setTab('window')}>
-            <Icon name="box" size="sm" />Windows
+            <Icon name="box" size="sm" />{t('Windows')}
           </button>
           <span class="grow" />
-          <Button size="sm" variant="ghost" icon="refresh" onClick={() => void load()}>Refresh</Button>
+          <Button size="sm" variant="ghost" icon="refresh" onClick={() => void load()}>{t('Refresh')}</Button>
         </div>
 
         <Show when={error()}>
           <div class="auth-banner red" role="alert">
             <Icon name="warn" class="tr" />
-            <div class="col grow"><strong class="fs13">Could not start sharing</strong><span class="t2 fs12">{error()}</span></div>
+            <div class="col grow"><strong class="fs13">{t('Could not start sharing')}</strong><span class="t2 fs12">{error()}</span></div>
           </div>
         </Show>
 
-        <div class="picker-grid" role="listbox" aria-label={tab() === 'monitor' ? 'Screens' : 'Windows'}>
+        <div class="picker-grid" role="listbox" aria-label={tab() === 'monitor' ? t('Screens') : t('Windows')}>
           <Show when={tab() === 'monitor'}>
             <For each={monitors()}>
               {(monitor, index) => (
@@ -128,7 +129,7 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
                   <div class="tmeta">
                     <Icon name="monitor" size="sm" class="t3" />
                     <div class="col grow" style={{ 'min-width': 0 }}><strong class="fs13 trunc">{monitorName(monitor.name)}</strong><span class="t3 fs12">{monitor.width} × {monitor.height}</span></div>
-                    <Show when={monitor.is_primary}><span class="tag admin">Main</span></Show>
+                    <Show when={monitor.is_primary}><span class="tag admin">{t('Main')}</span></Show>
                   </div>
                 </div>
               )}
@@ -151,8 +152,8 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
           <Show when={empty()}>
             <div class="col center g8 picker-empty">
               <Icon name="monitor" size="xl" class="t3" />
-              <strong>{tab() === 'monitor' ? 'No screens found' : 'No windows to share'}</strong>
-              <span class="t2 fs13">{tab() === 'monitor' ? 'Check that a display is connected, then refresh.' : 'Minimised windows are not listed. Open the window you want and refresh.'}</span>
+              <strong>{tab() === 'monitor' ? t('No screens found') : t('No windows to share')}</strong>
+              <span class="t2 fs13">{tab() === 'monitor' ? t('Check that a display is connected, then refresh.') : t('Minimised windows are not listed. Open the window you want and refresh.')}</span>
             </div>
           </Show>
           <Show when={loading() && monitors().length + windows().length === 0}><span class="skel pulse" style={{ height: '160px' }} /></Show>
@@ -160,22 +161,22 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
 
         <div class="setrow">
           <div class="col grow">
-            <strong class="fs13">Share system sound too</strong>
-            <span class="t3 fs12">Everything your speakers play goes out with the picture.</span>
+            <strong class="fs13">{t('Share system sound too')}</strong>
+            <span class="t3 fs12">{t('Everything your speakers play goes out with the picture.')}</span>
           </div>
-          <Toggle label="Share system sound too" checked={withAudio()} onChange={setWithAudio} />
+          <Toggle label={t('Share system sound too')} checked={withAudio()} onChange={setWithAudio} />
         </div>
         <Show when={withAudio()}>
           <div class="auth-banner amber" role="note">
             <Icon name="warn" />
-            <span class="fs13">Other people's voices are part of that sound: they will hear themselves with a small delay. Use headphones.</span>
+            <span class="fs13">{t("Other people's voices are part of that sound: they will hear themselves with a small delay. Use headphones.")}</span>
           </div>
         </Show>
-        <span class="t3 fs12">30 frames per second; pictures larger than 4K are scaled down before they are sent.</span>
+        <span class="t3 fs12">{t('30 frames per second; pictures larger than 4K are scaled down before they are sent.')}</span>
 
         <div class="row g8" style={{ 'justify-content': 'flex-end' }}>
-          <Button variant="secondary" onClick={props.onClose}>Cancel</Button>
-          <Button variant="primary" icon="share" loading={starting()} disabled={!picked()} onClick={() => void start()}>Start sharing</Button>
+          <Button variant="secondary" onClick={props.onClose}>{t('Cancel')}</Button>
+          <Button variant="primary" icon="share" loading={starting()} disabled={!picked()} onClick={() => void start()}>{t('Start sharing')}</Button>
         </div>
       </div>
     </Modal>

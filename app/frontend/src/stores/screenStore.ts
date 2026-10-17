@@ -1,6 +1,7 @@
 import { api } from '../services/api';
 import type { SessionEvents } from '../types';
 import { setAppError } from './notificationStore';
+import { t } from '../i18n';
 import { endedShare, isSharing, resetScreenState, setEndedShare, setIsSharing, setScreenSources, setSharingInfo, setWatching, sharingInfo, watching } from './screenState';
 import { allVoiceParticipants, setVoiceParticipants } from './voiceStore';
 import { endReasonFromServer } from '../components/screen/viewerState';
@@ -91,11 +92,11 @@ export const screenHandlers: Pick<{ [K in keyof SessionEvents]: (payload: Sessio
     noteEnded(data.peer_id, data.reason);
     markSharing(data.peer_id, false);
   },
-  'screen-audio-failed': (reason) => setAppError(`Screen sound is not shared: ${reason}`),
+  'screen-audio-failed': (reason) => setAppError(t('Screen sound is not shared: {reason}', { reason })),
   'screen-share-ended': (reason) => {
     setIsSharing(false);
     setSharingInfo(null);
-    setAppError(`Screen sharing stopped: ${reason}`);
+    setAppError(t('Screen sharing stopped: {reason}', { reason }));
   },
 };
 

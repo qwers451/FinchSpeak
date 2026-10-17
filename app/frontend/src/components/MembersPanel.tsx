@@ -2,6 +2,7 @@ import { For, Show } from 'solid-js';
 import { knownUsers, presence, statusTexts } from '../stores/sessionStore';
 import { Avatar } from '../ui';
 import type { User, UserStatus } from '../types';
+import { t } from '../i18n';
 
 const statusClass = (status: UserStatus) => (status === 'online' ? 'on' : status === 'idle' ? 'idle' : status === 'donotdisturb' ? 'dnd' : 'off');
 const statusOf = (user: User): UserStatus => presence()[user.id] ?? user.status ?? 'offline';
@@ -18,16 +19,16 @@ export function MembersPanel() {
         <span class="trunc">{props.user.display_name || props.user.username}</span>
         <Show when={statusTexts()[props.user.id]}><span class="t3 fs12 trunc">{statusTexts()[props.user.id]}</span></Show>
       </div>
-      <Show when={props.user.role === 'admin'}><span class="tag admin">Admin</span></Show>
+      <Show when={props.user.role === 'admin'}><span class="tag admin">{t('Admin')}</span></Show>
     </div>
   );
 
   return (
-    <aside class="members" aria-label="Members">
-      <span class="sec-label" style={{ padding: '0 8px 8px' }}>Online — {online().length}</span>
+    <aside class="members" aria-label={t('Members')}>
+      <span class="sec-label" style={{ padding: '0 8px 8px' }}>{t('Online — {count}', { count: online().length })}</span>
       <For each={online()}>{(user) => <Row user={user} />}</For>
       <Show when={offline().length > 0}>
-        <span class="sec-label" style={{ padding: '16px 8px 8px' }}>Offline — {offline().length}</span>
+        <span class="sec-label" style={{ padding: '16px 8px 8px' }}>{t('Offline — {count}', { count: offline().length })}</span>
         <For each={offline()}>{(user) => <Row user={user} />}</For>
       </Show>
     </aside>

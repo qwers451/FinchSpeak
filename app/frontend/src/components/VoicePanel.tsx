@@ -11,12 +11,13 @@ import { LiveCard } from './voice/LiveCard';
 import { isMeParticipant, ParticipantTile } from './voice/ParticipantTile';
 import { VoiceSettingsModal } from './voice/VoiceSettingsModal';
 import { arrange, avatarSizeFor, gridColumns, gridRows } from './voice/voiceLayout';
+import { t } from '../i18n';
 
 /** What the round-trip time to the server says about the link. */
 function pingLabel(ms: number | null): { text: string; color: string } | null {
   if (ms === null) return null;
   const quality = ms < 60 ? 'excellent' : ms < 120 ? 'good' : ms < 250 ? 'fair' : 'poor';
-  return { text: `${ms} ms · ${quality}`, color: ms < 120 ? 'var(--teal)' : 'var(--amber)' };
+  return { text: t('{count} ms · {quality}', { count: ms, quality: t(quality) }), color: ms < 120 ? 'var(--teal)' : 'var(--amber)' };
 }
 
 /** D1/D2: the voice room: LIVE cards, the grid of people, the roster, the dock. */
@@ -32,8 +33,8 @@ export function VoicePanel() {
     <main class="main voice-room">
       <div class="mhead">
         <Icon name="vol" size="lg" class="t3" />
-        <h3 style={{ 'font-size': '18px' }}>{activeVoiceChannel()?.name ?? 'Voice room'}</h3>
-        <span class="tag violet">{voiceParticipants().length} in room</span>
+        <h3 style={{ 'font-size': '18px' }}>{activeVoiceChannel()?.name ?? t('Voice room')}</h3>
+        <span class="tag violet">{t('{count} in room', { count: voiceParticipants().length })}</span>
         <span class="grow" />
         <Show when={ping()}>
           {(p) => <span class="pill" style={{ 'border-color': p().color, color: p().color }}><Icon name="bars" size="sm" />{p().text}</span>}
@@ -53,12 +54,12 @@ export function VoicePanel() {
           </div>
         </Show>
 
-        <Show when={tiles() > 0} fallback={<div class="col center grow t2">Nobody is here yet.</div>}>
+        <Show when={tiles() > 0} fallback={<div class="col center grow t2">{t('Nobody is here yet.')}</div>}>
           <div
             class={`room-grid${showViewer() ? ' compact' : ''}`}
             style={{ '--rows': showViewer() ? 1 : gridRows(tiles()), 'grid-template-columns': `repeat(${showViewer() ? Math.min(6, Math.max(3, tiles())) : gridColumns(tiles())}, minmax(0, 1fr))`, 'grid-template-rows': showViewer() ? 'auto' : `repeat(${gridRows(tiles())}, minmax(0, 1fr))` }}
             role="list"
-            aria-label="People in the room"
+            aria-label={t('People in the room')}
           >
             <For each={arranged().grid}>
               {(participant) => (
@@ -69,8 +70,8 @@ export function VoicePanel() {
         </Show>
 
         <Show when={arranged().roster.length > 0}>
-          <div class="roster" aria-label="More people in the room">
-            <span class="sec-label">+ {arranged().roster.length} more · scroll</span>
+          <div class="roster" aria-label={t('More people in the room')}>
+            <span class="sec-label">{t('+ {count} more · scroll', { count: arranged().roster.length })}</span>
             <div class="roster-list">
               <For each={arranged().roster}>
                 {(participant) => (

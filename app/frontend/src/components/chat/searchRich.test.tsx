@@ -2,6 +2,7 @@ import { render } from 'solid-js/web';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../../services/api';
 import { setCurrentUser } from '../../stores/authStore';
+import { DEFAULT_PREFS, setPrefs } from '../../stores/settingsStore';
 import { activeChannel, revealTarget, setActiveChannel, setChannels, setMessages } from '../../stores/chatStore';
 import { clearToasts } from '../../ui';
 import { highlight, SearchBox, searchTerms } from './SearchBox';
@@ -20,6 +21,7 @@ const mount = (view: () => unknown) => {
 };
 
 beforeEach(() => {
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'en' } });
   vi.restoreAllMocks();
   clearToasts();
   setCurrentUser({ id: 'me', username: 'alice', display_name: 'Alice', role: 'member' });

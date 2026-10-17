@@ -22,7 +22,7 @@ beforeEach(() => {
   resetSessionState();
   clearToasts();
   clearAvatarCache();
-  setPrefs(DEFAULT_PREFS);
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'en' } });
   setCurrentUser(me);
   setKnownUsers([me]);
   setChannels([{ id: 'c1', short_id: 1, name: 'general', channel_type: 'text', position: 0, bitrate_kbps: 64 }]);
@@ -102,6 +102,19 @@ it('appearance changes reach the page', async () => {
   await flush();
   expect(prefs().appearance.showMembers).toBe(false);
   setPrefs(DEFAULT_PREFS);
+});
+
+it('switches the mounted settings dialog language and updates the document language', async () => {
+  button('Appearance').click();
+  await flush();
+  expect(document.querySelector('[aria-label="Language"]')).toBeTruthy();
+  document.querySelectorAll<HTMLElement>('[role="radio"]').forEach((radio) => {
+    if (radio.textContent === 'Русский') radio.click();
+  });
+  await flush();
+  expect(document.documentElement.lang).toBe('ru');
+  expect(button('Внешний вид')).toBeTruthy();
+  expect(document.body.textContent).toContain('Тема');
 });
 
 it('the about page shows the server and its certificate and copies diagnostics', async () => {

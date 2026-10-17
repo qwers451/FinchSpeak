@@ -19,6 +19,7 @@ import { IconSprite, Titlebar, ToastHost } from './ui';
 import { AdminModal } from './components/admin/AdminModal';
 import { SettingsModal } from './components/settings/SettingsModal';
 import type { UnlistenFn } from '@tauri-apps/api/event';
+import { t } from './i18n';
 
 export function App() {
   let unlisten: UnlistenFn | undefined;
@@ -64,8 +65,8 @@ export function App() {
             <Show when={activeChannel()} fallback={
               <div class="splash" style={{ background: 'var(--bg-app)' }}>
                 <img src="./mascot.svg" alt="" width="260" />
-                <h2>Welcome to FinchSpeak</h2>
-                <p class="t2">Pick a channel on the left to start chatting or talking.</p>
+                <h2>{t('Welcome to FinchSpeak')}</h2>
+                <p class="t2">{t('Pick a channel on the left to start chatting or talking.')}</p>
               </div>
             }>
               <Show when={activeChannel()?.channel_type === 'text'} fallback={<VoicePanel />}>

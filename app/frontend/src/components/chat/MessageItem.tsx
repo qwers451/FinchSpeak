@@ -9,6 +9,7 @@ import { Attachments } from './AttachmentView';
 import { clock } from './chatFormat';
 import { RichText } from './RichText';
 import { EmojiPicker } from './EmojiPicker';
+import { t } from '../../i18n';
 
 type Props = {
   message: Message;
@@ -59,12 +60,12 @@ export function MessageItem(props: Props) {
   const copy = () => void navigator.clipboard?.writeText(msg().content);
 
   const Tools = () => (
-    <div class="hover-tools" role="toolbar" aria-label="Message actions">
-      <button type="button" aria-label="Add reaction" title="Add reaction" onClick={togglePicker}><Icon name="smile" size="sm" /></button>
-      <button type="button" aria-label="Reply" title="Reply" onClick={() => props.onReply(msg())}><Icon name="send" size="sm" /></button>
-      <button type="button" aria-label="Copy text" title="Copy text" onClick={copy}><Icon name="copy" size="sm" /></button>
-      <Show when={mine()}><button type="button" aria-label="Edit message" title="Edit" onClick={startEdit}><Icon name="edit" size="sm" /></button></Show>
-      <Show when={canDelete()}><button type="button" aria-label="Delete message" title="Delete" onClick={() => setConfirming(true)}><Icon name="trash" size="sm" /></button></Show>
+    <div class="hover-tools" role="toolbar" aria-label={t('Message actions')}>
+      <button type="button" aria-label={t('Add reaction')} title={t('Add reaction')} onClick={togglePicker}><Icon name="smile" size="sm" /></button>
+      <button type="button" aria-label={t('Reply')} title={t('Reply')} onClick={() => props.onReply(msg())}><Icon name="send" size="sm" /></button>
+      <button type="button" aria-label={t('Copy text')} title={t('Copy text')} onClick={copy}><Icon name="copy" size="sm" /></button>
+      <Show when={mine()}><button type="button" aria-label={t('Edit message')} title={t('Edit')} onClick={startEdit}><Icon name="edit" size="sm" /></button></Show>
+      <Show when={canDelete()}><button type="button" aria-label={t('Delete message')} title={t('Delete')} onClick={() => setConfirming(true)}><Icon name="trash" size="sm" /></button></Show>
     </div>
   );
 
@@ -81,11 +82,11 @@ export function MessageItem(props: Props) {
         <Show when={!props.compact}>
           <div class="row g8">
             <span class="name">{msg().author_name}</span>
-            <span class="time">{msg().state === 'sending' ? 'sending…' : clock(msg().timestamp)}</span>
+            <span class="time">{msg().state === 'sending' ? t('sending…') : clock(msg().timestamp)}</span>
             <Show when={msg().state === 'sending'}><span class="spin mini" /></Show>
-            <Show when={msg().state === 'failed'}><span class="tr fs12 b">Not sent</span></Show>
-            <Show when={msg().edited_at}><span class="edited" title="Edited">(edited)</span></Show>
-            <Show when={author()?.role === 'admin'}><span class="tag admin">Admin</span></Show>
+            <Show when={msg().state === 'failed'}><span class="tr fs12 b">{t('Not sent')}</span></Show>
+            <Show when={msg().edited_at}><span class="edited" title={t('Edited')}>({t('edited')})</span></Show>
+            <Show when={author()?.role === 'admin'}><span class="tag admin">{t('Admin')}</span></Show>
           </div>
         </Show>
 
@@ -93,7 +94,7 @@ export function MessageItem(props: Props) {
           {(quote) => (
             <button type="button" class={`reply-quote${quote().deleted ? ' gone' : ''}`} disabled={quote().deleted} onClick={() => props.onJump(quote().message_id)}>
               <Icon name="send" size="sm" class="flip" />
-              <Show when={!quote().deleted} fallback={<span class="t3">Original message deleted</span>}>
+              <Show when={!quote().deleted} fallback={<span class="t3">{t('Original message deleted')}</span>}>
                 <strong>{quote().author_name}</strong><span class="trunc">{quote().snippet}</span>
               </Show>
             </button>
@@ -109,7 +110,7 @@ export function MessageItem(props: Props) {
                 class="txt edit-box"
                 rows={Math.min(8, Math.max(1, draft().split('\n').length))}
                 value={draft()}
-                aria-label="Edit message"
+                aria-label={t('Edit message')}
                 ref={(el) => queueMicrotask(() => { el.focus(); el.setSelectionRange(el.value.length, el.value.length); })}
                 onInput={(event) => setDraft(event.currentTarget.value)}
                 onKeyDown={(event) => {
@@ -119,10 +120,10 @@ export function MessageItem(props: Props) {
               />
             </div>
             <div class="row g8">
-              <span class="t3 fs12 grow">Esc to <span class="ty">cancel</span> · Enter to <span class="ty">save</span></span>
-              <Show when={draft().length > MAX_MESSAGE_CHARS}><span class="tr fs12 b">{draft().length - MAX_MESSAGE_CHARS} over</span></Show>
-              <Button size="sm" variant="secondary" onClick={() => void finishEdit(false)}>Cancel</Button>
-              <Button size="sm" variant="primary" disabled={!draft().trim() || draft().length > MAX_MESSAGE_CHARS} onClick={() => void finishEdit(true)}>Save</Button>
+              <span class="t3 fs12 grow">{t('Esc to cancel · Enter to save')}</span>
+              <Show when={draft().length > MAX_MESSAGE_CHARS}><span class="tr fs12 b">{t('{count} over', { count: draft().length - MAX_MESSAGE_CHARS })}</span></Show>
+              <Button size="sm" variant="secondary" onClick={() => void finishEdit(false)}>{t('Cancel')}</Button>
+              <Button size="sm" variant="primary" disabled={!draft().trim() || draft().length > MAX_MESSAGE_CHARS} onClick={() => void finishEdit(true)}>{t('Save')}</Button>
             </div>
           </div>
         </Show>
@@ -132,8 +133,8 @@ export function MessageItem(props: Props) {
         <Show when={msg().state === 'failed'}>
           <div class="row g12" style={{ 'margin-top': '4px' }}>
             <Show when={msg().failure}><span class="t3 fs12 trunc">{msg().failure}</span></Show>
-            <button type="button" class="link-btn ty" style={{ margin: 0 }} onClick={() => void retryMessage(msg().id)}>Retry</button>
-            <button type="button" class="link-btn t2" style={{ margin: 0 }} onClick={() => discardFailed(msg().id)}>Delete</button>
+            <button type="button" class="link-btn ty" style={{ margin: 0 }} onClick={() => void retryMessage(msg().id)}>{t('Retry')}</button>
+            <button type="button" class="link-btn t2" style={{ margin: 0 }} onClick={() => discardFailed(msg().id)}>{t('Delete')}</button>
           </div>
         </Show>
 
@@ -148,14 +149,14 @@ export function MessageItem(props: Props) {
                     <span>{reaction.emoji}</span><span>{countLabel(reaction.user_ids.length)}</span>
                     <span class="tooltip react-tip" role="tooltip">
                       <span style={{ 'font-size': '16px' }}>{reaction.emoji}</span>
-                      <span>{reaction.user_ids.slice(0, 5).map(nameOf).join(', ')}{reaction.user_ids.length > 5 ? ` and ${reaction.user_ids.length - 5} others` : ''}</span>
+                      <span>{reaction.user_ids.length > 5 ? t('{names} and {count} others', { names: reaction.user_ids.slice(0, 5).map(nameOf).join(', '), count: reaction.user_ids.length - 5 }) : reaction.user_ids.slice(0, 5).map(nameOf).join(', ')}</span>
                     </span>
                   </button>
                 );
               }}
             </For>
             <Show when={stored()}>
-              <button type="button" class="pill add-react" aria-label="Add reaction" onClick={togglePicker}><Icon name="smile" size="sm" /></button>
+              <button type="button" class="pill add-react" aria-label={t('Add reaction')} onClick={togglePicker}><Icon name="smile" size="sm" /></button>
             </Show>
           </div>
         </Show>
@@ -171,9 +172,9 @@ export function MessageItem(props: Props) {
       <ConfirmDialog
         open={confirming()}
         danger
-        title="Delete this message?"
-        message={<><div class="msg-preview"><span class="trunc">{msg().content}</span></div><div style={{ 'margin-top': '8px' }}>It disappears for everyone. This cannot be undone.</div></>}
-        confirmLabel="Delete"
+        title={t('Delete this message?')}
+        message={<><div class="msg-preview"><span class="trunc">{msg().content}</span></div><div style={{ 'margin-top': '8px' }}>{t('It disappears for everyone. This cannot be undone.')}</div></>}
+        confirmLabel={t('Delete')}
         onCancel={() => setConfirming(false)}
         onConfirm={() => { setConfirming(false); void deleteMessage(msg().id); }}
       />

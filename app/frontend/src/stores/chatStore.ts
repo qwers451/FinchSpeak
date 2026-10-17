@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import { currentUser } from './authStore';
 import { setAppError } from './notificationStore';
 import { outboxForChannel, removeFromOutbox, saveToOutbox, type OutboxEntry } from './outbox';
+import { t } from '../i18n';
 
 export const [channels, setChannels] = createSignal<Channel[]>([]);
 export const [activeChannel, setActiveChannel] = createSignal<Channel | null>(null);
@@ -174,7 +175,7 @@ async function deliver(pending: Message, attachmentIds: string[], replyToId: str
     await api.sendTextMessage(pending.channel_id, pending.content, attachmentIds, clientMsgId, replyToId);
   } catch (err) {
     markFailed(pending.id, String(err));
-    setAppError(`Message not sent: ${String(err)}`);
+    setAppError(t('Message not sent: {error}', { error: String(err) }));
     console.error('Failed to send text message:', err);
   }
 }
@@ -225,7 +226,7 @@ export function discardFailed(id: string) {
 export function handleMessageRejected(rejection: { client_msg_id: string; code: number; message: string }) {
   const pendingId = `local-${rejection.client_msg_id}`;
   if (messages().some((message) => message.id === pendingId)) markFailed(pendingId, rejection.message);
-  setAppError(`Message not sent: ${rejection.message}`);
+  setAppError(t('Message not sent: {error}', { error: rejection.message }));
 }
 
 export function handleIncomingMessage(incoming: IncomingMessage | Message) {

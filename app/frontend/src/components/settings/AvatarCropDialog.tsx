@@ -1,12 +1,14 @@
 import { createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { saveAvatar } from '../../stores/profileStore';
 import { Button, Icon, Modal, Slider } from '../../ui';
+import { t } from '../../i18n';
 
 /** The side of the square that is cut out and sent (the server makes it 128 px). */
 export const CROP_SIDE = 256;
 /** Pictures bigger than this are refused before they are even read. */
 export const MAX_SOURCE_BYTES = 12 * 1024 * 1024;
 const ACCEPTED = ['image/png', 'image/jpeg', 'image/webp'];
+type AvatarError = { kind: 'local'; source: string } | { kind: 'external'; text: string };
 
 /** Why a chosen file cannot be used, or `null`. */
 export function checkAvatarFile(file: { type: string; size: number }): string | null {
@@ -34,7 +36,13 @@ export function AvatarCropDialog(props: { file: File; onClose: () => void; onDon
   let image: ImageBitmap | undefined;
   const [zoom, setZoom] = createSignal(1);
   const [pan, setPan] = createSignal({ x: 0, y: 0 });
-  const [error, setError] = createSignal<string | null>(null);
+  const [error, setError] = createSignal<AvatarError | null>(null);
+  const setLocalError = (source: string) => setError({ kind: 'local', source });
+  const errorText = () => {
+    const current = error();
+    if (!current) return '';
+    return current.kind === 'local' ? t(current.source) : current.text;
+  };
   const [busy, setBusy] = createSignal(false);
   const [ready, setReady] = createSignal(false);
   let drag: { x: number; y: number; panX: number; panY: number } | null = null;
@@ -53,7 +61,7 @@ export function AvatarCropDialog(props: { file: File; onClose: () => void; onDon
       setReady(true);
       draw();
     } catch {
-      setError('That picture could not be opened. Try another file');
+      setLocalError('That picture could not be opened. Try another file');
     }
   });
   onCleanup(() => image?.close());
@@ -81,19 +89,20 @@ export function AvatarCropDialog(props: { file: File; onClose: () => void; onDon
     const blob = await new Promise<Blob | null>((resolve) => canvas!.toBlob(resolve, 'image/png'));
     if (!blob) {
       setBusy(false);
-      setError('The picture could not be prepared');
+      setLocalError('The picture could not be prepared');
       return;
     }
     const failure = await saveAvatar(new Uint8Array(await blob.arrayBuffer()), 'image/png');
     setBusy(false);
-    if (failure) setError(failure);
+    if (failure?.kind === 'local') setLocalError(failure.message);
+    else if (failure) setError({ kind: 'external', text: failure.message });
     else props.onDone();
   };
 
   return (
-    <Modal open onClose={props.onClose} title="Position your picture" width="420px">
+    <Modal open onClose={props.onClose} title={t('Position your picture')} width="420px">
       <div class="col g16 center">
-        <div class="crop-frame" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} role="img" aria-label="Preview of your picture">
+        <div class="crop-frame" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} role="img" aria-label={t('Preview of your picture')}>
           <canvas ref={canvas} width={CROP_SIDE} height={CROP_SIDE} />
           <div class="crop-ring" />
           <Show when={!ready() && !error()}><span class="spin" style={{ position: 'absolute' }} /></Show>
@@ -101,16 +110,16 @@ export function AvatarCropDialog(props: { file: File; onClose: () => void; onDon
         <div class="row g12" style={{ width: '100%' }}>
           <Icon name="image" size="sm" class="t3" />
           <div class="grow">
-            <Slider label="Zoom" min={1} max={3} step={0.05} value={zoom()} onChange={(value) => { setZoom(value); setPanClamped(pan().x, pan().y); }} />
+            <Slider label={t('Zoom')} min={1} max={3} step={0.05} value={zoom()} onChange={(value) => { setZoom(value); setPanClamped(pan().x, pan().y); }} />
           </div>
         </div>
-        <span class="t3 fs12">Drag the picture to move it. Everyone sees the part inside the circle.</span>
+        <span class="t3 fs12">{t('Drag the picture to move it. Everyone sees the part inside the circle.')}</span>
         <Show when={error()}>
-          <div class="auth-banner red" role="alert" style={{ width: '100%' }}><Icon name="warn" class="tr" /><span class="fs13">{error()}</span></div>
+          <div class="auth-banner red" role="alert" style={{ width: '100%' }}><Icon name="warn" class="tr" /><span class="fs13">{errorText()}</span></div>
         </Show>
         <div class="row g8" style={{ 'justify-content': 'flex-end', width: '100%' }}>
-          <Button variant="secondary" onClick={props.onClose}>Cancel</Button>
-          <Button variant="primary" loading={busy()} disabled={!ready()} onClick={() => void upload()}>Use this picture</Button>
+          <Button variant="secondary" onClick={props.onClose}>{t('Cancel')}</Button>
+          <Button variant="primary" loading={busy()} disabled={!ready()} onClick={() => void upload()}>{t('Use this picture')}</Button>
         </div>
       </div>
     </Modal>

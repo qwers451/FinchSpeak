@@ -6,6 +6,7 @@ import { connectionStatus, knownUsers } from '../../stores/sessionStore';
 import { currentUser } from '../../stores/authStore';
 import { Avatar, Button, Icon } from '../../ui';
 import { EmojiPicker } from './EmojiPicker';
+import { t } from '../../i18n';
 
 /** The `@word` the caret is in, if any: where it starts and what has been typed of it. */
 export function mentionAt(text: string, caret: number): { start: number; query: string } | null {
@@ -99,26 +100,26 @@ export function Composer() {
         {(target) => (
           <div class="reply-bar">
             <Icon name="send" size="sm" class="flip t3" />
-            <span class="t2 fs13 trunc">Replying to <strong>{target().author_name}</strong>: {target().content}</span>
-            <button type="button" class="icon-close" aria-label="Cancel reply" onClick={() => setReplyingTo(null)}><Icon name="x" size="sm" /></button>
+            <span class="t2 fs13 trunc">{t('Replying to {name}: {content}', { name: target().author_name, content: target().content })}</span>
+            <button type="button" class="icon-close" aria-label={t('Cancel reply')} onClick={() => setReplyingTo(null)}><Icon name="x" size="sm" /></button>
           </div>
         )}
       </Show>
 
       <Show when={pendingFiles().length > 0}>
-        <div class="row g8 wrap" style={{ padding: '0 20px 8px' }} aria-label="Attachments">
+        <div class="row g8 wrap" style={{ padding: '0 20px 8px' }} aria-label={t('Attachments')}>
           <For each={pendingFiles()}>
             {(entry) => (
               <span class={`pill file-pill ${entry.status}`} title={entry.error}>
                 <Show when={entry.status === 'uploading'} fallback={<Icon name={entry.status === 'ready' ? 'file' : 'warn'} size="sm" />}><span class="spin mini" /></Show>
                 <span class="trunc" style={{ 'max-width': '180px' }}>{entry.name}</span>
-                <Show when={entry.status === 'uploading'}><span class="t3">Uploading…</span></Show>
-                <Show when={entry.status === 'toolarge'}><span class="tr">Too large: {formatSize(entry.size)}. The limit is 10 MB.</span></Show>
+                <Show when={entry.status === 'uploading'}><span class="t3">{t('Uploading…')}</span></Show>
+                <Show when={entry.status === 'toolarge'}><span class="tr">{t('Too large: {size}. The limit is 10 MB.', { size: formatSize(entry.size) })}</span></Show>
                 <Show when={entry.status === 'failed'}>
-                  <span style={{ color: 'var(--amber)' }}>Upload failed</span>
-                  <button type="button" class="link-btn ty" style={{ margin: 0 }} onClick={() => void retryUpload(entry.key)}>Retry</button>
+                  <span style={{ color: 'var(--amber)' }}>{t('Upload failed')}</span>
+                  <button type="button" class="link-btn ty" style={{ margin: 0 }} onClick={() => void retryUpload(entry.key)}>{t('Retry')}</button>
                 </Show>
-                <button type="button" class="icon-close" aria-label={`Remove ${entry.name}`} onClick={() => removePending(entry.key)}><Icon name="x" size="sm" /></button>
+                <button type="button" class="icon-close" aria-label={t('Remove {name}', { name: entry.name })} onClick={() => removePending(entry.key)}><Icon name="x" size="sm" /></button>
               </span>
             )}
           </For>
@@ -126,8 +127,8 @@ export function Composer() {
       </Show>
 
       <Show when={candidates().length > 0}>
-        <div class="card mention-menu" role="listbox" aria-label="Members">
-          <span class="sec-label" style={{ padding: '6px 8px' }}>Members matching "{mention()!.query}"</span>
+        <div class="card mention-menu" role="listbox" aria-label={t('Members')}>
+          <span class="sec-label" style={{ padding: '6px 8px' }}>{t('Members matching "{query}"', { query: mention()!.query })}</span>
           <For each={candidates()}>
             {(user, index) => (
               <div class={`mem${index() === selected() ? ' sel' : ''}`} role="option" aria-selected={index() === selected()}
@@ -149,15 +150,15 @@ export function Composer() {
 
       <div class={`composer${over() > 0 ? ' is-error' : ''}${offline() ? ' is-offline' : ''}`}>
         <input ref={fileInput} type="file" multiple hidden onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; void attachFiles(files); }} />
-        <Button iconOnly size="sm" variant="ghost" icon="clip" label="Attach a file" disabled={offline()} onClick={() => fileInput?.click()} />
+        <Button iconOnly size="sm" variant="ghost" icon="clip" label={t('Attach a file')} disabled={offline()} onClick={() => fileInput?.click()} />
         <textarea
           ref={box}
           class="txt"
           rows={Math.min(8, Math.max(1, text().split('\n').length))}
           value={text()}
           disabled={offline()}
-          aria-label="Message"
-          placeholder={offline() ? 'You are offline. Reconnecting…' : `Message #${activeChannel()?.name ?? 'channel'}`}
+          aria-label={t('Message')}
+          placeholder={offline() ? t('You are offline. Reconnecting…') : t('Message #{channel}', { channel: activeChannel()?.name ?? t('channel') })}
           onInput={(event) => {
             setText(event.currentTarget.value);
             syncCaret();
@@ -171,9 +172,9 @@ export function Composer() {
           onClick={syncCaret}
           onPaste={onPaste}
         />
-        <Show when={over() > 0}><span class="tr fs12 b fit">{over()} over</span></Show>
-        <Button iconOnly size="sm" variant="ghost" icon="smile" label="Emoji" disabled={offline()} onClick={() => setEmoji(!emoji())} />
-        <Button iconOnly size="sm" variant="primary" icon="send" label="Send" disabled={!canSend()} onClick={() => void submit()} />
+        <Show when={over() > 0}><span class="tr fs12 b fit">{t('{count} over', { count: over() })}</span></Show>
+        <Button iconOnly size="sm" variant="ghost" icon="smile" label={t('Emoji')} disabled={offline()} onClick={() => setEmoji(!emoji())} />
+        <Button iconOnly size="sm" variant="primary" icon="send" label={t('Send')} disabled={!canSend()} onClick={() => void submit()} />
       </div>
     </div>
   );

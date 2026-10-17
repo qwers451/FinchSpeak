@@ -17,6 +17,8 @@ export interface NotificationPrefs {
 }
 
 export interface AppearancePrefs {
+  theme: 'claude' | 'custom';
+  language: 'ru' | 'en';
   density: 'comfortable' | 'compact';
   textSize: 'small' | 'medium' | 'large';
   reduceMotion: boolean;
@@ -34,7 +36,7 @@ export interface Prefs {
 
 export const DEFAULT_PREFS: Prefs = {
   notifications: { mentions: true, allMessages: false, voiceJoin: true, sounds: true, soundVolume: 0.6, flash: true },
-  appearance: { density: 'comfortable', textSize: 'medium', reduceMotion: false, showMembers: true, closeToTray: true },
+  appearance: { theme: 'claude', language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, showMembers: true, closeToTray: true },
   mutedChannels: {},
 };
 
@@ -71,6 +73,8 @@ export function parsePrefs(raw: string | null): Prefs {
       flash: bool(n.flash, d.notifications.flash),
     },
     appearance: {
+      theme: pick(a.theme, ['claude', 'custom'] as const, d.appearance.theme),
+      language: pick(a.language, ['ru', 'en'] as const, d.appearance.language),
       density: pick(a.density, ['comfortable', 'compact'] as const, d.appearance.density),
       textSize: pick(a.textSize, ['small', 'medium', 'large'] as const, d.appearance.textSize),
       reduceMotion: bool(a.reduceMotion, d.appearance.reduceMotion),
@@ -120,6 +124,8 @@ export function isChannelMuted(channelId: string, now = Date.now()): boolean {
 
 /** Put the looks on the page (called when they change). */
 export function applyAppearance(appearance: AppearancePrefs, root: HTMLElement = document.documentElement) {
+  root.dataset.theme = appearance.theme;
+  root.lang = appearance.language;
   root.dataset.density = appearance.density;
   root.dataset.reduceMotion = String(appearance.reduceMotion);
   root.style.setProperty('--zoom', String(TEXT_ZOOM[appearance.textSize]));

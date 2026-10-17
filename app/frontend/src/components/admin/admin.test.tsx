@@ -9,6 +9,7 @@ import { setCurrentUser } from '../../stores/authStore';
 import { resetSessionState, sessionHandlers, setKnownUsers, setLocalPeerId } from '../../stores/sessionStore';
 import { setActiveVoiceChannel, setSpeakingPeers, setVoiceParticipants } from '../../stores/voiceStore';
 import { clearToasts } from '../../ui';
+import { DEFAULT_PREFS, setPrefs } from '../../stores/settingsStore';
 import { VoicePanel } from '../VoicePanel';
 import { AdminModal } from './AdminModal';
 
@@ -30,6 +31,7 @@ function open(user: typeof boss | typeof mod) {
 }
 
 beforeEach(() => {
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'en' } });
   vi.restoreAllMocks();
   resetSessionState();
   clearToasts();

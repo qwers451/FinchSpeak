@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, Show } from 'solid-js';
 import { pendingMismatch, pendingTofu, setAuthError, setPendingMismatch, setPendingTofu } from '../stores/authStore';
 import { api } from '../services/api';
 import { Button, Field, Icon, Modal } from '../ui';
+import { t } from '../i18n';
 
 /** `AA:BB:CC:…` as groups of eight bytes, one group per line. */
 export function fingerprintGroups(fingerprint: string): string[] {
@@ -30,27 +31,27 @@ export function TofuModal() {
   };
 
   return (
-    <Modal open={!!pendingTofu()} onClose={() => setPendingTofu(null)} title="Trust this server?" width="560px">
+    <Modal open={!!pendingTofu()} onClose={() => setPendingTofu(null)} title={t('Trust this server?')} width="560px">
       <Show when={pendingTofu()}>
         {(data) => (
           <div class="col g20">
             <div class="row g16">
               <div class="av s56 c3"><Icon name="shield" size="lg" /></div>
-              <span class="t2">This is the first time you connect to <strong class="tv">{hostOf(data().hostname)}</strong>.</span>
+              <span class="t2">{t('This is the first time you connect to {host}.', { host: hostOf(data().hostname) })}</span>
             </div>
             <div class="col g8">
-              <span class="sec-label">Certificate fingerprint · SHA-256</span>
+              <span class="sec-label">{t('Certificate fingerprint · SHA-256')}</span>
               <div class="fp-grid" data-testid="fingerprint">
                 <For each={fingerprintGroups(data().fingerprint)}>{(group) => <span>{group}</span>}</For>
               </div>
             </div>
             <div class="auth-banner info">
               <Icon name="info" class="tc" />
-              <span class="fs13">Compare these characters with the fingerprint the server admin sees in the Server page. If they match, nobody is listening in. FinchSpeak will warn you if this ever changes.</span>
+              <span class="fs13">{t('Compare these characters with the fingerprint the server admin sees in the Server page. If they match, nobody is listening in. FinchSpeak will warn you if this ever changes.')}</span>
             </div>
             <div class="row g12" style={{ 'justify-content': 'flex-end' }}>
-              <Button variant="secondary" onClick={() => setPendingTofu(null)}>Cancel</Button>
-              <Button variant="violet" icon="check" onClick={() => void confirm()}>They match — trust server</Button>
+              <Button variant="secondary" onClick={() => setPendingTofu(null)}>{t('Cancel')}</Button>
+              <Button variant="violet" icon="check" onClick={() => void confirm()}>{t('They match — trust server')}</Button>
             </div>
           </div>
         )}
@@ -79,21 +80,20 @@ export function CertChangedModal() {
   };
 
   return (
-    <Modal open={!!data()} onClose={close} title="This server's certificate changed" width="680px" tone="danger" dismissable={false}>
+    <Modal open={!!data()} onClose={close} title={t("This server's certificate changed")} width="680px" tone="danger" dismissable={false}>
       <Show when={data()}>
         {(current) => (
           <div class="col g20">
             <p class="fs16">
-              The certificate of <strong>{current().hostname}</strong> is not the one you trusted before. This can happen after a server
-              reinstall — or when someone is <strong class="tr">intercepting your connection</strong>. Your password was <strong>not</strong> sent.
+              {t('The certificate of {host} is not the one you trusted before. This can happen after a server reinstall — or when someone is intercepting your connection. Your password was not sent.', { host: current().hostname })}
             </p>
             <div class="grid" style={{ 'grid-template-columns': 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
               <div class="fp-card">
-                <span class="sec-label tt">You trusted</span>
+                <span class="sec-label tt">{t('You trusted')}</span>
                 <div class="fp-grid plain"><For each={fingerprintGroups(current().expected)}>{(g) => <span>{g}</span>}</For></div>
               </div>
               <div class="fp-card bad">
-                <span class="sec-label tr">The server now presents</span>
+                <span class="sec-label tr">{t('The server now presents')}</span>
                 <div class="fp-grid plain" data-testid="actual-fingerprint">
                   <For each={fingerprintGroups(current().actual)}>{(g, row) => (
                     <span>
@@ -106,14 +106,14 @@ export function CertChangedModal() {
               </div>
             </div>
             <div class="col g8">
-              <span class="fs13 t2">Ask the server admin to read out the fingerprint shown on the Server page. Only continue if it matches the red one above.</span>
-              <Field label="To continue anyway, type the server name" value={typed()} onInput={setTyped} placeholder={current().hostname} />
+              <span class="fs13 t2">{t('Ask the server admin to read out the fingerprint shown on the Server page. Only continue if it matches the red one above.')}</span>
+              <Field label={t('To continue anyway, type the server name')} value={typed()} onInput={setTyped} placeholder={current().hostname} />
             </div>
             <div class="row g12 between">
-              <Button variant="ghost" icon="copy" onClick={copy}>Copy details</Button>
+              <Button variant="ghost" icon="copy" onClick={copy}>{t('Copy details')}</Button>
               <div class="row g12">
-                <span data-autofocus style={{ display: 'contents' }}><Button variant="primary" onClick={close}>Disconnect — keep me safe</Button></span>
-                <Button variant="danger-ghost" disabled={!matches()} onClick={() => void trustNew()}>Trust the new certificate</Button>
+                <span data-autofocus style={{ display: 'contents' }}><Button variant="primary" onClick={close}>{t('Disconnect — keep me safe')}</Button></span>
+                <Button variant="danger-ghost" disabled={!matches()} onClick={() => void trustNew()}>{t('Trust the new certificate')}</Button>
               </div>
             </div>
           </div>

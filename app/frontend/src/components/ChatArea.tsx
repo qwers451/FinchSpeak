@@ -7,6 +7,7 @@ import type { Message } from '../types';
 import { Button, Icon, pushToast } from '../ui';
 import { rowInfo } from './chat/chatFormat';
 import { Composer } from './chat/Composer';
+import { t } from '../i18n';
 import { SearchBox } from './chat/SearchBox';
 import { MessageItem } from './chat/MessageItem';
 
@@ -17,7 +18,7 @@ const LOAD_OLDER_PX = 160;
 
 function Skeleton() {
   return (
-    <div class="col g16" style={{ padding: '16px 20px' }} aria-label="Loading messages" role="status">
+    <div class="col g16" style={{ padding: '16px 20px' }} aria-label={t('Loading messages')} role="status">
       <For each={[140, 100, 120]}>
         {(width, index) => (
           <div class="row g12" style={{ 'align-items': 'flex-start' }}>
@@ -112,7 +113,7 @@ export function ChatArea() {
   const jumpTo = (messageId: string) => {
     const target = list?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`);
     if (!target) {
-      pushToast({ kind: 'info', title: 'That message is further up', text: 'Scroll up to load older messages.' });
+      pushToast({ kind: 'info', title: t('That message is further up'), text: t('Scroll up to load older messages.') });
       return;
     }
     target.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -163,7 +164,7 @@ export function ChatArea() {
     <main class="main chat" onDragEnter={onDragEnter} onDragLeave={onDragLeave} onDragOver={onDragOver} onDrop={onDrop}>
       <div class="mhead">
         <Icon name="hash" size="lg" class="t3" />
-        <h3 style={{ 'font-size': '18px' }}>{activeChannel()?.name ?? 'select-channel'}</h3>
+        <h3 style={{ 'font-size': '18px' }}>{activeChannel()?.name ?? t('select-channel')}</h3>
         <Show when={activeChannel()?.topic}>
           <span class="vsep" style={{ height: '20px', 'align-self': 'center' }} />
           <span class="t2 fs13 trunc grow">{activeChannel()?.topic}</span>
@@ -172,14 +173,14 @@ export function ChatArea() {
         <SearchBox />
       </div>
 
-      <div class="message-list" ref={list} onScroll={onScroll} role="log" aria-live="polite" aria-label="Messages">
-        <Show when={loadingOlder()}><div class="row center g8 t3 fs12" style={{ padding: '8px' }}><span class="spin mini" />Loading older messages…</div></Show>
+      <div class="message-list" ref={list} onScroll={onScroll} role="log" aria-live="polite" aria-label={t('Messages')}>
+        <Show when={loadingOlder()}><div class="row center g8 t3 fs12" style={{ padding: '8px' }}><span class="spin mini" />{t('Loading older messages…')}</div></Show>
         <Show when={chatLoading() && messages().length === 0}><Skeleton /></Show>
         <Show when={!chatLoading() && messages().length === 0}>
           <div class="col center g12 empty-chat">
             <img src="./mascot.svg" alt="" width="150" />
-            <h3 style={{ 'font-size': '20px' }}>Welcome to #{activeChannel()?.name}!</h3>
-            <span class="t2 fs13">This is the start of the conversation. Say hello — someone is always listening.</span>
+            <h3 style={{ 'font-size': '20px' }}>{t('Welcome to #{channel}!', { channel: activeChannel()?.name ?? '' })}</h3>
+            <span class="t2 fs13">{t('This is the start of the conversation. Say hello — someone is always listening.')}</span>
           </div>
         </Show>
         <For each={ids()}>
@@ -194,7 +195,7 @@ export function ChatArea() {
                 {(current) => (
                   <>
                     <Show when={info()?.day}>{(label) => <div class="daysep">{label()}</div>}</Show>
-                    <Show when={info()?.divider}><div class="daysep new">New messages</div></Show>
+                    <Show when={info()?.divider}><div class="daysep new">{t('New messages')}</div></Show>
                     <MessageItem message={current()} compact={info()?.compact ?? false} onReply={reply} onJump={jumpTo} />
                   </>
                 )}
@@ -206,7 +207,7 @@ export function ChatArea() {
 
       <Show when={unseen() > 0}>
         <div class="jump-wrap">
-          <Button size="sm" variant="primary" icon="down" onClick={toBottom}>{unseen() === 1 ? '1 new message' : `${unseen()} new messages`}</Button>
+          <Button size="sm" variant="primary" icon="down" onClick={toBottom}>{unseen() === 1 ? t('1 new message') : t('{count} new messages', { count: unseen() })}</Button>
         </div>
       </Show>
 
@@ -218,8 +219,8 @@ export function ChatArea() {
       <Show when={dragging()}>
         <div class="drop-overlay" aria-hidden="true">
           <Icon name="clip" size="xl" />
-          <strong>Drop files to attach</strong>
-          <span class="t2 fs13">Up to 10 files, 10 MB each</span>
+          <strong>{t('Drop files to attach')}</strong>
+          <span class="t2 fs13">{t('Up to 10 files, 10 MB each')}</span>
         </div>
       </Show>
     </main>

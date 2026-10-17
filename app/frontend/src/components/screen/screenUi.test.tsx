@@ -10,6 +10,7 @@ import { endedShare, setEndedShare, setIsSharing, setScreenSources, setSharingIn
 import { resetSessionState, setConnectionStatus, setKnownUsers } from '../../stores/sessionStore';
 import { setVoiceParticipants } from '../../stores/voiceStore';
 import { setVolumes } from '../../stores/volumeStore';
+import { DEFAULT_PREFS, setPrefs } from '../../stores/settingsStore';
 import { clearToasts } from '../../ui';
 import { monitorName, SharePickerModal } from './SharePickerModal';
 import { SharerPill } from './SharerPill';
@@ -34,6 +35,7 @@ const sources = {
 };
 
 beforeEach(() => {
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'en' } });
   vi.restoreAllMocks();
   core.invoke.mockClear();
   localStorage.clear();

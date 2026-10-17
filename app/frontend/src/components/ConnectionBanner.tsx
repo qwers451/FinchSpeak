@@ -2,6 +2,7 @@ import { Show } from 'solid-js';
 import { currentUser } from '../stores/authStore';
 import { connectionError, connectionStatus, reconnectInfo } from '../stores/sessionStore';
 import { Icon } from '../ui';
+import { t } from '../i18n';
 
 /** Splash shown while the interface subscribes to the backend (A5). */
 export function Splash() {
@@ -9,7 +10,7 @@ export function Splash() {
     <div class="splash" role="status">
       <img src="./mascot.svg" alt="" width="240" />
       <span class="spin" />
-      <span class="t2">Starting FinchSpeak…</span>
+      <span class="t2">{t('Starting FinchSpeak…')}</span>
     </div>
   );
 }
@@ -26,11 +27,11 @@ export function ConnectionBanner() {
         <span>
           {connectionStatus() === 'reconnecting'
             ? reconnectInfo()
-              ? `Reconnecting… try ${reconnectInfo()!.attempt}, next one in ${reconnectInfo()!.retryInSecs} s`
-              : 'Reconnecting…'
+              ? t('Reconnecting… try {attempt}, next one in {seconds} s', { attempt: reconnectInfo()!.attempt, seconds: reconnectInfo()!.retryInSecs })
+              : t('Reconnecting…')
             : connectionStatus() === 'failed'
-              ? 'Could not reconnect'
-              : 'Connection lost'}
+              ? t('Could not reconnect')
+              : t('Connection lost')}
         </span>
         <Show when={connectionError()}><span class="t3 fs12">{connectionError()}</span></Show>
       </div>

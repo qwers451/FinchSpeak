@@ -6,6 +6,7 @@ import { allVoiceParticipants } from '../../stores/voiceStore';
 import { screenAudioKey, setVolume, volumeFor } from '../../stores/volumeStore';
 import { Button, Icon, Slider, pushToast } from '../../ui';
 import { ENDED_AUTOCLOSE_MS, ViewerMachine, type ViewerSnapshot } from './viewerState';
+import { formatNumber, t } from '../../i18n';
 
 interface VideoChunkPayload {
   is_key: boolean;
@@ -21,7 +22,7 @@ const HUD_HIDE_MS = 3000;
 const INITIAL: ViewerSnapshot = { status: 'connecting', endReason: null, fps: 0, bitrateKbps: 0, width: 0, height: 0, wantKeyFrame: false };
 
 function bitrateText(kbps: number): string {
-  return kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${kbps} kbps`;
+  return kbps >= 1000 ? `${formatNumber(kbps / 1000, 1)} Mbps` : `${formatNumber(kbps)} kbps`;
 }
 
 /** E3/E4: the picture of the share you watch, with HUD, volume, full screen and every state of the stream. */
@@ -157,7 +158,7 @@ function Viewer(props: { peerId: number; userId: string }) {
       if (document.fullscreenElement) await document.exitFullscreen();
       else await frame?.requestFullscreen();
     } catch (err) {
-      pushToast({ kind: 'warn', title: 'Full screen is not available', text: String(err) });
+      pushToast({ kind: 'warn', title: t('Full screen is not available'), text: String(err) });
     }
   };
 
@@ -172,13 +173,13 @@ function Viewer(props: { peerId: number; userId: string }) {
       await video.requestPictureInPicture();
       video.addEventListener('leavepictureinpicture', () => { video.srcObject = null; }, { once: true });
     } catch (err) {
-      pushToast({ kind: 'warn', title: 'Picture-in-picture is not available', text: String(err) });
+      pushToast({ kind: 'warn', title: t('Picture-in-picture is not available'), text: String(err) });
     }
   };
 
   const copyDetails = () => {
     void navigator.clipboard?.writeText(`FinchSpeak viewer\ncodec: ${CODEC}\nVideoDecoder: ${typeof (window as unknown as { VideoDecoder?: unknown }).VideoDecoder}\nagent: ${navigator.userAgent}`);
-    pushToast({ kind: 'success', title: 'Details copied' });
+    pushToast({ kind: 'success', title: t('Details copied') });
   };
 
   const status = () => view().status;
@@ -199,9 +200,9 @@ function Viewer(props: { peerId: number; userId: string }) {
         {(o) => (
           <div class={`viewer-overlay${status() === 'unsupported' ? ' bad' : ''}`} role="status">
             <Show when={o().spin}><span class="spin" /></Show>
-            <strong class="head" style={{ 'font-size': '17px' }}>{o().head}</strong>
-            <span class="t2 fs12" style={{ 'max-width': '300px' }}>{o().body}</span>
-            <Show when={status() === 'unsupported'}><Button size="sm" variant="secondary" icon="copy" onClick={copyDetails}>Copy details</Button></Show>
+            <strong class="head" style={{ 'font-size': '17px' }}>{t(o().head)}</strong>
+            <span class="t2 fs12" style={{ 'max-width': '300px' }}>{t(o().body)}</span>
+            <Show when={status() === 'unsupported'}><Button size="sm" variant="secondary" icon="copy" onClick={copyDetails}>{t('Copy details')}</Button></Show>
           </div>
         )}
       </Show>
@@ -210,18 +211,18 @@ function Viewer(props: { peerId: number; userId: string }) {
         <span class="tag cyan">{name()}</span>
         <Show when={view().width > 0}><span class="tag cyan">{view().width} × {view().height}</span></Show>
         <Show when={status() === 'live' || status() === 'weak'}><span class="tag cyan">{view().fps} fps · {bitrateText(view().bitrateKbps)}</span></Show>
-        <Show when={status() === 'weak'}><span class="tag amber">Weak connection</span></Show>
+        <Show when={status() === 'weak'}><span class="tag amber">{t('Weak connection')}</span></Show>
       </div>
 
       <div class={`viewer-hud bottom${hud() ? ' on' : ''}`}>
         <Icon name={volumeFor(volumeKey()) === 0 ? 'vol-off' : 'vol'} size="sm" />
         <div style={{ width: '120px' }}>
-          <Slider cool label="Volume of the shared sound" min={0} max={2} step={0.05} value={volumeFor(volumeKey())} onChange={(value) => void setVolume(volumeKey(), screenAudioKey(props.peerId), value)} />
+          <Slider cool label={t('Volume of the shared sound')} min={0} max={2} step={0.05} value={volumeFor(volumeKey())} onChange={(value) => void setVolume(volumeKey(), screenAudioKey(props.peerId), value)} />
         </div>
         <span class="grow" />
-        <Show when={pipSupported()}><Button iconOnly size="sm" variant="ghost" icon="pip" label="Picture in picture" onClick={() => void pictureInPicture()} /></Show>
-        <Show when={fullscreenSupported()}><Button iconOnly size="sm" variant="ghost" icon="full" label={fullscreen() ? 'Leave full screen' : 'Full screen'} onClick={() => void toggleFullscreen()} /></Show>
-        <Button size="sm" variant="secondary" icon="x" onClick={() => void stopWatching()}>Stop watching</Button>
+        <Show when={pipSupported()}><Button iconOnly size="sm" variant="ghost" icon="pip" label={t('Picture in picture')} onClick={() => void pictureInPicture()} /></Show>
+        <Show when={fullscreenSupported()}><Button iconOnly size="sm" variant="ghost" icon="full" label={fullscreen() ? t('Leave full screen') : t('Full screen')} onClick={() => void toggleFullscreen()} /></Show>
+        <Button size="sm" variant="secondary" icon="x" onClick={() => void stopWatching()}>{t('Stop watching')}</Button>
       </div>
     </div>
   );
@@ -235,10 +236,10 @@ export function EndedPanel() {
 
 function Ended(props: { name: string; reason: 'stopped' | 'left' | 'disconnected' | 'room-closed' }) {
   const text = () => ({
-    stopped: { head: `${props.name} stopped sharing`, body: 'The room is still going. You can keep talking.' },
-    left: { head: `${props.name} left the room`, body: 'Their screen share ended with the call.' },
-    disconnected: { head: `${props.name} lost the connection`, body: 'Their screen share ended. It starts again if they come back and share.' },
-    'room-closed': { head: 'The voice room was closed', body: 'An admin deleted this room, so the screen share ended.' },
+    stopped: { head: t('{name} stopped sharing', { name: props.name }), body: t('The room is still going. You can keep talking.') },
+    left: { head: t('{name} left the room', { name: props.name }), body: t('Their screen share ended with the call.') },
+    disconnected: { head: t('{name} lost the connection', { name: props.name }), body: t('Their screen share ended. It starts again if they come back and share.') },
+    'room-closed': { head: t('The voice room was closed'), body: t('An admin deleted this room, so the screen share ended.') },
   })[props.reason];
   const timer = setTimeout(closeEndedShare, ENDED_AUTOCLOSE_MS);
   onCleanup(() => clearTimeout(timer));
@@ -247,7 +248,7 @@ function Ended(props: { name: string; reason: 'stopped' | 'left' | 'disconnected
       <div class="viewer-overlay" style={{ background: 'rgba(5, 8, 15, .9)' }}>
         <strong class="head" style={{ 'font-size': '17px' }}>{text().head}</strong>
         <span class="t2 fs12">{text().body}</span>
-        <Button variant="primary" size="sm" onClick={closeEndedShare}>Back to the room</Button>
+        <Button variant="primary" size="sm" onClick={closeEndedShare}>{t('Back to the room')}</Button>
       </div>
     </div>
   );

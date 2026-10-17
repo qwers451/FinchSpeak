@@ -2,6 +2,7 @@ import { beforeEach, expect, it } from 'vitest';
 import {
   applyAppearance, DEFAULT_PREFS, isChannelMuted, muteChannel, parsePrefs, setPrefs, unmuteChannel, updateAppearance, updateNotifications, prefs, TEXT_ZOOM,
 } from './settingsStore';
+import { t } from '../i18n';
 
 beforeEach(() => {
   localStorage.clear();
@@ -21,7 +22,7 @@ it('repairs values of the wrong type or outside their range and keeps the good o
     mutedChannels: { a: 123, b: null, c: 'x' },
   }));
   expect(repaired.notifications).toMatchObject({ mentions: true, sounds: false, soundVolume: 1 });
-  expect(repaired.appearance).toMatchObject({ density: 'comfortable', textSize: 'large' });
+  expect(repaired.appearance).toMatchObject({ theme: 'claude', language: 'ru', density: 'comfortable', textSize: 'large' });
   expect(repaired.mutedChannels).toEqual({ a: 123, b: null });
 });
 
@@ -48,8 +49,30 @@ it('a channel can be muted for a while, for good, and turned back on', () => {
 
 it('the looks are put on the page', () => {
   const root = document.createElement('div');
-  applyAppearance({ density: 'compact', textSize: 'large', reduceMotion: true, showMembers: true, closeToTray: true }, root);
+  applyAppearance({ ...DEFAULT_PREFS.appearance, density: 'compact', textSize: 'large', reduceMotion: true, theme: 'custom', language: 'en' }, root);
   expect(root.dataset.density).toBe('compact');
+  expect(root.dataset.theme).toBe('custom');
+  expect(root.lang).toBe('en');
   expect(root.dataset.reduceMotion).toBe('true');
   expect(root.style.getPropertyValue('--zoom')).toBe(String(TEXT_ZOOM.large));
+});
+
+it('migrates old appearance preferences without losing saved settings', () => {
+  const migrated = parsePrefs(JSON.stringify({ appearance: { density: 'compact', showMembers: false }, notifications: { sounds: false }, mutedChannels: { help: null } }));
+  expect(migrated.appearance).toMatchObject({ theme: 'claude', language: 'ru', density: 'compact', showMembers: false });
+  expect(migrated.notifications.sounds).toBe(false);
+  expect(migrated.mutedChannels).toEqual({ help: null });
+});
+
+it('repairs invalid theme and language while preserving valid choices', () => {
+  expect(parsePrefs(JSON.stringify({ appearance: { theme: 'light', language: 'fr', density: 'compact' } })).appearance)
+    .toMatchObject({ theme: 'claude', language: 'ru', density: 'compact' });
+});
+
+it('translates reactive source strings and interpolates dynamic values', () => {
+  setPrefs((current) => ({ ...current, appearance: { ...current.appearance, language: 'ru' } }));
+  expect(t('Settings')).toBe('Настройки');
+  expect(t('Install {version}', { version: '1.2.0' })).toBe('Установить 1.2.0');
+  setPrefs((current) => ({ ...current, appearance: { ...current.appearance, language: 'en' } }));
+  expect(t('Settings')).toBe('Settings');
 });

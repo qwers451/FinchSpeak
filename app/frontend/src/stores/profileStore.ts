@@ -2,6 +2,7 @@ import { createSignal } from 'solid-js';
 import { api } from '../services/api';
 import { currentUser, setCurrentUser } from './authStore';
 import { setAppError } from './notificationStore';
+import { t } from '../i18n';
 import type { UserStatus } from '../types';
 
 export const [profileOpen, setProfileOpen] = createSignal(false);
@@ -20,7 +21,7 @@ export async function saveDisplayName(name: string): Promise<boolean> {
 
 export async function savePassword(current: string, next: string, again: string): Promise<boolean> {
   if (next !== again) {
-    setAppError('The new passwords do not match');
+    setAppError(t('The new passwords do not match'));
     return false;
   }
   try {
@@ -35,6 +36,7 @@ export async function savePassword(current: string, next: string, again: string)
 
 export const STATUS_TEXT_MAX = 80;
 export const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
+export type AvatarSaveFailure = { kind: 'local' | 'external'; message: string };
 
 /** Choose how you appear to others, with an optional line of text. */
 export async function saveStatus(status: UserStatus, text: string): Promise<boolean> {
@@ -48,14 +50,14 @@ export async function saveStatus(status: UserStatus, text: string): Promise<bool
 }
 
 /** Send a picture (already cropped by the dialog) to the server; returns the reason when it fails. */
-export async function saveAvatar(bytes: Uint8Array, contentType: string): Promise<string | null> {
-  if (bytes.length > MAX_AVATAR_BYTES) return 'The picture must be smaller than 2 MB';
+export async function saveAvatar(bytes: Uint8Array, contentType: string): Promise<AvatarSaveFailure | null> {
+  if (bytes.length > MAX_AVATAR_BYTES) return { kind: 'local', message: 'The picture must be smaller than 2 MB' };
   try {
     const user = await api.uploadAvatar(Array.from(bytes), contentType);
     setCurrentUser({ ...(currentUser() ?? user), avatar_url: user.avatar_url });
     return null;
   } catch (err) {
-    return String(err).replace(/^Error:\s*/, '');
+    return { kind: 'external', message: String(err).replace(/^Error:\s*/, '') };
   }
 }
 

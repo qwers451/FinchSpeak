@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { Message } from '../../types';
 import { buildRows, dayLabel, splitMentions } from './chatFormat';
+import { DEFAULT_PREFS, setPrefs } from '../../stores/settingsStore';
+
+beforeEach(() => setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'en' } }));
 
 const at = (iso: string) => Math.floor(new Date(iso).getTime() / 1000);
 const msg = (id: string, author: string, iso: string, extra: Partial<Message> = {}): Message => ({

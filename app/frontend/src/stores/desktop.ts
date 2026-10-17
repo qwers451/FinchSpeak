@@ -121,7 +121,7 @@ export function startDesktopSync() {
   createRoot(() => {
     createEffect(() => {
       const state = trayStateNow();
-      void api.setTrayState(state).catch(() => {});
+      void api.setTrayState(state, prefs().appearance.language).catch(() => {});
     });
     createEffect(() => {
       void api.setCloseToTray(prefs().appearance.closeToTray).catch(() => {});

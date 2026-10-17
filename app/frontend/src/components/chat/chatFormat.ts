@@ -1,4 +1,5 @@
 import type { Message } from '../../types';
+import { locale, t } from '../../i18n';
 
 /** One line of the message list. */
 export type Row =
@@ -19,15 +20,15 @@ function dayStart(timestamp: number): number {
 /** "Today", "Yesterday", or "Mon, 14 Oct" (with the year when it is not this year). */
 export function dayLabel(timestamp: number, now = Date.now()): string {
   const days = Math.round((dayStart(now / 1000) - dayStart(timestamp)) / 86_400_000);
-  if (days === 0) return 'Today';
-  if (days === 1) return 'Yesterday';
+  if (days === 0) return t('Today');
+  if (days === 1) return t('Yesterday');
   const date = new Date(seconds(timestamp) * 1000);
   const sameYear = date.getFullYear() === new Date(now).getFullYear();
-  return date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) });
+  return date.toLocaleDateString(locale() === 'ru' ? 'ru-RU' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) });
 }
 
 export function clock(timestamp: number): string {
-  return new Date(seconds(timestamp) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(seconds(timestamp) * 1000).toLocaleTimeString(locale() === 'ru' ? 'ru-RU' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
 export interface RowInfo {

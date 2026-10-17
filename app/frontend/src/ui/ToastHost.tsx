@@ -2,6 +2,7 @@ import { createEffect, For, Show } from 'solid-js';
 import { appError, setAppError } from '../stores/notificationStore';
 import { Icon, type IconName } from './Icon';
 import { dismissToast, pushToast, toasts, type ToastKind } from './toastStore';
+import { t } from '../i18n';
 
 const ICON: Record<ToastKind, IconName> = { info: 'info', success: 'check', warn: 'warn', error: 'warn' };
 
@@ -16,7 +17,7 @@ export function ToastHost() {
   });
 
   return (
-    <div class="toast-host" role="region" aria-label="Notifications">
+    <div class="toast-host" role="region" aria-label={t('Notifications')}>
       <For each={toasts()}>
         {(toast) => (
           <div class={`toast ${toast.kind === 'info' ? '' : toast.kind}`} role={toast.kind === 'error' ? 'alert' : 'status'}>
@@ -36,12 +37,12 @@ export function ToastHost() {
                       dismissToast(toast.id);
                     }}
                   >
-                    {action().label}
+                    {t(action().label)}
                   </button>
                 )}
               </Show>
             </div>
-            <button type="button" class="icon-close" aria-label="Dismiss" onClick={() => dismissToast(toast.id)}>
+            <button type="button" class="icon-close" aria-label={t('Dismiss')} onClick={() => dismissToast(toast.id)}>
               <Icon name="x" size="sm" />
             </button>
           </div>
