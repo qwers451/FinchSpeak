@@ -121,3 +121,16 @@ it('enhancement false survives restart and rejected changes preserve storage', a
   expect(localStorage.getItem('finchspeak.voiceSettings')).toBe(saved);
   expect(appError()).toContain('unavailable');
 });
+
+it('serializes rapid changes and merges them after the preceding acknowledgement', async () => {
+  let acknowledge!: () => void;
+  const send = vi.spyOn(api, 'setVoiceSettings').mockImplementationOnce(() => new Promise<void>((resolve) => { acknowledge = resolve; })).mockResolvedValue();
+  const first = changeVoiceSettings({ input_gain: 2 });
+  const second = changeVoiceSettings({ voice_enhancement: false });
+  await Promise.resolve();
+  expect(send).toHaveBeenCalledTimes(1);
+  acknowledge();
+  await Promise.all([first, second]);
+  expect(send).toHaveBeenLastCalledWith({ ...DEFAULT_VOICE_SETTINGS, input_gain: 2, voice_enhancement: false });
+  expect(voiceSettings()).toMatchObject({ input_gain: 2, voice_enhancement: false });
+});

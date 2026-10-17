@@ -250,6 +250,7 @@ export interface SessionEvents {
   'server-error': { code: number; message: string };
   'audio-device-lost': null;
   'audio-device-failed': null;
+  'audio-processing-failed': { message: string };
   'audio-device-fallback': { kind: 'input' | 'output'; wanted: string };
 }
 

@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import * as events from './sessionEvents';
 import * as session from '../stores/sessionStore';
-import { allVoiceParticipants, setActiveVoiceChannel, voiceParticipants } from '../stores/voiceStore';
+import { allVoiceParticipants, setActiveVoiceChannel, voiceParticipants, isLocalSpeaking, setIsLocalSpeaking, micTestPhase, setMicTestPhase, micLevelDb, setMicLevelDb } from '../stores/voiceStore';
 import { channels } from '../stores/chatStore';
 import { api } from './api';
 import { messages, setActiveChannel, setMessages } from '../stores/chatStore';
@@ -125,4 +125,20 @@ it('AUD-019 exposes connection failures and server errors and disposes listeners
   dispose();
   expect(transport.callbacks.size).toBe(0);
   expect(transport.disposers.every((unlisten) => unlisten.mock.calls.length === 1)).toBe(true);
+});
+
+
+it('reports native processing failure, clears local audio activity, and unsubscribes', async () => {
+  const { dispose } = await events.subscribeSessionEvents();
+  setIsLocalSpeaking(true);
+  setMicTestPhase('recording');
+  setMicLevelDb(-12);
+  emit('audio-processing-failed', { message: 'WebRTC capture failed (status -1001)' });
+  expect(session.appError()).toContain('WebRTC capture failed');
+  expect(session.appError()).toContain('Rejoin');
+  expect(isLocalSpeaking()).toBe(false);
+  expect(micTestPhase()).toBe('idle');
+  expect(micLevelDb()).toBeLessThanOrEqual(-70);
+  dispose();
+  expect(transport.callbacks.has('audio-processing-failed')).toBe(false);
 });

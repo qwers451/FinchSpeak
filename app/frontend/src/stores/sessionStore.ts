@@ -164,6 +164,12 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   },
   'server-error': (error) => setAppError(`${error.code}: ${error.message}`),
   'audio-device-lost': () => setAppError('An audio device was disconnected; reopening the audio devices...'),
+  'audio-processing-failed': ({ message }) => {
+    setIsLocalSpeaking(false);
+    handleMicTest({ phase: 'done' });
+    handleMicLevel({ db: -120 });
+    setAppError(`Voice processing stopped: ${message}. Rejoin the voice channel to retry.`);
+  },
   'audio-device-failed': () => setAppError('The audio devices keep failing. Check them, then rejoin the voice channel.'),
   'audio-device-fallback': ({ kind, wanted }) =>
     setAppError(`"${wanted}" is not available; using the system default ${kind} device instead.`),

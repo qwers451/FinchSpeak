@@ -158,21 +158,31 @@ function saveVoice() {
   }
 }
 
-/** Change some microphone settings; applied at once and remembered. */
-export async function changeVoiceSettings(change: Partial<VoiceSettings>) {
-  const next = { ...voiceSettings(), ...change };
-  if (next.push_to_talk && !pushToTalkKey()) {
-    setAppError('Choose a push-to-talk key first');
-    return;
-  }
-  try {
-    await api.setVoiceSettings(next);
-  } catch (err) {
-    setAppError(String(err));
-    return;
-  }
-  setVoiceSettings(next);
-  saveVoice();
+// Serialize complete settings snapshots so a slow acknowledgement cannot lose a later change.
+let settingsWrite: Promise<void> = Promise.resolve();
+function queueSettingsWrite(action: () => Promise<void>): Promise<void> {
+  const pending = settingsWrite.then(action);
+  settingsWrite = pending.catch(() => {});
+  return pending;
+}
+
+/** Change microphone settings; publish/persist only after backend acknowledgement. */
+export function changeVoiceSettings(change: Partial<VoiceSettings>) {
+  return queueSettingsWrite(async () => {
+    const next = { ...voiceSettings(), ...change };
+    if (next.push_to_talk && !pushToTalkKey()) {
+      setAppError('Choose a push-to-talk key first');
+      return;
+    }
+    try {
+      await api.setVoiceSettings(next);
+    } catch (err) {
+      setAppError(String(err));
+      return;
+    }
+    setVoiceSettings(next);
+    saveVoice();
+  });
 }
 
 export async function choosePushToTalkKey(key: string | null) {
@@ -198,18 +208,20 @@ export function shortcutFromEvent(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' 
 }
 
 /** Push the remembered microphone settings and key to the backend (it forgets them on restart). */
-export async function restoreVoiceSettings() {
-  const saved = readSavedVoice();
-  if (!saved) return;
-  try {
-    if (saved.key) await api.setPushToTalkKey(saved.key);
-    setPushToTalkKey(saved.key);
-    const settings = { ...saved.settings, key_down: false, push_to_talk: saved.settings.push_to_talk && !!saved.key };
-    await api.setVoiceSettings(settings);
-    setVoiceSettings(settings);
-  } catch (err) {
-    setAppError(String(err));
-  }
+export function restoreVoiceSettings() {
+  return queueSettingsWrite(async () => {
+    const saved = readSavedVoice();
+    if (!saved) return;
+    try {
+      if (saved.key) await api.setPushToTalkKey(saved.key);
+      setPushToTalkKey(saved.key);
+      const settings = { ...saved.settings, key_down: false, push_to_talk: saved.settings.push_to_talk && !!saved.key };
+      await api.setVoiceSettings(settings);
+      setVoiceSettings(settings);
+    } catch (err) {
+      setAppError(String(err));
+    }
+  });
 }
 
 export async function joinVoice(channel: Channel) {

@@ -169,7 +169,7 @@ pub async fn get_voice_settings(state: State<'_, AppState>) -> Result<VoiceSetti
     Ok(state.voice_settings.snapshot())
 }
 
-/// Microphone volume, speech threshold, push-to-talk on/off and "hear myself".
+/// Microphone volume, speech threshold, voice enhancement, push-to-talk and monitoring.
 #[tauri::command]
 pub async fn set_voice_settings(settings: VoiceSettingsDto, state: State<'_, AppState>) -> Result<(), String> {
     state.voice_settings.apply(&settings);
