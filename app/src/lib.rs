@@ -12,15 +12,19 @@ use state::AppState;
 use tauri::Manager;
 
 /// Load pinned server fingerprints from `<app data dir>/known_servers.txt`.
-fn load_known_servers(app: &tauri::App) {
-    let state = app.state::<AppState>();
-    let path = match app.path().app_data_dir() {
-        Ok(dir) => dir.join("known_servers.txt"),
-        Err(e) => {
-            tracing::error!("No app data dir, server fingerprints will not persist: {e}");
-            return;
+fn profile_directory(default: std::path::PathBuf, explicit: Option<std::ffi::OsString>) -> std::io::Result<std::path::PathBuf> {
+    match explicit {
+        None => Ok(default),
+        Some(value) => {
+            let path = std::path::PathBuf::from(value);
+            if !path.is_absolute() { return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "FINCHSPEAK_PROFILE_DIR must be absolute")); }
+            Ok(path)
         }
-    };
+    }
+}
+fn load_known_servers(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let state = app.state::<AppState>();
+    let path = profile_directory(app.path().app_data_dir()?, std::env::var_os("FINCHSPEAK_PROFILE_DIR"))?.join("known_servers.txt");
     match finch_client_core::tofu::load_fingerprints(&path) {
         Ok(known) => {
             for (host, fingerprint) in known {
@@ -30,6 +34,7 @@ fn load_known_servers(app: &tauri::App) {
         Err(e) => tracing::error!("Failed to read {path:?}: {e}"),
     }
     *state.known_servers_path.blocking_write() = Some(path);
+    Ok(())
 }
 
 pub fn run() {
@@ -60,7 +65,7 @@ pub fn run() {
         .manage(state)
         .setup(|app| {
             tracing::info!("Tauri setup initialized");
-            load_known_servers(app);
+            load_known_servers(app)?;
             if let Err(e) = tray::setup(app.handle()) {
                 tracing::warn!("Could not create the tray icon: {e}");
             }
@@ -167,5 +172,19 @@ pub fn run() {
         .run(tauri::generate_context!())
     {
         tracing::error!("Error while running FinchSpeak application: {e}");
+    }
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::*;
+    #[test]
+    fn explicit_profile_is_absolute_and_never_falls_back() {
+        let default = std::path::PathBuf::from(r"C:\default");
+        assert_eq!(profile_directory(default.clone(), None).unwrap(), default);
+        let isolated = std::ffi::OsString::from(r"C:\QA Ж\a");
+        assert_eq!(profile_directory(default.clone(), Some(isolated.clone())).unwrap(), std::path::PathBuf::from(isolated));
+        assert!(profile_directory(default.clone(), Some("relative".into())).is_err());
+        assert!(profile_directory(default, Some("".into())).is_err());
     }
 }

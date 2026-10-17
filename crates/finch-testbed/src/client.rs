@@ -68,6 +68,29 @@ pub async fn connect_to(
 }
 
 impl TestClient {
+    /// Log in only after the operator-supplied certificate fingerprint has been verified.
+    /// HTTP and QUIC share one strict pin store; no TOFU bootstrap or trust bypass.
+    pub async fn connect_external(api_url: &str, quic_addr: SocketAddr, username: &str,
+        password: &str, expected_fingerprint: &str) -> anyhow::Result<Self> {
+        let compact = expected_fingerprint.replace(':', "");
+        anyhow::ensure!(compact.len() == 64 && compact.bytes().all(|b| b.is_ascii_hexdigit()), "expected SHA256 fingerprint required");
+        let canonical = compact.as_bytes().as_chunks::<2>().0.iter().map(|b| std::str::from_utf8(b).unwrap().to_uppercase()).collect::<Vec<_>>().join(":");
+        // ApiClient validates the entire HTTPS origin before any request.
+        let authority = api_url.strip_prefix("https://").ok_or_else(|| anyhow::anyhow!("HTTPS required"))?.trim_end_matches('/');
+        let hostname = if let Some(rest) = authority.strip_prefix('[') {
+            rest.split(']').next().unwrap_or("")
+        } else { authority.split(':').next().unwrap_or("") }.to_lowercase();
+        let pins = Arc::new(DashMap::new());
+        pins.insert(hostname.clone(), canonical);
+        let mut api = ApiClient::with_tofu(api_url, pins.clone())?;
+        api.verify_trust().await?;
+        let auth = api.login(username, password).await?;
+        api.set_token(auth.token.clone());
+        let (session, events) = connect(ConnectParams { quic_addr, hostname,
+            token: auth.token, require_known_fingerprint: true }, pins).await?;
+        Ok(Self { api, session, user:auth.user, events, datagrams:VecDeque::new(), recent:VecDeque::new() })
+    }
+
     /// Register `username` (display name = username) and open a QUIC session.
     pub async fn register(server: &TestServer, username: &str) -> anyhow::Result<Self> {
         Self::register_via(server, username, server.quic_addr).await
@@ -250,3 +273,4 @@ impl TestClient {
         }
     }
 }
+
