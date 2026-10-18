@@ -33,6 +33,14 @@ use crate::capture_privacy::{CaptureClock, CapturedSample, InputBoundary};
 /// Capacity of lock-free ring buffers (16384 samples ~ 341 ms at 48 kHz).
 const RING_BUFFER_CAPACITY: usize = 16384;
 
+fn playback_headroom(chunk: usize, callback_frames: usize) -> usize {
+    // Keep one processing frame beyond the largest observed hardware request.
+    // Small callbacks retain the existing 60 ms target. Bound the target so a
+    // complete resampled frame still fits in the ring before the next callback.
+    (chunk * 3).max(callback_frames.saturating_add(chunk))
+        .min(RING_BUFFER_CAPACITY.saturating_sub(chunk))
+}
+
 /// If the playout reference ring is this close to full, the output callback has started dropping samples.
 const REFERENCE_OVERFLOW_MARGIN: usize = 256;
 
@@ -297,12 +305,16 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 let mut playback_stream: Option<Stream> = None;
                 let mut output_resampler: Option<OutputResampler> = None;
                 let mut output_sample_rate = 48000u32;
+                let output_callback_frames = Arc::new(AtomicU32::new(0));
 
                 let (output_device, output_choice) = open_output_device(selection.output.as_deref());
                 report_fallback("output", &output_choice, &app_handle);
                 if let Some(device) = output_device {
                     match device.default_output_config() {
                         Ok(config) => {
+                            info!(device = ?device.name(), rate = config.sample_rate().0,
+                                channels = config.channels(), format = ?config.sample_format(),
+                                "Audio output configuration");
                             output_sample_rate = config.sample_rate().0;
                             reference_feeder = match ReferenceFeeder::new(output_sample_rate) {
                                 Ok(feeder) => Some(feeder),
@@ -314,6 +326,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             let channels = config.channels() as usize;
                             let is_deafened_ref = state.is_deafened.clone();
                             let latency_ref = output_latency_ms.clone();
+                            let callback_frames_ref = output_callback_frames.clone();
 
                             output_resampler = match OutputResampler::new(output_sample_rate) {
                                 Ok(resampler) => Some(resampler),
@@ -338,6 +351,10 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     if channels == 0 {
                                         return;
                                     }
+                                    callback_frames_ref.fetch_max(
+                                        (data.len() / channels).min(u32::MAX as usize) as u32,
+                                        Ordering::Relaxed,
+                                    );
                                     if is_deafened_ref.load(Ordering::Relaxed) {
                                         render_deafened(data, channels, &mut playback_cons, &mut reference_prod);
                                         return;
@@ -387,6 +404,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 if let Some(device) = input_device {
                     match device.default_input_config() {
                         Ok(config) => {
+                            info!(device = ?device.name(), rate = config.sample_rate().0,
+                                channels = config.channels(), format = ?config.sample_format(),
+                                "Audio input configuration");
                             let sample_rate = config.sample_rate().0;
                             let channels = config.channels() as usize;
 
@@ -483,7 +503,6 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 let mut capture_raw_buf = Vec::with_capacity(4096);
 
                 let target_output_chunk = ((output_sample_rate as usize * 20) / 1000).max(1);
-                let target_playback_headroom = target_output_chunk * 3;
 
                 // 4. Real-time active worker processing loop
                 while is_running.load(Ordering::SeqCst) {
@@ -557,6 +576,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     // A. Playback processing (mixer -> OutputResampler -> playback_prod)
                     if playback_stream.is_some() {
                         if let Some(resampler) = &mut output_resampler {
+                            let target_playback_headroom = playback_headroom(target_output_chunk,
+                                output_callback_frames.load(Ordering::Relaxed) as usize);
                             while playback_prod.occupied_len() < target_playback_headroom
                                 && playback_prod.vacant_len() >= target_output_chunk
                             {
@@ -819,6 +840,33 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn playback_headroom_keeps_small_callbacks_low_and_large_requests_bounded() {
+        assert_eq!(playback_headroom(960, 480), 2880);
+        assert_eq!(playback_headroom(960, 4800), 5760);
+        assert_eq!(playback_headroom(960, usize::MAX), RING_BUFFER_CAPACITY - 960);
+    }
+
+    #[test]
+    fn playback_queue_supplies_large_device_callbacks_without_periodic_silence() {
+        for rate in [8_000usize, 16_000, 44_100, 48_000, 96_000] {
+            let chunk = rate / 50;
+            for callback in [rate / 100, rate / 10] {
+                let (mut producer, mut consumer) = HeapRb::<f32>::new(RING_BUFFER_CAPACITY).split();
+                for _ in 0..5 {
+                    while producer.occupied_len() < playback_headroom(chunk, callback)
+                        && producer.vacant_len() >= chunk {
+                        for _ in 0..chunk { producer.try_push(0.25).unwrap(); }
+                    }
+                    for _ in 0..callback {
+                        assert_eq!(consumer.try_pop(), Some(0.25),
+                            "{rate} Hz callback of {callback} frames must not insert silence");
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn mic_test_records_then_plays_every_frame_once() {
