@@ -109,9 +109,9 @@ export function CertChangedModal() {
               <span class="fs13 t2">{t('Ask the server admin to read out the fingerprint shown on the Server page. Only continue if it matches the red one above.')}</span>
               <Field label={t('To continue anyway, type the server name')} value={typed()} onInput={setTyped} placeholder={current().hostname} />
             </div>
-            <div class="row g12 between">
+            <div class="row g12 between dialog-actions">
               <Button variant="ghost" icon="copy" onClick={copy}>{t('Copy details')}</Button>
-              <div class="row g12">
+              <div class="row g12 dialog-actions-primary">
                 <span data-autofocus style={{ display: 'contents' }}><Button variant="primary" onClick={close}>{t('Disconnect — keep me safe')}</Button></span>
                 <Button variant="danger-ghost" disabled={!matches()} onClick={() => void trustNew()}>{t('Trust the new certificate')}</Button>
               </div>

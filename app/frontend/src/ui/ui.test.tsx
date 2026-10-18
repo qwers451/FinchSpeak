@@ -85,6 +85,17 @@ describe('Button / Toggle / Slider', () => {
 });
 
 describe('Modal', () => {
+  it('offers an explicit close control while keeping initial focus on the content', async () => {
+    const onClose = vi.fn();
+    const host = mount(() => <Modal open onClose={onClose} title="Profile"><input aria-label="Name" /></Modal>);
+    await Promise.resolve();
+    expect(document.activeElement).toBe(host.querySelector('input'));
+    const close = host.querySelector<HTMLButtonElement>('.modal-heading button')!;
+    expect(close.getAttribute('aria-label')).toBe('Close');
+    close.click();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it('closes on Esc and gives the dialog an accessible name', () => {
     const onClose = vi.fn();
     const host = mount(() => (
@@ -107,6 +118,7 @@ describe('Modal', () => {
     ));
     host.querySelector('.overlay')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(onClose).not.toHaveBeenCalled();
+    expect(host.querySelector('.modal-heading button')).toBeNull();
   });
 
   it('ConfirmDialog reports both answers', () => {

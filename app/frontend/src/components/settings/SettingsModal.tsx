@@ -92,7 +92,7 @@ function ProfilePage() {
 
       <form class="col g12" onSubmit={async (e) => { e.preventDefault(); await saveDisplayName(name()); }}>
         <Field label={t('Display name')} value={name()} onInput={setName} help={t('Shown to everyone. Up to 32 characters.')} />
-        <div class="row g12">
+        <div class="row g12 profile-meta">
           <span class="t3 fs12 grow">{t('Username')} <strong class="t2">@{me()?.username}</strong> · {t('cannot be changed')}</span>
           <Show when={me()?.role === 'admin'}><span class="tag admin">{t('Admin')}</span></Show>
           <Button type="submit" size="sm" variant="primary" disabled={!name().trim() || name().trim() === me()?.display_name}>{t('Save name')}</Button>

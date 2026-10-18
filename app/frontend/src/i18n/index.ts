@@ -86,7 +86,7 @@ export const ru: Readonly<Record<string, string>> = {
   'Server details': 'Сведения о сервере', 'Start sharing': 'Начать демонстрацию', 'Stop sharing': 'Остановить демонстрацию',
   'Rename channel': 'Переименовать канал', 'New voice channel': 'Новый голосовой канал', 'New text channel': 'Новый текстовый канал', 'Channel name': 'Название канала', 'Quiet corner': 'Тихий уголок', 'general': 'общий',
   'Text channels': 'Текстовые каналы', 'Create text channel': 'Создать текстовый канал', 'Voice channels': 'Голосовые каналы', 'Create voice channel': 'Создать голосовой канал',
-  'Voice connected': 'Голосовое подключение активно', 'Voice disconnected': 'Голосовое подключение прервано', 'Unmute': 'Включить микрофон', 'Mute': 'Выключить микрофон', 'Undeafen': 'Включить звук', 'Deafen': 'Выключить звук',
+  'Voice connected': 'Голос подключён', 'Voice disconnected': 'Голос отключён', 'Unmute': 'Включить микрофон', 'Mute': 'Выключить микрофон', 'Undeafen': 'Включить звук', 'Deafen': 'Выключить звук',
   'Profile and settings': 'Профиль и настройки', 'Administration': 'Администрирование', 'Move up': 'Переместить вверх', 'Move down': 'Переместить вниз', 'Rename': 'Переименовать', 'Delete': 'Удалить',
   'Move {channel} up': 'Переместить канал {channel} вверх', 'Move {channel} down': 'Переместить канал {channel} вниз', 'Rename {channel}': 'Переименовать канал {channel}', 'Delete {channel}': 'Удалить канал {channel}',
   'You were mentioned': 'Вас упомянули', 'Unread messages': 'Непрочитанные сообщения', 'Deafened': 'Звук выключен', 'Sharing screen': 'Показывает экран', 'Disconnect from voice': 'Отключиться от голосовой комнаты', 'Disconnect': 'Отключиться',

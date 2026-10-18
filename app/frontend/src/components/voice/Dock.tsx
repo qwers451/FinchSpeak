@@ -18,7 +18,7 @@ function Ctl(props: CtlProps) {
 export function Dock(props: { onShare: () => void; onSettings: () => void }) {
   const talking = () => voiceSettings().push_to_talk && voiceSettings().key_down;
   return (
-    <div class="row center g16" style={{ padding: '0 20px 20px' }}>
+    <div class="row center g16 voice-controls">
       <Show when={voiceSettings().push_to_talk && pushToTalkKey()}>
         <span class="pill" style={talking() ? { 'border-color': 'var(--cyan)', color: 'var(--cyan)' } : undefined} role="status">
           <span class="dot" style={{ background: talking() ? 'var(--cyan)' : 'var(--text-3)' }} />

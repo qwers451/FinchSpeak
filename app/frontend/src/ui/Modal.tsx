@@ -39,7 +39,7 @@ export function Modal(props: ModalProps) {
     if (!props.open) return;
     const previous = document.activeElement as HTMLElement | null;
     queueMicrotask(() => {
-      const target = card?.querySelector<HTMLElement>('[data-autofocus] button, [data-autofocus]') ?? card?.querySelector<HTMLElement>(FOCUSABLE);
+      const target = card?.querySelector<HTMLElement>('[data-autofocus] button, [data-autofocus]') ?? Array.from(card?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []).find((element) => !element.closest('.modal-heading'));
       target?.focus();
     });
     onCleanup(() => previous?.focus?.());
@@ -87,9 +87,12 @@ export function Modal(props: ModalProps) {
             ...(props.tone === 'danger' ? { 'border-color': 'var(--red)', 'border-width': '2px' } : {}),
           }}
         >
-          <h2 id={titleId} class="modal-title">
-            {props.title}
-          </h2>
+          <div class="modal-heading">
+            <h2 id={titleId} class="modal-title">{props.title}</h2>
+            <Show when={props.dismissable !== false}>
+              <Button iconOnly size="sm" variant="ghost" icon="x" label={t('Close')} onClick={props.onClose} />
+            </Show>
+          </div>
           {props.children}
         </div>
       </div>

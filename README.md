@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/qwers451/FinchSpeak/releases">Скачать</a> ·
-  <a href="docs/RELEASE-NOTES-1.2.0.md">Что нового в 1.2.0</a> ·
+  <a href="docs/RELEASE-NOTES-1.2.1.md">Что нового в 1.2.1</a> ·
   <a href="docs/RELEASE-CHECKLIST.md">Проверка на двух ПК</a>
 </p>
 
@@ -29,7 +29,7 @@ FinchSpeak работает на вашем сервере: вы запуска�
 
 ## Запуск на двух компьютерах
 
-Скачайте файлы **из одного выпуска** на странице [GitHub Releases](https://github.com/qwers451/FinchSpeak/releases): `FinchSpeak-server-windows.zip` для серверного ПК и `FinchSpeak_1.2.0_x64-setup.exe` для каждого клиента. Архив `FinchSpeak-windows.zip` содержит и сервер, и переносимый клиент.
+Скачайте файлы **из одного выпуска** на странице [GitHub Releases](https://github.com/qwers451/FinchSpeak/releases): `FinchSpeak-server-windows.zip` для серверного ПК и `FinchSpeak_1.2.1_x64-setup.exe` для каждого клиента. Архив `FinchSpeak-windows.zip` содержит и сервер, и переносимый клиент.
 
 1. На серверном ПК нажмите «Извлечь всё» для серверного ZIP. Оставьте файлы вместе в папке, доступной для записи, и запустите `Run_Server.bat` **из распакованной папки**. Окно сервера должно оставаться открытым.
 2. Разрешите в брандмауэре **TCP 8443** (вход и файлы) и **UDP 4433** (голос и видео). Для теста в одной локальной сети узнайте IP-адрес серверного ПК командой `ipconfig`. Доступ через интернет дополнительно требует проброса этих портов на роутере.
@@ -75,7 +75,7 @@ cargo test --workspace -- --test-threads=1
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Клиент — Tauri 2 и SolidJS; сервер и медиатракт написаны на Rust. Исходный код компонентов находится в [`app`](app) и [`crates`](crates). Результаты автоматической проверки выпуска 1.2.0 и границы ручной проверки приведены в [QA-1.2.0.md](docs/QA-1.2.0.md).
+Клиент — Tauri 2 и SolidJS; сервер и медиатракт написаны на Rust. Исходный код компонентов находится в [`app`](app) и [`crates`](crates). Проверка интерфейса описана в [QA-UI-1.2.1.md](docs/QA-UI-1.2.1.md), проверка аудио и предыдущего выпуска — в [QA-1.2.0.md](docs/QA-1.2.0.md).
 
 ## Лицензия
 

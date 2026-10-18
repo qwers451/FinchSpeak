@@ -51,19 +51,19 @@ function MembersTab(props: { isAdmin: boolean }) {
   return (
     <>
       <div class="tbl-wrap">
-        <table class="tbl">
+        <table class="tbl members-table">
           <thead><tr><th>{t('Member')}</th><th>{t('Role')}</th><th>{t('State')}</th><th>{t('Last seen')}</th><th /></tr></thead>
           <tbody>
             <For each={members()}>
               {(member) => (
                 <tr>
-                  <td>
+                  <td class="member-name">
                     <div class="row g12">
                       <Avatar name={member.display_name} id={member.id} size={32} />
                       <div class="col" style={{ 'min-width': 0 }}><strong class="fs13 trunc">{member.display_name}</strong><span class="t3 fs12">@{member.username}</span></div>
                     </div>
                   </td>
-                  <td>
+                  <td data-label={t('Role')}>
                     <Show when={props.isAdmin && member.id !== me()} fallback={<span class={`tag ${member.role === 'admin' ? 'admin' : member.role === 'moderator' ? 'violet' : ''}`}>{t(member.role === 'admin' ? 'Admin' : member.role === 'moderator' ? 'Moderator' : 'Member')}</span>}>
                       <div class="row g4">
                         <For each={[['member', 'Member'], ['moderator', 'Moderator'], ['admin', 'Admin']] as const}>
@@ -75,12 +75,12 @@ function MembersTab(props: { isAdmin: boolean }) {
                       </div>
                     </Show>
                   </td>
-                  <td>
+                  <td data-label={t('State')}>
                     <Show when={member.banned} fallback={<span class={member.online ? 'tt' : 't3'}>{member.online ? t('Online') : t('Offline')}</span>}>
                       <span class="tag red">{member.banned_until ? t('Banned until {when}', { when: when(member.banned_until) }) : t('Banned')}</span>
                     </Show>
                   </td>
-                  <td class="t2 fs13">{member.online ? t('now') : ago(member.last_seen)}</td>
+                  <td class="t2 fs13" data-label={t('Last seen')}>{member.online ? t('now') : ago(member.last_seen)}</td>
                   <td>
                     <Show when={may(member)}>
                       <div class="row g8" style={{ 'justify-content': 'flex-end' }}>
@@ -136,7 +136,7 @@ function InvitesTab() {
   return (
     <div class="col g16">
       <span class="t2 fs13">{t('People need a code to register. Give it to them yourself; it stops working after its uses or time run out.')}</span>
-      <div class="row g12" style={{ 'align-items': 'flex-end' }}>
+      <div class="row g12 invite-form" style={{ 'align-items': 'flex-end' }}>
         <div style={{ width: '120px' }}><Field label={t('Uses')} value={maxUses()} onInput={setMaxUses} /></div>
         <div style={{ width: '160px' }}><Field label={t('Valid for (hours)')} value={hours()} onInput={setHours} /></div>
         <Button variant="primary" icon="ticket" onClick={() => void create()}>{t('Create invitation')}</Button>

@@ -210,8 +210,8 @@ button:disabled { cursor:not-allowed; }
   --cut:8px; --plate:var(--bg-card); --edge:var(--line); --edge-width:1px;
   isolation:isolate; background:transparent; border:0; border-radius:0; box-shadow:none;
 }
-[data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card) { position:relative; }
-[data-theme="custom"] :is(.search-results,.mention-menu,.emoji-picker) { position:absolute; }
+[data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.emoji-picker) { position:relative; }
+[data-theme="custom"] :is(.search-results,.mention-menu) { position:absolute; }
 /* Clip background layers only. Menus, focus rings and status badges remain outside the panel. */
 [data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker)::before,
 [data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker)::after {

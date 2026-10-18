@@ -5,6 +5,7 @@ import './styles/app.css';
 import './styles/custom-tokens.css';
 import './styles/themes.css';
 import './styles/motion.css';
+import './styles/polish.css';
 import { App } from './App';
 
 const root = document.getElementById('root');

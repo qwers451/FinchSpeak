@@ -29,10 +29,11 @@ export function Avatar(props: AvatarProps) {
   return (
     <span
       class={`av${sizeClass()}${color()}${props.speaking ? ' speaking' : ''}${props.class ? ` ${props.class}` : ''}`}
-      style={picture() ? { 'background-image': `url(${picture()})`, 'background-size': 'cover', 'background-position': 'center' } : undefined}
       data-testid="avatar"
     >
-      <Show when={!picture()}>{props.ghost ? '?' : initialOf(props.name)}</Show>
+      <span class="av-art" style={picture() ? { 'background-image': `url(${picture()})`, 'background-size': 'cover', 'background-position': 'center' } : undefined}>
+        <Show when={!picture()}>{props.ghost ? '?' : initialOf(props.name)}</Show>
+      </span>
       <Show when={props.status && size() >= 24}><span class={`st ${props.status === 'off' ? '' : props.status}`} /></Show>
     </span>
   );

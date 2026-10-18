@@ -164,10 +164,10 @@ export function ChatArea() {
     <main class="main chat" onDragEnter={onDragEnter} onDragLeave={onDragLeave} onDragOver={onDragOver} onDrop={onDrop}>
       <div class="mhead">
         <Icon name="hash" size="lg" class="t3" />
-        <h3 style={{ 'font-size': '18px' }}>{activeChannel()?.name ?? t('select-channel')}</h3>
+        <h3 title={activeChannel()?.topic ?? undefined} style={{ 'font-size': '18px' }}>{activeChannel()?.name ?? t('select-channel')}</h3>
         <Show when={activeChannel()?.topic}>
-          <span class="vsep" style={{ height: '20px', 'align-self': 'center' }} />
-          <span class="t2 fs13 trunc grow">{activeChannel()?.topic}</span>
+          <span class="vsep topic-separator" style={{ height: '20px', 'align-self': 'center' }} />
+          <span class="t2 fs13 trunc grow channel-topic">{activeChannel()?.topic}</span>
         </Show>
         <Show when={!activeChannel()?.topic}><span class="grow" /></Show>
         <SearchBox />
