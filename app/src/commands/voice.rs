@@ -34,6 +34,7 @@ pub async fn join_voice_channel(
 ) -> Result<(), String> {
     let ch_uuid = Uuid::parse_str(&channel_id)
         .map_err(|e| format!("Invalid channel UUID: {}", e))?;
+    let _transition = state.voice_transition.lock().await;
 
     let tx_opt = state.control_tx.read().await.clone();
     let tx = tx_opt.ok_or_else(|| "Not connected via QUIC".to_string())?;
@@ -57,6 +58,7 @@ pub async fn join_voice_channel(
 
 #[tauri::command]
 pub async fn leave_voice_channel(state: State<'_, AppState>) -> Result<(), String> {
+    let _transition = state.voice_transition.lock().await;
     let tx_opt = state.control_tx.read().await.clone();
     if let Some(tx) = tx_opt {
         let _ = tx.send(ClientMessage::LeaveVoice).await;
@@ -144,6 +146,7 @@ pub async fn set_audio_devices(
         *current = selection;
     }
 
+    let _transition = state.voice_transition.lock().await;
     let channel = *state.current_voice_channel.read().await;
     if let Some(short_id) = channel {
         state

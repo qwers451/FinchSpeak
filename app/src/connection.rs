@@ -21,6 +21,7 @@ use tracing::{info, warn};
 use crate::state::{AppState, VideoChunkPayload};
 
 async fn supersede_session(state: &AppState) -> u64 {
+    let _transition = state.voice_transition.lock().await;
     let generation = state.session_generation.fetch_add(1, Ordering::SeqCst) + 1;
     *state.last_connect.write().await = None;
     if let Some(connection) = state.quic_connection.write().await.take() {
@@ -201,23 +202,8 @@ async fn reconnect(
                 session.connection.close(0u32.into(), b"session replaced");
                 return None;
             }
-            let voice_channel = (*state.current_voice_channel.read().await).and_then(|short_id| {
-                session
-                    .channels
-                    .iter()
-                    .find(|c| c.short_id == short_id)
-                    .map(|c| c.id)
-            });
             activate_session(&session, state, app_handle).await;
-            if let Some(channel_id) = voice_channel {
-                let _ = session
-                    .control_tx
-                    .send(ClientMessage::JoinVoice { channel_id })
-                    .await;
-                let _ = session.control_tx.send(ClientMessage::UpdateVoiceState {
-                    muted: state.is_muted.load(Ordering::SeqCst),
-                    deafened: state.is_deafened.load(Ordering::SeqCst),
-                }).await;
+            if restore_voice_membership(state, &session, generation).await {
                 // Same control stream, so this is processed after the rejoin above.
                 *state.screen_viewer.lock().await = ScreenViewer::new();
                 resubscribe(state).await;
@@ -231,6 +217,20 @@ async fn reconnect(
             None
         }
     }
+}
+
+async fn restore_voice_membership(state: &AppState, session: &Session, generation: u64) -> bool {
+    let _transition = state.voice_transition.lock().await;
+    if state.session_generation.load(Ordering::SeqCst) != generation { return false; }
+    let channel = (*state.current_voice_channel.read().await).and_then(|short_id|
+        session.channels.iter().find(|channel| channel.short_id == short_id).map(|channel| channel.id));
+    let Some(channel_id) = channel else { return false; };
+    if session.control_tx.send(ClientMessage::JoinVoice { channel_id }).await.is_err() { return false; }
+    let _ = session.control_tx.send(ClientMessage::UpdateVoiceState {
+        muted: state.is_muted.load(Ordering::SeqCst),
+        deafened: state.is_deafened.load(Ordering::SeqCst),
+    }).await;
+    true
 }
 
 fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
@@ -432,6 +432,16 @@ fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
     }
 }
 
+/// Accept voice only from the current room, atomically with room transitions.
+async fn route_voice_audio(state: &AppState, header: &MediaHeader, payload: Bytes) -> Option<(u32, bool)> {
+    // Keep this guard through insertion: a room transition then clears everything
+    // accepted before the transition, and packets arriving later fail this check.
+    let channel = state.current_voice_channel.read().await;
+    if *channel != Some(header.channel_id) { return None; }
+    if state.is_deafened.load(Ordering::Relaxed) { return None; }
+    state.mixer.lock().await.on_audio_packet(header, payload, Instant::now())
+}
+
 /// Route an incoming media datagram (Audio → mixer, VideoDelta → screen viewer).
 async fn route_datagram(bytes: Bytes, state: &AppState, app_handle: &tauri::AppHandle) {
     if bytes.len() < MEDIA_HEADER_SIZE {
@@ -445,19 +455,14 @@ async fn route_datagram(bytes: Bytes, state: &AppState, app_handle: &tauri::AppH
 
     match header.media_type {
         MediaType::Audio => {
-            if !state.is_deafened.load(Ordering::Relaxed) {
-                let mut mixer = state.mixer.lock().await;
-                if let Some((peer_id, speaking)) =
-                    mixer.on_audio_packet(&header, payload, Instant::now())
-                {
-                    let _ = app_handle.emit(
-                        "user-speaking",
-                        serde_json::json!({
-                            "peer_id": peer_id,
-                            "is_speaking": speaking
-                        }),
-                    );
-                }
+            if let Some((peer_id, speaking)) = route_voice_audio(state, &header, payload).await {
+                let _ = app_handle.emit(
+                    "user-speaking",
+                    serde_json::json!({
+                        "peer_id": peer_id,
+                        "is_speaking": speaking
+                    }),
+                );
             }
         }
         MediaType::ScreenAudio if is_watching(state, &header) => {
@@ -538,6 +543,55 @@ async fn screen_viewer_ticker(state: AppState, generation: u64) {
 mod tests {
     use super::*;
     use finch_testbed::{client::TestClient, server::TestServer};
+
+    #[tokio::test]
+    async fn replacing_session_waits_for_voice_transition() {
+        let state = AppState::new();
+        let transition = state.voice_transition.lock().await;
+        let cloned = state.clone();
+        let replacing = tokio::spawn(async move { supersede_session(&cloned).await });
+        tokio::task::yield_now().await;
+        assert_eq!(state.session_generation.load(Ordering::SeqCst), 0);
+        assert!(!replacing.is_finished());
+        drop(transition);
+        assert_eq!(replacing.await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn pending_leave_prevents_reconnect_from_restoring_stale_membership() -> anyhow::Result<()> {
+        let server = TestServer::start().await?;
+        let client = TestClient::register(&server, "rejoinrace").await?;
+        let mut session = client.session.clone();
+        let (tx, mut rx) = mpsc::channel(8);
+        session.control_tx = tx;
+        let state = AppState::new();
+        *state.current_voice_channel.write().await = Some(client.channel(finch_protocol::models::ChannelType::Voice).1);
+        let transition = state.voice_transition.lock().await;
+        let cloned = state.clone();
+        let restoring = tokio::spawn(async move { restore_voice_membership(&cloned, &session, 0).await });
+        assert!(tokio::time::timeout(Duration::from_millis(50), rx.recv()).await.is_err(),
+            "automatic rejoin must wait until the explicit leave has completed");
+        *state.current_voice_channel.write().await = None;
+        drop(transition);
+        assert!(!restoring.await?);
+        assert!(rx.try_recv().is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn delayed_audio_cannot_enter_after_leave_or_from_another_room() {
+        let state = AppState::new();
+        let mut encoder = finch_audio::OpusVoiceEncoder::new(64).unwrap();
+        let payload = encoder.encode(&[0.1; finch_audio::FRAME_SIZE_48K]).unwrap();
+        let header = MediaHeader::new_audio(1, 7, 0, 0, false, false);
+        route_voice_audio(&state, &header, payload.clone()).await;
+        assert!(state.mixer.lock().await.loss_rate(7).is_none(), "left room must stay silent");
+        *state.current_voice_channel.write().await = Some(2);
+        route_voice_audio(&state, &header, payload.clone()).await;
+        assert!(state.mixer.lock().await.loss_rate(7).is_none(), "old room cannot refill the mixer");
+        let header = MediaHeader::new_audio(2, 7, 0, 0, false, false);
+        assert_eq!(route_voice_audio(&state, &header, payload).await, Some((7, true)));
+    }
 
     #[tokio::test]
     async fn aud031_replacing_session_closes_previous_quic_connection() -> anyhow::Result<()> {

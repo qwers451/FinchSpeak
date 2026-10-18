@@ -185,6 +185,7 @@ pub async fn register(
 
 #[tauri::command]
 pub async fn logout(state: State<'_, AppState>) -> Result<(), String> {
+    let _transition = state.voice_transition.lock().await;
     // Stop any reconnect loop before the connection is closed.
     state
         .session_generation

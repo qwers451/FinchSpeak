@@ -167,6 +167,8 @@ pub struct AppState {
     pub is_muted: Arc<AtomicBool>,
     pub is_deafened: Arc<AtomicBool>,
     pub mixer: Arc<Mutex<AudioMixer>>,
+    /// Serialize explicit room changes with automatic reconnect membership restoration.
+    pub voice_transition: Arc<Mutex<()>>,
     /// Receiving side of the screen share being watched (at most one at a time).
     pub screen_viewer: Arc<Mutex<ScreenViewer>>,
     /// Session peer id of the sharer being watched; 0 = not watching.
@@ -250,6 +252,7 @@ impl AppState {
             is_muted: Arc::new(AtomicBool::new(false)),
             is_deafened: Arc::new(AtomicBool::new(false)),
             mixer: Arc::new(Mutex::new(AudioMixer::new())),
+            voice_transition: Arc::new(Mutex::new(())),
             screen_viewer: Arc::new(Mutex::new(ScreenViewer::new())),
             viewing_peer: Arc::new(AtomicU32::new(0)),
             viewing_user: Arc::new(RwLock::new(None)),

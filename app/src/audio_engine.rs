@@ -225,6 +225,20 @@ fn mix_next_frame(
     mixer.blocking_lock().mix_frame(frame, now)
 }
 
+/// Discard queued playout while deafened; only actual output silence goes to AEC.
+fn render_deafened(
+    data: &mut [f32], channels: usize,
+    playback: &mut impl Consumer<Item = f32>,
+    reference: &mut impl Producer<Item = f32>,
+) {
+    let queued = playback.occupied_len();
+    playback.skip(queued);
+    data.fill(0.0);
+    for _ in 0..data.len() / channels {
+        let _ = reference.try_push(0.0);
+    }
+}
+
 /// Tell the UI when the chosen device was not available and the default is used instead.
 fn report_fallback(kind: &str, choice: &DeviceChoice, app_handle: &tauri::AppHandle) {
     if let DeviceChoice::FellBack { wanted } = choice {
@@ -325,10 +339,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         return;
                                     }
                                     if is_deafened_ref.load(Ordering::Relaxed) {
-                                        data.fill(0.0);
-                                        for _ in 0..data.len() / channels {
-                                            let _ = reference_prod.try_push(0.0);
-                                        }
+                                        render_deafened(data, channels, &mut playback_cons, &mut reference_prod);
                                         return;
                                     }
                                     for chunk in data.chunks_mut(channels) {
@@ -896,6 +907,19 @@ mod tests {
         }
 
         assert_eq!(cons.occupied_len(), 0);
+    }
+
+    #[test]
+    fn deafen_discards_queued_audio_and_feeds_only_silence_to_aec() {
+        let (mut producer, mut playback) = HeapRb::<f32>::new(1024).split();
+        let (mut reference, mut received) = HeapRb::<f32>::new(1024).split();
+        for _ in 0..960 { producer.try_push(0.5).unwrap(); }
+        let mut data = [0.75; 32];
+        render_deafened(&mut data, 2, &mut playback, &mut reference);
+        assert!(data.iter().all(|sample| *sample == 0.0));
+        assert_eq!(playback.occupied_len(), 0, "undeafen must not replay pre-deafen samples");
+        assert_eq!(received.occupied_len(), 16);
+        while let Some(sample) = received.try_pop() { assert_eq!(sample, 0.0); }
     }
 
     /// A briefly busy mixer (the network task is pushing a packet) must delay the frame,
