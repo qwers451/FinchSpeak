@@ -31,6 +31,7 @@ async fn supersede_session(state: &AppState) -> u64 {
     state.stop_screen_share();
     state.stop_watching().await;
     *state.current_voice_channel.write().await = None;
+    *state.mixer.lock().await = finch_audio::AudioMixer::new();
     generation
 }
 
@@ -77,6 +78,8 @@ pub async fn start_quic_session(
 
 /// Make `session` the active one in the app state and tell the UI.
 async fn activate_session(session: &Session, state: &AppState, app_handle: &tauri::AppHandle) {
+    // Peer ids and packet sequences belong to this session, not the previous server.
+    *state.mixer.lock().await = finch_audio::AudioMixer::new();
     state
         .session_peer_id
         .store(session.session_peer_id, Ordering::SeqCst);
@@ -105,6 +108,7 @@ async fn run_session(
             return;
         };
         if state.session_generation.load(Ordering::SeqCst) != generation { return; }
+        *state.mixer.lock().await = finch_audio::AudioMixer::new();
         let _ = app_handle.emit("connection-lost", reason);
         match reconnect(&state, &app_handle, generation).await {
             Some(new_events) => events = new_events,
@@ -132,6 +136,16 @@ async fn forward_events(
                 }
             }
             SessionEvent::Control(msg) => {
+                match &msg {
+                    ServerMessage::UserLeftVoice { peer_id, .. }
+                    | ServerMessage::UserJoinedVoice { peer_id, .. } => {
+                        state.mixer.lock().await.remove_speaker(*peer_id);
+                    }
+                    ServerMessage::ScreenShareStopped { peer_id, .. } => {
+                        state.mixer.lock().await.retire_stream(finch_audio::screen_audio_key(*peer_id));
+                    }
+                    _ => {}
+                }
                 if let ServerMessage::ScreenShareStarted { user_id, peer_id, .. } = &msg {
                     follow_watched_share(state, *user_id, *peer_id).await;
                 }

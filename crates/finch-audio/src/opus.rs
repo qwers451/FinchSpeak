@@ -70,6 +70,7 @@ impl OpusVoiceDecoder {
         let packet: Packet = payload.try_into().map_err(|_| AudioOpusError::SignalConversion)?;
         let signals: MutSignals<f32> = (&mut output[..]).try_into().map_err(|_| AudioOpusError::SignalConversion)?;
         let decoded = self.decoder.decode_float(Some(packet), signals, false)?;
+        output[decoded..].fill(0.0);
         Ok(decoded)
     }
 
@@ -83,6 +84,19 @@ impl OpusVoiceDecoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shorter_packet_clears_unused_samples_in_reused_output() {
+        let encoder = Encoder::new(SampleRate::Hz48000, Channels::Mono, Application::Voip).unwrap();
+        let mut bytes = [0u8; MAX_OPUS_PACKET_SIZE];
+        let length = encoder.encode_float(&[0.1; FRAME_SIZE_48K / 2], &mut bytes).unwrap();
+        let mut decoder = OpusVoiceDecoder::new().unwrap();
+        let mut output = [0.75; FRAME_SIZE_48K];
+        let decoded = decoder.decode(&Bytes::copy_from_slice(&bytes[..length]), &mut output).unwrap();
+        assert_eq!(decoded, FRAME_SIZE_48K / 2);
+        assert!(output[decoded..].iter().all(|sample| *sample == 0.0),
+            "a short packet must not replay samples left by the preceding frame");
+    }
 
     #[test]
     fn test_opus_encode_decode_roundtrip() {

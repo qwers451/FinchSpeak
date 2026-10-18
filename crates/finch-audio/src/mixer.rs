@@ -67,10 +67,24 @@ impl AudioMixer {
         }
     }
 
-    /// Remove a speaker who left the voice channel.
+    /// Remove a participant's voice and screen audio when they leave.
     pub fn remove_speaker(&mut self, peer_id: u32) {
         self.speakers.remove(&peer_id);
         self.preset_volumes.remove(&peer_id);
+        let screen = screen_audio_key(peer_id);
+        self.speakers.remove(&screen);
+        self.preset_volumes.remove(&screen);
+    }
+
+    /// Retire old decoders when changing rooms, retaining this session's chosen volumes.
+    pub fn clear_playout(&mut self) {
+        self.speakers.clear();
+        self.scratch_buf.fill(0.0);
+    }
+
+    /// End one stream without forgetting its local volume (e.g. stop watching a share).
+    pub fn retire_stream(&mut self, stream_id: u32) {
+        self.speakers.remove(&stream_id);
     }
 
     /// Largest playout queue length across all remote speakers.
@@ -203,6 +217,53 @@ impl AudioMixer {
 mod tests {
     use super::*;
     use crate::opus::OpusVoiceEncoder;
+
+    #[test]
+    fn leaving_peer_discards_both_voice_and_screen_audio() {
+        let mut mixer = AudioMixer::new();
+        let mut encoder = OpusVoiceEncoder::new(64).unwrap();
+        let payload = encoder.encode(&[0.1; FRAME_SIZE_48K]).unwrap();
+        let now = Instant::now();
+        for seq in 100..103 {
+            let header = MediaHeader::new_audio(1, 7, seq, seq as u32 * 20, false, false);
+            mixer.on_audio_packet(&header, payload.clone(), now);
+            mixer.on_screen_audio_packet(&header, payload.clone(), now);
+        }
+        mixer.remove_speaker(7);
+        let mut out = [0.0; FRAME_SIZE_48K];
+        mixer.mix_frame(&mut out, now);
+        assert!(out.iter().all(|sample| *sample == 0.0), "left peer must not keep playing a share");
+        assert!(mixer.speakers.is_empty(), "both decoders must be retired");
+        // A rejoining sender can start its packet sequence at zero.
+        for seq in 0..2 {
+            let header = MediaHeader::new_audio(1, 7, seq, seq as u32 * 20, false, false);
+            mixer.on_audio_packet(&header, payload.clone(), now);
+        }
+        mixer.mix_frame(&mut out, now);
+        assert!(out.iter().any(|sample| sample.abs() > 0.0001));
+    }
+
+    #[test]
+    fn changing_rooms_retires_sequences_but_preserves_local_mutes() {
+        let mut mixer = AudioMixer::new();
+        let mut encoder = OpusVoiceEncoder::new(64).unwrap();
+        let payload = encoder.encode(&[0.1; FRAME_SIZE_48K]).unwrap();
+        let now = Instant::now();
+        mixer.set_speaker_volume(7, 0.0);
+        for seq in 100..103 {
+            mixer.on_audio_packet(&MediaHeader::new_audio(1, 7, seq, 0, false, false), payload.clone(), now);
+        }
+        mixer.clear_playout();
+        for seq in 0..2 {
+            mixer.on_audio_packet(&MediaHeader::new_audio(2, 7, seq, 0, false, false), payload.clone(), now);
+        }
+        let mut out = [0.0; FRAME_SIZE_48K];
+        mixer.mix_frame(&mut out, now);
+        assert!(out.iter().all(|sample| *sample == 0.0), "saved mute still applies");
+        mixer.set_speaker_volume(7, 1.0);
+        mixer.mix_frame(&mut out, now);
+        assert!(out.iter().any(|sample| sample.abs() > 0.0001), "new sequence was accepted");
+    }
 
     #[test]
     fn test_mixer_soft_limiting() {

@@ -104,7 +104,11 @@ impl JitterBuffer {
             Some(last_seq) => {
                 // Signed 16-bit difference handles sequence rollover seamlessly
                 let delta = header.sequence.wrapping_sub(last_seq) as i16;
-                let ext = (self.last_extended_seq as i64 + delta as i64) as u64;
+                // An old packet from before the first observed cycle has no
+                // representable index. Never turn -1 into a far-future u64::MAX.
+                let Some(ext) = self.last_extended_seq.checked_add_signed(i64::from(delta)) else {
+                    return;
+                };
 
                 // Update last seen if this is the newest packet
                 if delta > 0 {
@@ -678,5 +682,19 @@ mod tests {
         push_seq(&mut buffer, 0, false, &payload);
         for seq in 10..=16 { push_seq(&mut buffer, seq, false, &payload); }
         assert_eq!(buffer.counters(), (11, 9), "missing slots 1 through 9 are still losses");
+    }
+
+    #[test]
+    fn previous_cycle_packet_before_sequence_origin_is_ignored() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let mut out = [0.0; FRAME_SIZE_48K];
+        push_seq(&mut buffer, 0, false, &payload);
+        push_seq(&mut buffer, u16::MAX, false, &payload);
+        push_seq(&mut buffer, 1, false, &payload);
+        assert_eq!(buffer.buffered_len(), 2, "pre-origin packet is not a future packet");
+        assert_eq!(buffer.pop_frame(&mut out), PlayoutResult::Normal);
+        assert_eq!(buffer.pop_frame(&mut out), PlayoutResult::Normal);
+        assert_eq!(buffer.next_playout_seq, Some(2));
     }
 }

@@ -16,7 +16,7 @@ import {
   participantsForChannel,
   speakingPeers,
 } from '../stores/voiceStore';
-import { connectionStatus, presence, statusTexts } from '../stores/sessionStore';
+import { connectionStatus, knownUsers, presence, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
 import { currentUser } from '../stores/authStore';
 import type { Channel } from '../types';
@@ -175,7 +175,7 @@ export function Sidebar() {
                 <For each={participantsForChannel(channel.id)}>
                   {(participant) => (
                     <div class="vp">
-                      <Avatar name={participant.username} id={participant.user_id} size={24} speaking={speakingPeers().has(participant.peer_id)} />
+                      <Avatar name={participant.username} id={participant.user_id} size={24} src={knownUsers().find((user) => user.id === participant.user_id)?.avatar_url} speaking={speakingPeers().has(participant.peer_id)} />
                       <span class="grow trunc">{participant.username}</span>
                       <Show when={participant.is_muted}><Icon name="mic-off" title={t('Muted')} style={{ color: 'var(--red-text)' }} /></Show>
                       <Show when={participant.is_deafened}><Icon name="phones-off" title={t('Deafened')} style={{ color: 'var(--red-text)' }} /></Show>

@@ -228,7 +228,10 @@ impl AppState {
 
     /// Forget the screen share we were watching.
     pub async fn stop_watching(&self) {
-        self.viewing_peer.store(0, std::sync::atomic::Ordering::SeqCst);
+        let peer_id = self.viewing_peer.swap(0, std::sync::atomic::Ordering::SeqCst);
+        if peer_id != 0 {
+            self.mixer.lock().await.retire_stream(finch_audio::screen_audio_key(peer_id));
+        }
         *self.viewing_user.write().await = None;
         *self.screen_viewer.lock().await = ScreenViewer::new();
     }
@@ -286,6 +289,38 @@ mod tests {
 #[cfg(test)]
 mod voice_settings_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn stopping_a_view_retires_screen_audio_without_removing_voice() {
+        use finch_audio::{screen_audio_key, OpusVoiceEncoder, FRAME_SIZE_48K};
+        use finch_protocol::media::MediaHeader;
+        let state = AppState::new();
+        let mut encoder = OpusVoiceEncoder::new(64).unwrap();
+        let payload = encoder.encode(&[0.1; FRAME_SIZE_48K]).unwrap();
+        {
+            let mut mixer = state.mixer.lock().await;
+            mixer.set_speaker_volume(screen_audio_key(7), 0.0);
+            for seq in 0..2 {
+                let header = MediaHeader::new_audio(1, 7, seq, seq as u32 * 20, false, false);
+                mixer.on_audio_packet(&header, payload.clone(), std::time::Instant::now());
+                mixer.on_screen_audio_packet(&header, payload.clone(), std::time::Instant::now());
+            }
+            assert!(mixer.loss_rate(screen_audio_key(7)).is_some());
+        }
+        state.viewing_peer.store(7, Ordering::SeqCst);
+        state.stop_watching().await;
+        let mut mixer = state.mixer.lock().await;
+        assert!(mixer.loss_rate(screen_audio_key(7)).is_none());
+        assert!(mixer.loss_rate(7).is_some(), "participant voice remains available");
+        mixer.set_speaker_volume(7, 0.0);
+        for seq in 0..2 {
+            let header = MediaHeader::new_audio(1, 7, seq, seq as u32 * 20, false, false);
+            mixer.on_screen_audio_packet(&header, payload.clone(), std::time::Instant::now());
+        }
+        let mut out = [0.0; FRAME_SIZE_48K];
+        mixer.mix_frame(&mut out, std::time::Instant::now());
+        assert!(out.iter().all(|sample| *sample == 0.0), "watching again preserves the saved screen mute");
+    }
 
     fn dto(gain: f32, threshold: f32, ptt: bool) -> VoiceSettingsDto {
         VoiceSettingsDto { input_gain: gain, vad_threshold_db: threshold, push_to_talk: ptt, key_down: false, monitor: false, voice_enhancement: true }

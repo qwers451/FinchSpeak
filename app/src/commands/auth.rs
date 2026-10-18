@@ -191,6 +191,7 @@ pub async fn logout(state: State<'_, AppState>) -> Result<(), String> {
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     *state.last_connect.write().await = None;
     state.audio_engine.lock().await.stop();
+    *state.mixer.lock().await = finch_audio::AudioMixer::new();
     state.stop_screen_share();
     state.stop_watching().await;
 
