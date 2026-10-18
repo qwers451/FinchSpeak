@@ -64,7 +64,7 @@ export function AuthModal() {
       <div class="col center auth-brand">
         <div class="auth-disc auth-disc-a" />
         <div class="auth-disc auth-disc-b" />
-        <img src="./mascot.svg" alt={t('FinchSpeak goldfinch with a headset')} class="auth-mascot" />
+        <img src="/custom/assets/illustrations/mascot.svg" alt={t('FinchSpeak goldfinch with a headset')} class="auth-mascot" />
         <div class="col g8" style={{ 'text-align': 'center', position: 'relative' }}>
           <h1 style={{ 'font-size': '40px', 'line-height': '44px' }}>{t('Talk. Share.')} <span class="ty">{t('Chirp.')}</span></h1>
           <p class="t2 fs16" style={{ 'max-width': '400px' }}>{t('Your own voice rooms, chat and screen sharing, on a server you control.')}</p>

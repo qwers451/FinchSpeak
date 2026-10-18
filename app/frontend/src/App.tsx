@@ -64,7 +64,7 @@ export function App() {
             <Sidebar />
             <Show when={activeChannel()} fallback={
               <div class="splash" style={{ background: 'var(--bg-app)' }}>
-                <img src="./mascot.svg" alt="" width="260" />
+                <img src="/custom/assets/illustrations/mascot.svg" alt="" width="260" />
                 <h2>{t('Welcome to FinchSpeak')}</h2>
                 <p class="t2">{t('Pick a channel on the left to start chatting or talking.')}</p>
               </div>

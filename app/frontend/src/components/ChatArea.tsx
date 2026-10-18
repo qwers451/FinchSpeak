@@ -178,7 +178,7 @@ export function ChatArea() {
         <Show when={chatLoading() && messages().length === 0}><Skeleton /></Show>
         <Show when={!chatLoading() && messages().length === 0}>
           <div class="col center g12 empty-chat">
-            <img src="./mascot.svg" alt="" width="150" />
+            <img src="/custom/assets/illustrations/mascot.svg" alt="" width="150" />
             <h3 style={{ 'font-size': '20px' }}>{t('Welcome to #{channel}!', { channel: activeChannel()?.name ?? '' })}</h3>
             <span class="t2 fs13">{t('This is the start of the conversation. Say hello — someone is always listening.')}</span>
           </div>

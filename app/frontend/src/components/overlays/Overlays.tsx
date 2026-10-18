@@ -117,7 +117,7 @@ export function SessionEndedScreen() {
     <Show when={sessionEnded()}>
       {(kind) => (
         <div class="splash session-ended" role="alertdialog" aria-labelledby="session-ended-title">
-          <img src="./mascot.svg" alt="" width="220" />
+          <img src="/custom/assets/illustrations/mascot.svg" alt="" width="220" />
           <h2 id="session-ended-title">{t(END_TEXT[kind()].headline)}</h2>
           <p class="t2" style={{ 'max-width': '420px', 'text-align': 'center' }}>{t(END_TEXT[kind()].body)}</p>
           <Button variant="primary" size="lg" onClick={() => { setSessionEnded(null); void logoutUser(); }}>{t('Back to sign in')}</Button>

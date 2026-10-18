@@ -14,7 +14,7 @@ async function windowCall(action: 'minimize' | 'toggleMaximize' | 'close') {
 export function Titlebar(props: { title?: string }) {
   return (
     <div class="titlebar" data-tauri-drag-region onDblClick={() => void windowCall('toggleMaximize')}>
-      <img src="./mark.svg" alt="" width="18" height="18" data-tauri-drag-region />
+      <img src="/custom/assets/brand/finch-mark.svg" alt="" width="18" height="18" data-tauri-drag-region />
       <span data-tauri-drag-region>{props.title ?? 'FinchSpeak'}</span>
       <Show when={inTauri()}>
         <div class="wc">
