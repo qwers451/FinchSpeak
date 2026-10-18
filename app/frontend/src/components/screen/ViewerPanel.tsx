@@ -46,7 +46,7 @@ function Viewer(props: { peerId: number; userId: string }) {
 
   const name = createMemo(() => {
     const person = allVoiceParticipants().find((participant) => participant.peer_id === props.peerId);
-    return knownUsers().find((user) => user.id === props.userId)?.display_name ?? person?.username ?? 'Someone';
+    return knownUsers().find((user) => user.id === props.userId)?.display_name ?? person?.username ?? t('Someone');
   });
   const volumeKey = () => `screen:${props.userId}`;
   const pipSupported = () => typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled;
@@ -185,7 +185,7 @@ function Viewer(props: { peerId: number; userId: string }) {
   const status = () => view().status;
   const showOverlay = () => ['connecting', 'buffering', 'decoder-reset', 'reconnecting', 'unsupported'].includes(status());
   const overlay = () => ({
-    connecting: { head: 'Waiting for the first picture…', body: `Asking ${name()}'s computer for a full frame. Usually under a second.`, spin: true },
+    connecting: { head: 'Waiting for the first picture…', body: t("Asking {name}'s computer for a full frame. Usually under a second.", { name: name() }), spin: true },
     buffering: { head: 'Catching up…', body: 'Some packets were lost; waiting for a clean frame.', spin: true },
     'decoder-reset': { head: 'Restoring the picture…', body: 'A frame could not be decoded; asking for a fresh one.', spin: true },
     reconnecting: { head: 'Reconnecting…', body: 'The picture resumes automatically when you are back.', spin: true },
@@ -193,7 +193,7 @@ function Viewer(props: { peerId: number; userId: string }) {
   } as Record<string, { head: string; body: string; spin: boolean }>)[status()];
 
   return (
-    <div ref={frame} class={`viewer${fullscreen() ? ' is-fullscreen' : ''}`} onMouseMove={showHud} role="region" aria-label={`${name()}'s shared screen`}>
+    <div ref={frame} class={`viewer${fullscreen() ? ' is-fullscreen' : ''}`} onMouseMove={showHud} role="region" aria-label={t("{name}'s shared screen", { name: name() })}>
       <canvas ref={canvas} class="viewer-canvas" />
 
       <Show when={showOverlay() && overlay()}>

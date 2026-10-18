@@ -57,7 +57,8 @@ export async function startMicTest(seconds = 3) {
   try {
     await api.testMicrophone(seconds);
   } catch (err) {
-    setAppError(String(err).replace(/^Error:\s*/, ''));
+    const message = String(err).replace(/^Error:\s*/, '');
+    setAppError(t(message));
   }
 }
 let mutedBeforeDeafen = false;

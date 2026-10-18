@@ -110,9 +110,9 @@ export function AuthModal() {
               <Field label={t('Password')} icon="lock" type="password" value={password()} onInput={setPassword}
                 autocomplete={isRegister() ? 'new-password' : 'current-password'} autofocus={!!rememberedUsername() && !isRegister()} />
               <Show when={isRegister() && password()}>
-                <div class="row g8" aria-label={`Password strength: ${strength().label}`}>
+                <div class="row g8" aria-label={t('Password strength: {strength}', { strength: t(strength().label) })}>
                   {[1, 2, 3, 4].map((step) => <div class={`strength-seg${strength().score >= step ? ' on' : ''}`} />)}
-                  <span class="fs12 ty b fit">{strength().label}</span>
+                  <span class="fs12 ty b fit">{t(strength().label)}</span>
                 </div>
               </Show>
             </div>

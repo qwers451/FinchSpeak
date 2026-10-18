@@ -1,6 +1,6 @@
 # FinchSpeak 1.2.0 — QA and release evidence
 
-Status: implementation and local verification; stable release is not published yet. Updated 18 October 2026 (Europe/Moscow). Baseline: main9f500ce / published v1.1.0 source807a893. Product scope and deliberate omissions are in docs/superpowers/specs/2026-10-17-desktop-1.2.0-design.md.
+Status: local release gates passed; main CI and publication remain. Updated 18 October 2026 (Europe/Moscow). Baseline: main9f500ce / published v1.1.0 source807a893. Product scope and deliberate omissions are in docs/superpowers/specs/2026-10-17-desktop-1.2.0-design.md.
 
 ## Reproduced v1.1.0 capture regression
 WASAPI can report equal callback instants for adjacent10ms buffers while capture positions advance. v1.1.0 CaptureClock rejected callback<=previous_callback. Alternating tagged/untagged buffers left no complete fresh20ms resampler input eligible for Opus. Consequently no outbound voice and no local speaking indication, even with a working microphone.
@@ -29,24 +29,30 @@ One actual SolidJS interface, Claude Dark default and owner-supplied Finch Custo
 
 Browser visual checks use real application components with isolated fixture data, not network/hardware simulation evidence. Screens include auth, chat, voice, audio settings, appearance, admin and sharing. Desktop baseline1280x720 and minimum900x600; inspect both themes, RU/EN live switching, readable participant names, scrollable settings/tables, keyboard focus and reduced motion. Screenshots are local under original-checkout target/desktop-1.2.0/screens. Final matrix completion is recorded below.
 
+The owner's updated kit supplied a new bird. Its mark and illustrations replaced the earlier kit art; Claude Dark now uses the same bird, and Tauri app/installer icons are generated from that mark. The native tray decodes the supplied 64px online, voice and muted PNGs, with a visible red live-sharing marker. Its asset decoding and three distinct states have a focused unit test. Browser checks confirmed the updated Claude authentication artwork, both voice-room skins, Russian admin labels and the repaired Custom mention/search popovers. Source images were read as data; kit scripts were not executed.
+
+An actual EXE resource check caught a cached old client icon and the default NSIS installer icon. `app/build.rs` now tracks the ICO and Tauri config changes; NSIS explicitly uses the same ICO. After rebuilding, the client and installer embedded 32px icon pixels both exactly matched the supplied bird. `scripts/test-release-icons.ps1` enforces this in release CI.
+
 Motion has short functional enter/exit and control feedback; frequent voice controls do not wait for it. OS/application reduced motion disables travel and transitions. Closing dialogs become inert immediately, restore focus and cancel pending removal when reopened. Cut-corner background layers do not clip popovers or focus rings.
 
 ## Automated evidence before final release
 | Check | Result |
 |---|---|
-| Frontend full suite,18Oct01:49 |289passed /33files,0failed|
-| Frontend typecheck +production Vite build |PASS, no missing-font warning after public path correction|
-| Full workspace Rust before final version/tray/capture changes |412passed /64suite summaries,0failed,2ignored; baseline evidence only|
-| Updated app tests incl capture fix |41passed (38unit +3security integration);2hardware ignored in routine suite|
+| Frontend full suite after review fixes |289passed /33files,0failed|
+| Frontend typecheck +production Vite build after updated art |PASS, 85 modules, no missing-font warning|
+| Full workspace Rust on 1.2.0 feature source |415passed /64suite summaries,0failed,3hardware ignored|
+| Final app tests after icon/config change |42passed (39unit +3security integration),0failed,2hardware ignored|
 | Explicit real-device repeated-clock pipeline |PASS, before/after measurements above|
-| Updated app all-target Clippy -Dwarnings |PASS|
+| Updated workspace all-target Clippy -Dwarnings |PASS after icon/config change|
 | Final main CI full workspace on release source |PENDING|
-| Packaged client/native DLL closure |PENDING|
-| Both server/portable ZIP launchers and API/backup/restore |PENDING|
-| Fresh install +v1.1.0 upgrade +uninstall (clean runner) |PENDING|
-| Updater signature, tamper rejection, manifest URLs/version |PENDING|
+| Packaged client/native DLL closure and client/installer embedded bird icons |PASS on final binaries|
+| Both final ZIP launchers and API/backup/restore |PASS on final archives|
+| Fresh install +v1.1.0 upgrade +uninstall (isolated profile) |PASS on final NSIS|
+| Updater signature, tamper rejection, manifest URLs/version and five local SHA256 sums |PASS on final NSIS/manifest/packages|
 | Actual published assets SHA256/signature/download |PENDING|
-| Real Tauri window/event delivery |PENDING|
+| Real Tauri window/event delivery |Process stays open under isolated profile; UI/event inspection PENDING (Windows automation helper unavailable)|
+
+An independent read-only source review reported no remaining Critical or Important findings in the audio/privacy path, preference migration, localization, popovers, artwork or updater. Its report is preserved locally under original-checkout target/desktop-1.2.0/final-review.md. The reviewer inspected source only; packaged checks above were run separately.
 
 ## Limits and scope decisions
 No new custom EQ/compressor, NS stacking, arbitrary gain increase, advanced processing controls, new server roles, audit-chain claims, hardware decoder switches or unsupported sharing settings. Those demonstration controls were not product requirements: the owner prioritised a simple working production release. Existing WebRTC/RNNoise/Opus DSP is preserved.

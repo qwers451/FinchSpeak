@@ -122,7 +122,7 @@ function ProfilePage() {
         <Field label={t('Current password')} type="password" value={current()} onInput={setCurrent} autocomplete="current-password" />
         <Field label={t('New password')} type="password" value={next()} onInput={setNext} autocomplete="new-password" />
         <Show when={next()}>
-          <div class="row g8">{[1, 2, 3, 4].map((step) => <div class={`strength-seg${strength().score >= step ? ' on' : ''}`} />)}<span class="fs12 ty b fit">{strength().label}</span></div>
+          <div class="row g8">{[1, 2, 3, 4].map((step) => <div class={`strength-seg${strength().score >= step ? ' on' : ''}`} />)}<span class="fs12 ty b fit">{t(strength().label)}</span></div>
         </Show>
         <Field label={t('Repeat the new password')} type="password" value={again()} onInput={setAgain} autocomplete="new-password" error={mismatch()} />
         <span class="t3 fs12">{t('Changing the password signs you out on your other devices.')}</span>

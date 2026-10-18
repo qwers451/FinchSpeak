@@ -113,6 +113,20 @@ export const ru: Readonly<Record<string, string>> = {
   'Delete #{channel}?': 'Удалить канал #{channel}?', 'Download failed: {error}': 'Не удалось скачать файл: {error}',
   'Name changed.': 'Имя изменено.', 'Password changed. Other devices are signed out.': 'Пароль изменён. На других устройствах выполнен выход.',
   'Use a PNG, JPEG or WebP picture': 'Выберите изображение в формате PNG, JPEG или WebP', 'That picture is too large. Pick one under 12 MB': 'Изображение слишком большое. Выберите файл размером до 12 МБ', 'That picture could not be opened. Try another file': 'Не удалось открыть изображение. Попробуйте другой файл', 'The picture could not be prepared': 'Не удалось подготовить изображение', 'The picture must be smaller than 2 MB': 'Размер изображения должен быть меньше 2 МБ',
+  'Invitations': 'Приглашения', 'Log': 'Журнал', 'Moderator': 'Модератор',
+  'Weak': 'Слабый', 'Fair': 'Средний', 'Good': 'Хороший', 'Strong': 'Сильный',
+  'Show password': 'Показать пароль', 'Hide password': 'Скрыть пароль',
+  'Someone': 'Кто-то', '{name} is typing…': '{name} печатает…', '{first} and {second} are typing…': '{first} и {second} печатают…', 'Several people are typing…': 'Несколько человек печатают…',
+  'Waiting for the first picture…': 'Ожидаем первое изображение…', "Asking {name}'s computer for a full frame. Usually under a second.": 'Запрашиваем полный кадр у компьютера пользователя {name}. Обычно это занимает меньше секунды.',
+  'Catching up…': 'Восстанавливаем поток…', 'Some packets were lost; waiting for a clean frame.': 'Часть пакетов потерялась. Ожидаем целый кадр.',
+  'Restoring the picture…': 'Восстанавливаем изображение…', 'A frame could not be decoded; asking for a fresh one.': 'Не удалось декодировать кадр. Запрашиваем новый.',
+  'The picture resumes automatically when you are back.': 'Изображение вернётся автоматически после восстановления соединения.',
+  'This computer cannot play the video': 'Этот компьютер не может воспроизвести видео',
+  'Its graphics driver has no H.264 decoder. Voice still works. Update the graphics driver, or ask for a window share at lower quality.': 'В графическом драйвере нет декодера H.264. Голос продолжает работать. Обновите драйвер или попросите показать окно в более низком качестве.',
+  "{name}'s shared screen": 'Демонстрация экрана: {name}',
+  'Join a voice channel first: the microphone is only open during a call': 'Сначала подключитесь к голосовой комнате: микрофон работает только во время звонка', 'Unmute yourself first': 'Сначала включите микрофон',
+  'The old certificate was forgotten. Sign in again and compare the new fingerprint.': 'Старый сертификат удалён из доверенных. Войдите ещё раз и сравните новый отпечаток.',
+  'a channel': 'канале', '{name} mentioned you in #{channel}': '{name} упомянул вас в канале #{channel}', '{name} in #{channel}': '{name} в канале #{channel}', 'your voice room': 'вашей голосовой комнате', '{name} joined {room}': '{name} присоединился к комнате {room}',
 };
 
 export const locale = () => prefs().appearance.language;

@@ -90,6 +90,12 @@ jobs:
           ./scripts/build-server-release.ps1
           ./scripts/package-release.ps1
 
+      - name: Client and installer artwork
+        shell: pwsh
+        run: |
+          $version = $env:FINCH_RELEASE_TAG.TrimStart('v')
+          ./scripts/test-release-icons.ps1 -Executable target/release/finch-app.exe -Installer "target/release/bundle/nsis/FinchSpeak_${version}_x64-setup.exe"
+
       - name: Packaged server smoke test
         shell: pwsh
         run: |

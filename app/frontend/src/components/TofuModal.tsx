@@ -72,7 +72,7 @@ export function CertChangedModal() {
     if (!current || !matches()) return;
     await api.forgetServerFingerprint(current.hostname);
     close();
-    setAuthError('The old certificate was forgotten. Sign in again and compare the new fingerprint.');
+    setAuthError(t('The old certificate was forgotten. Sign in again and compare the new fingerprint.'));
   };
   const copy = () => {
     const current = data();

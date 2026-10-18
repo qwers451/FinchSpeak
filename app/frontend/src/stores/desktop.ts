@@ -6,6 +6,7 @@ import { activeChannel, channels } from './chatStore';
 import { isChannelMuted, prefs } from './settingsStore';
 import { isSharing } from './screenState';
 import { activeVoiceChannel, isMuted } from './voiceStore';
+import { t } from '../i18n';
 
 // Desktop behaviour: notifications, tones, the tray icon. Everything here is optional: if the
 // platform refuses, the app keeps working without it.
@@ -85,9 +86,9 @@ export function reactToMessage(
   if (viewing) return 'none';
   const wanted = mentionedMe ? settings.mentions : settings.allMessages;
   if (!wanted) return 'none';
-  const channel = channels().find((candidate) => candidate.id === message.channel_id)?.name ?? 'a channel';
+  const channel = channels().find((candidate) => candidate.id === message.channel_id)?.name ?? t('a channel');
   if (!focused) {
-    void notifyDesktop(mentionedMe ? `${message.author_name} mentioned you in #${channel}` : `${message.author_name} in #${channel}`, message.content);
+    void notifyDesktop(mentionedMe ? t('{name} mentioned you in #{channel}', { name: message.author_name, channel }) : t('{name} in #{channel}', { name: message.author_name, channel }), message.content);
     if (settings.flash) void flashTaskbar();
   }
   if (mentionedMe) playTone('mention');
@@ -99,7 +100,7 @@ export function reactToVoiceMovement(kind: 'join' | 'leave', name: string, userI
   const settings = prefs().notifications;
   if (!settings.voiceJoin || userId === currentUser()?.id) return;
   playTone(kind);
-  if (kind === 'join' && !focused) void notifyDesktop(`${name} joined ${activeVoiceChannel()?.name ?? 'your voice room'}`, '');
+  if (kind === 'join' && !focused) void notifyDesktop(t('{name} joined {room}', { name, room: activeVoiceChannel()?.name ?? t('your voice room') }), '');
 }
 
 // ---- tray and window --------------------------------------------------------------------------

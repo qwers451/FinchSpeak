@@ -64,7 +64,7 @@ function MembersTab(props: { isAdmin: boolean }) {
                     </div>
                   </td>
                   <td>
-                    <Show when={props.isAdmin && member.id !== me()} fallback={<span class={`tag ${member.role === 'admin' ? 'admin' : member.role === 'moderator' ? 'violet' : ''}`}>{member.role}</span>}>
+                    <Show when={props.isAdmin && member.id !== me()} fallback={<span class={`tag ${member.role === 'admin' ? 'admin' : member.role === 'moderator' ? 'violet' : ''}`}>{t(member.role === 'admin' ? 'Admin' : member.role === 'moderator' ? 'Moderator' : 'Member')}</span>}>
                       <div class="row g4">
                         <For each={[['member', 'Member'], ['moderator', 'Moderator'], ['admin', 'Admin']] as const}>
                           {([role, label]) => (

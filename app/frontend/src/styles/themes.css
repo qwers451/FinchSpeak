@@ -185,9 +185,9 @@ button:disabled { cursor:not-allowed; }
 .splash { background:var(--bg-app); text-align:center; padding:32px; }
 .splash > img { width:180px; opacity:.85; }
 .splash h2 { font-weight:500; font-size:26px; letter-spacing:-.04em; }
-[data-theme="claude"] :is(.brand,.titlebar) > img { content:url('/brand/claude-mark.svg'); }
-[data-theme="claude"] .auth-mascot { content:url('/brand/claude-bird.svg'); }
-[data-theme="claude"] .splash > img { content:url('/brand/claude-bird.svg'); }
+[data-theme="claude"] :is(.brand,.titlebar) > img { content:url('/custom/assets/brand/finch-mark.svg'); }
+[data-theme="claude"] .auth-mascot { content:url('/custom/assets/illustrations/mascot.svg'); }
+[data-theme="claude"] .splash > img { content:url('/custom/assets/illustrations/mascot.svg'); }
 /* Finch Custom retains the supplied kit's geometry, colour and assets. */
 [data-theme="custom"] body { font-size:12px; }
 [data-theme="custom"] :is(.brand,.titlebar) > img { content:url('/custom/assets/brand/finch-mark.svg'); }
@@ -208,8 +208,10 @@ button:disabled { cursor:not-allowed; }
 [data-theme="custom"] .upanel { background:var(--bg-deep); border-color:var(--line); }
 [data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker) {
   --cut:8px; --plate:var(--bg-card); --edge:var(--line); --edge-width:1px;
-  position:relative; isolation:isolate; background:transparent; border:0; border-radius:0; box-shadow:none;
+  isolation:isolate; background:transparent; border:0; border-radius:0; box-shadow:none;
 }
+[data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card) { position:relative; }
+[data-theme="custom"] :is(.search-results,.mention-menu,.emoji-picker) { position:absolute; }
 /* Clip background layers only. Menus, focus rings and status badges remain outside the panel. */
 [data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker)::before,
 [data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker)::after {
@@ -323,7 +325,7 @@ button:disabled { cursor:not-allowed; }
 .room-grid.compact { min-height:96px; }
 .room-grid.compact .vc { min-height:80px; }
 [data-theme="custom"] .room-grid .vc { padding:18px 14px; gap:10px; }
-[data-theme="claude"] .empty-chat > img { content:url('/brand/claude-bird.svg'); }
+[data-theme="claude"] .empty-chat > img { content:url('/custom/assets/illustrations/mascot.svg'); }
 [data-theme="custom"] .empty-chat > img { content:url('/custom/assets/illustrations/empty-chat.svg'); }
 
 [data-theme="custom"] .modal[data-tone="danger"] { --edge:var(--red); --edge-width:2px; }

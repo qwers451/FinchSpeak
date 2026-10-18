@@ -135,9 +135,9 @@ export function ChatArea() {
     if (!channel) return '';
     const names = typingNames(channel.id, now());
     if (names.length === 0) return '';
-    if (names.length === 1) return `${names[0]} is typing…`;
-    if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
-    return 'Several people are typing…';
+    if (names.length === 1) return t('{name} is typing…', { name: names[0] });
+    if (names.length === 2) return t('{first} and {second} are typing…', { first: names[0], second: names[1] });
+    return t('Several people are typing…');
   });
 
   // Dropping files anywhere on the chat attaches them.

@@ -1,5 +1,6 @@
 import { createSignal, createUniqueId, Show, type JSX } from 'solid-js';
 import { Icon, type IconName } from './Icon';
+import { t } from '../i18n';
 
 type FieldProps = {
   label: string;
@@ -44,7 +45,7 @@ export function Field(props: FieldProps) {
         />
         {props.trailing}
         <Show when={isPassword()}>
-          <button type="button" class="icon-close" aria-label={shown() ? 'Hide password' : 'Show password'} onClick={() => setShown(!shown())}>
+          <button type="button" class="icon-close" aria-label={shown() ? t('Hide password') : t('Show password')} onClick={() => setShown(!shown())}>
             <Icon name="eye" size="sm" />
           </button>
         </Show>

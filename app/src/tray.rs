@@ -71,6 +71,14 @@ impl TrayState {
     }
 }
 
+fn bird_icon_bytes(state: TrayState) -> &'static [u8] {
+    match state {
+        TrayState::Idle => include_bytes!("../frontend/public/custom/assets/tray-icons/png/tray-01-online-32@2x.png"),
+        TrayState::Voice | TrayState::Live => include_bytes!("../frontend/public/custom/assets/tray-icons/png/tray-02-voice-32@2x.png"),
+        TrayState::Muted => include_bytes!("../frontend/public/custom/assets/tray-icons/png/tray-04-muted-32@2x.png"),
+    }
+}
+
 /// `rgba` (width x height) with a filled circle of `color` in the bottom-right corner.
 pub fn with_dot(rgba: &[u8], width: u32, height: u32, color: [u8; 3]) -> Vec<u8> {
     let mut out = rgba.to_vec();
@@ -96,9 +104,9 @@ pub fn with_dot(rgba: &[u8], width: u32, height: u32, color: [u8; 3]) -> Vec<u8>
 }
 
 fn icon_for(app: &AppHandle, state: TrayState) -> Option<Image<'static>> {
-    let base = app.default_window_icon()?;
+    let base = Image::from_bytes(bird_icon_bytes(state)).ok().or_else(|| app.default_window_icon().cloned())?.to_owned();
     let Some(color) = state.dot() else {
-        return Some(base.clone().to_owned());
+        return Some(base);
     };
     Some(Image::new_owned(with_dot(base.rgba(), base.width(), base.height(), color), base.width(), base.height()))
 }
@@ -155,8 +163,8 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
                 show_window(tray.app_handle());
             }
         });
-    if let Some(icon) = app.default_window_icon() {
-        builder = builder.icon(icon.clone());
+    if let Some(icon) = icon_for(app, TrayState::Idle) {
+        builder = builder.icon(icon);
     }
     builder.build(app)?;
     Ok(())
@@ -202,5 +210,17 @@ mod tests {
             assert!(state.tooltip("en").starts_with("FinchSpeak"));
             assert_eq!(state.dot().is_none(), state == TrayState::Idle);
         }
+    }
+
+    #[test]
+    fn tray_states_use_the_supplied_bird_artwork() {
+        let idle = Image::from_bytes(bird_icon_bytes(TrayState::Idle)).unwrap();
+        let voice = Image::from_bytes(bird_icon_bytes(TrayState::Voice)).unwrap();
+        let muted = Image::from_bytes(bird_icon_bytes(TrayState::Muted)).unwrap();
+        assert_eq!((idle.width(), idle.height()), (64, 64));
+        assert_eq!((voice.width(), voice.height()), (64, 64));
+        assert_eq!((muted.width(), muted.height()), (64, 64));
+        assert_ne!(idle.rgba(), voice.rgba());
+        assert_ne!(voice.rgba(), muted.rgba());
     }
 }
