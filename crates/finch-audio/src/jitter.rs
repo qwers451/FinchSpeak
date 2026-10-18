@@ -19,8 +19,8 @@ pub const MIN_BUFFER_PACKETS: usize = 2;
 /// Maximum jitter buffer delay (6 packets = 120 ms).
 pub const MAX_BUFFER_PACKETS: usize = 6;
 
-/// Packets allowed above the target depth before the oldest are skipped.
-const CATCH_UP_SLACK_PACKETS: usize = 1;
+/// Do not keep asking Opus to invent speech after the sender has stopped.
+const MAX_CONCEALMENT_FRAMES: usize = 6;
 
 /// Result of popping an audio frame from the jitter buffer.
 #[derive(Debug, PartialEq, Eq)]
@@ -47,6 +47,8 @@ pub struct JitterBuffer {
     last_seq: Option<u16>,
     last_extended_seq: u64,
     next_playout_seq: Option<u64>,
+    /// Preserve the late-packet boundary when an idle stream releases its playout pointer.
+    retired_before: Option<u64>,
     queue: BTreeMap<u64, QueuedPacket>,
     decoder: OpusVoiceDecoder,
 
@@ -63,6 +65,8 @@ pub struct JitterBuffer {
     priming: bool,
     /// While re-buffering after an underrun, fill with PLC instead of silence.
     conceal_while_priming: bool,
+    priming_frames: usize,
+    concealed_frames: usize,
 }
 
 impl JitterBuffer {
@@ -73,6 +77,7 @@ impl JitterBuffer {
             last_seq: None,
             last_extended_seq: 0,
             next_playout_seq: None,
+            retired_before: None,
             queue: BTreeMap::new(),
             decoder,
             last_transit: None,
@@ -82,6 +87,8 @@ impl JitterBuffer {
             total_lost: 0,
             priming: true,
             conceal_while_priming: false,
+            priming_frames: 0,
+            concealed_frames: 0,
         })
     }
 
@@ -108,6 +115,13 @@ impl JitterBuffer {
             }
         };
 
+        // Ignore old/duplicate arrivals before they can change timing estimates.
+        if self.next_playout_seq.or(self.retired_before).is_some_and(|next| extended_seq < next)
+            || self.queue.contains_key(&extended_seq)
+        {
+            return;
+        }
+
         // RFC 3550 inter-arrival jitter calculation
         if let Some((last_arrival, last_timestamp)) = self.last_transit {
             let arrival_diff_ms = now.duration_since(last_arrival).as_secs_f64() * 1000.0;
@@ -126,13 +140,6 @@ impl JitterBuffer {
         }
         self.last_transit = Some((now, header.timestamp));
 
-        // A packet whose slot was already played or concealed can no longer be used.
-        if let Some(next) = self.next_playout_seq
-            && extended_seq < next
-        {
-            return;
-        }
-
         // Insert into queue
         self.queue.insert(
             extended_seq,
@@ -144,17 +151,22 @@ impl JitterBuffer {
         );
 
         // Bound latency: if the sender runs ahead of playout, drop the oldest packets.
-        let mut trimmed = false;
+        let mut removed = 0u64;
         while self.queue.len() > MAX_BUFFER_PACKETS {
             self.queue.pop_first();
-            trimmed = true;
+            removed += 1;
         }
         // Missing packets still own a playout slot (PLC). Advance over them only
         // when intentionally discarding a real backlog, not on every new arrival.
-        if trimmed
+        if removed > 0
             && let (Some(next), Some(&oldest)) = (self.next_playout_seq, self.queue.keys().next())
             && next < oldest
         {
+            let covered = oldest - next;
+            self.total_expected += covered;
+            // Intentionally skipped real packets are accounted as played;
+            // absent slots passed during catch-up remain genuine losses.
+            self.total_lost += covered.saturating_sub(removed);
             self.next_playout_seq = Some(oldest);
         }
 
@@ -164,6 +176,29 @@ impl JitterBuffer {
         {
             self.next_playout_seq = Some(first_seq);
         }
+    }
+
+    fn finish_spurt(&mut self) {
+        self.retired_before = self.next_playout_seq;
+        self.next_playout_seq = None;
+        self.last_transit = None;
+        self.priming = true;
+        self.conceal_while_priming = false;
+        self.priming_frames = 0;
+        self.concealed_frames = 0;
+    }
+
+    fn conceal(&mut self, output: &mut [f32; FRAME_SIZE_48K]) -> PlayoutResult {
+        if self.queue.is_empty() && self.concealed_frames >= MAX_CONCEALMENT_FRAMES {
+            self.finish_spurt();
+            output.fill(0.0);
+            return PlayoutResult::Empty;
+        }
+        self.concealed_frames += 1;
+        if self.decoder.decode_plc(output).is_err() {
+            output.fill(0.0);
+        }
+        PlayoutResult::Concealed
     }
 
     /// Read and decode the next 20 ms frame (960 samples @ 48 kHz).
@@ -179,43 +214,33 @@ impl JitterBuffer {
 
         // Buffer `target_packets` at the start of every talk spurt and after an underrun
         if self.priming {
-            if self.queue.len() < self.target_packets {
+            let complete = self.queue.values().any(|packet|
+                packet.flags & finch_protocol::media::FLAG_SILENCE != 0);
+            if self.queue.len() < self.target_packets && !complete
+                && (self.queue.is_empty() || self.priming_frames < MAX_BUFFER_PACKETS)
+            {
+                self.priming_frames += 1;
                 if self.conceal_while_priming {
-                    let _ = self.decoder.decode_plc(output);
-                    return PlayoutResult::Concealed;
+                    return self.conceal(output);
                 }
                 output.fill(0.0);
                 return PlayoutResult::Buffering;
             }
             self.priming = false;
             self.conceal_while_priming = false;
+            self.priming_frames = 0;
         }
 
-        // A burst (the pre-roll of a new talk spurt, a network stall that cleared) leaves more
-        // queued than the target; playing it all out would keep every later packet that much
-        // later for good. Skip the oldest and stay close to the target.
-        let limit = self.target_packets + CATCH_UP_SLACK_PACKETS;
-        let mut removed = 0u64;
-        while self.queue.len() > limit {
-            self.queue.pop_first();
-            removed += 1;
-        }
-        if removed > 0 && let Some(&oldest) = self.queue.keys().next() {
-            // Slots that never arrived before the new start count as lost, skipped ones as played.
-            let covered = oldest.saturating_sub(playout_seq);
-            self.total_expected += covered;
-            self.total_lost += covered.saturating_sub(removed);
-            self.next_playout_seq = Some(oldest);
-        }
-        let playout_seq = self.next_playout_seq.unwrap_or(playout_seq);
+        // A valid capture pre-roll is five packets. Do not trim it to the smaller
+        // adaptive target: those oldest packets contain the beginning of the word.
+        // push() still enforces the hard six-packet / 120 ms queue bound.
 
         // Underrun: nothing queued at all means playout is ahead of the network, not that the
         // packet was lost. Hold position and re-buffer to the current target instead.
         if self.queue.is_empty() {
-            let _ = self.decoder.decode_plc(output);
             self.priming = true;
             self.conceal_while_priming = true;
-            return PlayoutResult::Concealed;
+            return self.conceal(output);
         }
 
         self.total_expected += 1;
@@ -225,24 +250,21 @@ impl JitterBuffer {
             let is_silence = (packet.flags & finch_protocol::media::FLAG_SILENCE) != 0;
 
             if self.decoder.decode(&packet.payload, output).is_ok() {
+                self.concealed_frames = 0;
                 self.next_playout_seq = Some(playout_seq + 1);
 
                 if is_silence && self.queue.is_empty() {
                     // Reset playout on silence end; the next spurt is buffered again
-                    self.next_playout_seq = None;
-                    self.last_transit = None;
-                    self.priming = true;
+                    self.finish_spurt();
                 }
                 PlayoutResult::Normal
             } else {
-                let _ = self.decoder.decode_plc(output);
                 self.next_playout_seq = Some(playout_seq + 1);
-                PlayoutResult::Concealed
+                self.conceal(output)
             }
         } else {
             // Packet loss: call Opus PLC to smooth over the gap
             self.total_lost += 1;
-            let _ = self.decoder.decode_plc(output);
             self.next_playout_seq = Some(playout_seq + 1);
 
             // If we have fallen too far behind incoming packets, resynchronize
@@ -253,7 +275,7 @@ impl JitterBuffer {
                 self.next_playout_seq = Some(oldest_queued);
             }
 
-            PlayoutResult::Concealed
+            self.conceal(output)
         }
     }
 
@@ -281,6 +303,57 @@ impl JitterBuffer {
 mod tests {
     use super::*;
     use crate::opus::OpusVoiceEncoder;
+
+    #[test]
+    fn lost_end_marker_eventually_produces_exact_silence() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let mut output = [0.0; FRAME_SIZE_48K];
+        push_seq(&mut buffer, 0, false, &payload);
+        push_seq(&mut buffer, 1, false, &payload);
+        assert_eq!(buffer.pop_frame(&mut output), PlayoutResult::Normal);
+        assert_eq!(buffer.pop_frame(&mut output), PlayoutResult::Normal);
+        for _ in 0..50 {
+            buffer.pop_frame(&mut output);
+        }
+        assert_eq!(buffer.pop_frame(&mut output), PlayoutResult::Empty,
+            "an absent end marker must not synthesize PLC indefinitely");
+        assert!(output.iter().all(|sample| *sample == 0.0));
+    }
+
+    #[test]
+    fn delayed_end_marker_does_not_wait_for_another_packet() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let mut output = [0.0; FRAME_SIZE_48K];
+        push_seq(&mut buffer, 0, false, &payload);
+        push_seq(&mut buffer, 1, false, &payload);
+        buffer.pop_frame(&mut output);
+        buffer.pop_frame(&mut output);
+        buffer.pop_frame(&mut output); // temporarily empty, starts rebuffering
+        push_seq(&mut buffer, 2, true, &payload);
+        assert_eq!(buffer.pop_frame(&mut output), PlayoutResult::Normal,
+            "the end marker already completes the talk spurt");
+        assert_eq!(buffer.pop_frame(&mut output), PlayoutResult::Empty);
+    }
+
+    #[test]
+    fn initial_preroll_is_not_discarded_as_network_backlog() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let mut output = [0.0; FRAME_SIZE_48K];
+        // VoiceCapture sends four preceding frames plus the activating frame at once.
+        for seq in 0..5 {
+            push_seq(&mut buffer, seq, false, &payload);
+        }
+        assert_eq!(buffer.pop_frame(&mut output), PlayoutResult::Normal);
+        assert_eq!(buffer.next_playout_seq, Some(1),
+            "the first samples of a word must reach the decoder");
+        for seq in 1..5 {
+            assert_eq!(buffer.pop_frame(&mut output), PlayoutResult::Normal);
+            assert_eq!(buffer.next_playout_seq, Some(seq + 1));
+        }
+    }
 
     #[test]
     fn a_new_arrival_does_not_skip_a_missing_playout_slot() {
@@ -463,10 +536,10 @@ mod tests {
         assert!(buffer.loss_rate() < 0.05, "loss rate {:.2} with no real losses", buffer.loss_rate());
     }
 
-    /// A burst of old packets (the pre-roll of a talk spurt) must not leave the stream a few
-    /// frames later than necessary for the rest of the spurt.
+    /// Capture pre-roll is intentional audio, not excess network backlog. Preserve it,
+    /// while keeping queued audio within the documented 120 ms hard limit.
     #[test]
-    fn test_burst_does_not_add_standing_latency() {
+    fn test_preroll_latency_stays_within_the_hard_bound() {
         let mut buffer = JitterBuffer::new().unwrap();
         let payload = opus_frame();
         let mut out = [0.0f32; FRAME_SIZE_48K];
@@ -483,10 +556,10 @@ mod tests {
                 deepest_after_settling = deepest_after_settling.max(buffer.buffered_len());
             }
         }
-        assert!(
-            deepest_after_settling <= 3,
-            "{deepest_after_settling} packets still queued: the burst became permanent latency"
-        );
+        assert!(deepest_after_settling <= MAX_BUFFER_PACKETS,
+            "{deepest_after_settling} packets exceed the latency bound");
+        assert_eq!(buffer.counters().0, 40, "every played packet has one slot");
+        assert_eq!(buffer.next_playout_seq, Some(40), "no beginning/middle frames skipped");
     }
 
     /// Packets that never arrived must still show up as loss when a burst makes the buffer
@@ -500,6 +573,110 @@ mod tests {
             push_seq(&mut buffer, seq, false, &payload); // 2 is lost
         }
         buffer.pop_frame(&mut out);
+        buffer.pop_frame(&mut out); // the next slot (2) is the one actually missing
         assert!(buffer.loss_rate() > 0.0, "the missing packet was not counted");
+    }
+
+    #[test]
+    fn single_packet_start_has_a_bounded_wait() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let mut out = [0.0; FRAME_SIZE_48K];
+        push_seq(&mut buffer, 0, false, &payload);
+        for _ in 0..MAX_BUFFER_PACKETS {
+            assert_eq!(buffer.pop_frame(&mut out), PlayoutResult::Buffering);
+        }
+        assert_eq!(buffer.pop_frame(&mut out), PlayoutResult::Normal);
+    }
+
+    #[test]
+    fn idle_recovery_rejects_old_packets_and_preserves_new_onset() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let mut out = [0.0; FRAME_SIZE_48K];
+        push_seq(&mut buffer, 0, false, &payload);
+        push_seq(&mut buffer, 1, false, &payload);
+        buffer.pop_frame(&mut out);
+        buffer.pop_frame(&mut out);
+        for _ in 0..50 { buffer.pop_frame(&mut out); }
+        assert_eq!(buffer.pop_frame(&mut out), PlayoutResult::Empty);
+        push_seq(&mut buffer, 1, false, &payload); // already played
+        assert_eq!(buffer.buffered_len(), 0);
+        push_seq(&mut buffer, 3, false, &payload); // end marker 2 was lost
+        push_seq(&mut buffer, 4, false, &payload);
+        assert_eq!(buffer.pop_frame(&mut out), PlayoutResult::Normal);
+        assert_eq!(buffer.next_playout_seq, Some(4));
+    }
+
+    #[test]
+    fn continuing_packet_arrivals_keep_recovering_after_an_underrun() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let payload = opus_frame();
+        let mut out = [0.0; FRAME_SIZE_48K];
+        push_seq(&mut buffer, 0, false, &payload);
+        push_seq(&mut buffer, 1, false, &payload);
+        buffer.pop_frame(&mut out);
+        buffer.pop_frame(&mut out);
+        assert_eq!(buffer.pop_frame(&mut out), PlayoutResult::Concealed);
+        for seq in 2..50 {
+            push_seq(&mut buffer, seq, false, &payload);
+            let result = buffer.pop_frame(&mut out);
+            if seq > 3 { assert_eq!(result, PlayoutResult::Normal); }
+        }
+    }
+
+    #[test]
+    fn lossy_jittery_stream_ends_in_silence_without_an_end_marker() {
+        for seed in 1..=8u64 {
+            let mut random = seed;
+            let mut encoder = OpusVoiceEncoder::new(64).unwrap();
+            let mut buffer = JitterBuffer::new().unwrap();
+            let start = Instant::now();
+            let mut arrivals = Vec::new();
+            for seq in 0..250u16 {
+                let frame = std::array::from_fn(|i| {
+                    let t = (seq as usize * FRAME_SIZE_48K + i) as f32 / 48_000.0;
+                    0.2 * (t * 220.0 * 2.0 * std::f32::consts::PI).sin()
+                });
+                let payload = encoder.encode(&frame).unwrap();
+                random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
+                if (random >> 32) % 100 < 5 { continue; }
+                let delay = (random >> 40) % 61;
+                arrivals.push((seq as u64 * 20 + delay, seq, payload));
+            }
+            arrivals.sort_by_key(|packet| packet.0);
+            let mut next = 0;
+            let mut normal = 0;
+            let mut out = [0.0; FRAME_SIZE_48K];
+            for tick in 0..300u64 {
+                while next < arrivals.len() && arrivals[next].0 <= tick * 20 {
+                    let (at, seq, payload) = &arrivals[next];
+                    buffer.push(&MediaHeader::new_audio(1, 1, *seq, *seq as u32 * 20, false, false),
+                        payload.clone(), start + std::time::Duration::from_millis(*at));
+                    next += 1;
+                }
+                let result = buffer.pop_frame(&mut out);
+                if result == PlayoutResult::Normal { normal += 1; }
+                assert!(out.iter().all(|sample| sample.is_finite()));
+                assert!(buffer.buffered_len() <= MAX_BUFFER_PACKETS);
+                if tick >= 280 {
+                    assert_eq!(result, PlayoutResult::Empty, "seed={seed}, tick={tick}");
+                    assert!(out.iter().all(|sample| *sample == 0.0));
+                }
+            }
+            assert!(normal >= 210, "seed={seed}: only {normal}/250 frames decoded normally");
+        }
+    }
+
+    #[test]
+    fn hard_bound_accounts_for_skipped_slots_and_real_losses() {
+        let payload = opus_frame();
+        let mut buffer = JitterBuffer::new().unwrap();
+        for seq in 0..50 { push_seq(&mut buffer, seq, false, &payload); }
+        assert_eq!(buffer.counters(), (44, 0), "discarded real packets are counted as played");
+        let mut buffer = JitterBuffer::new().unwrap();
+        push_seq(&mut buffer, 0, false, &payload);
+        for seq in 10..=16 { push_seq(&mut buffer, seq, false, &payload); }
+        assert_eq!(buffer.counters(), (11, 9), "missing slots 1 through 9 are still losses");
     }
 }
