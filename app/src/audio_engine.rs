@@ -34,6 +34,52 @@ use crate::capture_privacy::{CaptureClock, CapturedSample, InputBoundary};
 /// Capacity of lock-free ring buffers (16384 samples ~ 341 ms at 48 kHz).
 const RING_BUFFER_CAPACITY: usize = 16384;
 
+#[derive(Clone, Copy, Default)]
+struct PlaybackSample {
+    audible: f32,
+    echo_reference: f32,
+}
+
+// Only continuous live monitoring is excluded. Recorded microphone tests remain
+// in the reference alongside remote audio: they can echo while capture is private.
+fn playback_sample(reference_source: f32, live_monitor: f32) -> PlaybackSample {
+    let combined = reference_source + live_monitor;
+    let scale = combined.abs().max(1.0);
+    PlaybackSample { audible: combined / scale, echo_reference: reference_source / scale }
+}
+
+struct PlaybackResampler {
+    audible: OutputResampler,
+    reference: OutputResampler,
+    rate: u32,
+}
+impl PlaybackResampler {
+    fn new(rate: u32) -> Result<Self, String> {
+        Ok(Self { audible: OutputResampler::new(rate).map_err(|e| e.to_string())?,
+            reference: OutputResampler::new(rate).map_err(|e| e.to_string())?, rate })
+    }
+    fn passthrough() -> Self {
+        Self { audible: OutputResampler::Passthrough, reference: OutputResampler::Passthrough, rate: 48_000 }
+    }
+    fn process(&mut self, source: &[f32; FRAME_SIZE_48K], monitor: &[f32; FRAME_SIZE_48K]) -> Result<Vec<PlaybackSample>, String> {
+        let result = self.process_frame(source, monitor);
+        if result.is_err() { *self = Self::new(self.rate)?; }
+        result
+    }
+    fn process_frame(&mut self, source: &[f32; FRAME_SIZE_48K], monitor: &[f32; FRAME_SIZE_48K]) -> Result<Vec<PlaybackSample>, String> {
+        let mut audible = [0.0; FRAME_SIZE_48K];
+        let mut reference = [0.0; FRAME_SIZE_48K];
+        for index in 0..FRAME_SIZE_48K {
+            let sample = playback_sample(source[index], monitor[index]);
+            audible[index] = sample.audible; reference[index] = sample.echo_reference;
+        }
+        let audible = self.audible.process(&audible).map_err(|e| e.to_string())?;
+        let reference = self.reference.process(&reference).map_err(|e| e.to_string())?;
+        if audible.len() != reference.len() { return Err("Playout and echo reference length mismatch".into()); }
+        Ok(audible.into_iter().zip(reference).map(|(audible, echo_reference)| PlaybackSample { audible, echo_reference }).collect())
+    }
+}
+
 fn playback_headroom(chunk: usize, callback_frames: usize) -> usize {
     // Keep one processing frame beyond the largest observed hardware request.
     // Small callbacks retain the existing 60 ms target. Bound the target so a
@@ -234,10 +280,26 @@ fn mix_next_frame(
     mixer.blocking_lock().mix_frame(frame, now)
 }
 
+/// Render paired samples without allowing local monitoring into the AEC reference.
+fn render_playback(
+    data: &mut [f32], channels: usize,
+    playback: &mut impl Consumer<Item = PlaybackSample>,
+    reference: &mut impl Producer<Item = f32>,
+) -> (u64, u64) {
+    let mut missing = 0;
+    let mut reference_dropped = 0;
+    for chunk in data.chunks_mut(channels) {
+        let sample = playback.try_pop().unwrap_or_else(|| { missing += 1; PlaybackSample::default() });
+        if reference.try_push(sample.echo_reference).is_err() { reference_dropped += 1; }
+        chunk.fill(sample.audible);
+    }
+    (missing, reference_dropped)
+}
+
 /// Discard queued playout while deafened; only actual output silence goes to AEC.
 fn render_deafened(
     data: &mut [f32], channels: usize,
-    playback: &mut impl Consumer<Item = f32>,
+    playback: &mut impl Consumer<Item = PlaybackSample>,
     reference: &mut impl Producer<Item = f32>,
 ) {
     let queued = playback.occupied_len();
@@ -293,7 +355,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 let stream_failed = Arc::new(AtomicBool::new(false));
 
                 // 1. Output (Playback) Ring Buffer & cpal Stream
-                let playback_rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
+                let playback_rb = HeapRb::<PlaybackSample>::new(RING_BUFFER_CAPACITY);
                 let (mut playback_prod, mut playback_cons) = playback_rb.split();
 
                 // What the speakers actually played, for echo cancellation: the output callback
@@ -306,7 +368,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 let mut applied_latency_ms = 0u32;
 
                 let mut playback_stream: Option<Stream> = None;
-                let mut output_resampler: Option<OutputResampler> = None;
+                let mut output_resampler: Option<PlaybackResampler> = None;
                 let mut output_sample_rate = 48000u32;
                 let output_callback_frames = Arc::new(AtomicU32::new(0));
 
@@ -335,11 +397,11 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             let output_diagnostics = diagnostics.clone();
                             let mut previous_output_callback: Option<(u64, Instant)> = None;
 
-                            output_resampler = match OutputResampler::new(output_sample_rate) {
+                            output_resampler = match PlaybackResampler::new(output_sample_rate) {
                                 Ok(resampler) => Some(resampler),
                                 Err(e) => {
                                     error!("Failed to initialize OutputResampler: {}", e);
-                                    Some(OutputResampler::Passthrough)
+                                    Some(PlaybackResampler::passthrough())
                                 }
                             };
 
@@ -374,15 +436,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         render_deafened(data, channels, &mut playback_cons, &mut reference_prod);
                                         return;
                                     }
-                                    let mut missing = 0;
-                                    let mut reference_dropped = 0;
-                                    for chunk in data.chunks_mut(channels) {
-                                        let sample = playback_cons.try_pop().unwrap_or_else(|| { missing += 1; 0.0 });
-                                        if reference_prod.try_push(sample).is_err() { reference_dropped += 1; }
-                                        for out_ch in chunk.iter_mut() {
-                                            *out_ch = sample;
-                                        }
-                                    }
+                                    let (missing, reference_dropped) = render_playback(data, channels, &mut playback_cons, &mut reference_prod);
                                     output_diagnostics.add_at(diagnostic_epoch, Metric::OutputUnderflowSamples, missing);
                                     output_diagnostics.add_at(diagnostic_epoch, Metric::OutputUnderflowCallbacks, u64::from(missing > 0));
                                     output_diagnostics.add_at(diagnostic_epoch, Metric::ReferenceDroppedSamples, reference_dropped);
@@ -537,6 +591,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 // The processed microphone, played back to the user while "hear myself" is on.
                 let mut monitor_queue: std::collections::VecDeque<[f32; FRAME_SIZE_48K]> = std::collections::VecDeque::new();
                 let mut playback_frame_48k = [0.0f32; FRAME_SIZE_48K];
+                let mut monitor_frame_48k = [0.0f32; FRAME_SIZE_48K];
                 let mut capture_frame_48k = [0.0f32; FRAME_SIZE_48K];
                 let mut capture_raw_buf = Vec::with_capacity(4096);
 
@@ -649,11 +704,10 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         state.voice_settings.set_mic_test(false);
                                     }
                                 }
+                                monitor_frame_48k.fill(0.0);
                                 if effective_monitor(&state.voice_settings, mic_test.is_some()) {
                                     if let Some(own) = monitor_queue.pop_front() {
-                                        for (out, mine) in playback_frame_48k.iter_mut().zip(own.iter()) {
-                                            *out = (*out + *mine).clamp(-1.0, 1.0);
-                                        }
+                                        monitor_frame_48k = own;
                                     } else {
                                         diagnostics.add(Metric::MonitorEmptyFrames, 1);
                                     }
@@ -669,7 +723,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     );
                                 }
 
-                                match resampler.process(&playback_frame_48k) {
+                                match resampler.process(&playback_frame_48k, &monitor_frame_48k) {
                                     Ok(resampled) => {
                                         for &sample in &resampled {
                                             let _ = playback_prod.try_push(sample);
@@ -678,7 +732,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     Err(e) => {
                                         error!("Output resampling error: {}", e);
                                         for _ in 0..target_output_chunk {
-                                            let _ = playback_prod.try_push(0.0);
+                                            let _ = playback_prod.try_push(PlaybackSample::default());
                                         }
                                     }
                                 }
@@ -807,6 +861,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         && state.voice_settings.privacy_snapshot() == (generation, true);
                                     capture.set_transmit_gate(frame_gate);
                                     let dsp_epoch = diagnostics.epoch();
+                                    capture.set_diagnostics_enabled(dsp_epoch != 0);
                                     let dsp_started = (dsp_epoch != 0).then(Instant::now);
                                     let processed = capture.process(&mut capture_frame_48k, sender_id, now_ms);
                                     if let Some(started) = dsp_started { diagnostics.dsp_frame_at(dsp_epoch, started.elapsed().as_micros() as u64); }
@@ -824,6 +879,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         }
                                     };
                                     processing_failures.succeeded();
+                                    if let Some(stages) = output.diagnostics {
+                                        diagnostics.signal_frame_at(dsp_epoch, stages.stage_power, stages.gate_changes, stages.dsp_resets);
+                                    }
                                     let ptt_open = state.voice_settings.transmit_open()
                                         && !state.is_muted.load(Ordering::Relaxed);
                                     let preview_active = output.activity.should_transmit() && ptt_open;
@@ -914,6 +972,124 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_render_outputs_monitor_but_references_only_remote_and_test() {
+        let (mut producer, mut playback) = HeapRb::<PlaybackSample>::new(16).split();
+        let (mut reference, mut received) = HeapRb::<f32>::new(16).split();
+        assert!(producer.try_push(playback_sample(0.0, 0.4)).is_ok());
+        assert!(producer.try_push(playback_sample(0.2, 0.1)).is_ok());
+        let mut stereo = [0.75; 8];
+        assert_eq!(render_playback(&mut stereo, 2, &mut playback, &mut reference), (2, 0));
+        assert!((stereo[0] - 0.4).abs() < 1e-6);
+        assert!((stereo[2] - 0.3).abs() < 1e-6);
+        assert_eq!(stereo[0], stereo[1]); assert_eq!(stereo[2], stereo[3]);
+        assert_eq!(&stereo[4..], &[0.0; 4]);
+        assert_eq!(received.try_pop(), Some(0.0));
+        assert_eq!(received.try_pop(), Some(0.2));
+        assert_eq!(received.try_pop(), Some(0.0));
+        assert_eq!(received.try_pop(), Some(0.0));
+    }
+
+    #[test]
+    fn local_preview_is_audible_but_never_becomes_far_end_reference() {
+        let local = playback_sample(0.0, 0.4);
+        assert_eq!(local.audible, 0.4);
+        assert_eq!(local.echo_reference, 0.0);
+        let remote = playback_sample(0.3, 0.0);
+        assert_eq!(remote.audible, 0.3);
+        assert_eq!(remote.echo_reference, 0.3);
+        let clipped = playback_sample(0.8, 0.8);
+        assert_eq!(clipped.audible, 1.0);
+        assert_eq!(clipped.echo_reference, 0.5);
+    }
+
+    #[test]
+    fn monitor_feedback_preserves_full_capture_speech_like_no_monitor() -> anyhow::Result<()> {
+        let speech = finch_testbed::audio::load_speech_48k("speech_1")?;
+        let far_end = finch_testbed::audio::load_speech_48k("speech_2")?;
+        for initial_remote_frames in [0, 100] {
+        for enhancement in [false, true] {
+        for delay_frames in [3usize, 6] {
+            let mut baseline = VoiceCapture::new(VoiceCaptureConfig { voice_enhancement: enhancement, ..Default::default() })?;
+            let mut monitored = VoiceCapture::new(VoiceCaptureConfig { voice_enhancement: enhancement, ..Default::default() })?;
+            baseline.set_transmit_gate(false); monitored.set_transmit_gate(false);
+            baseline.set_stream_delay_ms(10)?; monitored.set_stream_delay_ms(10)?;
+            // Activate AEC with real far-end audio first. The test must also work
+            // after the room becomes quiet, while has_reference remains latched.
+            for index in 0..initial_remote_frames {
+                let mut remote = [0.0; FRAME_SIZE_48K];
+                for (offset, sample) in remote.iter_mut().enumerate() { *sample = far_end[(index * FRAME_SIZE_48K + offset) % far_end.len()] * 0.1; }
+                baseline.push_playback_reference(&remote)?; monitored.push_playback_reference(&remote)?;
+                let mut left = remote.map(|sample| sample * 0.3); let mut right = left;
+                baseline.process(&mut left, 1, index as u32 * 20)?; monitored.process(&mut right, 1, index as u32 * 20)?;
+            }
+            let mut references: Vec<[f32; FRAME_SIZE_48K]> = Vec::new();
+            let mut max_difference = 0.0f32;
+            for index in 0..800 {
+                let mut input = [0.0; FRAME_SIZE_48K];
+                for (sample_index, sample) in input.iter_mut().enumerate() {
+                    *sample = speech[(index * FRAME_SIZE_48K + sample_index) % speech.len()];
+                }
+                let mut expected = input;
+                baseline.push_playback_reference(&[0.0; FRAME_SIZE_48K])?;
+                let reference = if index >= delay_frames { references[index - delay_frames] } else { [0.0; FRAME_SIZE_48K] };
+                monitored.push_playback_reference(&reference)?;
+                baseline.process(&mut expected, 1, index as u32 * 20)?;
+                monitored.process(&mut input, 1, index as u32 * 20)?;
+                for (&actual, &expected) in input.iter().zip(&expected) { max_difference = max_difference.max((actual - expected).abs()); }
+                references.push(input.map(|sample| playback_sample(0.0, sample).echo_reference));
+            }
+            assert!(max_difference < 1e-6, "local monitor must not alter capture: remote_frames={initial_remote_frames} enhancement={enhancement} lag={delay_frames}, difference={max_difference}");
+        }
+        }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn paired_resamplers_preserve_remote_and_isolate_monitor_tail() {
+        for rate in [16_000, 44_100, 48_000, 96_000] {
+            let mut mixed = PlaybackResampler::new(rate).unwrap();
+            let mut reference_only = OutputResampler::new(rate).unwrap();
+            let mut monitor_only = PlaybackResampler::new(rate).unwrap();
+            let mut heard_monitor = false;
+            for index in 0..80 {
+                let source = std::array::from_fn(|n| (((index * FRAME_SIZE_48K + n) as f32) * 0.03).sin() * 0.2);
+                let local = if index < 40 { [0.15; FRAME_SIZE_48K] } else { [0.0; FRAME_SIZE_48K] };
+                let pairs = mixed.process(&source, &local).unwrap();
+                let expected = reference_only.process(&source).unwrap();
+                assert_eq!(pairs.len(), expected.len());
+                for (sample, expected) in pairs.iter().zip(&expected) {
+                    assert!((sample.echo_reference - expected).abs() < 1e-6, "far-end reference changed at {rate} Hz");
+                }
+                let own = monitor_only.process(&[0.0; FRAME_SIZE_48K], &local).unwrap();
+                assert!(own.iter().all(|sample| sample.echo_reference == 0.0), "local FFT tail leaked into AEC at {rate} Hz");
+                heard_monitor |= own.iter().any(|sample| sample.audible.abs() > 0.01);
+            }
+            assert!(heard_monitor);
+        }
+    }
+
+    #[test]
+    fn remote_echo_still_cancels_while_live_monitor_is_excluded() {
+        let source = std::array::from_fn(|index| (index as f32 * 0.1).sin() * 0.3);
+        let echo = source.map(|sample| sample * 0.5);
+        let mut resampler = PlaybackResampler::new(48_000).unwrap();
+        let mut aec = finch_audio::EchoCanceller::new().unwrap();
+        let mut final_energy = 0.0;
+        for _ in 0..150 {
+            let played = resampler.process(&source, &[0.05; FRAME_SIZE_48K]).unwrap();
+            let reference = std::array::from_fn(|index| played[index].echo_reference);
+            assert_eq!(reference, source, "remote/screen/test reference must remain available");
+            aec.push_reference(&reference).unwrap();
+            let mut captured = echo;
+            aec.process_capture(&mut captured).unwrap();
+            final_energy = captured.iter().map(|sample| sample * sample).sum::<f32>();
+        }
+        let original_energy = echo.iter().map(|sample| sample * sample).sum::<f32>();
+        assert!(final_energy < original_energy * 0.1, "far-end echo cancellation must remain active");
+    }
 
     #[test]
     fn playback_headroom_keeps_small_callbacks_low_and_large_requests_bounded() {
@@ -1033,9 +1209,9 @@ mod tests {
 
     #[test]
     fn deafen_discards_queued_audio_and_feeds_only_silence_to_aec() {
-        let (mut producer, mut playback) = HeapRb::<f32>::new(1024).split();
+        let (mut producer, mut playback) = HeapRb::<PlaybackSample>::new(1024).split();
         let (mut reference, mut received) = HeapRb::<f32>::new(1024).split();
-        for _ in 0..960 { producer.try_push(0.5).unwrap(); }
+        for _ in 0..960 { assert!(producer.try_push(playback_sample(0.3, 0.2)).is_ok()); }
         let mut data = [0.75; 32];
         render_deafened(&mut data, 2, &mut playback, &mut reference);
         assert!(data.iter().all(|sample| *sample == 0.0));

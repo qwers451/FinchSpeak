@@ -75,6 +75,10 @@ pub struct AudioDiagnostics {
     dsp_count: AtomicU64, dsp_max_us: AtomicU64,
     history: Mutex<History>,
     stream: Mutex<StreamContext>,
+    signal_frames: AtomicU64,
+    signal_power: [AtomicU64; 4], signal_zero: [AtomicU64; 4],
+    signal_drops: [AtomicU64; 4], signal_run: [AtomicU64; 4], signal_max_run: [AtomicU64; 4],
+    capture_gate_changes: AtomicU64, capture_dsp_resets: AtomicU64,
 }
 impl Default for AudioDiagnostics {
     fn default() -> Self {
@@ -82,7 +86,10 @@ impl Default for AudioDiagnostics {
             input: CallbackStats::default(), output: CallbackStats::default(),
             metrics: std::array::from_fn(|_| AtomicU64::new(0)), dsp_histogram: std::array::from_fn(|_| AtomicU64::new(0)),
             dsp_count: AtomicU64::new(0), dsp_max_us: AtomicU64::new(0), history: Mutex::new(History::default()),
-            stream: Mutex::new(StreamContext::default()) }
+            stream: Mutex::new(StreamContext::default()), signal_frames: AtomicU64::new(0),
+            signal_power: std::array::from_fn(|_| AtomicU64::new(0)), signal_zero: std::array::from_fn(|_| AtomicU64::new(0)),
+            signal_drops: std::array::from_fn(|_| AtomicU64::new(0)), signal_run: std::array::from_fn(|_| AtomicU64::new(0)),
+            signal_max_run: std::array::from_fn(|_| AtomicU64::new(0)), capture_gate_changes: AtomicU64::new(0), capture_dsp_resets: AtomicU64::new(0) }
     }
 }
 impl AudioDiagnostics {
@@ -108,6 +115,11 @@ impl AudioDiagnostics {
         self.input.reset(); self.output.reset();
         for value in self.metrics.iter().chain(self.dsp_histogram.iter()) { value.store(0, Ordering::Relaxed); }
         self.dsp_count.store(0, Ordering::Relaxed); self.dsp_max_us.store(0, Ordering::Relaxed);
+        self.signal_frames.store(0, Ordering::Relaxed);
+        self.capture_gate_changes.store(0, Ordering::Relaxed); self.capture_dsp_resets.store(0, Ordering::Relaxed);
+        for values in [&self.signal_power, &self.signal_zero, &self.signal_drops, &self.signal_run, &self.signal_max_run] {
+            for value in values { value.store(0, Ordering::Relaxed); }
+        }
         let stream = self.stream.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let mut history = self.history.lock().unwrap_or_else(|e| e.into_inner());
         history.stream = stream;
@@ -179,8 +191,37 @@ impl AudioDiagnostics {
             cumulative += bucket.load(Ordering::Relaxed);
             if count > 0 && cumulative >= threshold { p95 = 1u64 << index; break; }
         }
+        let frames = self.signal_frames.load(Ordering::Relaxed);
+        let stages: Vec<_> = ["input_mono", "after_aec", "after_rnnoise", "after_gain"].iter().enumerate().map(|(index, name)| {
+            let power = self.signal_power[index].load(Ordering::Relaxed) as f64 / 1e12 / frames.max(1) as f64;
+            serde_json::json!({ "name": name, "mean_dbfs": 10.0 * power.max(1e-12).log10(),
+                "zero_frames": self.signal_zero[index].load(Ordering::Relaxed),
+                "drops_over_12db_from_active_previous_stage": self.signal_drops[index].load(Ordering::Relaxed),
+                "max_consecutive_drop_frames": self.signal_max_run[index].load(Ordering::Relaxed) })
+        }).collect();
         serde_json::json!({ "input": self.input.snapshot(), "output": self.output.snapshot(), "metrics": metrics,
+            "signal": { "frames": frames, "stages": stages, "active_previous_stage_floor_dbfs": -45,
+                "capture_gate_changes_current_stream": self.capture_gate_changes.load(Ordering::Relaxed),
+                "privacy_reopen_dsp_resets_current_stream": self.capture_dsp_resets.load(Ordering::Relaxed) },
             "dsp": { "frames": count, "max_us": self.dsp_max_us.load(Ordering::Relaxed), "p95_upper_bound_us": p95 } })
+    }
+    pub fn signal_frame_at(&self, epoch: u64, powers: [f32; 4], gate_changes: u64, resets: u64) {
+        self.record(epoch, || {
+            self.signal_frames.fetch_add(1, Ordering::Relaxed);
+            self.capture_gate_changes.store(gate_changes, Ordering::Relaxed);
+            self.capture_dsp_resets.store(resets, Ordering::Relaxed);
+            for index in 0..4 {
+                let power = if powers[index].is_finite() { powers[index].clamp(0.0, 1.0) } else { 0.0 };
+                self.signal_power[index].fetch_add((power as f64 * 1e12).round() as u64, Ordering::Relaxed);
+                self.signal_zero[index].fetch_add(u64::from(power == 0.0), Ordering::Relaxed);
+                let dropped = index > 0 && powers[index - 1] > 0.00003162278 && power < powers[index - 1] * 0.06309573;
+                if dropped {
+                    self.signal_drops[index].fetch_add(1, Ordering::Relaxed);
+                    let run = self.signal_run[index].fetch_add(1, Ordering::Relaxed) + 1;
+                    self.signal_max_run[index].fetch_max(run, Ordering::Relaxed);
+                } else { self.signal_run[index].store(0, Ordering::Relaxed); }
+            }
+        });
     }
     pub fn tick(&self, mode: &str, muted: bool, deafened: bool) {
         if !self.enabled() { return; }
@@ -212,6 +253,8 @@ impl AudioDiagnostics {
             "os": std::env::consts::OS, "arch": std::env::consts::ARCH, "enabled": self.enabled(),
             "diagnostic_epoch": self.epoch.load(Ordering::SeqCst),
             "contains_audio": false, "stream": history.stream,
+            "aec_reference_policy": "remote_and_recorded_test; continuous_live_monitor_excluded",
+            "signal_comparison_note": "same 20 ms frame indices, not latency aligned; isolated attenuation counters are not a quality score",
             "elapsed_ms": history.stopped_ms.unwrap_or_else(|| history.started.map(|t| t.elapsed().as_millis() as u64).unwrap_or(0)),
             "counter_semantics": "cumulative across stream generations since diagnostics start; lock-free counters are approximate during capture; activation rejects include PTT and may be restored by preroll",
             "samples": history.samples, "current": self.counters() });
@@ -292,5 +335,20 @@ mod tests {
         let report: serde_json::Value = serde_json::from_str(&d.report().unwrap()).unwrap();
         assert!(report["stream"]["input"].is_null());
         assert_eq!(report["stream"]["input_active"], false);
+    }
+
+    #[test]
+    fn signal_metrics_localize_attenuation_without_audio_payload() {
+        let d = AudioDiagnostics::default(); d.start(); let epoch = d.epoch();
+        for _ in 0..3 { d.signal_frame_at(epoch, [0.001, 0.000001, 0.000001, 0.000001], 7, 3); }
+        d.signal_frame_at(epoch, [0.001; 4], 7, 3);
+        let signal = d.counters()["signal"].clone();
+        assert_eq!(signal["frames"], 4);
+        assert_eq!(signal["stages"][1]["drops_over_12db_from_active_previous_stage"], 3);
+        assert_eq!(signal["stages"][1]["max_consecutive_drop_frames"], 3);
+        assert_eq!(signal["stages"][2]["drops_over_12db_from_active_previous_stage"], 0);
+        assert_eq!(signal["privacy_reopen_dsp_resets_current_stream"], 3);
+        d.start(); d.signal_frame_at(epoch, [1.0; 4], 99, 99);
+        assert_eq!(d.counters()["signal"]["frames"], 0);
     }
 }
