@@ -1,6 +1,8 @@
 /* Layout must remain usable at the desktop minimum, including the saved text zoom. */
 .main,.side,.members,.mhead,.room-body,.settings,.setnav { min-width:0; }
 .side,.members { flex-shrink:0; }
+/* The member list scrolls inside its own column so every member stays reachable at any window height. */
+.members { min-height:0; overflow-y:auto; scrollbar-gutter:stable; overscroll-behavior:contain; }
 .mhead h3 { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .mhead > .ic,.mhead > .tag,.mhead > .pill { flex-shrink:0; }
 .mhead .grow { min-width:0; }
