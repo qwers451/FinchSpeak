@@ -6,6 +6,7 @@ import {
 import type { AudioDevice } from '../../types';
 import { Button, Icon, Modal, Slider, Toggle } from '../../ui';
 import { t } from '../../i18n';
+import { api } from '../../services/api';
 
 function DevicePicker(props: { kind: keyof DeviceSelection; label: string; devices: AudioDevice[] }) {
   const missing = () => {
@@ -35,7 +36,75 @@ function DevicePicker(props: { kind: keyof DeviceSelection; label: string; devic
 /** D3: devices, microphone level with the speech threshold, push-to-talk, hear myself, test. */
 export function VoiceSettingsModal(props: { open: boolean; onClose: () => void }) {
   const [capturing, setCapturing] = createSignal(false);
+  const [diagnosticsBusy, setDiagnosticsBusy] = createSignal(false);
+  const [diagnosticsAction, setDiagnosticsAction] = createSignal<'start' | 'stop' | 'save' | null>(null);
+  const [diagnosticsStatus, setDiagnosticsStatus] = createSignal('');
+  const [diagnosticsError, setDiagnosticsError] = createSignal('');
+  const [diagnosticCapture, setDiagnosticCapture] = createSignal(false);
   createEffect(on(() => props.open, (open) => { if (open) void loadAudioDevices(); }));
+
+  const startDiagnostics = async () => {
+    setDiagnosticsBusy(true);
+    setDiagnosticsAction('start');
+    setDiagnosticsError('');
+    setDiagnosticsStatus('');
+    try {
+      await api.startAudioDiagnostics();
+      // The backend starts a fresh diagnostic capture on every call.
+      setDiagnosticsStatus(t('Capturing audio diagnostics…'));
+      setDiagnosticCapture(true);
+    } catch (error) {
+      setDiagnosticsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDiagnosticsBusy(false);
+      setDiagnosticsAction(null);
+    }
+  };
+
+  const stopDiagnostics = async () => {
+    setDiagnosticsBusy(true);
+    setDiagnosticsAction('stop');
+    setDiagnosticsError('');
+    setDiagnosticsStatus('');
+    try {
+      await api.stopAudioDiagnostics();
+      setDiagnosticCapture(false);
+      setDiagnosticsStatus(t('Capture stopped. You can save the report.'));
+    } catch (error) {
+      setDiagnosticsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDiagnosticsBusy(false);
+      setDiagnosticsAction(null);
+    }
+  };
+
+  const saveDiagnostics = async () => {
+    setDiagnosticsBusy(true);
+    setDiagnosticsAction('save');
+    setDiagnosticsError('');
+    setDiagnosticsStatus('');
+    try {
+      const report = await api.getAudioDiagnostics();
+      const url = URL.createObjectURL(new Blob([report], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'finchspeak-audio-diagnostics.json';
+      document.body.append(link);
+      try {
+        link.click();
+      } finally {
+        link.remove();
+        // Let the browser hand the blob to its download manager before releasing it.
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      setDiagnosticsStatus(t('Audio diagnostics report saved.'));
+    } catch (error) {
+      setDiagnosticsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDiagnosticsBusy(false);
+      setDiagnosticsAction(null);
+    }
+  };
 
   const captureKey = (event: KeyboardEvent) => {
     event.preventDefault();
@@ -118,6 +187,28 @@ export function VoiceSettingsModal(props: { open: boolean; onClose: () => void }
         <Show when={voiceSettings().monitor}>
           <div class="auth-banner amber" role="note"><Icon name="warn" /><span class="fs13">{t('Use headphones, or the speakers will feed back into the microphone.')}</span></div>
         </Show>
+
+        <div class="col g8" aria-label={t('Audio diagnostics')}>
+          <div class="col g4">
+            <strong class="fs13">{t('Audio diagnostics')}</strong>
+            <span class="t3 fs12">{t('Collects device names, audio configuration, and technical counters. No audio is recorded.')}</span>
+          </div>
+          <div class="row g8">
+            <Button variant="secondary" icon="play" aria-label={t('Start or reset audio diagnostics')} disabled={diagnosticsBusy()} loading={diagnosticsAction() === 'start'} onClick={() => void startDiagnostics()}>
+              {t('Start / reset capture')}
+            </Button>
+            <Show when={diagnosticCapture()}>
+              <Button variant="secondary" icon="x" aria-label={t('Stop audio diagnostics')} disabled={diagnosticsBusy()} loading={diagnosticsAction() === 'stop'} onClick={() => void stopDiagnostics()}>
+                {t('Stop capture')}
+              </Button>
+            </Show>
+            <Button variant="secondary" icon="dl" aria-label={t('Save audio diagnostics report')} disabled={diagnosticsBusy() || diagnosticCapture()} loading={diagnosticsAction() === 'save'} onClick={() => void saveDiagnostics()}>
+              {t('Save report')}
+            </Button>
+          </div>
+          <Show when={diagnosticsStatus()}><span class="t3 fs12" role="status">{diagnosticsStatus()}</span></Show>
+          <Show when={diagnosticsError()}><span class="err" role="alert"><Icon name="warn" size="sm" />{diagnosticsError()}</span></Show>
+        </div>
 
         <div class="row" style={{ 'justify-content': 'flex-end' }}><Button variant="primary" onClick={props.onClose}>{t('Done')}</Button></div>
       </div>

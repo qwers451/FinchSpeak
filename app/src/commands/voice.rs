@@ -209,3 +209,18 @@ pub async fn test_microphone(seconds: Option<u32>, state: State<'_, AppState>) -
     state.mic_test_request.store(seconds.unwrap_or(3).clamp(1, 10), Ordering::SeqCst);
     Ok(())
 }
+
+#[tauri::command]
+pub fn start_audio_diagnostics(state: State<'_, AppState>) {
+    state.audio_diagnostics.start();
+}
+
+#[tauri::command]
+pub fn stop_audio_diagnostics(state: State<'_, AppState>) {
+    state.audio_diagnostics.stop();
+}
+
+#[tauri::command]
+pub fn get_audio_diagnostics(state: State<'_, AppState>) -> Result<String, String> {
+    state.audio_diagnostics.report().map_err(|error| error.to_string())
+}

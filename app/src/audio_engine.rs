@@ -28,6 +28,7 @@ const MAX_DEVICE_RESTARTS: usize = 5;
 const RESTART_WINDOW: Duration = Duration::from_secs(10);
 
 use crate::state::AppState;
+use crate::audio_diagnostics::{DeviceConfig, Metric};
 use crate::capture_privacy::{CaptureClock, CapturedSample, InputBoundary};
 
 /// Capacity of lock-free ring buffers (16384 samples ~ 341 ms at 48 kHz).
@@ -286,6 +287,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 info!("Starting audio worker streams for channel {}", channel_id);
 
                 let selection = state.audio_devices.read().map(|s| s.clone()).unwrap_or_default();
+                let diagnostics = state.audio_diagnostics.clone();
+                diagnostics.stream_begin();
                 // Set from cpal's error callbacks when a stream dies (e.g. the headset is unplugged).
                 let stream_failed = Arc::new(AtomicBool::new(false));
 
@@ -316,6 +319,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                 channels = config.channels(), format = ?config.sample_format(),
                                 "Audio output configuration");
                             output_sample_rate = config.sample_rate().0;
+                            diagnostics.configure(false, DeviceConfig { name: device.name().unwrap_or_default(),
+                                sample_rate: output_sample_rate, channels: config.channels(), sample_format: format!("{:?}", config.sample_format()) });
                             reference_feeder = match ReferenceFeeder::new(output_sample_rate) {
                                 Ok(feeder) => Some(feeder),
                                 Err(e) => {
@@ -327,6 +332,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             let is_deafened_ref = state.is_deafened.clone();
                             let latency_ref = output_latency_ms.clone();
                             let callback_frames_ref = output_callback_frames.clone();
+                            let output_diagnostics = diagnostics.clone();
+                            let mut previous_output_callback: Option<(u64, Instant)> = None;
 
                             output_resampler = match OutputResampler::new(output_sample_rate) {
                                 Ok(resampler) => Some(resampler),
@@ -351,6 +358,14 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     if channels == 0 {
                                         return;
                                     }
+                                    let diagnostic_epoch = output_diagnostics.epoch();
+                                    if diagnostic_epoch != 0 {
+                                        let now = Instant::now();
+                                        let gap = previous_output_callback.filter(|(epoch, _)| *epoch == diagnostic_epoch)
+                                            .map(|(_, last)| now.duration_since(last).as_micros() as u64).unwrap_or(0);
+                                        previous_output_callback = Some((diagnostic_epoch, now));
+                                        output_diagnostics.callback_at(diagnostic_epoch, false, data.len() / channels, gap);
+                                    } else { previous_output_callback = None; }
                                     callback_frames_ref.fetch_max(
                                         (data.len() / channels).min(u32::MAX as usize) as u32,
                                         Ordering::Relaxed,
@@ -359,13 +374,18 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         render_deafened(data, channels, &mut playback_cons, &mut reference_prod);
                                         return;
                                     }
+                                    let mut missing = 0;
+                                    let mut reference_dropped = 0;
                                     for chunk in data.chunks_mut(channels) {
-                                        let sample = playback_cons.try_pop().unwrap_or(0.0);
-                                        let _ = reference_prod.try_push(sample);
+                                        let sample = playback_cons.try_pop().unwrap_or_else(|| { missing += 1; 0.0 });
+                                        if reference_prod.try_push(sample).is_err() { reference_dropped += 1; }
                                         for out_ch in chunk.iter_mut() {
                                             *out_ch = sample;
                                         }
                                     }
+                                    output_diagnostics.add_at(diagnostic_epoch, Metric::OutputUnderflowSamples, missing);
+                                    output_diagnostics.add_at(diagnostic_epoch, Metric::OutputUnderflowCallbacks, u64::from(missing > 0));
+                                    output_diagnostics.add_at(diagnostic_epoch, Metric::ReferenceDroppedSamples, reference_dropped);
                                 },
                                 err_fn,
                                 None,
@@ -377,6 +397,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         error!("Failed to start playback stream: {}", e);
                                     } else {
                                         playback_stream = Some(stream);
+                                        diagnostics.stream_active(false, true);
                                     }
                                 }
                                 Err(e) => {
@@ -408,6 +429,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                 channels = config.channels(), format = ?config.sample_format(),
                                 "Audio input configuration");
                             let sample_rate = config.sample_rate().0;
+                            diagnostics.configure(true, DeviceConfig { name: device.name().unwrap_or_default(),
+                                sample_rate, channels: config.channels(), sample_format: format!("{:?}", config.sample_format()) });
                             let channels = config.channels() as usize;
 
                             input_resampler = match InputResampler::new(sample_rate) {
@@ -425,6 +448,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             };
                             let privacy = state.voice_settings.clone();
                             let mut capture_clock = CaptureClock::default();
+                            let input_diagnostics = diagnostics.clone();
+                            let mut previous_input_callback: Option<(u64, Instant)> = None;
                             let stream_res = device.build_input_stream(
                                 &config.into(),
                                 move |data: &[f32], info: &cpal::InputCallbackInfo| {
@@ -434,14 +459,25 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     if channels == 0 {
                                         return;
                                     }
+                                    let diagnostic_epoch = input_diagnostics.epoch();
+                                    if diagnostic_epoch != 0 {
+                                        let now = Instant::now();
+                                        let gap = previous_input_callback.filter(|(epoch, _)| *epoch == diagnostic_epoch)
+                                            .map(|(_, last)| now.duration_since(last).as_micros() as u64).unwrap_or(0);
+                                        previous_input_callback = Some((diagnostic_epoch, now));
+                                        input_diagnostics.callback_at(diagnostic_epoch, true, data.len() / channels, gap);
+                                    } else { previous_input_callback = None; }
+                                    let mut dropped = 0;
                                     for frame in data.chunks(channels) {
                                         let mut sum = 0.0f32;
                                         for &s in frame {
                                             sum += s;
                                         }
                                         let mono = sum / (channels as f32);
-                                        let _ = capture_prod.try_push(CapturedSample { sample: mono, generation: tag });
+                                        if capture_prod.try_push(CapturedSample { sample: mono, generation: tag }).is_err() { dropped += 1; }
                                     }
+                                    input_diagnostics.add_at(diagnostic_epoch, Metric::CaptureDroppedSamples, dropped);
+                                    input_diagnostics.maximum_at(diagnostic_epoch, Metric::CaptureHighWaterSamples, capture_prod.occupied_len() as u64);
                                 },
                                 err_fn,
                                 None,
@@ -453,6 +489,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         error!("Failed to start capture stream: {}", e);
                                     } else {
                                         capture_stream = Some(stream);
+                                        diagnostics.stream_active(true, true);
                                     }
                                 }
                                 Err(e) => {
@@ -469,6 +506,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 }
 
                 if playback_stream.is_none() && capture_stream.is_none() {
+                    diagnostics.tick("startup-failed", state.is_muted.load(Ordering::Relaxed), state.is_deafened.load(Ordering::Relaxed));
                     error!("Both playback and capture audio streams failed to initialize");
                     is_running.store(false, Ordering::SeqCst);
                     continue;
@@ -503,9 +541,17 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 let mut capture_raw_buf = Vec::with_capacity(4096);
 
                 let target_output_chunk = ((output_sample_rate as usize * 20) / 1000).max(1);
+                let mut previous_playback_refill: Option<(u64, Instant)> = None;
 
                 // 4. Real-time active worker processing loop
                 while is_running.load(Ordering::SeqCst) {
+                    let diagnostic_mode = match &mic_test {
+                        Some(test) if test.recording_done() => "microphone-test-playing",
+                        Some(_) => "microphone-test-recording",
+                        None if state.voice_settings.monitor() => "monitor",
+                        None => "voice",
+                    };
+                    diagnostics.tick(diagnostic_mode, state.is_muted.load(Ordering::Relaxed), state.is_deafened.load(Ordering::Relaxed));
                     match cmd_rx.try_recv() {
                         Ok(new_cmd) => {
                             pending_cmd = Some(new_cmd);
@@ -581,6 +627,14 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             while playback_prod.occupied_len() < target_playback_headroom
                                 && playback_prod.vacant_len() >= target_output_chunk
                             {
+                                let diagnostic_epoch = diagnostics.epoch();
+                                if diagnostic_epoch != 0 {
+                                    let now = Instant::now();
+                                    if let Some((_, last)) = previous_playback_refill.filter(|(epoch, _)| *epoch == diagnostic_epoch) {
+                                        diagnostics.maximum_at(diagnostic_epoch, Metric::PlaybackRefillMaxGapUs, now.duration_since(last).as_micros() as u64);
+                                    }
+                                    previous_playback_refill = Some((diagnostic_epoch, now));
+                                } else { previous_playback_refill = None; }
                                 let speech_events =
                                     mix_next_frame(&state.mixer, &mut playback_frame_48k, Instant::now());
                                 if let Some(test) = &mut mic_test {
@@ -600,6 +654,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         for (out, mine) in playback_frame_48k.iter_mut().zip(own.iter()) {
                                             *out = (*out + *mine).clamp(-1.0, 1.0);
                                         }
+                                    } else {
+                                        diagnostics.add(Metric::MonitorEmptyFrames, 1);
                                     }
                                 }
 
@@ -676,11 +732,15 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         if let Some(capture) = &mut voice_capture { capture.set_transmit_gate(false); }
                     }
                     // B. Capture processing (capture_cons -> InputResampler -> AEC -> Noise -> VAD -> Opus)
+                    let batch_epoch = diagnostics.epoch();
+                    let batch_started = (batch_epoch != 0).then(Instant::now);
+                    let mut batch_frames = 0;
                     if capture_stream.is_some() {
                         if let Some(resampler) = &mut input_resampler {
                             let needed = resampler.input_frames_needed();
                             if needed > 0 {
                                 while capture_cons.occupied_len() >= needed {
+                                    batch_frames += 1;
                                     capture_raw_buf.clear();
                                     capture_tagged_buf.clear();
                                     for _ in 0..needed {
@@ -746,7 +806,11 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     let frame_gate = fresh
                                         && state.voice_settings.privacy_snapshot() == (generation, true);
                                     capture.set_transmit_gate(frame_gate);
-                                    let output = match capture.process(&mut capture_frame_48k, sender_id, now_ms) {
+                                    let dsp_epoch = diagnostics.epoch();
+                                    let dsp_started = (dsp_epoch != 0).then(Instant::now);
+                                    let processed = capture.process(&mut capture_frame_48k, sender_id, now_ms);
+                                    if let Some(started) = dsp_started { diagnostics.dsp_frame_at(dsp_epoch, started.elapsed().as_micros() as u64); }
+                                    let output = match processed {
                                         Ok(output) => output,
                                         Err(error) => {
                                             error!(%error, "Microphone processing failed");
@@ -773,6 +837,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     }
                                     if let Some(test) = &mut mic_test {
                                         if !test.recording_done() {
+                                            if !preview_active { diagnostics.add(Metric::TestActivationRejectedFrames, 1); }
+                                            if !ptt_open { diagnostics.add(Metric::TestPttClosedFrames, 1); }
                                             test.record(&capture_frame_48k, preview_active, ptt_open);
                                             if test.recording_done() {
                                                 let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "playing" }));
@@ -782,6 +848,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     if effective_monitor(&state.voice_settings, mic_test.is_some()) {
                                         if monitor_queue.len() >= 5 {
                                             monitor_queue.pop_front();
+                                            diagnostics.add(Metric::MonitorDroppedFrames, 1);
                                         }
                                         monitor_queue.push_back(capture_frame_48k);
                                     } else {
@@ -816,6 +883,10 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         }
                     }
 
+                    if let Some(started) = batch_started {
+                        diagnostics.maximum_at(batch_epoch, Metric::CaptureBatchMaxFrames, batch_frames);
+                        diagnostics.maximum_at(batch_epoch, Metric::CaptureBatchMaxUs, started.elapsed().as_micros() as u64);
+                    }
                     std::thread::sleep(Duration::from_millis(5));
                 }
 
@@ -827,6 +898,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
                 }
 
+                diagnostics.stream_active(true, false);
+                diagnostics.stream_active(false, false);
+                diagnostics.tick("stopped", state.is_muted.load(Ordering::Relaxed), state.is_deafened.load(Ordering::Relaxed));
                 info!("Audio streams for channel {} stopped", channel_id);
             }
             AudioCommand::Stop => {

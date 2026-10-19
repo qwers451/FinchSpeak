@@ -276,6 +276,21 @@ export const api = {
     }
   },
 
+  startAudioDiagnostics: async (): Promise<void> => {
+    if (isTauri()) return invoke('start_audio_diagnostics');
+    throw new Error('Audio diagnostics need the desktop app');
+  },
+
+  stopAudioDiagnostics: async (): Promise<void> => {
+    if (isTauri()) return invoke('stop_audio_diagnostics');
+    throw new Error('Audio diagnostics need the desktop app');
+  },
+
+  getAudioDiagnostics: async (): Promise<string> => {
+    if (isTauri()) return invoke('get_audio_diagnostics');
+    throw new Error('Audio diagnostics need the desktop app');
+  },
+
   // Administration
   createInvite: async (maxUses: number, expiresHours: number): Promise<Invite> => {
     if (isTauri()) {
