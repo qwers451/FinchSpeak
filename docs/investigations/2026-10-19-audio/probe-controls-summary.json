@@ -1,0 +1,141 @@
+{
+  "purpose": "throwaway isolated AEC probe, not real-device reproduction",
+  "dll_sha256": "d30128d0a9f6c94592a5ff03cf9eb432d6ff3fc835a3b991ee7cc9f55af8083d",
+  "seconds_per_case": 16,
+  "cases": [
+    {
+      "mode": "silence",
+      "monitor_delay_ms": 60,
+      "aec_delay_ms": 10,
+      "active_windows": 40,
+      "gain_db_p10": 0.0,
+      "gain_db_median": 0.0,
+      "gain_db_p90": 0.0,
+      "windows_below_minus12db": 0,
+      "windows_below_minus24db": 0,
+      "source": "synthesized_speech"
+    },
+    {
+      "mode": "silence_native",
+      "monitor_delay_ms": 60,
+      "aec_delay_ms": 10,
+      "active_windows": 40,
+      "gain_db_p10": -0.9856084848737268,
+      "gain_db_median": -0.38754524831277737,
+      "gain_db_p90": 0.3351657086226303,
+      "windows_below_minus12db": 0,
+      "windows_below_minus24db": 0,
+      "source": "synthesized_speech"
+    },
+    {
+      "mode": "unrelated",
+      "monitor_delay_ms": 60,
+      "aec_delay_ms": 10,
+      "active_windows": 40,
+      "gain_db_p10": -54.23115457532924,
+      "gain_db_median": -2.2498572036789337,
+      "gain_db_p90": -0.454063338790014,
+      "windows_below_minus12db": 12,
+      "windows_below_minus24db": 12,
+      "source": "synthesized_speech"
+    },
+    {
+      "mode": "closed_loop",
+      "monitor_delay_ms": 60,
+      "aec_delay_ms": 10,
+      "active_windows": 40,
+      "gain_db_p10": -8.146495861033939,
+      "gain_db_median": -3.149671129735733,
+      "gain_db_p90": -0.4913982770050363,
+      "windows_below_minus12db": 3,
+      "windows_below_minus24db": 0,
+      "source": "synthesized_speech"
+    },
+    {
+      "mode": "closed_loop",
+      "monitor_delay_ms": 120,
+      "aec_delay_ms": 60,
+      "active_windows": 40,
+      "gain_db_p10": -13.975630833195613,
+      "gain_db_median": -2.1168280247282665,
+      "gain_db_p90": -0.5857286810594977,
+      "windows_below_minus12db": 7,
+      "windows_below_minus24db": 3,
+      "source": "synthesized_speech"
+    },
+    {
+      "mode": "silence",
+      "monitor_delay_ms": 60,
+      "aec_delay_ms": 10,
+      "active_windows": 59,
+      "gain_db_p10": 0.0,
+      "gain_db_median": 0.0,
+      "gain_db_p90": 0.0,
+      "windows_below_minus12db": 0,
+      "windows_below_minus24db": 0,
+      "source": "synthesized_speech_3"
+    },
+    {
+      "mode": "silence_native",
+      "monitor_delay_ms": 60,
+      "aec_delay_ms": 10,
+      "active_windows": 59,
+      "gain_db_p10": -0.9327141171762892,
+      "gain_db_median": -0.5499983567089085,
+      "gain_db_p90": 0.16143768902558278,
+      "windows_below_minus12db": 0,
+      "windows_below_minus24db": 0,
+      "source": "synthesized_speech_3"
+    },
+    {
+      "mode": "unrelated",
+      "monitor_delay_ms": 60,
+      "aec_delay_ms": 10,
+      "active_windows": 59,
+      "gain_db_p10": -2.3179334291959144,
+      "gain_db_median": -0.8670937399546028,
+      "gain_db_p90": 0.15683728144945197,
+      "windows_below_minus12db": 0,
+      "windows_below_minus24db": 0,
+      "source": "synthesized_speech_3"
+    },
+    {
+      "mode": "closed_loop",
+      "monitor_delay_ms": 60,
+      "aec_delay_ms": 10,
+      "active_windows": 59,
+      "gain_db_p10": -8.641724308009023,
+      "gain_db_median": -4.548727702411663,
+      "gain_db_p90": -0.568128909563156,
+      "windows_below_minus12db": 3,
+      "windows_below_minus24db": 0,
+      "source": "synthesized_speech_3"
+    },
+    {
+      "mode": "closed_loop",
+      "monitor_delay_ms": 120,
+      "aec_delay_ms": 60,
+      "active_windows": 59,
+      "gain_db_p10": -7.14818841550775,
+      "gain_db_median": -1.940420018496187,
+      "gain_db_p90": -0.44761705169803645,
+      "windows_below_minus12db": 2,
+      "windows_below_minus24db": 1,
+      "source": "synthesized_speech_3"
+    }
+  ],
+  "channel_average": {
+    "same": {
+      "gain_db": 0.0,
+      "exact_zero": false
+    },
+    "silent": {
+      "gain_db": -6.020599913279624,
+      "exact_zero": false
+    },
+    "opposite": {
+      "gain_db": -150.0,
+      "exact_zero": true
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "scope": "synthetic model, no actual device timestamps",
+  "cases": [
+    {
+      "pattern": "normal",
+      "duration_ms": 10000,
+      "private_frames_after_warmup": 0,
+      "dsp_reopens_after_warmup": 0
+    },
+    {
+      "pattern": "callback_repeats",
+      "duration_ms": 10000,
+      "private_frames_after_warmup": 0,
+      "dsp_reopens_after_warmup": 0
+    },
+    {
+      "pattern": "capture_repeats",
+      "duration_ms": 10000,
+      "private_frames_after_warmup": 48,
+      "dsp_reopens_after_warmup": 48
+    }
+  ]
+}

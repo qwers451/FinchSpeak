@@ -1,0 +1,4879 @@
+{
+  "arch": "x86_64",
+  "client_version": "1.2.3",
+  "contains_audio": false,
+  "counter_semantics": "cumulative across stream generations since diagnostics start; lock-free counters are approximate during capture; activation rejects include PTT and may be restored by preroll",
+  "current": {
+    "dsp": {
+      "frames": 4113,
+      "max_us": 5654,
+      "p95_upper_bound_us": 1024
+    },
+    "input": {
+      "callbacks": 8233,
+      "max_frames": 480,
+      "max_gap_us": 11986,
+      "min_frames": 480,
+      "total_frames": 3951840
+    },
+    "metrics": {
+      "capture_batch_max_frames": 1,
+      "capture_batch_max_us": 5701,
+      "capture_dropped_samples": 0,
+      "capture_high_water_samples": 960,
+      "monitor_dropped_frames": 0,
+      "monitor_empty_frames": 1,
+      "output_underflow_callbacks": 0,
+      "output_underflow_samples": 0,
+      "playback_refill_max_gap_us": 25574,
+      "reference_dropped_samples": 0,
+      "test_activation_rejected_frames_before_preroll": 207,
+      "test_ptt_closed_frames": 0
+    },
+    "output": {
+      "callbacks": 8234,
+      "max_frames": 480,
+      "max_gap_us": 12656,
+      "min_frames": 480,
+      "total_frames": 3952320
+    }
+  },
+  "diagnostic_epoch": 2,
+  "elapsed_ms": 82336,
+  "enabled": false,
+  "os": "windows",
+  "samples": [
+    {
+      "counters": {
+        "dsp": {
+          "frames": 50,
+          "max_us": 794,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 100,
+          "max_frames": 480,
+          "max_gap_us": 10520,
+          "min_frames": 480,
+          "total_frames": 48000
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 1729,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 23112,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 0,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 101,
+          "max_frames": 480,
+          "max_gap_us": 10691,
+          "min_frames": 480,
+          "total_frames": 48480
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 1002,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 100,
+          "max_us": 794,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 200,
+          "max_frames": 480,
+          "max_gap_us": 10565,
+          "min_frames": 480,
+          "total_frames": 96000
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 1729,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 23112,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 0,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 201,
+          "max_frames": 480,
+          "max_gap_us": 10691,
+          "min_frames": 480,
+          "total_frames": 96480
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 2003,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 151,
+          "max_us": 794,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 300,
+          "max_frames": 480,
+          "max_gap_us": 10565,
+          "min_frames": 480,
+          "total_frames": 144000
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 1729,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 23112,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 0,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 301,
+          "max_frames": 480,
+          "max_gap_us": 10691,
+          "min_frames": 480,
+          "total_frames": 144480
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 3006,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 201,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 400,
+          "max_frames": 480,
+          "max_gap_us": 10565,
+          "min_frames": 480,
+          "total_frames": 192000
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24182,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 0,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 401,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 192480
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 4007,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 251,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 500,
+          "max_frames": 480,
+          "max_gap_us": 10565,
+          "min_frames": 480,
+          "total_frames": 240000
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24182,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 0,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 501,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 240480
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 5009,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 300,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 601,
+          "max_frames": 480,
+          "max_gap_us": 10565,
+          "min_frames": 480,
+          "total_frames": 288480
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24182,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 24,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 601,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 288480
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 6010,
+      "mode": "microphone-test-recording",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 350,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 701,
+          "max_frames": 480,
+          "max_gap_us": 10565,
+          "min_frames": 480,
+          "total_frames": 336480
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24182,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 74,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 702,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 336960
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 7013,
+      "mode": "microphone-test-recording",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 401,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 801,
+          "max_frames": 480,
+          "max_gap_us": 10565,
+          "min_frames": 480,
+          "total_frames": 384480
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24182,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 125,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 802,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 384960
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 8017,
+      "mode": "microphone-test-recording",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 451,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 901,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 432480
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24182,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 150,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 902,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 432960
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 9018,
+      "mode": "microphone-test-playing",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 501,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 1001,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 480480
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24182,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 150,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 1002,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 480960
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 10019,
+      "mode": "microphone-test-playing",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 551,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 1102,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 528960
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24182,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 150,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 1103,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 529440
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 11023,
+      "mode": "microphone-test-playing",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 600,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 1202,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 576960
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24182,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 150,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 1203,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 577440
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 12028,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 650,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 1303,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 625440
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 150,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 1304,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 625920
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 13032,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 700,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 1403,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 673440
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 150,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 1404,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 673920
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 14034,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 751,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 1503,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 721440
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 150,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 1504,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 721920
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 15039,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 801,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 1603,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 769440
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 150,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 1604,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 769920
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 16039,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 851,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 1704,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 817920
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 150,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 1705,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 818400
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 17043,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 901,
+          "max_us": 1357,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 1804,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 865920
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 2666,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 150,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 1805,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 866400
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 18043,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 951,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 1904,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 913920
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 150,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 1905,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 914400
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 19048,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1000,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 2005,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 962400
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 151,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 2006,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 962880
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 20052,
+      "mode": "microphone-test-recording",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1050,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 2105,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1010400
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 184,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 2106,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1010880
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 21054,
+      "mode": "microphone-test-recording",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1100,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 2205,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1058400
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 2206,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1058880
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 22054,
+      "mode": "microphone-test-recording",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1151,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 2305,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1106400
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 2306,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1106880
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 23057,
+      "mode": "microphone-test-playing",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1201,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 2405,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1154400
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 2406,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1154880
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 24059,
+      "mode": "microphone-test-playing",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1251,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 2506,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1202880
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 2507,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1203360
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 25064,
+      "mode": "microphone-test-playing",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1300,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 2606,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1250880
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 2607,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1251360
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 26069,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1350,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 2706,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1298880
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 2707,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1299360
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 27069,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1400,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 2807,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1347360
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 2808,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1347840
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 28072,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1451,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 2907,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1395360
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 24903,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 2908,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1395840
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 29076,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1501,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 3008,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1443840
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 3008,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1443840
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 30080,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1551,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 3108,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1491840
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 3109,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1492320
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 31083,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1601,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 3208,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1539840
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 3209,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1540320
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 32084,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1651,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 3308,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1587840
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 3309,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1588320
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 33085,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1701,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 3408,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1635840
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 3409,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1636320
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 34086,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1751,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 3508,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1683840
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 3509,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1684320
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 35087,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1801,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 3608,
+          "max_frames": 480,
+          "max_gap_us": 10659,
+          "min_frames": 480,
+          "total_frames": 1731840
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 3609,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1732320
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 36089,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1851,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 3709,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 1780320
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 3710,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1780800
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 37092,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1901,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 3809,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 1828320
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 0,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 3810,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1828800
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 38092,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 1951,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 3909,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 1876320
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 3910,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1876800
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 39093,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2001,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 4009,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 1924320
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 4010,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1924800
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 40095,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2052,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 4109,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 1972320
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 4110,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 1972800
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 41097,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2102,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 4209,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2020320
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 4210,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2020800
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 42097,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2152,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 4309,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2068320
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 4310,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2068800
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 43099,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2202,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 4410,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2116800
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 4410,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2116800
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 44102,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2252,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 4510,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2164800
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 4511,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2165280
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 45106,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2302,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 4610,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2212800
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 4611,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2213280
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 46107,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2352,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 4710,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2260800
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 4711,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2261280
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 47109,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2402,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 4811,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2309280
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 4811,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2309280
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 48111,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2452,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 4911,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2357280
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 4911,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2357280
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 49112,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2502,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 5011,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2405280
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 5012,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2405760
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 50114,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2552,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 5111,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2453280
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 5112,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2453760
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 51114,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2602,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 5211,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2501280
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 5212,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2501760
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 52116,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2653,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 5312,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2549760
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 5312,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2549760
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 53121,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2703,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 5412,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2597760
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 5413,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2598240
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 54122,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2753,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 5512,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2645760
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 5513,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2646240
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 55122,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2803,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 5612,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2693760
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 5613,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2694240
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 56126,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2853,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 5712,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2741760
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 5713,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2742240
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 57126,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2903,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 5812,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2789760
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 5813,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2790240
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 58126,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 2953,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 5912,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2837760
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 5913,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2838240
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 59131,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3003,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 6013,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2886240
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 6014,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2886720
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 60135,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3053,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 6113,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2934240
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 6114,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2934720
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 61136,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3104,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 6213,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 2982240
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 6214,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 2982720
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 62141,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3154,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 6314,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 3030720
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 6315,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 3031200
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 63142,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3204,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 6414,
+          "max_frames": 480,
+          "max_gap_us": 11399,
+          "min_frames": 480,
+          "total_frames": 3078720
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 6414,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 3078720
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 64143,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3254,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 6514,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3126720
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 6515,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 3127200
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 65146,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3304,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 6614,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3174720
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 6615,
+          "max_frames": 480,
+          "max_gap_us": 12597,
+          "min_frames": 480,
+          "total_frames": 3175200
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 66146,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3354,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 6714,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3222720
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 6715,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3223200
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 67147,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3404,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 6814,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3270720
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 6815,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3271200
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 68147,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3454,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 6914,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3318720
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 6915,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3319200
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 69150,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3504,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 7015,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3367200
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 7016,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3367680
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 70153,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3555,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 7115,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3415200
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 7116,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3415680
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 71157,
+      "mode": "monitor",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3605,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 7215,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3463200
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 7216,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3463680
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 72158,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3655,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 7316,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3511680
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 7316,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3511680
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 73161,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3705,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 7416,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3559680
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 7416,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3559680
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 74162,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3755,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 7516,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3607680
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 7517,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3608160
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 75167,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3805,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 7616,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3655680
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 7617,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3656160
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 76170,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3855,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 7717,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3704160
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 7718,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3704640
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 77173,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3905,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 7817,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3752160
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 7818,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3752640
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 78174,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 3956,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 7917,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3800160
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 7918,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3800640
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 79179,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 4006,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 8017,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3848160
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 8018,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3848640
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 80180,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 4056,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 8118,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3896640
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 8118,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3896640
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 81182,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 4106,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 8218,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3944640
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 8219,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3945120
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 82186,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    },
+    {
+      "counters": {
+        "dsp": {
+          "frames": 4113,
+          "max_us": 5654,
+          "p95_upper_bound_us": 1024
+        },
+        "input": {
+          "callbacks": 8233,
+          "max_frames": 480,
+          "max_gap_us": 11986,
+          "min_frames": 480,
+          "total_frames": 3951840
+        },
+        "metrics": {
+          "capture_batch_max_frames": 1,
+          "capture_batch_max_us": 5701,
+          "capture_dropped_samples": 0,
+          "capture_high_water_samples": 960,
+          "monitor_dropped_frames": 0,
+          "monitor_empty_frames": 1,
+          "output_underflow_callbacks": 0,
+          "output_underflow_samples": 0,
+          "playback_refill_max_gap_us": 25574,
+          "reference_dropped_samples": 0,
+          "test_activation_rejected_frames_before_preroll": 207,
+          "test_ptt_closed_frames": 0
+        },
+        "output": {
+          "callbacks": 8234,
+          "max_frames": 480,
+          "max_gap_us": 12656,
+          "min_frames": 480,
+          "total_frames": 3952320
+        }
+      },
+      "deafened": false,
+      "elapsed_ms": 82336,
+      "mode": "voice",
+      "muted": false,
+      "stream": {
+        "generation": 1,
+        "input": {
+          "channels": 2,
+          "name": "Микрофон (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "input_active": true,
+        "output": {
+          "channels": 2,
+          "name": "Динамики (HS5)",
+          "sample_format": "F32",
+          "sample_rate": 48000
+        },
+        "output_active": true
+      }
+    }
+  ],
+  "schema_version": 1,
+  "stream": {
+    "generation": 1,
+    "input": {
+      "channels": 2,
+      "name": "Микрофон (HS5)",
+      "sample_format": "F32",
+      "sample_rate": 48000
+    },
+    "input_active": true,
+    "output": {
+      "channels": 2,
+      "name": "Динамики (HS5)",
+      "sample_format": "F32",
+      "sample_rate": 48000
+    },
+    "output_active": true
+  }
+}
