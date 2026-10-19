@@ -126,7 +126,7 @@ it('Ctrl+K finds a channel by a part of its name and opens it with Enter', async
   const host = document.createElement('div');
   document.body.appendChild(host);
   dispose = render(() => <Overlays />, host);
-  press('k', { ctrlKey: true });
+  press('k', { code: 'KeyK', ctrlKey: true });
   await flush();
   const input = document.querySelector<HTMLInputElement>('input[aria-label="Channel name"]')!;
   input.value = 'gam';
@@ -137,6 +137,28 @@ it('Ctrl+K finds a channel by a part of its name and opens it with Enter', async
   await flush();
   await flush();
   expect(activeChannel()?.id).toBe('c2');
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it('Ctrl+K opens the switcher in a Russian layout, where the key reports "л"', async () => {
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  dispose = render(() => <Overlays />, host);
+  const event = new KeyboardEvent('keydown', { key: 'л', code: 'KeyK', ctrlKey: true, bubbles: true, cancelable: true });
+  window.dispatchEvent(event);
+  await flush();
+  expect(event.defaultPrevented).toBe(true);
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Jump to a channel');
+  expect(document.querySelector('input[aria-label="Channel name"]')).toBeTruthy();
+});
+
+it('Ctrl+L and a bare K do not open the switcher', async () => {
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  dispose = render(() => <Overlays />, host);
+  press('l', { code: 'KeyL', ctrlKey: true });
+  press('k', { code: 'KeyK' });
+  await flush();
   expect(document.querySelector('[role="dialog"]')).toBeNull();
 });
 

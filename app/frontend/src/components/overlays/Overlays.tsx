@@ -38,7 +38,7 @@ export function Overlays() {
   });
 
   const onKey = (event: KeyboardEvent) => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    if ((event.ctrlKey || event.metaKey) && event.code === 'KeyK') { // the physical key: `key` is "л" in a Russian layout
       event.preventDefault();
       setQuery('');
       setSelected(0);
