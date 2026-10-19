@@ -203,7 +203,7 @@ function ChannelsTab() {
           <div class="row g8" style={{ 'justify-content': 'flex-end' }}><Button variant="secondary" onClick={() => setRenaming(null)}>{t('Cancel')}</Button><Button type="submit" variant="primary">{t('Save')}</Button></div>
         </form>
       </Modal>
-      <ConfirmDialog open={!!deleting()} danger title={`Delete ${deleting()?.name ?? ''}?`}
+      <ConfirmDialog open={!!deleting()} danger title={t('Delete {name}?', { name: deleting()?.name ?? '' })}
         message={t('All messages and files in this channel will be removed. People in a deleted voice channel are sent out.')} confirmLabel={t('Delete channel')}
         onCancel={() => setDeleting(null)} onConfirm={() => { const c = deleting()!; setDeleting(null); void removeChannel(c); }} />
     </div>
@@ -225,7 +225,7 @@ function ServerTab() {
           </div>
           <div class="col g4">
             <span class="field-label">{t('Certificate fingerprint')}</span>
-            <div class="fp-grid plain" style={{ 'font-size': '12px' }}>{info().certificate_fingerprint ?? 'unknown'}</div>
+            <div class="fp-grid plain" style={{ 'font-size': '12px' }}>{info().certificate_fingerprint ?? t('unknown')}</div>
             <span class="t3 fs12">{t('Share this with people so they can compare it when their app asks them to trust the server.')}</span>
             <Show when={info().certificate_fingerprint}><Button size="sm" variant="ghost" icon="copy" onClick={() => { void navigator.clipboard?.writeText(info().certificate_fingerprint!); pushToast({ kind: 'success', title: t('Fingerprint copied') }); }}>{t('Copy fingerprint')}</Button></Show>
           </div>

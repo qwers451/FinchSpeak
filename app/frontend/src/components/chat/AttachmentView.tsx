@@ -28,7 +28,7 @@ function FileChip(props: { attachment: AttachmentInfo }) {
         <span class="b trunc fs13" title={props.attachment.filename}>{props.attachment.filename}</span>
         <span class="t3 fs12">{typeLabel(props.attachment)}</span>
       </div>
-      <Button iconOnly size="sm" variant="ghost" icon="dl" label={`Download ${props.attachment.filename}`} onClick={() => void downloadAttachment(props.attachment)} />
+      <Button iconOnly size="sm" variant="ghost" icon="dl" label={t('Download {name}', { name: props.attachment.filename })} onClick={() => void downloadAttachment(props.attachment)} />
     </div>
   );
 }
@@ -38,7 +38,7 @@ function ImageThumb(props: { attachment: AttachmentInfo; onOpen: () => void }) {
   const size = () => previewSize(props.attachment);
   return (
     <button type="button" class="img-thumb" style={{ width: `${size().width}px`, height: `${size().height}px` }}
-      aria-label={`Open ${props.attachment.filename}`} onClick={props.onOpen}>
+      aria-label={t('Open {name}', { name: props.attachment.filename })} onClick={props.onOpen}>
       <Show when={url()} fallback={<span class={url.error ? 'img-fail' : 'skel pulse'} style={{ width: '100%', height: '100%', 'border-radius': 0 }}>
         <Show when={url.error}><Icon name="warn" /></Show></span>}>
         <img src={url()} alt={props.attachment.filename} width={size().width} height={size().height} draggable={false} />

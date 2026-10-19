@@ -5,6 +5,7 @@ import { setCurrentUser } from '../stores/authStore';
 import { setUnread, resetActivity } from '../stores/activityStore';
 import { replyingTo, setActiveChannel, setChatLoading, setMessages, setReplyingTo } from '../stores/chatStore';
 import { setPendingFiles } from '../stores/attachmentStore';
+import { DEFAULT_PREFS, setPrefs } from '../stores/settingsStore';
 import { setConnectionStatus, setKnownUsers } from '../stores/sessionStore';
 import type { Channel, Message, User } from '../types';
 import { clearToasts } from '../ui';
@@ -222,6 +223,15 @@ it('reaction chips show who reacted, mark mine, and toggle on click', async () =
   chips[0].click();
   await flush();
   expect(react).toHaveBeenCalledWith('a', '👍', false);
+});
+
+it('ru: the reaction tooltip calls me "Вы" and an unknown reactor "Кто-то"', () => {
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'ru' } });
+  setMessages([msg('a', bob, 0, { reactions: [{ emoji: '👍', user_ids: ['me', 'bob', 'ghost'] }] })]);
+  const host = mount();
+  const tip = host.querySelector('button.react .react-tip')?.textContent ?? '';
+  expect(tip).toContain('Вы, Bob Marley, Кто-то');
+  expect(tip).not.toMatch(/\b(You|Someone)\b/);
 });
 
 it('dropping files on the chat attaches them, with an overlay while dragging', async () => {

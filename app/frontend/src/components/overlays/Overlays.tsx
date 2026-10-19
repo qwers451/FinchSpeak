@@ -67,7 +67,7 @@ export function Overlays() {
           <For each={SHORTCUTS}>
             {([keys, what]) => (
               <div class="row g12">
-                <span class="row g4" style={{ width: '170px', flex: 'none' }}><For each={keys}>{(key) => <span class="kbd">{key}</span>}</For></span>
+                <span class="row g4" style={{ width: '170px', flex: 'none' }}><For each={keys}>{(key) => <span class="kbd">{t(key)}</span>}</For></span>
             <span class="t2 fs13">{t(what)}</span>
               </div>
             )}

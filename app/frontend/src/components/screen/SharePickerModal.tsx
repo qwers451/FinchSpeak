@@ -45,7 +45,7 @@ function SourceThumb(props: { kind: 'monitor' | 'window'; id: number; index: num
 
   return (
     <div class="thumb source-thumb">
-      <Show when={url()} fallback={<span class={failed() ? 'thumb-fail' : 'skel pulse'} style={{ position: 'absolute', inset: '0', 'border-radius': '0' }}>{failed() ? 'No preview' : ''}</span>}>
+      <Show when={url()} fallback={<span class={failed() ? 'thumb-fail' : 'skel pulse'} style={{ position: 'absolute', inset: '0', 'border-radius': '0' }}>{failed() ? t('No preview') : ''}</span>}>
         <img src={url()!} alt="" draggable={false} />
       </Show>
     </div>
