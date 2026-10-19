@@ -39,6 +39,7 @@ export function VoiceSettingsModal(props: { open: boolean; onClose: () => void }
 
   const captureKey = (event: KeyboardEvent) => {
     event.preventDefault();
+    event.stopPropagation(); // while choosing a key, Esc must not reach the dialog and close it
     if (event.code === 'Escape') {
       setCapturing(false);
       return;

@@ -222,6 +222,7 @@ function KeysPage() {
 
   const capture = (event: KeyboardEvent) => {
     event.preventDefault();
+    event.stopPropagation(); // while choosing a key, Esc must not reach the dialog and close it
     if (event.code === 'Escape') { setCapturing(false); return; }
     const shortcut = shortcutFromEvent(event);
     if (!shortcut) return;

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../../services/api';
 import { avatarSrc, clearAvatarCache, userIdOf } from '../../stores/avatarCache';
 import { setCurrentUser, currentUser } from '../../stores/authStore';
-import { setProfileMessage, setProfileOpen } from '../../stores/profileStore';
+import { profileOpen, setProfileMessage, setProfileOpen } from '../../stores/profileStore';
 import { resetSessionState, sessionHandlers, setKnownUsers } from '../../stores/sessionStore';
 import { DEFAULT_PREFS, prefs, setPrefs } from '../../stores/settingsStore';
 import { setChannels } from '../../stores/chatStore';
@@ -170,4 +170,35 @@ it('a changed picture reaches the person everywhere', () => {
   expect(currentUser()?.avatar_url).toContain('v=9');
   sessionHandlers['avatar-changed']({ user_id: me.id, avatar_url: null });
   expect(currentUser()?.avatar_url).toBeNull();
+});
+
+// ---- push-to-talk key capture
+
+const pttButton = () => document.querySelector('button[aria-label="Push-to-talk key"]') as HTMLButtonElement;
+const pressEscape = (element: HTMLElement) => {
+  const event = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true });
+  element.dispatchEvent(event);
+  return event;
+};
+
+it('Esc while choosing the push-to-talk key cancels the choice and keeps the dialog open', async () => {
+  button('Keys and about').click();
+  await flush();
+  pttButton().click();
+  await flush();
+  expect(pttButton().textContent).toContain('Press a key');
+
+  pressEscape(pttButton());
+  await flush();
+  expect(profileOpen()).toBe(true);
+  expect(document.querySelector('[role="dialog"]')).toBeTruthy();
+  expect(pttButton().textContent).toContain('Choose key');
+});
+
+it('Esc outside key capture still closes the settings dialog', async () => {
+  button('Keys and about').click();
+  await flush();
+  pressEscape(pttButton());
+  await flush();
+  expect(profileOpen()).toBe(false);
 });
