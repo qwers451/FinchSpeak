@@ -185,3 +185,47 @@ it('ru: a screen without a preview says so in Russian', async () => {
   expect(document.body.textContent).toContain('Нет предпросмотра');
   expect(document.body.textContent).not.toContain('No preview');
 });
+
+it('ru: every kind of audit log entry reads in Russian', async () => {
+  const entry = (id: number, action: string, target: string | null, details: string | null = null) => ({ id, at: Math.floor(Date.now() / 1000) - id, actor_name: 'boss', action, target, details });
+  (api.auditLog as ReturnType<typeof vi.fn>).mockResolvedValue([
+    entry(1, 'kick', 'bob'),
+    entry(2, 'ban', 'bob', 'permanent'),
+    entry(3, 'ban', 'bob', '3600'),
+    entry(4, 'unban', 'bob'),
+    entry(5, 'role_changed', 'bob', 'member -> moderator'),
+    entry(6, 'message_deleted', '42', 'channel c1'),
+    entry(7, 'channel_created', 'games', 'text'),
+    entry(8, 'channel_deleted', 'games'),
+    entry(9, 'invite_created', 'K7M2QX9TPW4B', '3 uses'),
+    entry(10, 'invite_revoked', 'K7M2QX9TPW4B'),
+    entry(11, 'registration_changed', null, 'open'),
+    entry(12, 'backup', null),
+    entry(13, 'voice_kick', 'bob'),
+    entry(14, 'voice_mute', 'bob'),
+    entry(15, 'voice_unmute', 'bob'),
+  ]);
+  openAdmin();
+  await flush();
+  tab(/Журнал/).click();
+  await flush();
+  await flush();
+  const lines = Array.from(document.querySelectorAll('.setrow .fs13')).map((line) => line.textContent);
+  expect(lines).toEqual([
+    'boss исключил bob',
+    'boss заблокировал bob',
+    'boss заблокировал bob на время',
+    'boss снял блокировку: bob',
+    'boss изменил роль bob (member -> moderator)',
+    'boss удалил чужое сообщение',
+    'boss создал канал games',
+    'boss удалил канал games',
+    'boss создал приглашение K7M2QX9TPW4B',
+    'boss отозвал приглашение K7M2QX9TPW4B',
+    'boss установил регистрацию: open',
+    'boss сделал резервную копию',
+    'boss отключил bob от голосовой комнаты',
+    'boss заглушил bob в голосовой комнате',
+    'boss разрешил говорить bob в голосовой комнате',
+  ]);
+});
