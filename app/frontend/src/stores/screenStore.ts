@@ -72,7 +72,7 @@ export function closeEndedShare() {
 function noteEnded(peerId: number, reason: string | undefined) {
   const watched = watching();
   if (!watched || watched.peer_id !== peerId) return;
-  const name = allVoiceParticipants().find((participant) => participant.peer_id === peerId)?.username ?? 'The sharer';
+  const name = allVoiceParticipants().find((participant) => participant.peer_id === peerId)?.username ?? t('The sharer');
   setEndedShare({ user_id: watched.user_id, peer_id: peerId, name, reason: endReasonFromServer(reason) });
   setWatching(null);
 }

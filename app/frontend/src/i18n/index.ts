@@ -118,7 +118,7 @@ export const ru: Readonly<Record<string, string>> = {
   '{name} gets every power an admin has, including banning and changing roles.': '{name} получает все права администратора, включая блокировку и смену ролей.',
   '{name} can kick people, silence them in voice and delete messages.': '{name} сможет исключать людей, отключать им микрофон в голосовых комнатах и удалять сообщения.',
   '{name} loses their staff powers.': '{name} лишится прав модератора и администратора.',
-  'Delete {name}?': 'Удалить канал {name}?',
+  'Delete {name}?': 'Удалить канал {name}?', 'The sharer': 'Автор показа',
   'Download {name}': 'Скачать {name}', 'Open {name}': 'Открыть {name}', 'No preview': 'Нет предпросмотра', 'You': 'Вы',
   'Delete #{channel}?': 'Удалить канал #{channel}?', 'Download failed: {error}': 'Не удалось скачать файл: {error}',
   'Name changed.': 'Имя изменено.', 'Password changed. Other devices are signed out.': 'Пароль изменён. На других устройствах выполнен выход.',
@@ -140,7 +140,7 @@ export const ru: Readonly<Record<string, string>> = {
 };
 
 /** Russian plural forms, keyed by the English `other` form that `plural()` is called with. */
-const ruPlurals: Readonly<Record<string, Partial<Record<Intl.LDMLPluralRule, string>> & { other: string }>> = {
+export const ruPlurals: Readonly<Record<string, Partial<Record<Intl.LDMLPluralRule, string>> & { other: string }>> = {
   '{count} new messages': { one: '{count} новое сообщение', few: '{count} новых сообщения', many: '{count} новых сообщений', other: '{count} новых сообщения' },
 };
 const pluralRules = { ru: new Intl.PluralRules('ru-RU'), en: new Intl.PluralRules('en-GB') };
