@@ -42,3 +42,19 @@ it('leaves the base separator size in finch.css alone: the theme rules own it', 
   expect(fontSize('.daysep')).not.toBe(11);
   expect(declarationsFor(readStyle('finch.css'), '.daysep').join(';')).toMatch(/font:800 11px/);
 });
+
+it('lays the channel actions over the right part of the row, with the row background behind them', () => {
+  const rules = declarationsFor(readStyle('app.css'), '.ch .acts').join(';');
+  expect(rules).toMatch(/position:\s*absolute/);
+  expect(rules).toMatch(/right:\s*0/);
+  expect(rules).toMatch(/background:\s*inherit/);
+  // The row is the positioning parent and keeps a background while a button inside has the focus.
+  expect(declarationsFor(readStyle('finch.css'), '.ch').join(';')).toMatch(/position:\s*relative/);
+  expect(declarationsFor(readStyle('app.css'), '.ch:focus-within').join(';')).toMatch(/background:/);
+});
+
+it('does not hide the actions from keyboard users: they show on hover and on focus', () => {
+  const app = readStyle('app.css');
+  expect(declarationsFor(app, '.ch:hover .acts').join(';')).toMatch(/display:\s*flex/);
+  expect(declarationsFor(app, '.ch:focus-within .acts').join(';')).toMatch(/display:\s*flex/);
+});

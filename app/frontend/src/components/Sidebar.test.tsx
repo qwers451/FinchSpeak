@@ -111,3 +111,13 @@ it('still joins a voice channel with Enter on the row itself', async () => {
   expect(nav.selectChannel).toHaveBeenCalledWith(voice);
   expect(nav.joinVoice).toHaveBeenCalledWith(voice);
 });
+
+it('puts the full channel name in a tooltip, because the action buttons may cut it short', () => {
+  setCurrentUser(admin);
+  setChannels([{ ...text, name: 'planning-and-roadmap' }, { ...voice, name: 'late-night-hangout' }]);
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  dispose = render(() => <Sidebar />, host);
+  const names = Array.from(host.querySelectorAll('.ch > .trunc')).map((name) => [name.textContent, name.getAttribute('title')]);
+  expect(names).toEqual([['planning-and-roadmap', 'planning-and-roadmap'], ['late-night-hangout', 'late-night-hangout']]);
+});

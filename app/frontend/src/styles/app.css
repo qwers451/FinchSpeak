@@ -61,7 +61,8 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 .ch { cursor: pointer; }
 .ch .trunc { min-width: 0; }
 .ch:hover .acts, .ch:focus-within .acts { display: flex; }
-.ch .acts { margin-left: auto; }
+.ch .acts { position: absolute; top: 0; bottom: 0; right: 0; align-items: center; gap: 0; padding: 0 2px 0 4px; background: inherit; border-radius: inherit; }
+.ch:focus-within { background: var(--bg-hover); }
 .ch .acts button { all: unset; display: flex; cursor: pointer; padding: 2px; border-radius: 4px; }
 .ch .acts button:hover { color: var(--text); background: var(--bg-card); }
 .profile-open { all: unset; display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; cursor: pointer; border-radius: 8px; }
