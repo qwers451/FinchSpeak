@@ -126,55 +126,57 @@ export function Composer() {
         </div>
       </Show>
 
-      <Show when={candidates().length > 0}>
-        <div class="card mention-menu" role="listbox" aria-label={t('Members')}>
-          <span class="sec-label" style={{ padding: '6px 8px' }}>{t('Members matching "{query}"', { query: mention()!.query })}</span>
-          <For each={candidates()}>
-            {(user, index) => (
-              <div class={`mem${index() === selected() ? ' sel' : ''}`} role="option" aria-selected={index() === selected()}
-                onMouseDown={(event) => { event.preventDefault(); pickMention(user.username); }}>
-                <Avatar name={user.display_name || user.username} id={user.id} size={24} />
-                <span class="grow trunc b">{user.display_name || user.username}</span>
-                <span class="t3 fs12">@{user.username}</span>
-              </div>
-            )}
-          </For>
-        </div>
-      </Show>
+      <div class="composer-anchor">
+        <Show when={candidates().length > 0}>
+          <div class="card mention-menu" role="listbox" aria-label={t('Members')}>
+            <span class="sec-label" style={{ padding: '6px 8px' }}>{t('Members matching "{query}"', { query: mention()!.query })}</span>
+            <For each={candidates()}>
+              {(user, index) => (
+                <div class={`mem${index() === selected() ? ' sel' : ''}`} role="option" aria-selected={index() === selected()}
+                  onMouseDown={(event) => { event.preventDefault(); pickMention(user.username); }}>
+                  <Avatar name={user.display_name || user.username} id={user.id} size={24} />
+                  <span class="grow trunc b">{user.display_name || user.username}</span>
+                  <span class="t3 fs12">@{user.username}</span>
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
 
-      <Show when={emoji()}>
-        <div class="composer-picker">
-          <EmojiPicker showQuick={false} onClose={() => setEmoji(false)} onPick={(char) => { setEmoji(false); insertAt(caret(), caret(), char); }} />
-        </div>
-      </Show>
+        <Show when={emoji()}>
+          <div class="composer-picker">
+            <EmojiPicker showQuick={false} onClose={() => setEmoji(false)} onPick={(char) => { setEmoji(false); insertAt(caret(), caret(), char); }} />
+          </div>
+        </Show>
 
-      <div class={`composer${over() > 0 ? ' is-error' : ''}${offline() ? ' is-offline' : ''}`}>
-        <input ref={fileInput} type="file" multiple hidden onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; void attachFiles(files); }} />
-        <Button iconOnly size="sm" variant="ghost" icon="clip" label={t('Attach a file')} disabled={offline()} onClick={() => fileInput?.click()} />
-        <textarea
-          ref={box}
-          class="txt"
-          rows={Math.min(8, Math.max(1, text().split('\n').length))}
-          value={text()}
-          disabled={offline()}
-          aria-label={t('Message')}
-          placeholder={offline() ? t('You are offline. Reconnecting…') : t('Message #{channel}', { channel: activeChannel()?.name ?? t('channel') })}
-          onInput={(event) => {
-            setText(event.currentTarget.value);
-            syncCaret();
-            setSelected(0);
-            setDismissedAt(null);
-            const channel = activeChannel();
-            if (channel && event.currentTarget.value) notifyTyping(channel.id);
-          }}
-          onKeyDown={onKeyDown}
-          onKeyUp={syncCaret}
-          onClick={syncCaret}
-          onPaste={onPaste}
-        />
-        <Show when={over() > 0}><span class="tr fs12 b fit">{t('{count} over', { count: over() })}</span></Show>
-        <Button iconOnly size="sm" variant="ghost" icon="smile" label={t('Emoji')} disabled={offline()} onClick={() => setEmoji(!emoji())} />
-        <Button iconOnly size="sm" variant="primary" icon="send" label={t('Send')} disabled={!canSend()} onClick={() => void submit()} />
+        <div class={`composer${over() > 0 ? ' is-error' : ''}${offline() ? ' is-offline' : ''}`}>
+          <input ref={fileInput} type="file" multiple hidden onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; void attachFiles(files); }} />
+          <Button iconOnly size="sm" variant="ghost" icon="clip" label={t('Attach a file')} disabled={offline()} onClick={() => fileInput?.click()} />
+          <textarea
+            ref={box}
+            class="txt"
+            rows={Math.min(8, Math.max(1, text().split('\n').length))}
+            value={text()}
+            disabled={offline()}
+            aria-label={t('Message')}
+            placeholder={offline() ? t('You are offline. Reconnecting…') : t('Message #{channel}', { channel: activeChannel()?.name ?? t('channel') })}
+            onInput={(event) => {
+              setText(event.currentTarget.value);
+              syncCaret();
+              setSelected(0);
+              setDismissedAt(null);
+              const channel = activeChannel();
+              if (channel && event.currentTarget.value) notifyTyping(channel.id);
+            }}
+            onKeyDown={onKeyDown}
+            onKeyUp={syncCaret}
+            onClick={syncCaret}
+            onPaste={onPaste}
+          />
+          <Show when={over() > 0}><span class="tr fs12 b fit">{t('{count} over', { count: over() })}</span></Show>
+          <Button iconOnly size="sm" variant="ghost" icon="smile" label={t('Emoji')} disabled={offline()} onClick={() => setEmoji(!emoji())} />
+          <Button iconOnly size="sm" variant="primary" icon="send" label={t('Send')} disabled={!canSend()} onClick={() => void submit()} />
+        </div>
       </div>
     </div>
   );

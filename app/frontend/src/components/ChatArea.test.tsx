@@ -158,6 +158,30 @@ it('suggests members after @ and inserts the chosen login', async () => {
   expect(host.querySelector('[role="listbox"]')).toBeNull();
 });
 
+it('opens the mention list and the emoji picker inside the input anchor, above the field', async () => {
+  const host = mount();
+  const box = host.querySelector<HTMLTextAreaElement>('textarea')!;
+  type(box, 'ping @da');
+  await flush();
+  const anchor = host.querySelector('.composer-anchor')!;
+  expect(anchor.querySelector('.mention-menu')).not.toBeNull();
+  expect(anchor.querySelector('.composer')).not.toBeNull();
+  type(box, '');
+  await flush();
+  button(host, 'Emoji').click();
+  await flush();
+  expect(anchor.querySelector('.composer-picker')).not.toBeNull();
+  expect(host.querySelectorAll('.composer-anchor')).toHaveLength(1);
+});
+
+it('puts the input right after the reply bar, so the bar and the input can share a border', async () => {
+  const host = mount();
+  expect(host.querySelector('.reply-bar')).toBeNull();
+  setReplyingTo(msg('a', bob, 0));
+  await flush();
+  expect(host.querySelector('.reply-bar + .composer-anchor > .composer')).not.toBeNull();
+});
+
 it('finds the @word under the caret and ignores addresses', () => {
   expect(mentionAt('hello @bo', 9)).toEqual({ start: 6, query: 'bo' });
   expect(mentionAt('hello @bo and more', 9)).toEqual({ start: 6, query: 'bo' });
