@@ -35,10 +35,12 @@ function MembersTab(props: { isAdmin: boolean }) {
   const may = (member: AdminUser) => member.id !== me() && (props.isAdmin || member.role === 'member');
   const consequence = (p: NonNullable<Pending>) => {
     const name = p.member.display_name;
-    const banTime = p.seconds ? t(BAN_CHOICES.find(([, s]) => s === p.seconds)?.[0] ?? 'a while') : t('until you lift the ban');
+    const banTime = t(BAN_CHOICES.find(([, s]) => s === p.seconds)?.[0] ?? 'a while');
     const messages: Record<MemberAction, [string, Record<string, string>] > = {
       kick: ['{name} is disconnected and has to sign in again. They can come back.', { name }],
-      ban: ['{name} is disconnected and cannot sign in for {duration}.', { name, duration: banTime }],
+      ban: p.seconds
+        ? ['{name} is disconnected and cannot sign in for {duration}.', { name, duration: banTime }]
+        : ['{name} is disconnected and cannot sign in until you lift the ban.', { name }],
       unban: ['{name} can sign in again.', { name }],
       'make-admin': ['{name} gets every power an admin has, including banning and changing roles.', { name }],
       'make-moderator': ['{name} can kick people, silence them in voice and delete messages.', { name }],

@@ -79,6 +79,18 @@ it('ru: the ban dialog and its confirmation have no English durations or buttons
   expect(buttonMatching(/^Заблокировать$/, dialog())).toBeTruthy();
 });
 
+it('ru: a permanent ban reads as a sentence, not a duration', async () => {
+  openAdmin();
+  await flush();
+  const alice = Array.from(document.querySelectorAll('tbody tr')).find((r) => r.textContent?.includes('ALICE'))!;
+  buttonMatching(/^Заблокировать/, alice).click();
+  await flush();
+  buttonMatching(/^Навсегда$/, dialog()).click();
+  await flush();
+  expect(dialog().textContent).toContain('не сможет войти, пока вы не снимете блокировку.');
+  expect(dialog().textContent).not.toContain('Срок блокировки');
+});
+
 it('ru: kick, unban and role confirmations are explained in Russian', async () => {
   openAdmin();
   await flush();

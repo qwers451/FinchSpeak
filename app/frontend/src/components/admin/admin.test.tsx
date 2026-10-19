@@ -100,6 +100,22 @@ it('banning offers durations, confirms, and passes the length on', async () => {
   expect(ban).toHaveBeenCalledWith('alice', 86_400);
 });
 
+it('a permanent ban says it lasts until it is lifted, not "for until"', async () => {
+  const ban = vi.spyOn(api, 'banUser').mockResolvedValue();
+  open(boss);
+  await flush();
+  const alice = Array.from(document.querySelectorAll('tbody tr')).find((r) => r.textContent?.includes('ALICE'))!;
+  button('Ban…', alice).click();
+  await flush();
+  button('For good', dialog()).click();
+  await flush();
+  expect(dialog().textContent).toContain('cannot sign in until you lift the ban.');
+  expect(dialog().textContent).not.toContain('for until');
+  button('Ban', dialog()).click();
+  await flush();
+  expect(ban).toHaveBeenCalledWith('alice');
+});
+
 it('a moderator can kick members but is not offered bans, roles or staff', async () => {
   open(mod);
   await flush();
