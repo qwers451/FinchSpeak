@@ -152,6 +152,35 @@ export function formatNumber(value: number, maximumFractionDigits?: number): str
   return new Intl.NumberFormat(locale() === 'ru' ? 'ru-RU' : 'en-GB', maximumFractionDigits === undefined ? undefined : { maximumFractionDigits }).format(value);
 }
 
+const UNITS = {
+  en: { B: 'B', KB: 'KB', MB: 'MB', GB: 'GB', kbps: 'kbps', Mbps: 'Mbps', fps: 'fps', min: 'min', h: 'h', d: 'd' },
+  ru: { B: 'Б', KB: 'КБ', MB: 'МБ', GB: 'ГБ', kbps: 'кбит/с', Mbps: 'Мбит/с', fps: 'кадр/с', min: 'мин', h: 'ч', d: 'д' },
+} as const;
+export type UnitName = keyof typeof UNITS.en;
+
+/** The short label of a unit in the interface language (KB / КБ, kbps / кбит/с, h / ч …). */
+export const unit = (name: UnitName): string => UNITS[locale() === 'ru' ? 'ru' : 'en'][name];
+
+/** A size in bytes as "500 B", "2 KB", "5.5 MB", "3 GB". With `smallest: 'KB'` anything under a megabyte reads in kilobytes (at least 1). */
+export function formatBytes(bytes: number, smallest: 'B' | 'KB' = 'B'): string {
+  if (bytes < 1024 && smallest === 'B') return `${formatNumber(bytes)} ${unit('B')}`;
+  if (bytes < 1024 * 1024) return `${formatNumber(Math.max(1, Math.round(bytes / 1024)))} ${unit('KB')}`;
+  if (bytes < 1024 ** 3) return `${formatNumber(bytes / 1024 / 1024, 1)} ${unit('MB')}`;
+  return `${formatNumber(bytes / 1024 ** 3, 2)} ${unit('GB')}`;
+}
+
+/** A video bitrate given in kilobits per second, as "850 kbps" or "2.5 Mbps". */
+export function formatBitrate(kbps: number): string {
+  return kbps >= 1000 ? `${formatNumber(kbps / 1000, 1)} ${unit('Mbps')}` : `${formatNumber(kbps)} ${unit('kbps')}`;
+}
+
+/** A length of time in whole seconds as "5 min", "2 h" or "1 d 2 h" (the unit labels follow the interface language). */
+export function formatDuration(seconds: number): string {
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} ${unit('min')}`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} ${unit('h')}`;
+  return `${Math.floor(seconds / 86400)} ${unit('d')} ${Math.floor((seconds % 86400) / 3600)} ${unit('h')}`;
+}
+
 function fill(template: string, params?: TranslationParams): string {
   if (!params) return template;
   return template.replace(/\{([^{}]+)\}/g, (match, key: string) => {

@@ -137,6 +137,9 @@ it('ru: the channel deletion title and the server page have no English words', a
   await flush();
   expect(document.body.textContent).toContain('неизвестно');
   expect(document.body.textContent).not.toMatch(/\bunknown\b/);
+  expect(document.body.textContent).toContain('2 ч'); // uptime
+  expect(document.body.textContent).toContain('5 МБ'); // uploaded files
+  expect(document.body.textContent).not.toMatch(/\b\d+ (h|MB|KB|GB|min|d)\b/);
 });
 
 it('ru: the link quality in the voice room is named in Russian', async () => {
@@ -160,6 +163,7 @@ it('ru: attachment buttons are named in Russian', () => {
   const labels = Array.from(host.querySelectorAll('[aria-label]')).map((el) => el.getAttribute('aria-label'));
   expect(labels).toContain('Скачать notes.txt');
   expect(labels.join()).not.toMatch(/Download|Open/);
+  expect(host.textContent).toContain('2 КБ · TXT');
 });
 
 it('ru: the shortcut list names the push-to-talk key in Russian', async () => {

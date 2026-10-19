@@ -8,7 +8,7 @@ import { channels } from '../../stores/chatStore';
 import { moveChannel, removeChannel, renameChannel } from '../../stores/channelAdminStore';
 import type { AdminUser, Channel } from '../../types';
 import { Avatar, Button, ConfirmDialog, Field, Icon, type IconName, Modal, pushToast, Toggle } from '../../ui';
-import { formatNumber, locale, t } from '../../i18n';
+import { formatBytes, formatDuration, locale, t } from '../../i18n';
 
 type Tab = 'members' | 'invites' | 'channels' | 'server' | 'log';
 
@@ -21,8 +21,8 @@ const ago = (seconds: number | null | undefined, now = Date.now()) => {
   if (minutes < 60 * 24) return t('{count} h ago', { count: Math.round(minutes / 60) });
   return t('{count} d ago', { count: Math.round(minutes / 1440) });
 };
-const bytes = (n: number | null | undefined) => (n == null ? '—' : n < 1024 * 1024 ? `${formatNumber(Math.max(1, Math.round(n / 1024)))} KB` : n < 1024 ** 3 ? `${formatNumber(n / 1024 / 1024, 1)} MB` : `${formatNumber(n / 1024 ** 3, 2)} GB`);
-const uptime = (s: number) => (s < 3600 ? `${Math.floor(s / 60)} min` : s < 86400 ? `${Math.floor(s / 3600)} h` : `${Math.floor(s / 86400)} d ${Math.floor((s % 86400) / 3600)} h`);
+const bytes = (n: number | null | undefined) => (n == null ? '—' : formatBytes(n, 'KB'));
+const uptime = formatDuration;
 
 const BAN_CHOICES: [string, number | undefined][] = [['1 hour', 3600], ['1 day', 86_400], ['1 week', 604_800], ['For good', undefined]];
 
