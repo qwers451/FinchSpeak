@@ -17,7 +17,6 @@
 .cat-toggle { min-width:0; white-space:normal; line-height:1.4; }
 .cat-add { flex:none; }
 .nav { scrollbar-gutter:stable; overscroll-behavior:contain; }
-.mem .tag.admin { flex-shrink:0; }
 .msg .meta { flex-wrap:wrap; row-gap:3px; }
 .msg .name { overflow-wrap:anywhere; }
 .msg .body { min-width:0; overflow-wrap:anywhere; }

@@ -312,7 +312,6 @@ button:disabled { cursor:not-allowed; }
 }
 
 /* Content-driven minimums keep names and controls readable in short windows. */
-.members .tag.admin { font-size:8px; letter-spacing:0; padding:0 4px; }
 .upanel { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; padding:12px; }
 .upanel .profile-open { grid-column:1 / -1; margin-bottom:6px; }
 .upanel > .btn.icon { justify-self:center; width:100%; }

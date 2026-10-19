@@ -17,3 +17,7 @@ it('does not reset members scrolling in the base or theme layers', () => {
   ].join(';');
   expect(lower).not.toMatch(/overflow/);
 });
+
+it('has no leftover rule for a role tag inside a member row: member rows no longer show one', () => {
+  expect(readStyle('polish.css')).not.toContain('.mem .tag.admin');
+});

@@ -16,3 +16,7 @@ it('anchors the composer popovers to the top edge of the input, whatever its hei
     expect(rules, selector).not.toMatch(/bottom:\s*72px/);
   }
 });
+
+it('has no role-tag override left for the members panel: the role is named by the group heading', () => {
+  expect(readStyle('themes.css')).not.toContain('.members .tag.admin');
+});
