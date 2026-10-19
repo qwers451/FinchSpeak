@@ -234,6 +234,34 @@ it('ru: the reaction tooltip calls me "Вы" and an unknown reactor "Кто-то
   expect(tip).not.toMatch(/\b(You|Someone)\b/);
 });
 
+it('the jump button counts unseen messages with the right plural form', async () => {
+  const jumpLabel = () => document.querySelector('.jump-wrap button')?.textContent?.replace(/\s+/g, ' ').trim();
+  const arriveWhileScrolledUp = async (language: 'ru' | 'en', total: number) => {
+    setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language } });
+    setMessages([msg('m0', bob, 0)]);
+    const host = mount();
+    const list = host.querySelector('.message-list') as HTMLElement;
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    await flush();
+    list.scrollTop = 0; // the reader has scrolled up, so new messages are only counted
+    const seen: string[] = [];
+    for (let i = 1; i <= total; i++) {
+      setMessages([...Array.from({ length: i + 1 }, (_, n) => msg(`m${n}`, bob, n))]);
+      await flush();
+      seen.push(jumpLabel() ?? '');
+    }
+    return seen;
+  };
+  const ru = await arriveWhileScrolledUp('ru', 5);
+  expect(ru).toEqual(['1 новое сообщение', '2 новых сообщения', '3 новых сообщения', '4 новых сообщения', '5 новых сообщений']);
+  dispose?.();
+  dispose = undefined;
+  document.body.innerHTML = '';
+  const en = await arriveWhileScrolledUp('en', 2);
+  expect(en).toEqual(['1 new message', '2 new messages']);
+});
+
 it('dropping files on the chat attaches them, with an overlay while dragging', async () => {
   const upload = vi.spyOn(api, 'uploadFile').mockImplementation(async (name) => ({ id: name, filename: name, size_bytes: 1, content_type: 'text/plain', url: '' }));
   const host = mount();

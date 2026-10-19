@@ -53,10 +53,10 @@ export const ru: Readonly<Record<string, string>> = {
   'Join the flock': 'Присоединиться к сообществу', 'Welcome back': 'С возвращением', 'Create your account on this server.': 'Создайте аккаунт на этом сервере.', 'Sign in to continue to your server.': 'Войдите, чтобы подключиться к серверу.',
   'Retry': 'Повторить', 'Already have an account?': 'Уже есть аккаунт?', 'New here?': 'Впервые здесь?', 'Sign in': 'Войти', 'Create an account': 'Создать аккаунт', 'Encrypted with TLS · certificate pinned on first use': 'Зашифровано по TLS · сертификат закрепляется при первом подключении',
   'Welcome to #{channel}!': 'Добро пожаловать в #{channel}!', 'This is the start of the conversation. Say hello — someone is always listening.': 'Это начало переписки. Поздоровайтесь — вас услышат.',
-  'New messages': 'Новые сообщения', '{count} new message': '{count} новое сообщение', '{count} new messages': '{count} новых сообщений', 'Drop files to attach': 'Перетащите файлы для отправки', 'Up to 10 files, 10 MB each': 'До 10 файлов размером до 10 МБ каждый',
+  'New messages': 'Новые сообщения', 'Drop files to attach': 'Перетащите файлы для отправки', 'Up to 10 files, 10 MB each': 'До 10 файлов размером до 10 МБ каждый',
   'Starting FinchSpeak…': 'Запуск FinchSpeak…', 'Online — {count}': 'В сети — {count}', 'Offline — {count}': 'Не в сети — {count}', 'Save': 'Сохранить', 'Create': 'Создать',
   'Reconnecting… try {attempt}, next one in {seconds} s': 'Повторное подключение… попытка {attempt}, следующая через {seconds} с', 'Reconnecting…': 'Повторное подключение…', 'Could not reconnect': 'Не удалось восстановить соединение', 'Connection lost': 'Соединение потеряно',
-  'Messages': 'Сообщения', 'Loading older messages…': 'Загрузка старых сообщений…', 'select-channel': 'выбрать канал', '1 new message': '1 новое сообщение',
+  'Messages': 'Сообщения', 'Loading older messages…': 'Загрузка старых сообщений…', 'select-channel': 'выбрать канал',
   'Keyboard shortcuts': 'Сочетания клавиш', 'Close': 'Закрыть', 'Jump to a channel': 'Перейти к каналу', 'Channels': 'Каналы', 'No channel like that.': 'Такого канала нет.', 'open': 'открыт', 'Back to sign in': 'Вернуться ко входу',
   'Show this list': 'Показать этот список', 'New line in a message': 'Новая строка в сообщении', 'Cancel an edit or reply, close a window': 'Отменить изменение или ответ, закрыть окно', 'Speak while it is held (set in Settings)': 'Говорить, пока клавиша нажата (настройка в профиле)',
   'You were disconnected by an admin': 'Администратор отключил вас', 'You can sign in again whenever you like.': 'Вы можете снова войти в любое время.', 'You have been banned from this server': 'Вас заблокировали на этом сервере',
@@ -139,6 +139,12 @@ export const ru: Readonly<Record<string, string>> = {
   'a channel': 'канале', '{name} mentioned you in #{channel}': '{name} упомянул вас в канале #{channel}', '{name} in #{channel}': '{name} в канале #{channel}', 'your voice room': 'вашей голосовой комнате', '{name} joined {room}': '{name} присоединился к комнате {room}',
 };
 
+/** Russian plural forms, keyed by the English `other` form that `plural()` is called with. */
+const ruPlurals: Readonly<Record<string, Partial<Record<Intl.LDMLPluralRule, string>> & { other: string }>> = {
+  '{count} new messages': { one: '{count} новое сообщение', few: '{count} новых сообщения', many: '{count} новых сообщений', other: '{count} новых сообщения' },
+};
+const pluralRules = { ru: new Intl.PluralRules('ru-RU'), en: new Intl.PluralRules('en-GB') };
+
 export const locale = () => prefs().appearance.language;
 
 /** Format visible numbers using the selected interface locale. */
@@ -146,13 +152,30 @@ export function formatNumber(value: number, maximumFractionDigits?: number): str
   return new Intl.NumberFormat(locale() === 'ru' ? 'ru-RU' : 'en-GB', maximumFractionDigits === undefined ? undefined : { maximumFractionDigits }).format(value);
 }
 
-/** Translate an English source string reactively and interpolate named values. */
-export function t(source: string, params?: TranslationParams): string {
-  const translated = locale() === 'ru' ? (ru[source] ?? source) : source;
-  if (!params) return translated;
-  return translated.replace(/\{([^{}]+)\}/g, (match, key: string) => {
+function fill(template: string, params?: TranslationParams): string {
+  if (!params) return template;
+  return template.replace(/\{([^{}]+)\}/g, (match, key: string) => {
     if (!(key in params)) return match;
     const value = params[key];
     return typeof value === 'number' ? formatNumber(value) : value;
   });
+}
+
+/** Translate an English source string reactively and interpolate named values. */
+export function t(source: string, params?: TranslationParams): string {
+  return fill(locale() === 'ru' ? (ru[source] ?? source) : source, params);
+}
+
+/**
+ * A counted phrase in the right plural form for the interface language: `plural(n, { one: '{count} file', other: '{count} files' })`.
+ * English uses the two forms given; Russian takes one / few / many from `ruPlurals`, found by the `other` form (a phrase without
+ * an entry there falls back to the English `other` form). `{count}` is filled in with the formatted number.
+ */
+export function plural(count: number, forms: { one: string; other: string }, params?: TranslationParams): string {
+  const values = { ...params, count };
+  if (locale() === 'ru') {
+    const table = ruPlurals[forms.other];
+    return table ? fill(table[pluralRules.ru.select(count)] ?? table.other, values) : fill(forms.other, values);
+  }
+  return fill(pluralRules.en.select(count) === 'one' ? forms.one : forms.other, values);
 }

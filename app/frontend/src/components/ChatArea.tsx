@@ -7,7 +7,7 @@ import type { Message } from '../types';
 import { Button, Icon, pushToast } from '../ui';
 import { rowInfo } from './chat/chatFormat';
 import { Composer } from './chat/Composer';
-import { t } from '../i18n';
+import { plural, t } from '../i18n';
 import { SearchBox } from './chat/SearchBox';
 import { MessageItem } from './chat/MessageItem';
 
@@ -207,7 +207,7 @@ export function ChatArea() {
 
       <Show when={unseen() > 0}>
         <div class="jump-wrap">
-          <Button size="sm" variant="primary" icon="down" onClick={toBottom}>{unseen() === 1 ? t('1 new message') : t('{count} new messages', { count: unseen() })}</Button>
+          <Button size="sm" variant="primary" icon="down" onClick={toBottom}>{plural(unseen(), { one: '{count} new message', other: '{count} new messages' })}</Button>
         </div>
       </Show>
 
