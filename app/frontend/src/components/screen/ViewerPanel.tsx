@@ -6,7 +6,7 @@ import { allVoiceParticipants } from '../../stores/voiceStore';
 import { screenAudioKey, setVolume, volumeFor } from '../../stores/volumeStore';
 import { Button, Icon, Slider, pushToast } from '../../ui';
 import { ENDED_AUTOCLOSE_MS, ViewerMachine, type ViewerSnapshot } from './viewerState';
-import { formatNumber, t } from '../../i18n';
+import { formatBitrate, t, unit } from '../../i18n';
 
 interface VideoChunkPayload {
   is_key: boolean;
@@ -20,10 +20,6 @@ const CODEC = 'avc1.42C033';
 const HUD_HIDE_MS = 3000;
 
 const INITIAL: ViewerSnapshot = { status: 'connecting', endReason: null, fps: 0, bitrateKbps: 0, width: 0, height: 0, wantKeyFrame: false };
-
-function bitrateText(kbps: number): string {
-  return kbps >= 1000 ? `${formatNumber(kbps / 1000, 1)} Mbps` : `${formatNumber(kbps)} kbps`;
-}
 
 /** E3/E4: the picture of the share you watch, with HUD, volume, full screen and every state of the stream. */
 export function ViewerPanel() {
@@ -210,7 +206,7 @@ function Viewer(props: { peerId: number; userId: string }) {
       <div class={`viewer-hud top${hud() || showOverlay() || status() === 'weak' ? ' on' : ''}`}>
         <span class="tag cyan">{name()}</span>
         <Show when={view().width > 0}><span class="tag cyan">{view().width} × {view().height}</span></Show>
-        <Show when={status() === 'live' || status() === 'weak'}><span class="tag cyan">{view().fps} fps · {bitrateText(view().bitrateKbps)}</span></Show>
+        <Show when={status() === 'live' || status() === 'weak'}><span class="tag cyan">{view().fps} {unit('fps')} · {formatBitrate(view().bitrateKbps)}</span></Show>
         <Show when={status() === 'weak'}><span class="tag amber">{t('Weak connection')}</span></Show>
       </div>
 

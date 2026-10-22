@@ -129,10 +129,10 @@ export function Sidebar() {
                 tabindex="0"
                 aria-current={activeChannel()?.id === channel.id ? 'page' : undefined}
                 onClick={() => { void selectChannel(channel); markRead(channel.id); }}
-                onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void selectChannel(channel); markRead(channel.id); } }}
+                onKeyDown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void selectChannel(channel); markRead(channel.id); } }}
               >
                 <Icon name="hash" size="sm" />
-                <span class="trunc">{channel.name}</span>
+                <span class="trunc" title={channel.name}>{channel.name}</span>
                 <ChannelActions channel={channel} onDialog={setDialog} />
                 <Show when={unread()[channel.id]}>
                   {(entry) => (
@@ -163,10 +163,10 @@ export function Sidebar() {
                   role="button"
                   tabindex="0"
                   onClick={() => { void selectChannel(channel); if (activeVoiceChannel()?.id !== channel.id) void joinVoice(channel); }}
-                  onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void selectChannel(channel); if (activeVoiceChannel()?.id !== channel.id) void joinVoice(channel); } }}
+                  onKeyDown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void selectChannel(channel); if (activeVoiceChannel()?.id !== channel.id) void joinVoice(channel); } }}
                 >
                   <Icon name="vol" size="sm" />
-                  <span class="trunc">{channel.name}</span>
+                  <span class="trunc" title={channel.name}>{channel.name}</span>
                   <ChannelActions channel={channel} onDialog={setDialog} />
                   <Show when={participantsForChannel(channel.id).length > 0}>
                     <span class="tag violet" style={{ 'margin-left': 'auto' }}>{participantsForChannel(channel.id).length}</span>

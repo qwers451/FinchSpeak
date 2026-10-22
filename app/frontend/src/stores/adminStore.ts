@@ -1,4 +1,5 @@
 import { createSignal } from 'solid-js';
+import { t } from '../i18n';
 import { api } from '../services/api';
 import type { AdminUser, AuditEntry, Invite, ServerOverview } from '../types';
 import { setAppError } from './notificationStore';
@@ -92,24 +93,28 @@ export async function loadMoreAudit() {
 
 /** One line for an entry, in words. */
 export function describeAudit(entry: AuditEntry): string {
-  const target = entry.target ? ` ${entry.target}` : '';
-  const text: Record<string, string> = {
-    kick: `kicked${target}`,
-    ban: `banned${target}${entry.details && entry.details !== 'permanent' ? ' for a while' : ''}`,
-    unban: `lifted the ban of${target}`,
-    role_changed: `changed the role of${target} (${entry.details ?? ''})`,
-    message_deleted: 'deleted a message of someone else',
-    channel_created: `created the channel${target}`,
-    channel_deleted: `deleted the channel${target}`,
-    invite_created: `created the invitation${target}`,
-    invite_revoked: `revoked the invitation${target}`,
-    registration_changed: `set registration to ${entry.details ?? '?'}`,
-    backup: 'made a backup',
-    voice_kick: `sent${target} out of the voice room`,
-    voice_mute: `silenced${target} in the voice room`,
-    voice_unmute: `un-silenced${target} in the voice room`,
+  const target = entry.target ?? '';
+  const details = entry.details ?? '';
+  const line = (): string => {
+    switch (entry.action) {
+      case 'kick': return t('kicked {target}', { target });
+      case 'ban': return entry.details && entry.details !== 'permanent' ? t('banned {target} for a while', { target }) : t('banned {target}', { target });
+      case 'unban': return t('lifted the ban of {target}', { target });
+      case 'role_changed': return t('changed the role of {target} ({details})', { target, details });
+      case 'message_deleted': return t('deleted a message of someone else');
+      case 'channel_created': return t('created the channel {target}', { target });
+      case 'channel_deleted': return t('deleted the channel {target}', { target });
+      case 'invite_created': return t('created the invitation {target}', { target });
+      case 'invite_revoked': return t('revoked the invitation {target}', { target });
+      case 'registration_changed': return t('set registration to {details}', { details: entry.details ?? '?' });
+      case 'backup': return t('made a backup');
+      case 'voice_kick': return t('sent {target} out of the voice room', { target });
+      case 'voice_mute': return t('silenced {target} in the voice room', { target });
+      case 'voice_unmute': return t('un-silenced {target} in the voice room', { target });
+      default: return `${entry.action} ${target}`;
+    }
   };
-  return text[entry.action] ?? `${entry.action}${target}`;
+  return line().trim();
 }
 
 // --- server page ----------------------------------------------------------------------------

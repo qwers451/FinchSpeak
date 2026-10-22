@@ -115,7 +115,7 @@ button:disabled { cursor:not-allowed; }
 .msg .body { font-size:14px; line-height:1.7; }
 .msg.mention { background:var(--tint-accent); }
 .msg .hover-tools { border-radius:var(--r-sm); }
-.daysep { padding:24px 28px; font-size:10px; font-weight:500; text-transform:none; letter-spacing:.02em; }
+.daysep { padding:24px 28px; font-size:12px; font-weight:500; text-transform:none; letter-spacing:.02em; }
 .react { border-width:1px; font-weight:500; border-radius:var(--r-sm); }
 .composer { margin:0 26px 24px; padding:9px 10px; min-height:56px; background:var(--bg-card); border:1px solid var(--line); border-radius:var(--r-lg); }
 .composer:focus-within { border-color:var(--text-3); box-shadow:0 0 0 1px var(--text-3); }
@@ -267,7 +267,7 @@ button:disabled { cursor:not-allowed; }
 [data-theme="custom"] .composer { border-radius:0; background:var(--bg-module); border-color:var(--line); border-left:3px solid var(--yellow); margin:0 24px 24px; }
 [data-theme="custom"] .composer:focus-within { box-shadow:none; border-color:var(--yellow); }
 [data-theme="custom"] .composer .txt { font-family:var(--font-read); }
-[data-theme="custom"] .daysep { text-transform:uppercase; font-size:9px; letter-spacing:.08em; }
+[data-theme="custom"] .daysep { text-transform:uppercase; font-size:11px; letter-spacing:.08em; }
 [data-theme="custom"] .react { border-radius:0; font-size:10px; }
 [data-theme="custom"] .tag { border-radius:0; font-size:9px; }
 [data-theme="custom"] .thumb,[data-theme="custom"] .viewer,[data-theme="custom"] .img-thumb { border-radius:0; }
@@ -312,7 +312,6 @@ button:disabled { cursor:not-allowed; }
 }
 
 /* Content-driven minimums keep names and controls readable in short windows. */
-.members .tag.admin { font-size:8px; letter-spacing:0; padding:0 4px; }
 .upanel { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; padding:12px; }
 .upanel .profile-open { grid-column:1 / -1; margin-bottom:6px; }
 .upanel > .btn.icon { justify-self:center; width:100%; }

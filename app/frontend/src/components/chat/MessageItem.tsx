@@ -43,9 +43,9 @@ export function MessageItem(props: Props) {
   const author = createMemo(() => knownUsers().find((user) => user.id === msg().author_id));
   const lookupLogin = (login: string) => knownUsers().find((user) => user.username.toLowerCase() === login)?.id;
   const nameOf = (userId: string) => {
-    if (userId === me()?.id) return 'You';
+    if (userId === me()?.id) return t('You');
     return knownUsers().find((user) => user.id === userId)?.display_name
-      ?? messages().find((message) => message.author_id === userId)?.author_name ?? 'Someone';
+      ?? messages().find((message) => message.author_id === userId)?.author_name ?? t('Someone');
   };
 
   const startEdit = () => {

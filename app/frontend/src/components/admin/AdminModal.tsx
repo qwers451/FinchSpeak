@@ -8,7 +8,7 @@ import { channels } from '../../stores/chatStore';
 import { moveChannel, removeChannel, renameChannel } from '../../stores/channelAdminStore';
 import type { AdminUser, Channel } from '../../types';
 import { Avatar, Button, ConfirmDialog, Field, Icon, type IconName, Modal, pushToast, Toggle } from '../../ui';
-import { formatNumber, locale, t } from '../../i18n';
+import { formatBytes, formatDuration, locale, t } from '../../i18n';
 
 type Tab = 'members' | 'invites' | 'channels' | 'server' | 'log';
 
@@ -21,8 +21,8 @@ const ago = (seconds: number | null | undefined, now = Date.now()) => {
   if (minutes < 60 * 24) return t('{count} h ago', { count: Math.round(minutes / 60) });
   return t('{count} d ago', { count: Math.round(minutes / 1440) });
 };
-const bytes = (n: number | null | undefined) => (n == null ? '—' : n < 1024 * 1024 ? `${formatNumber(Math.max(1, Math.round(n / 1024)))} KB` : n < 1024 ** 3 ? `${formatNumber(n / 1024 / 1024, 1)} MB` : `${formatNumber(n / 1024 ** 3, 2)} GB`);
-const uptime = (s: number) => (s < 3600 ? `${Math.floor(s / 60)} min` : s < 86400 ? `${Math.floor(s / 3600)} h` : `${Math.floor(s / 86400)} d ${Math.floor((s % 86400) / 3600)} h`);
+const bytes = (n: number | null | undefined) => (n == null ? '—' : formatBytes(n, 'KB'));
+const uptime = formatDuration;
 
 const BAN_CHOICES: [string, number | undefined][] = [['1 hour', 3600], ['1 day', 86_400], ['1 week', 604_800], ['For good', undefined]];
 
@@ -35,10 +35,12 @@ function MembersTab(props: { isAdmin: boolean }) {
   const may = (member: AdminUser) => member.id !== me() && (props.isAdmin || member.role === 'member');
   const consequence = (p: NonNullable<Pending>) => {
     const name = p.member.display_name;
-    const banTime = p.seconds ? t(BAN_CHOICES.find(([, s]) => s === p.seconds)?.[0] ?? 'a while') : t('until you lift the ban');
+    const banTime = t(BAN_CHOICES.find(([, s]) => s === p.seconds)?.[0] ?? 'a while');
     const messages: Record<MemberAction, [string, Record<string, string>] > = {
       kick: ['{name} is disconnected and has to sign in again. They can come back.', { name }],
-      ban: ['{name} is disconnected and cannot sign in for {duration}.', { name, duration: banTime }],
+      ban: p.seconds
+        ? ['{name} is disconnected and cannot sign in for {duration}.', { name, duration: banTime }]
+        : ['{name} is disconnected and cannot sign in until you lift the ban.', { name }],
       unban: ['{name} can sign in again.', { name }],
       'make-admin': ['{name} gets every power an admin has, including banning and changing roles.', { name }],
       'make-moderator': ['{name} can kick people, silence them in voice and delete messages.', { name }],
@@ -203,7 +205,7 @@ function ChannelsTab() {
           <div class="row g8" style={{ 'justify-content': 'flex-end' }}><Button variant="secondary" onClick={() => setRenaming(null)}>{t('Cancel')}</Button><Button type="submit" variant="primary">{t('Save')}</Button></div>
         </form>
       </Modal>
-      <ConfirmDialog open={!!deleting()} danger title={`Delete ${deleting()?.name ?? ''}?`}
+      <ConfirmDialog open={!!deleting()} danger title={t('Delete {name}?', { name: deleting()?.name ?? '' })}
         message={t('All messages and files in this channel will be removed. People in a deleted voice channel are sent out.')} confirmLabel={t('Delete channel')}
         onCancel={() => setDeleting(null)} onConfirm={() => { const c = deleting()!; setDeleting(null); void removeChannel(c); }} />
     </div>
@@ -225,7 +227,7 @@ function ServerTab() {
           </div>
           <div class="col g4">
             <span class="field-label">{t('Certificate fingerprint')}</span>
-            <div class="fp-grid plain" style={{ 'font-size': '12px' }}>{info().certificate_fingerprint ?? 'unknown'}</div>
+            <div class="fp-grid plain" style={{ 'font-size': '12px' }}>{info().certificate_fingerprint ?? t('unknown')}</div>
             <span class="t3 fs12">{t('Share this with people so they can compare it when their app asks them to trust the server.')}</span>
             <Show when={info().certificate_fingerprint}><Button size="sm" variant="ghost" icon="copy" onClick={() => { void navigator.clipboard?.writeText(info().certificate_fingerprint!); pushToast({ kind: 'success', title: t('Fingerprint copied') }); }}>{t('Copy fingerprint')}</Button></Show>
           </div>

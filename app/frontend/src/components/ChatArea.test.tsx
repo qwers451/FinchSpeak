@@ -5,6 +5,7 @@ import { setCurrentUser } from '../stores/authStore';
 import { setUnread, resetActivity } from '../stores/activityStore';
 import { replyingTo, setActiveChannel, setChatLoading, setMessages, setReplyingTo } from '../stores/chatStore';
 import { setPendingFiles } from '../stores/attachmentStore';
+import { DEFAULT_PREFS, setPrefs } from '../stores/settingsStore';
 import { setConnectionStatus, setKnownUsers } from '../stores/sessionStore';
 import type { Channel, Message, User } from '../types';
 import { clearToasts } from '../ui';
@@ -157,6 +158,30 @@ it('suggests members after @ and inserts the chosen login', async () => {
   expect(host.querySelector('[role="listbox"]')).toBeNull();
 });
 
+it('opens the mention list and the emoji picker inside the input anchor, above the field', async () => {
+  const host = mount();
+  const box = host.querySelector<HTMLTextAreaElement>('textarea')!;
+  type(box, 'ping @da');
+  await flush();
+  const anchor = host.querySelector('.composer-anchor')!;
+  expect(anchor.querySelector('.mention-menu')).not.toBeNull();
+  expect(anchor.querySelector('.composer')).not.toBeNull();
+  type(box, '');
+  await flush();
+  button(host, 'Emoji').click();
+  await flush();
+  expect(anchor.querySelector('.composer-picker')).not.toBeNull();
+  expect(host.querySelectorAll('.composer-anchor')).toHaveLength(1);
+});
+
+it('puts the input right after the reply bar, so the bar and the input can share a border', async () => {
+  const host = mount();
+  expect(host.querySelector('.reply-bar')).toBeNull();
+  setReplyingTo(msg('a', bob, 0));
+  await flush();
+  expect(host.querySelector('.reply-bar + .composer-anchor > .composer')).not.toBeNull();
+});
+
 it('finds the @word under the caret and ignores addresses', () => {
   expect(mentionAt('hello @bo', 9)).toEqual({ start: 6, query: 'bo' });
   expect(mentionAt('hello @bo and more', 9)).toEqual({ start: 6, query: 'bo' });
@@ -222,6 +247,43 @@ it('reaction chips show who reacted, mark mine, and toggle on click', async () =
   chips[0].click();
   await flush();
   expect(react).toHaveBeenCalledWith('a', '👍', false);
+});
+
+it('ru: the reaction tooltip calls me "Вы" and an unknown reactor "Кто-то"', () => {
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'ru' } });
+  setMessages([msg('a', bob, 0, { reactions: [{ emoji: '👍', user_ids: ['me', 'bob', 'ghost'] }] })]);
+  const host = mount();
+  const tip = host.querySelector('button.react .react-tip')?.textContent ?? '';
+  expect(tip).toContain('Вы, Bob Marley, Кто-то');
+  expect(tip).not.toMatch(/\b(You|Someone)\b/);
+});
+
+it('the jump button counts unseen messages with the right plural form', async () => {
+  const jumpLabel = () => document.querySelector('.jump-wrap button')?.textContent?.replace(/\s+/g, ' ').trim();
+  const arriveWhileScrolledUp = async (language: 'ru' | 'en', total: number) => {
+    setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language } });
+    setMessages([msg('m0', bob, 0)]);
+    const host = mount();
+    const list = host.querySelector('.message-list') as HTMLElement;
+    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+    await flush();
+    list.scrollTop = 0; // the reader has scrolled up, so new messages are only counted
+    const seen: string[] = [];
+    for (let i = 1; i <= total; i++) {
+      setMessages([...Array.from({ length: i + 1 }, (_, n) => msg(`m${n}`, bob, n))]);
+      await flush();
+      seen.push(jumpLabel() ?? '');
+    }
+    return seen;
+  };
+  const ru = await arriveWhileScrolledUp('ru', 5);
+  expect(ru).toEqual(['1 новое сообщение', '2 новых сообщения', '3 новых сообщения', '4 новых сообщения', '5 новых сообщений']);
+  dispose?.();
+  dispose = undefined;
+  document.body.innerHTML = '';
+  const en = await arriveWhileScrolledUp('en', 2);
+  expect(en).toEqual(['1 new message', '2 new messages']);
 });
 
 it('dropping files on the chat attaches them, with an overlay while dragging', async () => {

@@ -53,10 +53,10 @@ export const ru: Readonly<Record<string, string>> = {
   'Join the flock': 'Присоединиться к сообществу', 'Welcome back': 'С возвращением', 'Create your account on this server.': 'Создайте аккаунт на этом сервере.', 'Sign in to continue to your server.': 'Войдите, чтобы подключиться к серверу.',
   'Retry': 'Повторить', 'Already have an account?': 'Уже есть аккаунт?', 'New here?': 'Впервые здесь?', 'Sign in': 'Войти', 'Create an account': 'Создать аккаунт', 'Encrypted with TLS · certificate pinned on first use': 'Зашифровано по TLS · сертификат закрепляется при первом подключении',
   'Welcome to #{channel}!': 'Добро пожаловать в #{channel}!', 'This is the start of the conversation. Say hello — someone is always listening.': 'Это начало переписки. Поздоровайтесь — вас услышат.',
-  'New messages': 'Новые сообщения', '{count} new message': '{count} новое сообщение', '{count} new messages': '{count} новых сообщений', 'Drop files to attach': 'Перетащите файлы для отправки', 'Up to 10 files, 10 MB each': 'До 10 файлов размером до 10 МБ каждый',
-  'Starting FinchSpeak…': 'Запуск FinchSpeak…', 'Online — {count}': 'В сети — {count}', 'Offline — {count}': 'Не в сети — {count}', 'Save': 'Сохранить', 'Create': 'Создать',
+  'New messages': 'Новые сообщения', 'Drop files to attach': 'Перетащите файлы для отправки', 'Up to 10 files, 10 MB each': 'До 10 файлов размером до 10 МБ каждый',
+  'Starting FinchSpeak…': 'Запуск FinchSpeak…', 'Online — {count}': 'В сети — {count}', 'Admins — {count}': 'Администраторы — {count}', 'Moderators — {count}': 'Модераторы — {count}', 'Offline — {count}': 'Не в сети — {count}', 'Save': 'Сохранить', 'Create': 'Создать',
   'Reconnecting… try {attempt}, next one in {seconds} s': 'Повторное подключение… попытка {attempt}, следующая через {seconds} с', 'Reconnecting…': 'Повторное подключение…', 'Could not reconnect': 'Не удалось восстановить соединение', 'Connection lost': 'Соединение потеряно',
-  'Messages': 'Сообщения', 'Loading older messages…': 'Загрузка старых сообщений…', 'select-channel': 'выбрать канал', '1 new message': '1 новое сообщение',
+  'Messages': 'Сообщения', 'Loading older messages…': 'Загрузка старых сообщений…', 'select-channel': 'выбрать канал',
   'Keyboard shortcuts': 'Сочетания клавиш', 'Close': 'Закрыть', 'Jump to a channel': 'Перейти к каналу', 'Channels': 'Каналы', 'No channel like that.': 'Такого канала нет.', 'open': 'открыт', 'Back to sign in': 'Вернуться ко входу',
   'Show this list': 'Показать этот список', 'New line in a message': 'Новая строка в сообщении', 'Cancel an edit or reply, close a window': 'Отменить изменение или ответ, закрыть окно', 'Speak while it is held (set in Settings)': 'Говорить, пока клавиша нажата (настройка в профиле)',
   'You were disconnected by an admin': 'Администратор отключил вас', 'You can sign in again whenever you like.': 'Вы можете снова войти в любое время.', 'You have been banned from this server': 'Вас заблокировали на этом сервере',
@@ -93,7 +93,7 @@ export const ru: Readonly<Record<string, string>> = {
   'Trust this server?': 'Доверять этому серверу?', "This server's certificate changed": 'Сертификат сервера изменился',
   'The certificate of {host} is not the one you trusted before. This can happen after a server reinstall — or when someone is intercepting your connection. Your password was not sent.': 'Сертификат сервера {host} отличается от ранее доверенного. Это возможно после переустановки сервера или при перехвате соединения. Ваш пароль не отправлялся.',
   'To continue anyway, type the server name': 'Чтобы продолжить, введите имя сервера',
-  'never': 'никогда', 'just now': 'только что', '{count} min ago': '{count} мин. назад', '{count} h ago': '{count} ч назад', '{count} d ago': '{count} дн. назад', 'until you lift the ban': 'пока вы не снимете блокировку',
+  'never': 'никогда', 'just now': 'только что', '{count} min ago': '{count} мин. назад', '{count} h ago': '{count} ч назад', '{count} d ago': '{count} дн. назад',
   'Banned until {when}': 'Заблокирован до {when}', 'Ban {name}': 'Заблокировать {name}', 'For how long? Admins cannot be banned: make them a member first.': 'На какой срок? Администраторов нельзя блокировать: сначала понизьте их до участника.', '{action}: {name}?': '{action}: {name}?',
   'People need a code to register. Give it to them yourself; it stops working after its uses or time run out.': 'Для регистрации нужен код. Передайте его пользователю лично; код перестанет работать после указанного числа использований или срока.',
   'Uses': 'Использований', 'Valid for (hours)': 'Срок действия (часы)', 'Create invitation': 'Создать приглашение', 'New code': 'Новый код', 'Copy': 'Копировать', 'Code': 'Код', 'Used': 'Использован', 'Expires': 'Истекает', 'No invitations yet.': 'Приглашений пока нет.', 'Revoke': 'Отозвать',
@@ -105,11 +105,25 @@ export const ru: Readonly<Record<string, string>> = {
   'At most {count} files fit in one message': 'К одному сообщению можно прикрепить не более {count} файлов', 'Message not sent: {error}': 'Не удалось отправить сообщение: {error}', 'The new passwords do not match': 'Новые пароли не совпадают', 'Screen sound is not shared: {reason}': 'Звук экрана не передаётся: {reason}', 'Screen sharing stopped: {reason}': 'Демонстрация экрана остановлена: {reason}', 'A moderator sent you out. You can join again.': 'Модератор отключил вас. Вы можете присоединиться снова.',
   'An audio device was disconnected; reopening the audio devices...': 'Аудиоустройство отключилось. Повторное открытие аудиоустройств…', 'Voice processing stopped: {message}. Rejoin the voice channel to retry.': 'Обработка голоса остановлена: {message}. Переподключитесь к голосовому каналу, чтобы повторить попытку.', 'The audio devices keep failing. Check them, then rejoin the voice channel.': 'Аудиоустройства продолжают сбоить. Проверьте их и переподключитесь к голосовому каналу.', '"{wanted}" is not available; using the system default {kind} device instead.': 'Устройство «{wanted}» недоступно; используется системное устройство {kind} по умолчанию.', 'input': 'входное', 'output': 'выходное',
   'Voice controls': 'Управление голосом', 'Voice settings': 'Настройки голоса', 'Leave the room': 'Покинуть комнату', 'Live': 'В эфире', 'is sharing a screen': 'демонстрирует экран', 'Watch': 'Смотреть', 'Watching': 'Просмотр', 'Silenced by a moderator': 'Модератор отключил микрофон', 'Good connection': 'Хорошее соединение', 'Fair connection': 'Среднее соединение', 'Poor connection': 'Плохое соединение', '(you)': '(вы)', 'Speaking': 'Говорит', 'Allow to speak': 'Разрешить говорить', 'Silence': 'Отключить микрофон', 'Volume of {name}': 'Громкость: {name}', 'talking': 'говорит', 'push to talk': 'нажмите, чтобы говорить',
-  'Minimize': 'Свернуть', 'Maximize': 'Развернуть', 'Dismiss': 'Закрыть уведомление',
+  'Minimize': 'Свернуть', 'Maximize': 'Развернуть', 'Restore': 'Восстановить', 'Dismiss': 'Закрыть уведомление',
   'That message is further up': 'Это сообщение находится выше', 'You were removed from the voice room': 'Вас отключили от голосовой комнаты', 'Full screen is not available': 'Полноэкранный режим недоступен', 'Picture-in-picture is not available': 'Режим «картинка в картинке» недоступен', 'Details copied': 'Сведения скопированы', 'Code copied': 'Код скопирован', 'Backup made': 'Резервная копия создана',
-  '{name} is disconnected and cannot sign in for {duration}.': '{name} отключён и не сможет войти в течение {duration}.',
+  '{name} is disconnected and cannot sign in for {duration}.': '{name} отключён и не сможет войти. Срок блокировки: {duration}.', '{name} is disconnected and cannot sign in until you lift the ban.': '{name} отключён и не сможет войти, пока вы не снимете блокировку.',
   'Could not join voice: {error}': 'Не удалось подключиться к голосовому каналу: {error}', 'Could not switch audio device: {error}': 'Не удалось переключить аудиоустройство: {error}', 'Choose a push-to-talk key first': 'Сначала выберите клавишу активации микрофона',
   'excellent': 'отличное', '{count} ms · {quality}': '{count} мс · {quality}',
+  'good': 'хорошее', 'fair': 'среднее', 'poor': 'плохое',
+  'Ban': 'Заблокировать', '1 day': '1 день', '1 week': '1 неделя', 'For good': 'Навсегда', 'a while': 'некоторое время',
+  'kicked {target}': 'исключил {target}', 'banned {target}': 'заблокировал {target}', 'banned {target} for a while': 'заблокировал {target} на время', 'lifted the ban of {target}': 'снял блокировку: {target}',
+  'changed the role of {target} ({details})': 'изменил роль {target} ({details})', 'deleted a message of someone else': 'удалил чужое сообщение', 'created the channel {target}': 'создал канал {target}', 'deleted the channel {target}': 'удалил канал {target}',
+  'created the invitation {target}': 'создал приглашение {target}', 'revoked the invitation {target}': 'отозвал приглашение {target}', 'set registration to {details}': 'установил регистрацию: {details}', 'made a backup': 'сделал резервную копию',
+  'sent {target} out of the voice room': 'отключил {target} от голосовой комнаты', 'silenced {target} in the voice room': 'заглушил {target} в голосовой комнате', 'un-silenced {target} in the voice room': 'разрешил говорить {target} в голосовой комнате',
+  'Change role': 'Изменить роль', 'Confirm': 'Подтвердить', 'Active': 'Действует', 'Expired': 'Истёк', 'Used up': 'Исчерпан',
+  '{name} is disconnected and has to sign in again. They can come back.': '{name} отключён и должен войти снова. Вернуться можно в любой момент.',
+  '{name} can sign in again.': '{name} снова сможет войти.',
+  '{name} gets every power an admin has, including banning and changing roles.': '{name} получает все права администратора, включая блокировку и смену ролей.',
+  '{name} can kick people, silence them in voice and delete messages.': '{name} сможет исключать людей, отключать им микрофон в голосовых комнатах и удалять сообщения.',
+  '{name} loses their staff powers.': '{name} лишится прав модератора и администратора.',
+  'Delete {name}?': 'Удалить канал {name}?', 'The sharer': 'Автор показа',
+  'Download {name}': 'Скачать {name}', 'Open {name}': 'Открыть {name}', 'No preview': 'Нет предпросмотра', 'You': 'Вы',
   'Delete #{channel}?': 'Удалить канал #{channel}?', 'Download failed: {error}': 'Не удалось скачать файл: {error}',
   'Name changed.': 'Имя изменено.', 'Password changed. Other devices are signed out.': 'Пароль изменён. На других устройствах выполнен выход.',
   'Use a PNG, JPEG or WebP picture': 'Выберите изображение в формате PNG, JPEG или WebP', 'That picture is too large. Pick one under 12 MB': 'Изображение слишком большое. Выберите файл размером до 12 МБ', 'That picture could not be opened. Try another file': 'Не удалось открыть изображение. Попробуйте другой файл', 'The picture could not be prepared': 'Не удалось подготовить изображение', 'The picture must be smaller than 2 MB': 'Размер изображения должен быть меньше 2 МБ',
@@ -129,6 +143,12 @@ export const ru: Readonly<Record<string, string>> = {
   'a channel': 'канале', '{name} mentioned you in #{channel}': '{name} упомянул вас в канале #{channel}', '{name} in #{channel}': '{name} в канале #{channel}', 'your voice room': 'вашей голосовой комнате', '{name} joined {room}': '{name} присоединился к комнате {room}',
 };
 
+/** Russian plural forms, keyed by the English `other` form that `plural()` is called with. */
+export const ruPlurals: Readonly<Record<string, Partial<Record<Intl.LDMLPluralRule, string>> & { other: string }>> = {
+  '{count} new messages': { one: '{count} новое сообщение', few: '{count} новых сообщения', many: '{count} новых сообщений', other: '{count} новых сообщения' },
+};
+const pluralRules = { ru: new Intl.PluralRules('ru-RU'), en: new Intl.PluralRules('en-GB') };
+
 export const locale = () => prefs().appearance.language;
 
 /** Format visible numbers using the selected interface locale. */
@@ -136,13 +156,59 @@ export function formatNumber(value: number, maximumFractionDigits?: number): str
   return new Intl.NumberFormat(locale() === 'ru' ? 'ru-RU' : 'en-GB', maximumFractionDigits === undefined ? undefined : { maximumFractionDigits }).format(value);
 }
 
-/** Translate an English source string reactively and interpolate named values. */
-export function t(source: string, params?: TranslationParams): string {
-  const translated = locale() === 'ru' ? (ru[source] ?? source) : source;
-  if (!params) return translated;
-  return translated.replace(/\{([^{}]+)\}/g, (match, key: string) => {
+const UNITS = {
+  en: { B: 'B', KB: 'KB', MB: 'MB', GB: 'GB', kbps: 'kbps', Mbps: 'Mbps', fps: 'fps', min: 'min', h: 'h', d: 'd' },
+  ru: { B: 'Б', KB: 'КБ', MB: 'МБ', GB: 'ГБ', kbps: 'кбит/с', Mbps: 'Мбит/с', fps: 'кадр/с', min: 'мин', h: 'ч', d: 'д' },
+} as const;
+export type UnitName = keyof typeof UNITS.en;
+
+/** The short label of a unit in the interface language (KB / КБ, kbps / кбит/с, h / ч …). */
+export const unit = (name: UnitName): string => UNITS[locale() === 'ru' ? 'ru' : 'en'][name];
+
+/** A size in bytes as "500 B", "2 KB", "5.5 MB", "3 GB". With `smallest: 'KB'` anything under a megabyte reads in kilobytes (at least 1). */
+export function formatBytes(bytes: number, smallest: 'B' | 'KB' = 'B'): string {
+  if (bytes < 1024 && smallest === 'B') return `${formatNumber(bytes)} ${unit('B')}`;
+  if (bytes < 1024 * 1024) return `${formatNumber(Math.max(1, Math.round(bytes / 1024)))} ${unit('KB')}`;
+  if (bytes < 1024 ** 3) return `${formatNumber(bytes / 1024 / 1024, 1)} ${unit('MB')}`;
+  return `${formatNumber(bytes / 1024 ** 3, 2)} ${unit('GB')}`;
+}
+
+/** A video bitrate given in kilobits per second, as "850 kbps" or "2.5 Mbps". */
+export function formatBitrate(kbps: number): string {
+  return kbps >= 1000 ? `${formatNumber(kbps / 1000, 1)} ${unit('Mbps')}` : `${formatNumber(kbps)} ${unit('kbps')}`;
+}
+
+/** A length of time in whole seconds as "5 min", "2 h" or "1 d 2 h" (the unit labels follow the interface language). */
+export function formatDuration(seconds: number): string {
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} ${unit('min')}`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} ${unit('h')}`;
+  return `${Math.floor(seconds / 86400)} ${unit('d')} ${Math.floor((seconds % 86400) / 3600)} ${unit('h')}`;
+}
+
+function fill(template: string, params?: TranslationParams): string {
+  if (!params) return template;
+  return template.replace(/\{([^{}]+)\}/g, (match, key: string) => {
     if (!(key in params)) return match;
     const value = params[key];
     return typeof value === 'number' ? formatNumber(value) : value;
   });
+}
+
+/** Translate an English source string reactively and interpolate named values. */
+export function t(source: string, params?: TranslationParams): string {
+  return fill(locale() === 'ru' ? (ru[source] ?? source) : source, params);
+}
+
+/**
+ * A counted phrase in the right plural form for the interface language: `plural(n, { one: '{count} file', other: '{count} files' })`.
+ * English uses the two forms given; Russian takes one / few / many from `ruPlurals`, found by the `other` form (a phrase without
+ * an entry there falls back to the English `other` form). `{count}` is filled in with the formatted number.
+ */
+export function plural(count: number, forms: { one: string; other: string }, params?: TranslationParams): string {
+  const values = { ...params, count };
+  if (locale() === 'ru') {
+    const table = ruPlurals[forms.other];
+    return table ? fill(table[pluralRules.ru.select(count)] ?? table.other, values) : fill(forms.other, values);
+  }
+  return fill(pluralRules.en.select(count) === 'one' ? forms.one : forms.other, values);
 }
