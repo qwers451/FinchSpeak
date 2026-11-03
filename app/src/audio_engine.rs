@@ -19,13 +19,17 @@ use finch_audio::{
 };
 use finch_audio::quality::QualityTracker;
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
-use ringbuf::HeapRb;
+use ringbuf::{HeapCons, HeapProd, HeapRb};
 use tauri::Emitter;
 use tracing::{error, info, warn};
 
 /// More restarts than this inside `RESTART_WINDOW` means the devices keep failing: stop trying.
 const MAX_DEVICE_RESTARTS: usize = 5;
 const RESTART_WINDOW: Duration = Duration::from_secs(10);
+/// Time a device gets to settle after its stream died before it is opened again.
+const DEVICE_SETTLE: Duration = Duration::from_millis(500);
+/// Pause between attempts to open speakers that are not available yet (a headset switching profile).
+const OUTPUT_RETRY: Duration = Duration::from_secs(1);
 
 use crate::state::AppState;
 use crate::capture_privacy::{CaptureClock, CapturedSample, InputBoundary};
@@ -250,6 +254,132 @@ fn report_fallback(kind: &str, choice: &DeviceChoice, app_handle: &tauri::AppHan
     }
 }
 
+/// What a dead device stream takes down with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reopen {
+    /// Only the speakers: the microphone keeps running.
+    Output,
+    /// Both devices, as on a fresh start.
+    Everything,
+}
+
+/// Opening a Bluetooth headset's microphone switches the headset to the hands-free profile, which
+/// invalidates a running speaker stream. Reopening the microphone as well would switch it again
+/// and the call would break up in a loop, so a speaker-only failure reopens only the speakers.
+fn reopen_after(input_lost: bool, output_lost: bool) -> Option<Reopen> {
+    match (input_lost, output_lost) {
+        (false, false) => None,
+        (false, true) => Some(Reopen::Output),
+        (true, _) => Some(Reopen::Everything),
+    }
+}
+
+/// The speaker stream and the rings it shares with the worker.
+struct OutputSide {
+    _stream: Stream,
+    resampler: OutputResampler,
+    /// Samples per 20 ms at the device rate.
+    chunk: usize,
+    playback: HeapProd<f32>,
+    /// What the speakers actually played, for echo cancellation: the callback copies every
+    /// sample it plays into this lock-free ring.
+    reference: HeapCons<f32>,
+    reference_feeder: Option<ReferenceFeeder>,
+    /// How long the output device holds audio before it plays (set by the callback).
+    latency_ms: Arc<AtomicU32>,
+    /// Set from cpal's error callback when this stream dies; a late error from a replaced
+    /// stream cannot take down its successor.
+    failed: Arc<AtomicBool>,
+}
+
+fn open_output(state: &AppState, app_handle: &tauri::AppHandle) -> Option<OutputSide> {
+    let wanted = state.audio_devices.read().ok().and_then(|s| s.output.clone());
+    let (device, choice) = open_output_device(wanted.as_deref());
+    report_fallback("output", &choice, app_handle);
+    let Some(device) = device else {
+        error!("No default audio output device available");
+        return None;
+    };
+    let config = match device.default_output_config() {
+        Ok(config) => config,
+        Err(e) => {
+            error!("Failed to get default output audio config: {}", e);
+            return None;
+        }
+    };
+    let sample_rate = config.sample_rate().0;
+    let reference_feeder = match ReferenceFeeder::new(sample_rate) {
+        Ok(feeder) => Some(feeder),
+        Err(e) => {
+            error!("Echo cancellation reference disabled: {}", e);
+            None
+        }
+    };
+    let resampler = OutputResampler::new(sample_rate).unwrap_or_else(|e| {
+        error!("Failed to initialize OutputResampler: {}", e);
+        OutputResampler::Passthrough
+    });
+    let channels = config.channels() as usize;
+    let (playback, mut playback_cons) = HeapRb::<f32>::new(RING_BUFFER_CAPACITY).split();
+    let (mut reference_prod, reference) = HeapRb::<f32>::new(RING_BUFFER_CAPACITY).split();
+    let is_deafened = state.is_deafened.clone();
+    let latency_ms = Arc::new(AtomicU32::new(0));
+    let latency_ref = latency_ms.clone();
+    let failed = Arc::new(AtomicBool::new(false));
+    let failed_ref = failed.clone();
+
+    let err_fn = move |err| {
+        error!("Audio output error: {}", err);
+        failed_ref.store(true, Ordering::SeqCst);
+    };
+    let stream = device.build_output_stream(
+        &config.into(),
+        move |data: &mut [f32], info: &cpal::OutputCallbackInfo| {
+            let timestamp = info.timestamp();
+            if let Some(latency) = timestamp.playback.duration_since(&timestamp.callback) {
+                latency_ref.store(latency.as_millis() as u32, Ordering::Relaxed);
+            }
+            if channels == 0 {
+                return;
+            }
+            if is_deafened.load(Ordering::Relaxed) {
+                render_deafened(data, channels, &mut playback_cons, &mut reference_prod);
+                return;
+            }
+            for chunk in data.chunks_mut(channels) {
+                let sample = playback_cons.try_pop().unwrap_or(0.0);
+                let _ = reference_prod.try_push(sample);
+                for out_ch in chunk.iter_mut() {
+                    *out_ch = sample;
+                }
+            }
+        },
+        err_fn,
+        None,
+    );
+    let stream = match stream {
+        Ok(stream) => stream,
+        Err(e) => {
+            error!("Failed to build playback stream: {}", e);
+            return None;
+        }
+    };
+    if let Err(e) = stream.play() {
+        error!("Failed to start playback stream: {}", e);
+        return None;
+    }
+    Some(OutputSide {
+        _stream: stream,
+        resampler,
+        chunk: ((sample_rate as usize * 20) / 1000).max(1),
+        playback,
+        reference,
+        reference_feeder,
+        latency_ms,
+        failed,
+    })
+}
+
 /// Dedicated OS thread function managing cpal streams, DSP, and lock-free ring buffers.
 fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
     let mut pending_cmd: Option<AudioCommand> = None;
@@ -279,101 +409,13 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
 
                 let selection = state.audio_devices.read().map(|s| s.clone()).unwrap_or_default();
                 // Set from cpal's error callbacks when a stream dies (e.g. the headset is unplugged).
-                let stream_failed = Arc::new(AtomicBool::new(false));
+                let input_failed = Arc::new(AtomicBool::new(false));
 
-                // 1. Output (Playback) Ring Buffer & cpal Stream
-                let playback_rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
-                let (mut playback_prod, mut playback_cons) = playback_rb.split();
-
-                // What the speakers actually played, for echo cancellation: the output callback
-                // copies every sample it plays into this lock-free ring.
-                let reference_rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
-                let (mut reference_prod, mut reference_cons) = reference_rb.split();
-                let mut reference_feeder: Option<ReferenceFeeder> = None;
-                // How long the output device holds audio before it plays (set by the callback).
-                let output_latency_ms = Arc::new(AtomicU32::new(0));
-                let mut applied_latency_ms = 0u32;
-
-                let mut playback_stream: Option<Stream> = None;
-                let mut output_resampler: Option<OutputResampler> = None;
-                let mut output_sample_rate = 48000u32;
-
-                let (output_device, output_choice) = open_output_device(selection.output.as_deref());
-                report_fallback("output", &output_choice, &app_handle);
-                if let Some(device) = output_device {
-                    match device.default_output_config() {
-                        Ok(config) => {
-                            output_sample_rate = config.sample_rate().0;
-                            reference_feeder = match ReferenceFeeder::new(output_sample_rate) {
-                                Ok(feeder) => Some(feeder),
-                                Err(e) => {
-                                    error!("Echo cancellation reference disabled: {}", e);
-                                    None
-                                }
-                            };
-                            let channels = config.channels() as usize;
-                            let is_deafened_ref = state.is_deafened.clone();
-                            let latency_ref = output_latency_ms.clone();
-
-                            output_resampler = match OutputResampler::new(output_sample_rate) {
-                                Ok(resampler) => Some(resampler),
-                                Err(e) => {
-                                    error!("Failed to initialize OutputResampler: {}", e);
-                                    Some(OutputResampler::Passthrough)
-                                }
-                            };
-
-                            let failed = stream_failed.clone();
-                            let err_fn = move |err| {
-                                error!("Audio output error: {}", err);
-                                failed.store(true, Ordering::SeqCst);
-                            };
-                            let stream_res = device.build_output_stream(
-                                &config.into(),
-                                move |data: &mut [f32], info: &cpal::OutputCallbackInfo| {
-                                    let timestamp = info.timestamp();
-                                    if let Some(latency) = timestamp.playback.duration_since(&timestamp.callback) {
-                                        latency_ref.store(latency.as_millis() as u32, Ordering::Relaxed);
-                                    }
-                                    if channels == 0 {
-                                        return;
-                                    }
-                                    if is_deafened_ref.load(Ordering::Relaxed) {
-                                        render_deafened(data, channels, &mut playback_cons, &mut reference_prod);
-                                        return;
-                                    }
-                                    for chunk in data.chunks_mut(channels) {
-                                        let sample = playback_cons.try_pop().unwrap_or(0.0);
-                                        let _ = reference_prod.try_push(sample);
-                                        for out_ch in chunk.iter_mut() {
-                                            *out_ch = sample;
-                                        }
-                                    }
-                                },
-                                err_fn,
-                                None,
-                            );
-
-                            match stream_res {
-                                Ok(stream) => {
-                                    if let Err(e) = stream.play() {
-                                        error!("Failed to start playback stream: {}", e);
-                                    } else {
-                                        playback_stream = Some(stream);
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Failed to build playback stream: {}", e);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to get default output audio config: {}", e);
-                        }
-                    }
-                } else {
-                    error!("No default audio output device available");
-                }
+                // 1. Output (Playback) Ring Buffers & cpal Stream
+                let mut output = open_output(&state, &app_handle);
+                // When to try opening the speakers again after their stream died.
+                let mut output_reopen_at: Option<Instant> = None;
+                let mut applied_latency_ms: Option<u32> = None;
 
                 // 2. Input (Capture) Ring Buffer & cpal Stream
                 let capture_rb = HeapRb::<CapturedSample>::new(RING_BUFFER_CAPACITY);
@@ -398,7 +440,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                 }
                             };
 
-                            let failed = stream_failed.clone();
+                            let failed = input_failed.clone();
                             let err_fn = move |err| {
                                 error!("Audio input error: {}", err);
                                 failed.store(true, Ordering::SeqCst);
@@ -448,7 +490,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     error!("No default audio input device available");
                 }
 
-                if playback_stream.is_none() && capture_stream.is_none() {
+                if output.is_none() && capture_stream.is_none() {
                     error!("Both playback and capture audio streams failed to initialize");
                     is_running.store(false, Ordering::SeqCst);
                     continue;
@@ -482,9 +524,6 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 let mut capture_frame_48k = [0.0f32; FRAME_SIZE_48K];
                 let mut capture_raw_buf = Vec::with_capacity(4096);
 
-                let target_output_chunk = ((output_sample_rate as usize * 20) / 1000).max(1);
-                let target_playback_headroom = target_output_chunk * 3;
-
                 // 4. Real-time active worker processing loop
                 while is_running.load(Ordering::SeqCst) {
                     match cmd_rx.try_recv() {
@@ -506,9 +545,11 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
                         }
                     }
-                    // A0. A device stream died (headset unplugged, driver reset): reopen the devices,
-                    // falling back to the defaults, instead of leaving the call silent.
-                    if stream_failed.swap(false, Ordering::SeqCst) {
+                    // A0. A device stream died (headset unplugged, driver reset, Bluetooth profile
+                    // switch): reopen it, falling back to the default, instead of leaving the call silent.
+                    let input_lost = input_failed.swap(false, Ordering::SeqCst);
+                    let output_lost = output.as_ref().is_some_and(|out| out.failed.swap(false, Ordering::SeqCst));
+                    if let Some(reopen) = reopen_after(input_lost, output_lost) {
                         let now = Instant::now();
                         restart_times.retain(|t| now.duration_since(*t) < RESTART_WINDOW);
                         restart_times.push_back(now);
@@ -518,21 +559,48 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             is_running.store(false, Ordering::SeqCst);
                             break;
                         }
-                        warn!("Audio stream failed; reopening the audio devices");
                         let _ = app_handle.emit("audio-device-lost", ());
-                        std::thread::sleep(Duration::from_millis(500));
-                        pending_cmd = Some(AudioCommand::Start {
-                            channel_id,
-                            state: state.clone(),
-                            app_handle: app_handle.clone(),
-                        });
-                        break;
+                        match reopen {
+                            Reopen::Everything => {
+                                warn!("Audio stream failed; reopening the audio devices");
+                                std::thread::sleep(DEVICE_SETTLE);
+                                pending_cmd = Some(AudioCommand::Start {
+                                    channel_id,
+                                    state: state.clone(),
+                                    app_handle: app_handle.clone(),
+                                });
+                                break;
+                            }
+                            Reopen::Output => {
+                                // The microphone keeps running while the speakers settle.
+                                warn!("Audio output stream failed; reopening the speakers");
+                                output = None;
+                                output_reopen_at = Some(now + DEVICE_SETTLE);
+                            }
+                        }
+                    }
+                    if output_reopen_at.is_some_and(|at| Instant::now() >= at) {
+                        output_reopen_at = None;
+                        output = open_output(&state, &app_handle);
+                        if output.is_none() {
+                            output_reopen_at = Some(Instant::now() + OUTPUT_RETRY);
+                        }
+                        // The echo path and the playout reference start over with the new stream.
+                        applied_latency_ms = None;
+                        if let Some(capture) = &mut voice_capture {
+                            if let Err(error) = capture.reset_echo_canceller() {
+                                error!(%error, "Could not reset echo canceller");
+                                is_running.store(false, Ordering::SeqCst);
+                                let _ = app_handle.emit("audio-processing-failed", serde_json::json!({ "message": error.to_string() }));
+                                break;
+                            }
+                        }
                     }
 
                     // A-. A microphone test was asked for: record a few seconds, then play them back.
                     let requested = state.mic_test_request.swap(0, Ordering::SeqCst);
                     if requested > 0 && mic_test.is_none() {
-                        if capture_stream.is_some() && playback_stream.is_some() && !state.is_muted.load(Ordering::Relaxed) {
+                        if capture_stream.is_some() && output.is_some() && !state.is_muted.load(Ordering::Relaxed) {
                             state.voice_settings.set_mic_test(true);
                             monitor_queue.clear();
                             mic_test = Some(MicTest::new(requested));
@@ -554,55 +622,53 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         let _ = app_handle.emit("voice-quality", report);
                     }
 
-                    // A. Playback processing (mixer -> OutputResampler -> playback_prod)
-                    if playback_stream.is_some() {
-                        if let Some(resampler) = &mut output_resampler {
-                            while playback_prod.occupied_len() < target_playback_headroom
-                                && playback_prod.vacant_len() >= target_output_chunk
-                            {
-                                let speech_events =
-                                    mix_next_frame(&state.mixer, &mut playback_frame_48k, Instant::now());
-                                if let Some(test) = &mut mic_test {
-                                    if let Some(recorded) = test.next_playback_frame() {
-                                        for (out, mine) in playback_frame_48k.iter_mut().zip(recorded.iter()) {
-                                            *out = (*out + *mine).clamp(-1.0, 1.0);
-                                        }
-                                    }
-                                    if test.finished() {
-                                        let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
-                                        mic_test = None;
-                                        state.voice_settings.set_mic_test(false);
+                    // A. Playback processing (mixer -> OutputResampler -> speaker ring)
+                    if let Some(speakers) = &mut output {
+                        while speakers.playback.occupied_len() < speakers.chunk * 3
+                            && speakers.playback.vacant_len() >= speakers.chunk
+                        {
+                            let speech_events =
+                                mix_next_frame(&state.mixer, &mut playback_frame_48k, Instant::now());
+                            if let Some(test) = &mut mic_test {
+                                if let Some(recorded) = test.next_playback_frame() {
+                                    for (out, mine) in playback_frame_48k.iter_mut().zip(recorded.iter()) {
+                                        *out = (*out + *mine).clamp(-1.0, 1.0);
                                     }
                                 }
-                                if effective_monitor(&state.voice_settings, mic_test.is_some()) {
-                                    if let Some(own) = monitor_queue.pop_front() {
-                                        for (out, mine) in playback_frame_48k.iter_mut().zip(own.iter()) {
-                                            *out = (*out + *mine).clamp(-1.0, 1.0);
-                                        }
+                                if test.finished() {
+                                    let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
+                                    mic_test = None;
+                                    state.voice_settings.set_mic_test(false);
+                                }
+                            }
+                            if effective_monitor(&state.voice_settings, mic_test.is_some()) {
+                                if let Some(own) = monitor_queue.pop_front() {
+                                    for (out, mine) in playback_frame_48k.iter_mut().zip(own.iter()) {
+                                        *out = (*out + *mine).clamp(-1.0, 1.0);
                                     }
                                 }
+                            }
 
-                                for (peer_id, speaking) in speech_events {
-                                    let _ = app_handle.emit(
-                                        "user-speaking",
-                                        serde_json::json!({
-                                            "peer_id": peer_id,
-                                            "is_speaking": speaking
-                                        }),
-                                    );
-                                }
+                            for (peer_id, speaking) in speech_events {
+                                let _ = app_handle.emit(
+                                    "user-speaking",
+                                    serde_json::json!({
+                                        "peer_id": peer_id,
+                                        "is_speaking": speaking
+                                    }),
+                                );
+                            }
 
-                                match resampler.process(&playback_frame_48k) {
-                                    Ok(resampled) => {
-                                        for &sample in &resampled {
-                                            let _ = playback_prod.try_push(sample);
-                                        }
+                            match speakers.resampler.process(&playback_frame_48k) {
+                                Ok(resampled) => {
+                                    for &sample in &resampled {
+                                        let _ = speakers.playback.try_push(sample);
                                     }
-                                    Err(e) => {
-                                        error!("Output resampling error: {}", e);
-                                        for _ in 0..target_output_chunk {
-                                            let _ = playback_prod.try_push(0.0);
-                                        }
+                                }
+                                Err(e) => {
+                                    error!("Output resampling error: {}", e);
+                                    for _ in 0..speakers.chunk {
+                                        let _ = speakers.playback.try_push(0.0);
                                     }
                                 }
                             }
@@ -610,19 +676,21 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     }
 
                     // A2. Echo cancellation reference: what the speakers actually played.
-                    if let (Some(feeder), Some(capture)) = (&mut reference_feeder, &mut voice_capture) {
-                        let latency = output_latency_ms.load(Ordering::Relaxed);
-                        if latency.abs_diff(applied_latency_ms) >= 10 {
+                    if let (Some(OutputSide { reference_feeder: Some(feeder), reference, latency_ms, .. }), Some(capture)) =
+                        (&mut output, &mut voice_capture)
+                    {
+                        let latency = latency_ms.load(Ordering::Relaxed);
+                        if applied_latency_ms.is_none_or(|applied| latency.abs_diff(applied) >= 10) {
                             if let Err(error) = capture.set_stream_delay_ms(latency) {
                                 error!(%error, "Could not apply microphone echo delay");
                             }
-                            applied_latency_ms = latency;
+                            applied_latency_ms = Some(latency);
                         }
-                        if reference_cons.occupied_len() >= RING_BUFFER_CAPACITY - REFERENCE_OVERFLOW_MARGIN {
+                        if reference.occupied_len() >= RING_BUFFER_CAPACITY - REFERENCE_OVERFLOW_MARGIN {
                             // The callback outran us and dropped samples: the stream is no longer
                             // contiguous, so forget the echo path instead of learning a wrong one.
                             warn!("Playout reference overflow; resetting echo canceller");
-                            reference_cons.clear();
+                            reference.clear();
                             feeder.clear();
                             if let Err(error) = capture.reset_echo_canceller() {
                                 error!(%error, "Could not reset echo canceller");
@@ -633,7 +701,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         }
                         let mut played = [0.0f32; 1024];
                         loop {
-                            let n = reference_cons.pop_slice(&mut played);
+                            let n = reference.pop_slice(&mut played);
                             if n == 0 {
                                 break;
                             }
@@ -956,6 +1024,16 @@ mod tests {
         mix_next_frame(&mixer, &mut frame, now);
         handle.join().unwrap();
         assert!(frame.iter().any(|&s| s != 0.0), "a silent frame was inserted while the mixer was busy");
+    }
+
+    /// Opening a Bluetooth headset's microphone switches it to the hands-free profile, which kills
+    /// the speaker stream. Reopening the microphone as well would switch it again, in a loop.
+    #[test]
+    fn a_lost_speaker_stream_reopens_only_the_speakers() {
+        assert_eq!(reopen_after(false, false), None);
+        assert_eq!(reopen_after(false, true), Some(Reopen::Output));
+        assert_eq!(reopen_after(true, false), Some(Reopen::Everything));
+        assert_eq!(reopen_after(true, true), Some(Reopen::Everything));
     }
 
     #[test]
