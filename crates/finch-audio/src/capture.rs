@@ -310,7 +310,7 @@ mod tests {
     use super::*;
     use crate::opus::OpusVoiceDecoder;
     use crate::resampler::FRAME_SIZE_48K;
-    use crate::vad::{VadDecision, VadMode};
+    use crate::vad::{VadDecision, VadMode, HANGOVER_FRAME_COUNT};
     use finch_protocol::media::{MediaHeader, MediaType, MEDIA_HEADER_SIZE};
 
     fn tone_frame(frame_index: usize) -> [f32; FRAME_SIZE_48K] {
@@ -472,7 +472,7 @@ mod tests {
         }
 
         let mut outputs = Vec::new();
-        for _ in 0..10 {
+        for _ in 0..HANGOVER_FRAME_COUNT + 5 {
             let mut frame = [0.0f32; FRAME_SIZE_48K];
             outputs.push(capture.process(&mut frame, 42, 0).unwrap());
         }
@@ -482,7 +482,7 @@ mod tests {
         let last_hangover = outputs
             .iter()
             .position(|o| o.vad == VadDecision::Hangover { is_last: true })
-            .expect("hangover must end within 10 frames");
+            .expect("hangover must end within its length plus RNNoise latency");
         let packet = outputs[last_hangover].packets.last().expect("last hangover frame is sent");
         assert!(MediaHeader::from_slice(&packet[..MEDIA_HEADER_SIZE]).unwrap().is_silence());
         assert!(outputs.len() - last_hangover > 3, "silence must follow the hangover");

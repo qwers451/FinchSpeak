@@ -2,8 +2,9 @@
 //!
 //! In [`VadMode::Speech`] a frame is speech only if the neural classifier says so *and* it is
 //! above the user's dBFS threshold; in [`VadMode::Energy`] the threshold alone decides.
-//! When volume drops, 5 hangover frames (100 ms) of speech are transmitted for smooth fading,
-//! with the final packet tagged with the silence flag (`FLAG_SILENCE`).
+//! Once open, speech keeps the gate open down to [`HYSTERESIS_DB`] below the threshold.
+//! When speech stops, 10 hangover frames (200 ms) are transmitted, which bridges the pauses
+//! between words; the final packet is tagged with the silence flag (`FLAG_SILENCE`).
 
 use crate::resampler::FRAME_SIZE_48K;
 use crate::speech::SpeechClassifier;
@@ -11,8 +12,14 @@ use crate::speech::SpeechClassifier;
 /// Default VAD threshold in dBFS (-45.0 dBFS).
 pub const DEFAULT_VAD_THRESHOLD_DB: f32 = -45.0;
 
-/// Number of hangover frames to send after speech ends (5 frames * 20 ms = 100 ms).
-pub const HANGOVER_FRAME_COUNT: usize = 5;
+/// Number of hangover frames to send after speech ends (10 frames * 20 ms = 200 ms).
+/// With 100 ms a voice near the threshold broke up into separate syllables.
+pub const HANGOVER_FRAME_COUNT: usize = 10;
+
+/// How far below the threshold speech may fall once it has opened the gate. A voice near the
+/// threshold has quieter syllables and word endings; without this they were cut out of words.
+/// Opening still needs the full threshold.
+pub const HYSTERESIS_DB: f32 = 10.0;
 
 /// VAD state decision for a 20 ms audio frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,7 +113,8 @@ impl VoiceActivityDetector {
             None => true,
         };
 
-        if is_speech && level_db >= self.threshold_db {
+        let threshold_db = if self.hangover_remaining > 0 { self.threshold_db - HYSTERESIS_DB } else { self.threshold_db };
+        if is_speech && level_db >= threshold_db {
             self.was_speaking = true;
             self.hangover_remaining = HANGOVER_FRAME_COUNT;
             VadDecision::Speaking
@@ -139,15 +147,57 @@ mod tests {
         assert_eq!(vad.process(&loud), VadDecision::Speaking);
         assert_eq!(vad.process(&loud), VadDecision::Speaking);
 
-        // 5 hangover frames
-        assert_eq!(vad.process(&quiet), VadDecision::Hangover { is_last: false });
-        assert_eq!(vad.process(&quiet), VadDecision::Hangover { is_last: false });
-        assert_eq!(vad.process(&quiet), VadDecision::Hangover { is_last: false });
-        assert_eq!(vad.process(&quiet), VadDecision::Hangover { is_last: false });
+        // Hangover frames, the last one flagged
+        for _ in 1..HANGOVER_FRAME_COUNT {
+            assert_eq!(vad.process(&quiet), VadDecision::Hangover { is_last: false });
+        }
         assert_eq!(vad.process(&quiet), VadDecision::Hangover { is_last: true });
 
         // Silence afterwards
         assert_eq!(vad.process(&quiet), VadDecision::Silence);
         assert_eq!(vad.process(&quiet), VadDecision::Silence);
+    }
+
+    /// A 20 ms frame at a steady level of `db` dBFS.
+    fn level(db: f32) -> [f32; FRAME_SIZE_48K] {
+        [10f32.powf(db / 20.0); FRAME_SIZE_48K]
+    }
+
+    /// A voice close to the threshold has syllables a few dB below it: once the word has started
+    /// they must not be cut out of it (the microphone test and the call broke up into pieces).
+    #[test]
+    fn a_quieter_syllable_inside_a_word_is_not_cut() {
+        let mut vad = VoiceActivityDetector::new(-40.0);
+        let word = [level(-30.0); 3].into_iter().chain([level(-45.0); 12]).chain([level(-30.0); 3]);
+        for (index, frame) in word.enumerate() {
+            assert_eq!(vad.process(&frame), VadDecision::Speaking, "frame {index} of the word was dropped");
+        }
+    }
+
+    /// The pause between two words is bridged instead of closing the gate on every word.
+    #[test]
+    fn a_short_pause_between_words_keeps_the_gate_open() {
+        let mut vad = VoiceActivityDetector::new(-40.0);
+        assert_eq!(vad.process(&level(-30.0)), VadDecision::Speaking);
+        for index in 0..HANGOVER_FRAME_COUNT - 1 {
+            assert!(vad.process(&level(-80.0)).should_transmit(), "pause frame {index} closed the gate");
+        }
+        assert_eq!(vad.process(&level(-30.0)), VadDecision::Speaking);
+        const { assert!(HANGOVER_FRAME_COUNT * 20 >= 200, "pauses up to 200 ms are bridged") };
+    }
+
+    /// The lower bar only keeps an open gate open: a quiet voice cannot open it.
+    #[test]
+    fn a_voice_below_the_threshold_does_not_open_the_gate() {
+        let mut vad = VoiceActivityDetector::new(-40.0);
+        for _ in 0..20 {
+            assert_eq!(vad.process(&level(-45.0)), VadDecision::Silence);
+        }
+        // Speech that fades out completely still ends after the hangover.
+        assert_eq!(vad.process(&level(-30.0)), VadDecision::Speaking);
+        for _ in 0..HANGOVER_FRAME_COUNT {
+            assert!(matches!(vad.process(&level(-80.0)), VadDecision::Hangover { .. }));
+        }
+        assert_eq!(vad.process(&level(-80.0)), VadDecision::Silence);
     }
 }
