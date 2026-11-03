@@ -68,6 +68,19 @@ pub struct CaptureOutput {
     pub activity: VadDecision,
     /// Level of the processed frame in dBFS (-120 for silence): what the threshold is compared with.
     pub level_db: f32,
+    /// Optional per-stage diagnostics, enabled with [`VoiceCapture::set_diagnostics_enabled`].
+    pub diagnostics: Option<CaptureDiagnostics>,
+}
+
+/// Capture-stage mean-square levels and cumulative state-change counters.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CaptureDiagnostics {
+    /// Mean-square power at sanitized input, after AEC, after RNNoise, and after gain, in that order.
+    pub stage_power: [f32; 4],
+    /// Number of actual transmission privacy gate state changes during this capture session.
+    pub gate_changes: u64,
+    /// Successful AEC resets performed while reopening the gate after private capture.
+    pub dsp_resets: u64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -94,6 +107,9 @@ pub struct VoiceCapture {
     /// Push-to-talk: while false nothing is transmitted.
     gate_open: bool,
     pending_error: Option<ProcessingError>,
+    diagnostics_enabled: bool,
+    gate_changes: u64,
+    dsp_resets: u64,
 }
 
 impl VoiceCapture {
@@ -114,7 +130,15 @@ impl VoiceCapture {
             input_gain: 1.0,
             gate_open: true,
             pending_error: None,
+            diagnostics_enabled: false,
+            gate_changes: 0,
+            dsp_resets: 0,
         })
+    }
+
+    /// Enable or disable per-stage capture diagnostics without changing DSP or privacy state.
+    pub fn set_diagnostics_enabled(&mut self, enabled: bool) {
+        self.diagnostics_enabled = enabled;
     }
 
     /// Forget the echo path (reference stream interrupted, device changed).
@@ -140,6 +164,10 @@ impl VoiceCapture {
                 self.transmitting = false;
                 return; // Stay closed; a later requested opening retries initialization.
             }
+            self.dsp_resets = self.dsp_resets.saturating_add(1);
+        }
+        if self.gate_open != open {
+            self.gate_changes = self.gate_changes.saturating_add(1);
         }
         self.gate_open = open;
         if !open {
@@ -191,17 +219,26 @@ impl VoiceCapture {
         for sample in frame.iter_mut() {
             *sample = if sample.is_finite() { sample.clamp(-1.0, 1.0) } else { 0.0 };
         }
+        let mut stage_power = self.diagnostics_enabled.then(|| [mean_square(frame), 0.0, 0.0, 0.0]);
         self.echo_canceller.process_capture(frame)?;
+        if let Some(levels) = &mut stage_power { levels[1] = mean_square(frame); }
         self.noise_suppressor.process_frame(frame);
+        if let Some(levels) = &mut stage_power { levels[2] = mean_square(frame); }
         let analysis = frame.map(|sample| (sample * self.input_gain).clamp(-1.0, 1.0));
         let level_db = VoiceActivityDetector::compute_rms_dbfs(&analysis);
         let activity = self.vad.process(&analysis);
         self.gain.process(frame)?;
+        if let Some(levels) = &mut stage_power { levels[3] = mean_square(frame); }
+        let diagnostics = stage_power.map(|stage_power| CaptureDiagnostics {
+            stage_power,
+            gate_changes: self.gate_changes,
+            dsp_resets: self.dsp_resets,
+        });
         // Local monitoring receives processed audio, even while transmission is private.
         if !self.gate_open {
             self.preroll.clear();
             self.transmitting = false;
-            return Ok(CaptureOutput { packets: Vec::new(), vad: VadDecision::Silence, activity, level_db });
+            return Ok(CaptureOutput { packets: Vec::new(), vad: VadDecision::Silence, activity, level_db, diagnostics });
         }
         let vad = activity;
         if !vad.should_transmit() {
@@ -210,7 +247,7 @@ impl VoiceCapture {
                 self.preroll.pop_front();
             }
             self.preroll.push_back(*frame);
-            return Ok(CaptureOutput { packets: Vec::new(), vad, activity, level_db });
+            return Ok(CaptureOutput { packets: Vec::new(), vad, activity, level_db, diagnostics });
         }
 
         let mut packets = Vec::with_capacity(PREROLL_FRAMES + 1);
@@ -226,7 +263,7 @@ impl VoiceCapture {
         self.transmitting = true;
         packets.extend(self.encode_packet(frame, sender_peer_id, timestamp_ms, vad.is_silence_packet()));
 
-        Ok(CaptureOutput { packets, vad, activity, level_db })
+        Ok(CaptureOutput { packets, vad, activity, level_db, diagnostics })
     }
 
     /// Opus-encode one frame into a complete media datagram; `None` if encoding fails.
@@ -264,6 +301,10 @@ impl VoiceCapture {
     }
 }
 
+fn mean_square(frame: &[f32; FRAME_SIZE_48K]) -> f32 {
+    (frame.iter().map(|sample| sample * sample).sum::<f32>() / FRAME_SIZE_48K as f32).max(0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,6 +330,62 @@ mod tests {
             ..VoiceCaptureConfig::default()
         })
         .unwrap()
+    }
+
+    #[test]
+    fn capture_diagnostics_are_opt_in_and_report_finite_stage_power() {
+        let mut capture = capture_for_test();
+        let mut frame = tone_frame(0);
+        assert!(capture.process(&mut frame, 1, 0).unwrap().diagnostics.is_none());
+
+        capture.set_diagnostics_enabled(true);
+        let mut silence = [0.0; FRAME_SIZE_48K];
+        let diagnostics = capture.process(&mut silence, 1, 20).unwrap().diagnostics.unwrap();
+        assert!(diagnostics.stage_power.iter().all(|power| power.is_finite() && *power >= 0.0));
+        assert_eq!(diagnostics.stage_power[0], 0.0);
+
+        let mut frame = tone_frame(1);
+        let diagnostics = capture.process(&mut frame, 1, 40).unwrap().diagnostics.unwrap();
+        assert!(diagnostics.stage_power.iter().all(|power| power.is_finite() && *power >= 0.0));
+        assert!(diagnostics.stage_power[0] > 0.0, "sanitized input contains the test tone");
+    }
+
+    #[test]
+    fn toggling_diagnostics_does_not_change_capture_processing() {
+        let mut observed = capture_for_test();
+        let mut control = capture_for_test();
+        for index in 0..40 {
+            if index == 10 { observed.set_diagnostics_enabled(true); }
+            if index == 25 { observed.set_diagnostics_enabled(false); }
+            let mut observed_frame = tone_frame(index);
+            let mut control_frame = observed_frame;
+            let observed_output = observed.process(&mut observed_frame, 1, index as u32 * 20).unwrap();
+            let control_output = control.process(&mut control_frame, 1, index as u32 * 20).unwrap();
+            assert_eq!(observed_frame, control_frame);
+            assert_eq!(observed_output.packets, control_output.packets);
+            assert_eq!(observed_output.vad, control_output.vad);
+            assert_eq!(observed_output.activity, control_output.activity);
+            assert_eq!(observed_output.level_db, control_output.level_db);
+        }
+    }
+
+    #[test]
+    fn diagnostics_count_actual_gate_changes_and_successful_private_reopen_resets() {
+        let mut capture = capture_for_test();
+        capture.set_diagnostics_enabled(true);
+        capture.set_transmit_gate(false);
+        capture.set_transmit_gate(false);
+        let mut frame = tone_frame(0);
+        let diagnostics = capture.process(&mut frame, 1, 0).unwrap().diagnostics.unwrap();
+        assert_eq!(diagnostics.gate_changes, 1);
+        assert_eq!(diagnostics.dsp_resets, 0);
+
+        capture.set_transmit_gate(true);
+        capture.set_transmit_gate(true);
+        let mut frame = tone_frame(1);
+        let diagnostics = capture.process(&mut frame, 1, 20).unwrap().diagnostics.unwrap();
+        assert_eq!(diagnostics.gate_changes, 2);
+        assert_eq!(diagnostics.dsp_resets, 1);
     }
 
     #[test]
