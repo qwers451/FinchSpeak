@@ -2,7 +2,8 @@
 //!
 //! In [`VadMode::Speech`] a frame is speech only if the neural classifier says so *and* it is
 //! above the user's dBFS threshold; in [`VadMode::Energy`] the threshold alone decides.
-//! Once open, speech keeps the gate open down to [`HYSTERESIS_DB`] below the threshold.
+//! For [`HYSTERESIS_FRAMES`] after a frame at the full threshold, speech down to
+//! [`HYSTERESIS_DB`] below it still counts.
 //! When speech stops, 10 hangover frames (200 ms) are transmitted, which bridges the pauses
 //! between words; the final packet is tagged with the silence flag (`FLAG_SILENCE`).
 
@@ -16,10 +17,15 @@ pub const DEFAULT_VAD_THRESHOLD_DB: f32 = -45.0;
 /// With 100 ms a voice near the threshold broke up into separate syllables.
 pub const HANGOVER_FRAME_COUNT: usize = 10;
 
-/// How far below the threshold speech may fall once it has opened the gate. A voice near the
-/// threshold has quieter syllables and word endings; without this they were cut out of words.
-/// Opening still needs the full threshold.
+/// How far below the threshold speech may fall right after a frame at the full threshold. A voice
+/// near the threshold has quieter syllables and word endings; without this they were cut out of
+/// words. Opening still needs the full threshold.
 pub const HYSTERESIS_DB: f32 = 10.0;
+
+/// How long the lower bar lasts after the last frame at the full threshold (25 * 20 ms = 500 ms).
+/// Without a limit, someone talking below the threshold nearby kept the gate open indefinitely
+/// once the user had said a word.
+pub const HYSTERESIS_FRAMES: usize = 25;
 
 /// VAD state decision for a 20 ms audio frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +33,7 @@ pub enum VadDecision {
     /// Actively speaking (above threshold).
     Speaking,
     /// Hangover frame after speaking has ceased.
-    /// `is_last` is true for the 5th hangover frame (signaling the receiver to flush jitter buffer).
+    /// `is_last` is true for the last hangover frame (signaling the receiver to flush jitter buffer).
     Hangover { is_last: bool },
     /// Silent frame (not transmitted to network).
     Silence,
@@ -60,6 +66,8 @@ pub enum VadMode {
 pub struct VoiceActivityDetector {
     threshold_db: f32,
     hangover_remaining: usize,
+    /// Frames since the last speech frame at the full threshold.
+    frames_since_full: usize,
     was_speaking: bool,
     classifier: Option<SpeechClassifier>,
 }
@@ -86,6 +94,7 @@ impl VoiceActivityDetector {
         Self {
             threshold_db,
             hangover_remaining: 0,
+            frames_since_full: usize::MAX,
             was_speaking: false,
             classifier,
         }
@@ -113,8 +122,12 @@ impl VoiceActivityDetector {
             None => true,
         };
 
-        let threshold_db = if self.hangover_remaining > 0 { self.threshold_db - HYSTERESIS_DB } else { self.threshold_db };
-        if is_speech && level_db >= threshold_db {
+        let at_threshold = is_speech && level_db >= self.threshold_db;
+        let near_threshold = is_speech
+            && level_db >= self.threshold_db - HYSTERESIS_DB
+            && self.frames_since_full < HYSTERESIS_FRAMES;
+        self.frames_since_full = if at_threshold { 0 } else { self.frames_since_full.saturating_add(1) };
+        if at_threshold || near_threshold {
             self.was_speaking = true;
             self.hangover_remaining = HANGOVER_FRAME_COUNT;
             VadDecision::Speaking
@@ -184,6 +197,20 @@ mod tests {
         }
         assert_eq!(vad.process(&level(-30.0)), VadDecision::Speaking);
         const { assert!(HANGOVER_FRAME_COUNT * 20 >= 200, "pauses up to 200 ms are bridged") };
+    }
+
+    /// Someone talking below the threshold (a TV, a person nearby) must not keep the gate open
+    /// after the user's own word: the lower bar lasts only a short time after the last frame at
+    /// the full threshold.
+    #[test]
+    fn speech_below_the_threshold_does_not_hold_the_gate_open() {
+        let mut vad = VoiceActivityDetector::new(-40.0);
+        assert_eq!(vad.process(&level(-30.0)), VadDecision::Speaking);
+        let bound = HYSTERESIS_FRAMES + HANGOVER_FRAME_COUNT + 1;
+        let decisions: Vec<_> = (0..200).map(|_| vad.process(&level(-45.0))).collect();
+        let closed = decisions.iter().position(|d| *d == VadDecision::Silence).expect("the gate never closed");
+        assert!(closed <= bound, "closed after {closed} frames, bound {bound}");
+        assert!(decisions[closed..].iter().all(|d| *d == VadDecision::Silence), "it reopened below the threshold");
     }
 
     /// The lower bar only keeps an open gate open: a quiet voice cannot open it.

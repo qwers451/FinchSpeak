@@ -28,8 +28,10 @@ const MAX_DEVICE_RESTARTS: usize = 5;
 const RESTART_WINDOW: Duration = Duration::from_secs(10);
 /// Time a device gets to settle after its stream died before it is opened again.
 const DEVICE_SETTLE: Duration = Duration::from_millis(500);
-/// Pause between attempts to open speakers that are not available yet (a headset switching profile).
+/// First pause between attempts to open speakers that are not available yet (a headset switching
+/// profile); it doubles up to [`OUTPUT_RETRY_MAX`] while they stay missing.
 const OUTPUT_RETRY: Duration = Duration::from_secs(1);
+const OUTPUT_RETRY_MAX: Duration = Duration::from_secs(8);
 
 use crate::state::AppState;
 use crate::audio_diagnostics::{AudioDiagnostics, DeviceConfig, Metric};
@@ -510,6 +512,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 let mut output = open_output(&state, &app_handle, &diagnostics);
                 // When to try opening the speakers again after their stream died.
                 let mut output_reopen_at: Option<Instant> = None;
+                let mut output_retry = OUTPUT_RETRY;
                 let mut applied_latency_ms: Option<u32> = None;
 
                 // 2. Input (Capture) Ring Buffer & cpal Stream
@@ -702,6 +705,13 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                 output = None;
                                 diagnostics.stream_active(false, false);
                                 output_reopen_at = Some(now + DEVICE_SETTLE);
+                                output_retry = OUTPUT_RETRY;
+                                // Its playback needs the speakers; a waiting test would keep the
+                                // microphone private until they return.
+                                if mic_test.take().is_some() {
+                                    state.voice_settings.set_mic_test(false);
+                                    let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
+                                }
                             }
                         }
                     }
@@ -709,16 +719,19 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         output_reopen_at = None;
                         output = open_output(&state, &app_handle, &diagnostics);
                         if output.is_none() {
-                            output_reopen_at = Some(Instant::now() + OUTPUT_RETRY);
-                        }
-                        // The echo path and the playout reference start over with the new stream.
-                        applied_latency_ms = None;
-                        if let Some(capture) = &mut voice_capture {
-                            if let Err(error) = capture.reset_echo_canceller() {
-                                error!(%error, "Could not reset echo canceller");
-                                is_running.store(false, Ordering::SeqCst);
-                                let _ = app_handle.emit("audio-processing-failed", serde_json::json!({ "message": error.to_string() }));
-                                break;
+                            // Each attempt runs on this worker; back off while the device is missing.
+                            output_reopen_at = Some(Instant::now() + output_retry);
+                            output_retry = (output_retry * 2).min(OUTPUT_RETRY_MAX);
+                        } else {
+                            // The echo path and the playout reference start over with the new stream.
+                            applied_latency_ms = None;
+                            if let Some(capture) = &mut voice_capture {
+                                if let Err(error) = capture.reset_echo_canceller() {
+                                    error!(%error, "Could not reset echo canceller");
+                                    is_running.store(false, Ordering::SeqCst);
+                                    let _ = app_handle.emit("audio-processing-failed", serde_json::json!({ "message": error.to_string() }));
+                                    break;
+                                }
                             }
                         }
                     }
