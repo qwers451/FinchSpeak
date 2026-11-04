@@ -10,6 +10,8 @@ pub(crate) struct CaptureClock<T> {
     first_callback: Option<T>,
     cutoff: Option<T>,
     previous: Option<(T, T)>,
+    /// A buffer of this generation was proven newer than the cutoff.
+    accepted: bool,
 }
 impl<T: Copy + Ord> Default for CaptureClock<T> {
     fn default() -> Self {
@@ -18,6 +20,7 @@ impl<T: Copy + Ord> Default for CaptureClock<T> {
             first_callback: None,
             cutoff: None,
             previous: None,
+            accepted: false,
         }
     }
 }
@@ -28,8 +31,19 @@ impl<T: Copy + Ord> CaptureClock<T> {
             self.first_callback = None;
             self.cutoff = None;
             self.previous = None;
+            self.accepted = false;
         }
-        if !open || generation == 0 || capture > callback {
+        if !open || generation == 0 {
+            return 0;
+        }
+        if self.accepted {
+            // One stream delivers buffers in capture order, so everything after a buffer proven
+            // newer than the cutoff is newer too, whatever its timestamps say. Some drivers repeat
+            // or jitter them; treating those buffers as private closed the gate mid-speech.
+            self.previous = Some((capture, callback));
+            return generation;
+        }
+        if capture > callback {
             return 0;
         }
         if let Some((last_capture, last_callback)) = self.previous {
@@ -55,6 +69,7 @@ impl<T: Copy + Ord> CaptureClock<T> {
             return 0;
         };
         if capture >= cutoff {
+            self.accepted = true;
             generation
         } else {
             0
@@ -104,10 +119,14 @@ mod tests {
         assert_eq!(clock.tag(32, true, 3, 20), 0);
         assert_eq!(clock.tag(32, true, 19, 21), 0); // old hardware backlog
         assert_eq!(clock.tag(32, true, 20, 22), 32);
-        assert_eq!(clock.tag(32, true, 20, 23), 0); // nonadvancing capture clock
-        assert_eq!(clock.tag(32, true, 24, 23), 0); // invalid capture > callback
+        // Once fresh audio was accepted, later buffers of the stream are newer whatever the clock says.
+        assert_eq!(clock.tag(32, true, 20, 23), 32); // nonadvancing capture clock
+        assert_eq!(clock.tag(32, true, 24, 23), 32); // capture > callback
         assert_eq!(clock.tag(48, true, 30, 40), 0); // new epoch, even still open
         assert_eq!(clock.tag(48, true, 31, 41), 0);
+        // Until the new epoch accepts fresh audio, invalid clocks stay private.
+        assert_eq!(clock.tag(48, true, 50, 45), 0); // invalid capture > callback
+        assert_eq!(clock.tag(48, true, 30, 41), 0); // nonadvancing capture clock
         assert_eq!(clock.tag(48, true, 41, 42), 48);
     }
     #[test]
@@ -119,10 +138,38 @@ mod tests {
         assert_eq!(clock.tag(32, true, 95, 110), 0, "the first clock tick is still backlog");
         assert_eq!(clock.tag(32, true, 100, 120), 32);
         assert_eq!(clock.tag(32, true, 101, 120), 32, "an equal callback timestamp does not make newer capture private");
-        assert_eq!(clock.tag(32, true, 100, 121), 0, "a regressing capture timestamp stays private");
-        assert_eq!(clock.tag(32, true, 102, 119), 0, "a regressing callback clock stays private");
+        assert_eq!(clock.tag(32, true, 100, 121), 32, "a regressing capture timestamp after opening does not close the gate");
+        assert_eq!(clock.tag(32, true, 102, 119), 32, "a regressing callback clock after opening does not close the gate");
         assert_eq!(clock.tag(32, true, 103, 122), 32);
+        assert_eq!(clock.tag(32, false, 104, 123), 0, "closing still makes the next buffers private");
+        assert_eq!(clock.tag(32, true, 105, 124), 0, "and reopening needs a new cutoff");
     }
+    /// Some drivers (seen with Bluetooth headsets) repeat or jitter buffer timestamps. Once the
+    /// generation has accepted fresh audio, such a buffer must not close the gate: every
+    /// reopening reset noise suppression, the speech detector and echo cancellation, so the
+    /// activation indicator flickered and "hear myself" and the call broke up.
+    #[test]
+    fn capture_privacy_timestamp_glitches_after_opening_keep_the_gate_open() {
+        let mut clock = CaptureClock::default();
+        let (mut capture, mut opened_at, mut closed_after_opening) = (0u64, None, 0);
+        for index in 0..500u64 {
+            let callback = 1_000 + index * 10;
+            capture = match index % 7 {
+                3 => capture,          // repeated capture timestamp
+                5 => callback + 2,     // capture slightly ahead of the callback clock
+                _ => callback - 5,
+            };
+            let tag = clock.tag(32, true, capture, callback);
+            match (tag, opened_at) {
+                (32, None) => opened_at = Some(index),
+                (0, Some(_)) => closed_after_opening += 1,
+                _ => {}
+            }
+        }
+        assert!(opened_at.is_some_and(|index| index < 10), "the gate opens: {opened_at:?}");
+        assert_eq!(closed_after_opening, 0, "timestamp glitches closed an open gate");
+    }
+
     #[test]
     fn capture_privacy_inflight_callback_keeps_its_original_generation() {
         use ringbuf::{traits::*, HeapRb};
