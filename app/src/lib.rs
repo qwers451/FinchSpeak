@@ -2,6 +2,7 @@
 #![allow(clippy::collapsible_if, clippy::large_enum_variant, clippy::new_without_default)]
 
 pub mod audio_engine;
+pub mod audio_diagnostics;
 mod capture_privacy;
 pub mod updater;
 pub mod commands;
@@ -124,6 +125,9 @@ pub fn run() {
             commands::admin::backup_now,
             commands::admin::moderate_voice,
             commands::voice::test_microphone,
+            commands::voice::start_audio_diagnostics,
+            commands::voice::stop_audio_diagnostics,
+            commands::voice::get_audio_diagnostics,
             commands::screen::capture_thumbnail,
             commands::chat::download_thumb,
             // Chat

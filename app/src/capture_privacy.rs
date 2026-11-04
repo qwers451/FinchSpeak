@@ -10,7 +10,16 @@ pub(crate) struct CaptureClock<T> {
     first_callback: Option<T>,
     cutoff: Option<T>,
     previous: Option<(T, T)>,
+    /// Consecutive buffers of this generation proven newer than the cutoff.
+    fresh_run: u8,
+    /// The generation is confirmed open: [`CONFIRMING_BUFFERS`] fresh buffers in a row.
+    accepted: bool,
 }
+
+/// Fresh buffers in a row that confirm a generation. A single backlog buffer whose timestamp
+/// glitched past the cutoff stays a single public buffer and does not publish the backlog behind it.
+const CONFIRMING_BUFFERS: u8 = 2;
+
 impl<T: Copy + Ord> Default for CaptureClock<T> {
     fn default() -> Self {
         Self {
@@ -18,6 +27,8 @@ impl<T: Copy + Ord> Default for CaptureClock<T> {
             first_callback: None,
             cutoff: None,
             previous: None,
+            fresh_run: 0,
+            accepted: false,
         }
     }
 }
@@ -28,14 +39,28 @@ impl<T: Copy + Ord> CaptureClock<T> {
             self.first_callback = None;
             self.cutoff = None;
             self.previous = None;
+            self.fresh_run = 0;
+            self.accepted = false;
         }
-        if !open || generation == 0 || capture > callback {
+        if !open || generation == 0 {
+            return 0;
+        }
+        if self.accepted {
+            // One stream delivers buffers in capture order, so everything after buffers proven
+            // newer than the cutoff is newer too, whatever its timestamps say. Some drivers repeat
+            // or jitter them; treating those buffers as private closed the gate mid-speech.
+            self.previous = Some((capture, callback));
+            return generation;
+        }
+        if capture > callback {
+            self.fresh_run = 0;
             return 0;
         }
         if let Some((last_capture, last_callback)) = self.previous {
             // WASAPI's audio clock can report the same callback instant for
             // consecutive buffers even while their capture positions advance.
             if capture <= last_capture || callback < last_callback {
+                self.fresh_run = 0;
                 return 0;
             }
         }
@@ -55,8 +80,11 @@ impl<T: Copy + Ord> CaptureClock<T> {
             return 0;
         };
         if capture >= cutoff {
+            self.fresh_run += 1;
+            self.accepted = self.fresh_run >= CONFIRMING_BUFFERS;
             generation
         } else {
+            self.fresh_run = 0;
             0
         }
     }
@@ -104,10 +132,15 @@ mod tests {
         assert_eq!(clock.tag(32, true, 3, 20), 0);
         assert_eq!(clock.tag(32, true, 19, 21), 0); // old hardware backlog
         assert_eq!(clock.tag(32, true, 20, 22), 32);
-        assert_eq!(clock.tag(32, true, 20, 23), 0); // nonadvancing capture clock
-        assert_eq!(clock.tag(32, true, 24, 23), 0); // invalid capture > callback
+        assert_eq!(clock.tag(32, true, 21, 23), 32); // second fresh buffer confirms the opening
+        // Once the opening is confirmed, later buffers of the stream are newer whatever the clock says.
+        assert_eq!(clock.tag(32, true, 20, 23), 32); // nonadvancing capture clock
+        assert_eq!(clock.tag(32, true, 24, 23), 32); // capture > callback
         assert_eq!(clock.tag(48, true, 30, 40), 0); // new epoch, even still open
         assert_eq!(clock.tag(48, true, 31, 41), 0);
+        // Until the new epoch accepts fresh audio, invalid clocks stay private.
+        assert_eq!(clock.tag(48, true, 50, 45), 0); // invalid capture > callback
+        assert_eq!(clock.tag(48, true, 30, 41), 0); // nonadvancing capture clock
         assert_eq!(clock.tag(48, true, 41, 42), 48);
     }
     #[test]
@@ -119,10 +152,50 @@ mod tests {
         assert_eq!(clock.tag(32, true, 95, 110), 0, "the first clock tick is still backlog");
         assert_eq!(clock.tag(32, true, 100, 120), 32);
         assert_eq!(clock.tag(32, true, 101, 120), 32, "an equal callback timestamp does not make newer capture private");
-        assert_eq!(clock.tag(32, true, 100, 121), 0, "a regressing capture timestamp stays private");
-        assert_eq!(clock.tag(32, true, 102, 119), 0, "a regressing callback clock stays private");
+        assert_eq!(clock.tag(32, true, 100, 121), 32, "a regressing capture timestamp after opening does not close the gate");
+        assert_eq!(clock.tag(32, true, 102, 119), 32, "a regressing callback clock after opening does not close the gate");
         assert_eq!(clock.tag(32, true, 103, 122), 32);
+        assert_eq!(clock.tag(32, false, 104, 123), 0, "closing still makes the next buffers private");
+        assert_eq!(clock.tag(32, true, 105, 124), 0, "and reopening needs a new cutoff");
     }
+    /// Some drivers (seen with Bluetooth headsets) repeat or jitter buffer timestamps. Once the
+    /// generation has accepted fresh audio, such a buffer must not close the gate: every
+    /// reopening reset noise suppression, the speech detector and echo cancellation, so the
+    /// activation indicator flickered and "hear myself" and the call broke up.
+    #[test]
+    fn capture_privacy_timestamp_glitches_after_opening_keep_the_gate_open() {
+        let mut clock = CaptureClock::default();
+        let (mut capture, mut opened_at, mut closed_after_settling) = (0u64, None, 0);
+        // The first ~100 ms keep the strict checks while the opening is confirmed.
+        const SETTLE: u64 = 10;
+        for index in 0..500u64 {
+            let callback = 1_000 + index * 10;
+            capture = match index % 7 {
+                3 => capture,          // repeated capture timestamp
+                5 => callback + 2,     // capture slightly ahead of the callback clock
+                _ => callback - 5,
+            };
+            let tag = clock.tag(32, true, capture, callback);
+            if tag == 32 && opened_at.is_none() { opened_at = Some(index); }
+            if tag == 0 && index >= SETTLE { closed_after_settling += 1; }
+        }
+        assert!(opened_at.is_some_and(|index| index < SETTLE), "the gate opens: {opened_at:?}");
+        assert_eq!(closed_after_settling, 0, "timestamp glitches closed an open gate");
+    }
+
+    /// Audio queued before unmuting can still be delivered after the cutoff. One such buffer whose
+    /// timestamp glitched past the cutoff must not make the rest of that backlog public.
+    #[test]
+    fn capture_privacy_one_glitched_backlog_buffer_does_not_publish_the_backlog() {
+        let mut clock = CaptureClock::default();
+        assert_eq!(clock.tag(32, true, 1, 10), 0);
+        assert_eq!(clock.tag(32, true, 2, 20), 0); // cutoff 20
+        assert_eq!(clock.tag(32, true, 21, 22), 32, "glitched backlog buffer");
+        assert_eq!(clock.tag(32, true, 5, 23), 0, "the backlog after it stays private");
+        assert_eq!(clock.tag(32, true, 6, 24), 0);
+        assert_eq!(clock.tag(32, true, 25, 26), 32);
+    }
+
     #[test]
     fn capture_privacy_inflight_callback_keeps_its_original_generation() {
         use ringbuf::{traits::*, HeapRb};

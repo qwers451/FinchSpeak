@@ -19,19 +19,80 @@ use finch_audio::{
 };
 use finch_audio::quality::QualityTracker;
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
-use ringbuf::HeapRb;
+use ringbuf::{HeapCons, HeapProd, HeapRb};
 use tauri::Emitter;
 use tracing::{error, info, warn};
 
 /// More restarts than this inside `RESTART_WINDOW` means the devices keep failing: stop trying.
 const MAX_DEVICE_RESTARTS: usize = 5;
 const RESTART_WINDOW: Duration = Duration::from_secs(10);
+/// Time a device gets to settle after its stream died before it is opened again.
+const DEVICE_SETTLE: Duration = Duration::from_millis(500);
+/// First pause between attempts to open speakers that are not available yet (a headset switching
+/// profile); it doubles up to [`OUTPUT_RETRY_MAX`] while they stay missing.
+const OUTPUT_RETRY: Duration = Duration::from_secs(1);
+const OUTPUT_RETRY_MAX: Duration = Duration::from_secs(8);
 
 use crate::state::AppState;
+use crate::audio_diagnostics::{AudioDiagnostics, DeviceConfig, Metric};
 use crate::capture_privacy::{CaptureClock, CapturedSample, InputBoundary};
 
 /// Capacity of lock-free ring buffers (16384 samples ~ 341 ms at 48 kHz).
 const RING_BUFFER_CAPACITY: usize = 16384;
+
+#[derive(Clone, Copy, Default)]
+struct PlaybackSample {
+    audible: f32,
+    echo_reference: f32,
+}
+
+// Only continuous live monitoring is excluded. Recorded microphone tests remain
+// in the reference alongside remote audio: they can echo while capture is private.
+fn playback_sample(reference_source: f32, live_monitor: f32) -> PlaybackSample {
+    let combined = reference_source + live_monitor;
+    let scale = combined.abs().max(1.0);
+    PlaybackSample { audible: combined / scale, echo_reference: reference_source / scale }
+}
+
+struct PlaybackResampler {
+    audible: OutputResampler,
+    reference: OutputResampler,
+    rate: u32,
+}
+impl PlaybackResampler {
+    fn new(rate: u32) -> Result<Self, String> {
+        Ok(Self { audible: OutputResampler::new(rate).map_err(|e| e.to_string())?,
+            reference: OutputResampler::new(rate).map_err(|e| e.to_string())?, rate })
+    }
+    fn passthrough() -> Self {
+        Self { audible: OutputResampler::Passthrough, reference: OutputResampler::Passthrough, rate: 48_000 }
+    }
+    fn process(&mut self, source: &[f32; FRAME_SIZE_48K], monitor: &[f32; FRAME_SIZE_48K]) -> Result<Vec<PlaybackSample>, String> {
+        let result = self.process_frame(source, monitor);
+        if result.is_err() { *self = Self::new(self.rate)?; }
+        result
+    }
+    fn process_frame(&mut self, source: &[f32; FRAME_SIZE_48K], monitor: &[f32; FRAME_SIZE_48K]) -> Result<Vec<PlaybackSample>, String> {
+        let mut audible = [0.0; FRAME_SIZE_48K];
+        let mut reference = [0.0; FRAME_SIZE_48K];
+        for index in 0..FRAME_SIZE_48K {
+            let sample = playback_sample(source[index], monitor[index]);
+            audible[index] = sample.audible; reference[index] = sample.echo_reference;
+        }
+        let audible = self.audible.process(&audible).map_err(|e| e.to_string())?;
+        let reference = self.reference.process(&reference).map_err(|e| e.to_string())?;
+        if audible.len() != reference.len() { return Err("Playout and echo reference length mismatch".into()); }
+        Ok(audible.into_iter().zip(reference).map(|(audible, echo_reference)| PlaybackSample { audible, echo_reference }).collect())
+    }
+}
+
+fn playback_headroom(chunk: usize, callback_frames: usize) -> usize {
+    // Keep one processing frame beyond the largest observed hardware request.
+    // Small callbacks retain the existing 60 ms target. Bound the target so a
+    // complete resampled frame still fits in the ring before the next callback.
+    (chunk * 3).max(callback_frames.saturating_add(chunk))
+        .min(RING_BUFFER_CAPACITY.saturating_sub(chunk))
+}
 
 /// If the playout reference ring is this close to full, the output callback has started dropping samples.
 const REFERENCE_OVERFLOW_MARGIN: usize = 256;
@@ -225,10 +286,26 @@ fn mix_next_frame(
     mixer.blocking_lock().mix_frame(frame, now)
 }
 
+/// Render paired samples without allowing local monitoring into the AEC reference.
+fn render_playback(
+    data: &mut [f32], channels: usize,
+    playback: &mut impl Consumer<Item = PlaybackSample>,
+    reference: &mut impl Producer<Item = f32>,
+) -> (u64, u64) {
+    let mut missing = 0;
+    let mut reference_dropped = 0;
+    for chunk in data.chunks_mut(channels) {
+        let sample = playback.try_pop().unwrap_or_else(|| { missing += 1; PlaybackSample::default() });
+        if reference.try_push(sample.echo_reference).is_err() { reference_dropped += 1; }
+        chunk.fill(sample.audible);
+    }
+    (missing, reference_dropped)
+}
+
 /// Discard queued playout while deafened; only actual output silence goes to AEC.
 fn render_deafened(
     data: &mut [f32], channels: usize,
-    playback: &mut impl Consumer<Item = f32>,
+    playback: &mut impl Consumer<Item = PlaybackSample>,
     reference: &mut impl Producer<Item = f32>,
 ) {
     let queued = playback.occupied_len();
@@ -248,6 +325,154 @@ fn report_fallback(kind: &str, choice: &DeviceChoice, app_handle: &tauri::AppHan
             serde_json::json!({ "kind": kind, "wanted": wanted }),
         );
     }
+}
+
+/// What a dead device stream takes down with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reopen {
+    /// Only the speakers: the microphone keeps running.
+    Output,
+    /// Both devices, as on a fresh start.
+    Everything,
+}
+
+/// Opening a Bluetooth headset's microphone switches the headset to the hands-free profile, which
+/// invalidates a running speaker stream. Reopening the microphone as well would switch it again
+/// and the call would break up in a loop, so a speaker-only failure reopens only the speakers.
+fn reopen_after(input_lost: bool, output_lost: bool) -> Option<Reopen> {
+    match (input_lost, output_lost) {
+        (false, false) => None,
+        (false, true) => Some(Reopen::Output),
+        (true, _) => Some(Reopen::Everything),
+    }
+}
+
+/// The speaker stream and the rings it shares with the worker.
+struct OutputSide {
+    _stream: Stream,
+    resampler: PlaybackResampler,
+    /// Samples per 20 ms at the device rate.
+    chunk: usize,
+    playback: HeapProd<PlaybackSample>,
+    /// What the speakers actually played, for echo cancellation: the callback copies every
+    /// sample it plays into this lock-free ring.
+    reference: HeapCons<f32>,
+    reference_feeder: Option<ReferenceFeeder>,
+    /// How long the output device holds audio before it plays (set by the callback).
+    latency_ms: Arc<AtomicU32>,
+    /// Largest hardware request seen, for the playout headroom.
+    callback_frames: Arc<AtomicU32>,
+    /// Set from cpal's error callback when this stream dies; a late error from a replaced
+    /// stream cannot take down its successor.
+    failed: Arc<AtomicBool>,
+}
+
+fn open_output(state: &AppState, app_handle: &tauri::AppHandle, diagnostics: &Arc<AudioDiagnostics>) -> Option<OutputSide> {
+    let wanted = state.audio_devices.read().ok().and_then(|s| s.output.clone());
+    let (device, choice) = open_output_device(wanted.as_deref());
+    report_fallback("output", &choice, app_handle);
+    let Some(device) = device else {
+        error!("No default audio output device available");
+        return None;
+    };
+    let config = match device.default_output_config() {
+        Ok(config) => config,
+        Err(e) => {
+            error!("Failed to get default output audio config: {}", e);
+            return None;
+        }
+    };
+    info!(device = ?device.name(), rate = config.sample_rate().0,
+        channels = config.channels(), format = ?config.sample_format(),
+        "Audio output configuration");
+    let sample_rate = config.sample_rate().0;
+    diagnostics.configure(false, DeviceConfig { name: device.name().unwrap_or_default(),
+        sample_rate, channels: config.channels(), sample_format: format!("{:?}", config.sample_format()) });
+    let reference_feeder = match ReferenceFeeder::new(sample_rate) {
+        Ok(feeder) => Some(feeder),
+        Err(e) => {
+            error!("Echo cancellation reference disabled: {}", e);
+            None
+        }
+    };
+    let resampler = PlaybackResampler::new(sample_rate).unwrap_or_else(|e| {
+        error!("Failed to initialize OutputResampler: {}", e);
+        PlaybackResampler::passthrough()
+    });
+    let channels = config.channels() as usize;
+    let (playback, mut playback_cons) = HeapRb::<PlaybackSample>::new(RING_BUFFER_CAPACITY).split();
+    let (mut reference_prod, reference) = HeapRb::<f32>::new(RING_BUFFER_CAPACITY).split();
+    let is_deafened = state.is_deafened.clone();
+    let latency_ms = Arc::new(AtomicU32::new(0));
+    let latency_ref = latency_ms.clone();
+    let callback_frames = Arc::new(AtomicU32::new(0));
+    let callback_frames_ref = callback_frames.clone();
+    let output_diagnostics = diagnostics.clone();
+    let mut previous_output_callback: Option<(u64, Instant)> = None;
+    let failed = Arc::new(AtomicBool::new(false));
+    let failed_ref = failed.clone();
+
+    let err_fn = move |err| {
+        error!("Audio output error: {}", err);
+        failed_ref.store(true, Ordering::SeqCst);
+    };
+    let stream = device.build_output_stream(
+        &config.into(),
+        move |data: &mut [f32], info: &cpal::OutputCallbackInfo| {
+            let timestamp = info.timestamp();
+            if let Some(latency) = timestamp.playback.duration_since(&timestamp.callback) {
+                latency_ref.store(latency.as_millis() as u32, Ordering::Relaxed);
+            }
+            if channels == 0 {
+                return;
+            }
+            let diagnostic_epoch = output_diagnostics.epoch();
+            if diagnostic_epoch != 0 {
+                let now = Instant::now();
+                let gap = previous_output_callback.filter(|(epoch, _)| *epoch == diagnostic_epoch)
+                    .map(|(_, last)| now.duration_since(last).as_micros() as u64).unwrap_or(0);
+                previous_output_callback = Some((diagnostic_epoch, now));
+                output_diagnostics.callback_at(diagnostic_epoch, false, data.len() / channels, gap);
+            } else { previous_output_callback = None; }
+            callback_frames_ref.fetch_max(
+                (data.len() / channels).min(u32::MAX as usize) as u32,
+                Ordering::Relaxed,
+            );
+            if is_deafened.load(Ordering::Relaxed) {
+                render_deafened(data, channels, &mut playback_cons, &mut reference_prod);
+                return;
+            }
+            let (missing, reference_dropped) = render_playback(data, channels, &mut playback_cons, &mut reference_prod);
+            output_diagnostics.add_at(diagnostic_epoch, Metric::OutputUnderflowSamples, missing);
+            output_diagnostics.add_at(diagnostic_epoch, Metric::OutputUnderflowCallbacks, u64::from(missing > 0));
+            output_diagnostics.add_at(diagnostic_epoch, Metric::ReferenceDroppedSamples, reference_dropped);
+        },
+        err_fn,
+        None,
+    );
+    let stream = match stream {
+        Ok(stream) => stream,
+        Err(e) => {
+            error!("Failed to build playback stream: {}", e);
+            return None;
+        }
+    };
+    if let Err(e) = stream.play() {
+        error!("Failed to start playback stream: {}", e);
+        return None;
+    }
+    diagnostics.stream_active(false, true);
+    Some(OutputSide {
+        _stream: stream,
+        resampler,
+        chunk: ((sample_rate as usize * 20) / 1000).max(1),
+        playback,
+        reference,
+        reference_feeder,
+        latency_ms,
+        callback_frames,
+        failed,
+    })
 }
 
 /// Dedicated OS thread function managing cpal streams, DSP, and lock-free ring buffers.
@@ -278,102 +503,17 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 info!("Starting audio worker streams for channel {}", channel_id);
 
                 let selection = state.audio_devices.read().map(|s| s.clone()).unwrap_or_default();
+                let diagnostics = state.audio_diagnostics.clone();
+                diagnostics.stream_begin();
                 // Set from cpal's error callbacks when a stream dies (e.g. the headset is unplugged).
-                let stream_failed = Arc::new(AtomicBool::new(false));
+                let input_failed = Arc::new(AtomicBool::new(false));
 
-                // 1. Output (Playback) Ring Buffer & cpal Stream
-                let playback_rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
-                let (mut playback_prod, mut playback_cons) = playback_rb.split();
-
-                // What the speakers actually played, for echo cancellation: the output callback
-                // copies every sample it plays into this lock-free ring.
-                let reference_rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
-                let (mut reference_prod, mut reference_cons) = reference_rb.split();
-                let mut reference_feeder: Option<ReferenceFeeder> = None;
-                // How long the output device holds audio before it plays (set by the callback).
-                let output_latency_ms = Arc::new(AtomicU32::new(0));
-                let mut applied_latency_ms = 0u32;
-
-                let mut playback_stream: Option<Stream> = None;
-                let mut output_resampler: Option<OutputResampler> = None;
-                let mut output_sample_rate = 48000u32;
-
-                let (output_device, output_choice) = open_output_device(selection.output.as_deref());
-                report_fallback("output", &output_choice, &app_handle);
-                if let Some(device) = output_device {
-                    match device.default_output_config() {
-                        Ok(config) => {
-                            output_sample_rate = config.sample_rate().0;
-                            reference_feeder = match ReferenceFeeder::new(output_sample_rate) {
-                                Ok(feeder) => Some(feeder),
-                                Err(e) => {
-                                    error!("Echo cancellation reference disabled: {}", e);
-                                    None
-                                }
-                            };
-                            let channels = config.channels() as usize;
-                            let is_deafened_ref = state.is_deafened.clone();
-                            let latency_ref = output_latency_ms.clone();
-
-                            output_resampler = match OutputResampler::new(output_sample_rate) {
-                                Ok(resampler) => Some(resampler),
-                                Err(e) => {
-                                    error!("Failed to initialize OutputResampler: {}", e);
-                                    Some(OutputResampler::Passthrough)
-                                }
-                            };
-
-                            let failed = stream_failed.clone();
-                            let err_fn = move |err| {
-                                error!("Audio output error: {}", err);
-                                failed.store(true, Ordering::SeqCst);
-                            };
-                            let stream_res = device.build_output_stream(
-                                &config.into(),
-                                move |data: &mut [f32], info: &cpal::OutputCallbackInfo| {
-                                    let timestamp = info.timestamp();
-                                    if let Some(latency) = timestamp.playback.duration_since(&timestamp.callback) {
-                                        latency_ref.store(latency.as_millis() as u32, Ordering::Relaxed);
-                                    }
-                                    if channels == 0 {
-                                        return;
-                                    }
-                                    if is_deafened_ref.load(Ordering::Relaxed) {
-                                        render_deafened(data, channels, &mut playback_cons, &mut reference_prod);
-                                        return;
-                                    }
-                                    for chunk in data.chunks_mut(channels) {
-                                        let sample = playback_cons.try_pop().unwrap_or(0.0);
-                                        let _ = reference_prod.try_push(sample);
-                                        for out_ch in chunk.iter_mut() {
-                                            *out_ch = sample;
-                                        }
-                                    }
-                                },
-                                err_fn,
-                                None,
-                            );
-
-                            match stream_res {
-                                Ok(stream) => {
-                                    if let Err(e) = stream.play() {
-                                        error!("Failed to start playback stream: {}", e);
-                                    } else {
-                                        playback_stream = Some(stream);
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Failed to build playback stream: {}", e);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to get default output audio config: {}", e);
-                        }
-                    }
-                } else {
-                    error!("No default audio output device available");
-                }
+                // 1. Output (Playback) Ring Buffers & cpal Stream
+                let mut output = open_output(&state, &app_handle, &diagnostics);
+                // When to try opening the speakers again after their stream died.
+                let mut output_reopen_at: Option<Instant> = None;
+                let mut output_retry = OUTPUT_RETRY;
+                let mut applied_latency_ms: Option<u32> = None;
 
                 // 2. Input (Capture) Ring Buffer & cpal Stream
                 let capture_rb = HeapRb::<CapturedSample>::new(RING_BUFFER_CAPACITY);
@@ -387,7 +527,12 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 if let Some(device) = input_device {
                     match device.default_input_config() {
                         Ok(config) => {
+                            info!(device = ?device.name(), rate = config.sample_rate().0,
+                                channels = config.channels(), format = ?config.sample_format(),
+                                "Audio input configuration");
                             let sample_rate = config.sample_rate().0;
+                            diagnostics.configure(true, DeviceConfig { name: device.name().unwrap_or_default(),
+                                sample_rate, channels: config.channels(), sample_format: format!("{:?}", config.sample_format()) });
                             let channels = config.channels() as usize;
 
                             input_resampler = match InputResampler::new(sample_rate) {
@@ -398,13 +543,15 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                 }
                             };
 
-                            let failed = stream_failed.clone();
+                            let failed = input_failed.clone();
                             let err_fn = move |err| {
                                 error!("Audio input error: {}", err);
                                 failed.store(true, Ordering::SeqCst);
                             };
                             let privacy = state.voice_settings.clone();
                             let mut capture_clock = CaptureClock::default();
+                            let input_diagnostics = diagnostics.clone();
+                            let mut previous_input_callback: Option<(u64, Instant)> = None;
                             let stream_res = device.build_input_stream(
                                 &config.into(),
                                 move |data: &[f32], info: &cpal::InputCallbackInfo| {
@@ -414,14 +561,25 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     if channels == 0 {
                                         return;
                                     }
+                                    let diagnostic_epoch = input_diagnostics.epoch();
+                                    if diagnostic_epoch != 0 {
+                                        let now = Instant::now();
+                                        let gap = previous_input_callback.filter(|(epoch, _)| *epoch == diagnostic_epoch)
+                                            .map(|(_, last)| now.duration_since(last).as_micros() as u64).unwrap_or(0);
+                                        previous_input_callback = Some((diagnostic_epoch, now));
+                                        input_diagnostics.callback_at(diagnostic_epoch, true, data.len() / channels, gap);
+                                    } else { previous_input_callback = None; }
+                                    let mut dropped = 0;
                                     for frame in data.chunks(channels) {
                                         let mut sum = 0.0f32;
                                         for &s in frame {
                                             sum += s;
                                         }
                                         let mono = sum / (channels as f32);
-                                        let _ = capture_prod.try_push(CapturedSample { sample: mono, generation: tag });
+                                        if capture_prod.try_push(CapturedSample { sample: mono, generation: tag }).is_err() { dropped += 1; }
                                     }
+                                    input_diagnostics.add_at(diagnostic_epoch, Metric::CaptureDroppedSamples, dropped);
+                                    input_diagnostics.maximum_at(diagnostic_epoch, Metric::CaptureHighWaterSamples, capture_prod.occupied_len() as u64);
                                 },
                                 err_fn,
                                 None,
@@ -433,6 +591,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         error!("Failed to start capture stream: {}", e);
                                     } else {
                                         capture_stream = Some(stream);
+                                        diagnostics.stream_active(true, true);
                                     }
                                 }
                                 Err(e) => {
@@ -448,7 +607,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     error!("No default audio input device available");
                 }
 
-                if playback_stream.is_none() && capture_stream.is_none() {
+                if output.is_none() && capture_stream.is_none() {
+                    diagnostics.tick("startup-failed", state.is_muted.load(Ordering::Relaxed), state.is_deafened.load(Ordering::Relaxed));
                     error!("Both playback and capture audio streams failed to initialize");
                     is_running.store(false, Ordering::SeqCst);
                     continue;
@@ -479,14 +639,21 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 // The processed microphone, played back to the user while "hear myself" is on.
                 let mut monitor_queue: std::collections::VecDeque<[f32; FRAME_SIZE_48K]> = std::collections::VecDeque::new();
                 let mut playback_frame_48k = [0.0f32; FRAME_SIZE_48K];
+                let mut monitor_frame_48k = [0.0f32; FRAME_SIZE_48K];
                 let mut capture_frame_48k = [0.0f32; FRAME_SIZE_48K];
                 let mut capture_raw_buf = Vec::with_capacity(4096);
 
-                let target_output_chunk = ((output_sample_rate as usize * 20) / 1000).max(1);
-                let target_playback_headroom = target_output_chunk * 3;
+                let mut previous_playback_refill: Option<(u64, Instant)> = None;
 
                 // 4. Real-time active worker processing loop
                 while is_running.load(Ordering::SeqCst) {
+                    let diagnostic_mode = match &mic_test {
+                        Some(test) if test.recording_done() => "microphone-test-playing",
+                        Some(_) => "microphone-test-recording",
+                        None if state.voice_settings.monitor() => "monitor",
+                        None => "voice",
+                    };
+                    diagnostics.tick(diagnostic_mode, state.is_muted.load(Ordering::Relaxed), state.is_deafened.load(Ordering::Relaxed));
                     match cmd_rx.try_recv() {
                         Ok(new_cmd) => {
                             pending_cmd = Some(new_cmd);
@@ -506,9 +673,11 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
                         }
                     }
-                    // A0. A device stream died (headset unplugged, driver reset): reopen the devices,
-                    // falling back to the defaults, instead of leaving the call silent.
-                    if stream_failed.swap(false, Ordering::SeqCst) {
+                    // A0. A device stream died (headset unplugged, driver reset, Bluetooth profile
+                    // switch): reopen it, falling back to the default, instead of leaving the call silent.
+                    let input_lost = input_failed.swap(false, Ordering::SeqCst);
+                    let output_lost = output.as_ref().is_some_and(|out| out.failed.swap(false, Ordering::SeqCst));
+                    if let Some(reopen) = reopen_after(input_lost, output_lost) {
                         let now = Instant::now();
                         restart_times.retain(|t| now.duration_since(*t) < RESTART_WINDOW);
                         restart_times.push_back(now);
@@ -518,21 +687,59 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             is_running.store(false, Ordering::SeqCst);
                             break;
                         }
-                        warn!("Audio stream failed; reopening the audio devices");
                         let _ = app_handle.emit("audio-device-lost", ());
-                        std::thread::sleep(Duration::from_millis(500));
-                        pending_cmd = Some(AudioCommand::Start {
-                            channel_id,
-                            state: state.clone(),
-                            app_handle: app_handle.clone(),
-                        });
-                        break;
+                        match reopen {
+                            Reopen::Everything => {
+                                warn!("Audio stream failed; reopening the audio devices");
+                                std::thread::sleep(DEVICE_SETTLE);
+                                pending_cmd = Some(AudioCommand::Start {
+                                    channel_id,
+                                    state: state.clone(),
+                                    app_handle: app_handle.clone(),
+                                });
+                                break;
+                            }
+                            Reopen::Output => {
+                                // The microphone keeps running while the speakers settle.
+                                warn!("Audio output stream failed; reopening the speakers");
+                                output = None;
+                                diagnostics.stream_active(false, false);
+                                output_reopen_at = Some(now + DEVICE_SETTLE);
+                                output_retry = OUTPUT_RETRY;
+                                // Its playback needs the speakers; a waiting test would keep the
+                                // microphone private until they return.
+                                if mic_test.take().is_some() {
+                                    state.voice_settings.set_mic_test(false);
+                                    let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
+                                }
+                            }
+                        }
+                    }
+                    if output_reopen_at.is_some_and(|at| Instant::now() >= at) {
+                        output_reopen_at = None;
+                        output = open_output(&state, &app_handle, &diagnostics);
+                        if output.is_none() {
+                            // Each attempt runs on this worker; back off while the device is missing.
+                            output_reopen_at = Some(Instant::now() + output_retry);
+                            output_retry = (output_retry * 2).min(OUTPUT_RETRY_MAX);
+                        } else {
+                            // The echo path and the playout reference start over with the new stream.
+                            applied_latency_ms = None;
+                            if let Some(capture) = &mut voice_capture {
+                                if let Err(error) = capture.reset_echo_canceller() {
+                                    error!(%error, "Could not reset echo canceller");
+                                    is_running.store(false, Ordering::SeqCst);
+                                    let _ = app_handle.emit("audio-processing-failed", serde_json::json!({ "message": error.to_string() }));
+                                    break;
+                                }
+                            }
+                        }
                     }
 
                     // A-. A microphone test was asked for: record a few seconds, then play them back.
                     let requested = state.mic_test_request.swap(0, Ordering::SeqCst);
                     if requested > 0 && mic_test.is_none() {
-                        if capture_stream.is_some() && playback_stream.is_some() && !state.is_muted.load(Ordering::Relaxed) {
+                        if capture_stream.is_some() && output.is_some() && !state.is_muted.load(Ordering::Relaxed) {
                             state.voice_settings.set_mic_test(true);
                             monitor_queue.clear();
                             mic_test = Some(MicTest::new(requested));
@@ -554,55 +761,64 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         let _ = app_handle.emit("voice-quality", report);
                     }
 
-                    // A. Playback processing (mixer -> OutputResampler -> playback_prod)
-                    if playback_stream.is_some() {
-                        if let Some(resampler) = &mut output_resampler {
-                            while playback_prod.occupied_len() < target_playback_headroom
-                                && playback_prod.vacant_len() >= target_output_chunk
-                            {
-                                let speech_events =
-                                    mix_next_frame(&state.mixer, &mut playback_frame_48k, Instant::now());
-                                if let Some(test) = &mut mic_test {
-                                    if let Some(recorded) = test.next_playback_frame() {
-                                        for (out, mine) in playback_frame_48k.iter_mut().zip(recorded.iter()) {
-                                            *out = (*out + *mine).clamp(-1.0, 1.0);
-                                        }
-                                    }
-                                    if test.finished() {
-                                        let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
-                                        mic_test = None;
-                                        state.voice_settings.set_mic_test(false);
+                    // A. Playback processing (mixer -> OutputResampler -> speaker ring)
+                    if let Some(speakers) = &mut output {
+                        let target_playback_headroom = playback_headroom(speakers.chunk,
+                            speakers.callback_frames.load(Ordering::Relaxed) as usize);
+                        while speakers.playback.occupied_len() < target_playback_headroom
+                            && speakers.playback.vacant_len() >= speakers.chunk
+                        {
+                            let diagnostic_epoch = diagnostics.epoch();
+                            if diagnostic_epoch != 0 {
+                                let now = Instant::now();
+                                if let Some((_, last)) = previous_playback_refill.filter(|(epoch, _)| *epoch == diagnostic_epoch) {
+                                    diagnostics.maximum_at(diagnostic_epoch, Metric::PlaybackRefillMaxGapUs, now.duration_since(last).as_micros() as u64);
+                                }
+                                previous_playback_refill = Some((diagnostic_epoch, now));
+                            } else { previous_playback_refill = None; }
+                            let speech_events =
+                                mix_next_frame(&state.mixer, &mut playback_frame_48k, Instant::now());
+                            if let Some(test) = &mut mic_test {
+                                if let Some(recorded) = test.next_playback_frame() {
+                                    for (out, mine) in playback_frame_48k.iter_mut().zip(recorded.iter()) {
+                                        *out = (*out + *mine).clamp(-1.0, 1.0);
                                     }
                                 }
-                                if effective_monitor(&state.voice_settings, mic_test.is_some()) {
-                                    if let Some(own) = monitor_queue.pop_front() {
-                                        for (out, mine) in playback_frame_48k.iter_mut().zip(own.iter()) {
-                                            *out = (*out + *mine).clamp(-1.0, 1.0);
-                                        }
-                                    }
+                                if test.finished() {
+                                    let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
+                                    mic_test = None;
+                                    state.voice_settings.set_mic_test(false);
                                 }
+                            }
+                            monitor_frame_48k.fill(0.0);
+                            if effective_monitor(&state.voice_settings, mic_test.is_some()) {
+                                if let Some(own) = monitor_queue.pop_front() {
+                                    monitor_frame_48k = own;
+                                } else {
+                                    diagnostics.add(Metric::MonitorEmptyFrames, 1);
+                                }
+                            }
 
-                                for (peer_id, speaking) in speech_events {
-                                    let _ = app_handle.emit(
-                                        "user-speaking",
-                                        serde_json::json!({
-                                            "peer_id": peer_id,
-                                            "is_speaking": speaking
-                                        }),
-                                    );
-                                }
+                            for (peer_id, speaking) in speech_events {
+                                let _ = app_handle.emit(
+                                    "user-speaking",
+                                    serde_json::json!({
+                                        "peer_id": peer_id,
+                                        "is_speaking": speaking
+                                    }),
+                                );
+                            }
 
-                                match resampler.process(&playback_frame_48k) {
-                                    Ok(resampled) => {
-                                        for &sample in &resampled {
-                                            let _ = playback_prod.try_push(sample);
-                                        }
+                            match speakers.resampler.process(&playback_frame_48k, &monitor_frame_48k) {
+                                Ok(resampled) => {
+                                    for &sample in &resampled {
+                                        let _ = speakers.playback.try_push(sample);
                                     }
-                                    Err(e) => {
-                                        error!("Output resampling error: {}", e);
-                                        for _ in 0..target_output_chunk {
-                                            let _ = playback_prod.try_push(0.0);
-                                        }
+                                }
+                                Err(e) => {
+                                    error!("Output resampling error: {}", e);
+                                    for _ in 0..speakers.chunk {
+                                        let _ = speakers.playback.try_push(PlaybackSample::default());
                                     }
                                 }
                             }
@@ -610,19 +826,21 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     }
 
                     // A2. Echo cancellation reference: what the speakers actually played.
-                    if let (Some(feeder), Some(capture)) = (&mut reference_feeder, &mut voice_capture) {
-                        let latency = output_latency_ms.load(Ordering::Relaxed);
-                        if latency.abs_diff(applied_latency_ms) >= 10 {
+                    if let (Some(OutputSide { reference_feeder: Some(feeder), reference, latency_ms, .. }), Some(capture)) =
+                        (&mut output, &mut voice_capture)
+                    {
+                        let latency = latency_ms.load(Ordering::Relaxed);
+                        if applied_latency_ms.is_none_or(|applied| latency.abs_diff(applied) >= 10) {
                             if let Err(error) = capture.set_stream_delay_ms(latency) {
                                 error!(%error, "Could not apply microphone echo delay");
                             }
-                            applied_latency_ms = latency;
+                            applied_latency_ms = Some(latency);
                         }
-                        if reference_cons.occupied_len() >= RING_BUFFER_CAPACITY - REFERENCE_OVERFLOW_MARGIN {
+                        if reference.occupied_len() >= RING_BUFFER_CAPACITY - REFERENCE_OVERFLOW_MARGIN {
                             // The callback outran us and dropped samples: the stream is no longer
                             // contiguous, so forget the echo path instead of learning a wrong one.
                             warn!("Playout reference overflow; resetting echo canceller");
-                            reference_cons.clear();
+                            reference.clear();
                             feeder.clear();
                             if let Err(error) = capture.reset_echo_canceller() {
                                 error!(%error, "Could not reset echo canceller");
@@ -633,7 +851,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         }
                         let mut played = [0.0f32; 1024];
                         loop {
-                            let n = reference_cons.pop_slice(&mut played);
+                            let n = reference.pop_slice(&mut played);
                             if n == 0 {
                                 break;
                             }
@@ -655,11 +873,15 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         if let Some(capture) = &mut voice_capture { capture.set_transmit_gate(false); }
                     }
                     // B. Capture processing (capture_cons -> InputResampler -> AEC -> Noise -> VAD -> Opus)
+                    let batch_epoch = diagnostics.epoch();
+                    let batch_started = (batch_epoch != 0).then(Instant::now);
+                    let mut batch_frames = 0;
                     if capture_stream.is_some() {
                         if let Some(resampler) = &mut input_resampler {
                             let needed = resampler.input_frames_needed();
                             if needed > 0 {
                                 while capture_cons.occupied_len() >= needed {
+                                    batch_frames += 1;
                                     capture_raw_buf.clear();
                                     capture_tagged_buf.clear();
                                     for _ in 0..needed {
@@ -725,7 +947,12 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     let frame_gate = fresh
                                         && state.voice_settings.privacy_snapshot() == (generation, true);
                                     capture.set_transmit_gate(frame_gate);
-                                    let output = match capture.process(&mut capture_frame_48k, sender_id, now_ms) {
+                                    let dsp_epoch = diagnostics.epoch();
+                                    capture.set_diagnostics_enabled(dsp_epoch != 0);
+                                    let dsp_started = (dsp_epoch != 0).then(Instant::now);
+                                    let processed = capture.process(&mut capture_frame_48k, sender_id, now_ms);
+                                    if let Some(started) = dsp_started { diagnostics.dsp_frame_at(dsp_epoch, started.elapsed().as_micros() as u64); }
+                                    let output = match processed {
                                         Ok(output) => output,
                                         Err(error) => {
                                             error!(%error, "Microphone processing failed");
@@ -739,6 +966,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         }
                                     };
                                     processing_failures.succeeded();
+                                    if let Some(stages) = output.diagnostics {
+                                        diagnostics.signal_frame_at(dsp_epoch, stages.stage_power, stages.gate_changes, stages.dsp_resets);
+                                    }
                                     let ptt_open = state.voice_settings.transmit_open()
                                         && !state.is_muted.load(Ordering::Relaxed);
                                     let preview_active = output.activity.should_transmit() && ptt_open;
@@ -752,6 +982,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     }
                                     if let Some(test) = &mut mic_test {
                                         if !test.recording_done() {
+                                            if !preview_active { diagnostics.add(Metric::TestActivationRejectedFrames, 1); }
+                                            if !ptt_open { diagnostics.add(Metric::TestPttClosedFrames, 1); }
                                             test.record(&capture_frame_48k, preview_active, ptt_open);
                                             if test.recording_done() {
                                                 let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "playing" }));
@@ -761,6 +993,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     if effective_monitor(&state.voice_settings, mic_test.is_some()) {
                                         if monitor_queue.len() >= 5 {
                                             monitor_queue.pop_front();
+                                            diagnostics.add(Metric::MonitorDroppedFrames, 1);
                                         }
                                         monitor_queue.push_back(capture_frame_48k);
                                     } else {
@@ -795,6 +1028,10 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         }
                     }
 
+                    if let Some(started) = batch_started {
+                        diagnostics.maximum_at(batch_epoch, Metric::CaptureBatchMaxFrames, batch_frames);
+                        diagnostics.maximum_at(batch_epoch, Metric::CaptureBatchMaxUs, started.elapsed().as_micros() as u64);
+                    }
                     std::thread::sleep(Duration::from_millis(5));
                 }
 
@@ -806,6 +1043,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
                 }
 
+                diagnostics.stream_active(true, false);
+                diagnostics.stream_active(false, false);
+                diagnostics.tick("stopped", state.is_muted.load(Ordering::Relaxed), state.is_deafened.load(Ordering::Relaxed));
                 info!("Audio streams for channel {} stopped", channel_id);
             }
             AudioCommand::Stop => {
@@ -819,6 +1059,151 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_render_outputs_monitor_but_references_only_remote_and_test() {
+        let (mut producer, mut playback) = HeapRb::<PlaybackSample>::new(16).split();
+        let (mut reference, mut received) = HeapRb::<f32>::new(16).split();
+        assert!(producer.try_push(playback_sample(0.0, 0.4)).is_ok());
+        assert!(producer.try_push(playback_sample(0.2, 0.1)).is_ok());
+        let mut stereo = [0.75; 8];
+        assert_eq!(render_playback(&mut stereo, 2, &mut playback, &mut reference), (2, 0));
+        assert!((stereo[0] - 0.4).abs() < 1e-6);
+        assert!((stereo[2] - 0.3).abs() < 1e-6);
+        assert_eq!(stereo[0], stereo[1]); assert_eq!(stereo[2], stereo[3]);
+        assert_eq!(&stereo[4..], &[0.0; 4]);
+        assert_eq!(received.try_pop(), Some(0.0));
+        assert_eq!(received.try_pop(), Some(0.2));
+        assert_eq!(received.try_pop(), Some(0.0));
+        assert_eq!(received.try_pop(), Some(0.0));
+    }
+
+    #[test]
+    fn local_preview_is_audible_but_never_becomes_far_end_reference() {
+        let local = playback_sample(0.0, 0.4);
+        assert_eq!(local.audible, 0.4);
+        assert_eq!(local.echo_reference, 0.0);
+        let remote = playback_sample(0.3, 0.0);
+        assert_eq!(remote.audible, 0.3);
+        assert_eq!(remote.echo_reference, 0.3);
+        let clipped = playback_sample(0.8, 0.8);
+        assert_eq!(clipped.audible, 1.0);
+        assert_eq!(clipped.echo_reference, 0.5);
+    }
+
+    #[test]
+    fn monitor_feedback_preserves_full_capture_speech_like_no_monitor() -> anyhow::Result<()> {
+        let speech = finch_testbed::audio::load_speech_48k("speech_1")?;
+        let far_end = finch_testbed::audio::load_speech_48k("speech_2")?;
+        for initial_remote_frames in [0, 100] {
+        for enhancement in [false, true] {
+        for delay_frames in [3usize, 6] {
+            let mut baseline = VoiceCapture::new(VoiceCaptureConfig { voice_enhancement: enhancement, ..Default::default() })?;
+            let mut monitored = VoiceCapture::new(VoiceCaptureConfig { voice_enhancement: enhancement, ..Default::default() })?;
+            baseline.set_transmit_gate(false); monitored.set_transmit_gate(false);
+            baseline.set_stream_delay_ms(10)?; monitored.set_stream_delay_ms(10)?;
+            // Activate AEC with real far-end audio first. The test must also work
+            // after the room becomes quiet, while has_reference remains latched.
+            for index in 0..initial_remote_frames {
+                let mut remote = [0.0; FRAME_SIZE_48K];
+                for (offset, sample) in remote.iter_mut().enumerate() { *sample = far_end[(index * FRAME_SIZE_48K + offset) % far_end.len()] * 0.1; }
+                baseline.push_playback_reference(&remote)?; monitored.push_playback_reference(&remote)?;
+                let mut left = remote.map(|sample| sample * 0.3); let mut right = left;
+                baseline.process(&mut left, 1, index as u32 * 20)?; monitored.process(&mut right, 1, index as u32 * 20)?;
+            }
+            let mut references: Vec<[f32; FRAME_SIZE_48K]> = Vec::new();
+            let mut max_difference = 0.0f32;
+            for index in 0..800 {
+                let mut input = [0.0; FRAME_SIZE_48K];
+                for (sample_index, sample) in input.iter_mut().enumerate() {
+                    *sample = speech[(index * FRAME_SIZE_48K + sample_index) % speech.len()];
+                }
+                let mut expected = input;
+                baseline.push_playback_reference(&[0.0; FRAME_SIZE_48K])?;
+                let reference = if index >= delay_frames { references[index - delay_frames] } else { [0.0; FRAME_SIZE_48K] };
+                monitored.push_playback_reference(&reference)?;
+                baseline.process(&mut expected, 1, index as u32 * 20)?;
+                monitored.process(&mut input, 1, index as u32 * 20)?;
+                for (&actual, &expected) in input.iter().zip(&expected) { max_difference = max_difference.max((actual - expected).abs()); }
+                references.push(input.map(|sample| playback_sample(0.0, sample).echo_reference));
+            }
+            assert!(max_difference < 1e-6, "local monitor must not alter capture: remote_frames={initial_remote_frames} enhancement={enhancement} lag={delay_frames}, difference={max_difference}");
+        }
+        }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn paired_resamplers_preserve_remote_and_isolate_monitor_tail() {
+        for rate in [16_000, 44_100, 48_000, 96_000] {
+            let mut mixed = PlaybackResampler::new(rate).unwrap();
+            let mut reference_only = OutputResampler::new(rate).unwrap();
+            let mut monitor_only = PlaybackResampler::new(rate).unwrap();
+            let mut heard_monitor = false;
+            for index in 0..80 {
+                let source = std::array::from_fn(|n| (((index * FRAME_SIZE_48K + n) as f32) * 0.03).sin() * 0.2);
+                let local = if index < 40 { [0.15; FRAME_SIZE_48K] } else { [0.0; FRAME_SIZE_48K] };
+                let pairs = mixed.process(&source, &local).unwrap();
+                let expected = reference_only.process(&source).unwrap();
+                assert_eq!(pairs.len(), expected.len());
+                for (sample, expected) in pairs.iter().zip(&expected) {
+                    assert!((sample.echo_reference - expected).abs() < 1e-6, "far-end reference changed at {rate} Hz");
+                }
+                let own = monitor_only.process(&[0.0; FRAME_SIZE_48K], &local).unwrap();
+                assert!(own.iter().all(|sample| sample.echo_reference == 0.0), "local FFT tail leaked into AEC at {rate} Hz");
+                heard_monitor |= own.iter().any(|sample| sample.audible.abs() > 0.01);
+            }
+            assert!(heard_monitor);
+        }
+    }
+
+    #[test]
+    fn remote_echo_still_cancels_while_live_monitor_is_excluded() {
+        let source = std::array::from_fn(|index| (index as f32 * 0.1).sin() * 0.3);
+        let echo = source.map(|sample| sample * 0.5);
+        let mut resampler = PlaybackResampler::new(48_000).unwrap();
+        let mut aec = finch_audio::EchoCanceller::new().unwrap();
+        let mut final_energy = 0.0;
+        for _ in 0..150 {
+            let played = resampler.process(&source, &[0.05; FRAME_SIZE_48K]).unwrap();
+            let reference = std::array::from_fn(|index| played[index].echo_reference);
+            assert_eq!(reference, source, "remote/screen/test reference must remain available");
+            aec.push_reference(&reference).unwrap();
+            let mut captured = echo;
+            aec.process_capture(&mut captured).unwrap();
+            final_energy = captured.iter().map(|sample| sample * sample).sum::<f32>();
+        }
+        let original_energy = echo.iter().map(|sample| sample * sample).sum::<f32>();
+        assert!(final_energy < original_energy * 0.1, "far-end echo cancellation must remain active");
+    }
+
+    #[test]
+    fn playback_headroom_keeps_small_callbacks_low_and_large_requests_bounded() {
+        assert_eq!(playback_headroom(960, 480), 2880);
+        assert_eq!(playback_headroom(960, 4800), 5760);
+        assert_eq!(playback_headroom(960, usize::MAX), RING_BUFFER_CAPACITY - 960);
+    }
+
+    #[test]
+    fn playback_queue_supplies_large_device_callbacks_without_periodic_silence() {
+        for rate in [8_000usize, 16_000, 44_100, 48_000, 96_000] {
+            let chunk = rate / 50;
+            for callback in [rate / 100, rate / 10] {
+                let (mut producer, mut consumer) = HeapRb::<f32>::new(RING_BUFFER_CAPACITY).split();
+                for _ in 0..5 {
+                    while producer.occupied_len() < playback_headroom(chunk, callback)
+                        && producer.vacant_len() >= chunk {
+                        for _ in 0..chunk { producer.try_push(0.25).unwrap(); }
+                    }
+                    for _ in 0..callback {
+                        assert_eq!(consumer.try_pop(), Some(0.25),
+                            "{rate} Hz callback of {callback} frames must not insert silence");
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn mic_test_records_then_plays_every_frame_once() {
@@ -911,9 +1296,9 @@ mod tests {
 
     #[test]
     fn deafen_discards_queued_audio_and_feeds_only_silence_to_aec() {
-        let (mut producer, mut playback) = HeapRb::<f32>::new(1024).split();
+        let (mut producer, mut playback) = HeapRb::<PlaybackSample>::new(1024).split();
         let (mut reference, mut received) = HeapRb::<f32>::new(1024).split();
-        for _ in 0..960 { producer.try_push(0.5).unwrap(); }
+        for _ in 0..960 { assert!(producer.try_push(playback_sample(0.3, 0.2)).is_ok()); }
         let mut data = [0.75; 32];
         render_deafened(&mut data, 2, &mut playback, &mut reference);
         assert!(data.iter().all(|sample| *sample == 0.0));
@@ -956,6 +1341,16 @@ mod tests {
         mix_next_frame(&mixer, &mut frame, now);
         handle.join().unwrap();
         assert!(frame.iter().any(|&s| s != 0.0), "a silent frame was inserted while the mixer was busy");
+    }
+
+    /// Opening a Bluetooth headset's microphone switches it to the hands-free profile, which kills
+    /// the speaker stream. Reopening the microphone as well would switch it again, in a loop.
+    #[test]
+    fn a_lost_speaker_stream_reopens_only_the_speakers() {
+        assert_eq!(reopen_after(false, false), None);
+        assert_eq!(reopen_after(false, true), Some(Reopen::Output));
+        assert_eq!(reopen_after(true, false), Some(Reopen::Everything));
+        assert_eq!(reopen_after(true, true), Some(Reopen::Everything));
     }
 
     #[test]
