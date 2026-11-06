@@ -1,5 +1,6 @@
 //! The tray icon: opens the window, shows the call state, keeps the app running when the window is closed.
 
+use std::path::Path;
 use std::sync::atomic::Ordering;
 
 use tauri::image::Image;
@@ -10,6 +11,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::state::AppState;
 
 const TRAY_ID: &str = "main";
+const LANGUAGE_FILE: &str = "ui_language.txt";
 
 /// The last state and mention count shown, so each update can rebuild the whole tooltip.
 static SHOWN: std::sync::Mutex<(TrayState, u32)> = std::sync::Mutex::new((TrayState::Idle, 0));
@@ -188,15 +190,31 @@ pub fn show_window(app: &AppHandle) {
 }
 
 /// Build the icon and its menu.
-pub fn setup(app: &AppHandle) -> tauri::Result<()> {
-    let copy = tray_copy("ru");
+/// The interface language saved by the last session; anything but `en` reads as `ru`.
+pub fn saved_language(dir: &Path) -> String {
+    match std::fs::read_to_string(dir.join(LANGUAGE_FILE)) {
+        Ok(text) if text.trim() == "en" => "en".to_string(),
+        _ => "ru".to_string(),
+    }
+}
+
+/// Remember the interface language so the tray menu starts in it next time.
+pub fn save_language(dir: &Path, language: &str) {
+    let language = if language == "en" { "en" } else { "ru" };
+    if let Err(e) = std::fs::write(dir.join(LANGUAGE_FILE), language) {
+        tracing::warn!("Could not save the interface language: {e}");
+    }
+}
+
+pub fn setup(app: &AppHandle, language: &str) -> tauri::Result<()> {
+    let copy = tray_copy(language);
     let open = MenuItem::with_id(app, "open", copy.open, true, None::<&str>)?;
     let mute = MenuItem::with_id(app, "mute", copy.mute, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", copy.quit, true, None::<&str>)?;
     app.manage(TrayLabels { open: open.clone(), mute: mute.clone(), quit: quit.clone() });
     let menu = Menu::with_items(app, &[&open, &mute, &quit])?;
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip(TrayState::Idle.tooltip("ru"))
+        .tooltip(TrayState::Idle.tooltip(language))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -225,6 +243,19 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn language_round_trip_defaults_to_ru() {
+        let dir = std::env::temp_dir().join(format!("finch-tray-lang-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::remove_file(dir.join(LANGUAGE_FILE));
+        assert_eq!(saved_language(&dir), "ru");
+        save_language(&dir, "en");
+        assert_eq!(saved_language(&dir), "en");
+        save_language(&dir, "xx");
+        assert_eq!(saved_language(&dir), "ru");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn native_tray_copy_supports_russian_english_and_safe_default() {

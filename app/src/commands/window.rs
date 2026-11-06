@@ -16,7 +16,16 @@ pub async fn set_close_to_tray(enabled: bool, state: State<'_, AppState>) -> Res
 
 /// What the tray icon shows: `idle`, `voice`, `muted` or `live`.
 #[tauri::command]
-pub async fn set_tray_state(state: TrayState, language: Option<String>, app: AppHandle) -> Result<(), String> {
+pub async fn set_tray_state(state: TrayState, language: Option<String>, app: AppHandle, app_state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(language) = language.as_deref() {
+        // The profile directory is where the pinned fingerprints live.
+        let dir = app_state.known_servers_path.read().await.as_deref().and_then(|path| path.parent()).map(std::path::Path::to_path_buf);
+        if let Some(dir) = dir {
+            if tray::saved_language(&dir) != language {
+                tray::save_language(&dir, language);
+            }
+        }
+    }
     tray::set_state(&app, state, language.as_deref());
     Ok(())
 }

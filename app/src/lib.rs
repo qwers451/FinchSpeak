@@ -74,7 +74,11 @@ pub fn run() {
             tracing::info!("Tauri setup initialized");
             load_known_servers(app)?;
             connection::spawn_sleep_watch(app.state::<AppState>().inner().clone());
-            if let Err(e) = tray::setup(app.handle()) {
+            let language = match app.state::<AppState>().known_servers_path.blocking_read().as_deref().and_then(|path| path.parent()) {
+                Some(dir) => tray::saved_language(dir),
+                None => "ru".to_string(),
+            };
+            if let Err(e) = tray::setup(app.handle(), &language) {
                 tracing::warn!("Could not create the tray icon: {e}");
             }
             let hidden = should_start_hidden(std::env::args());
