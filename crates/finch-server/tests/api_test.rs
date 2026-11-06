@@ -393,3 +393,102 @@ async fn database_failure_is_not_reported_as_a_bad_token() -> anyhow::Result<()>
     assert!(matches!(check_active_jwt(&token, &secret, &pool).await, Err(TokenProblem::Internal)));
     Ok(())
 }
+
+async fn auth_json(app: &axum::Router, path: &str, body: Value) -> anyhow::Result<Value> {
+    let request = Request::builder().method("POST").uri(path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))?;
+    let response = app.clone().oneshot(request).await?;
+    assert!(response.status().is_success(), "{path} -> {}", response.status());
+    let bytes = response.into_body().collect().await?.to_bytes();
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+async fn call(app: &axum::Router, method: &str, uri: &str, token: &str) -> anyhow::Result<(StatusCode, Value)> {
+    let request = Request::builder().method(method).uri(uri)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())?;
+    let response = app.clone().oneshot(request).await?;
+    let status = response.status();
+    let bytes = response.into_body().collect().await?.to_bytes();
+    Ok((status, serde_json::from_slice(&bytes).unwrap_or(Value::Null)))
+}
+
+#[tokio::test]
+async fn sessions_list_marks_the_current_one() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool, open_registration(), finch_server::session::SessionManager::new());
+    let first = register_alice(&app).await?;
+    let laptop = auth_json(&app, "/api/auth/login", json!({"username":"alice","password":"password_123","device_name":"LAPTOP"})).await?;
+    let laptop_token = laptop["token"].as_str().unwrap().to_string();
+    let (status, list) = call(&app, "GET", "/api/auth/sessions", &laptop_token).await?;
+    assert_eq!(status, StatusCode::OK);
+    let items = list.as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    let current: Vec<_> = items.iter().filter(|s| s["current"] == true).collect();
+    assert_eq!(current.len(), 1);
+    assert_eq!(current[0]["device_name"], "LAPTOP");
+    let (_, list) = call(&app, "GET", "/api/auth/sessions", &first).await?;
+    let me = list.as_array().unwrap().iter().find(|s| s["current"] == true).unwrap();
+    assert!(me["device_name"].is_null());
+    Ok(())
+}
+
+#[tokio::test]
+async fn old_sessions_show_created_at_as_last_seen() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool.clone(), open_registration(), finch_server::session::SessionManager::new());
+    let token = register_alice(&app).await?;
+    sqlx::query("UPDATE sessions SET last_seen_at = NULL").execute(&pool).await?;
+    let (_, list) = call(&app, "GET", "/api/auth/sessions", &token).await?;
+    let item = &list.as_array().unwrap()[0];
+    assert_eq!(item["last_seen_at"], item["created_at"]);
+    assert!(item["created_at"].as_i64().unwrap() > 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn deleting_another_users_session_is_404() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool.clone(), open_registration(), finch_server::session::SessionManager::new());
+    let alice = register_alice(&app).await?;
+    let bob = auth_json(&app, "/api/auth/register", json!({"username":"bob","password":"password_123"})).await?;
+    let bob_token = bob["token"].as_str().unwrap().to_string();
+    let (_, list) = call(&app, "GET", "/api/auth/sessions", &bob_token).await?;
+    let bob_session = list[0]["id"].as_str().unwrap().to_string();
+    let (status, _) = call(&app, "DELETE", &format!("/api/auth/sessions/{bob_session}"), &alice).await?;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = call(&app, "GET", "/api/auth/me", &bob_token).await?;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(&app, "DELETE", &format!("/api/auth/sessions/{bob_session}"), &bob_token).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    Ok(())
+}
+
+#[tokio::test]
+async fn revoke_others_keeps_only_current() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool, open_registration(), finch_server::session::SessionManager::new());
+    let first = register_alice(&app).await?;
+    let second = auth_json(&app, "/api/auth/login", json!({"username":"alice","password":"password_123"})).await?;
+    let second = second["token"].as_str().unwrap().to_string();
+    let (status, _) = call(&app, "POST", "/api/auth/sessions/revoke-others", &second).await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(call(&app, "GET", "/api/auth/me", &first).await?.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(call(&app, "GET", "/api/auth/me", &second).await?.0, StatusCode::OK);
+    let (_, list) = call(&app, "GET", "/api/auth/sessions", &second).await?;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn refresh_touches_last_seen() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool.clone(), open_registration(), finch_server::session::SessionManager::new());
+    let token = register_alice(&app).await?;
+    sqlx::query("UPDATE sessions SET last_seen_at = 1").execute(&pool).await?;
+    assert_eq!(call(&app, "POST", "/api/auth/refresh", &token).await?.0, StatusCode::OK);
+    let seen: i64 = sqlx::query_scalar("SELECT last_seen_at FROM sessions").fetch_one(&pool).await?;
+    assert!(seen > 1_000_000);
+    Ok(())
+}

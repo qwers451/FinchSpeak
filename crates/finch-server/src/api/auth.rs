@@ -247,6 +247,57 @@ pub async fn logout_handler(auth: AuthUser, State(state): State<ArcSharedState>)
     Ok(StatusCode::NO_CONTENT)
 }
 
+fn close_session_connections(state: &ArcSharedState, token_ids: &[String]) {
+    let connections: Vec<_> = state.sessions.sessions.iter()
+        .filter(|session| token_ids.contains(&session.token_id))
+        .map(|session| session.connection.clone()).collect();
+    for connection in connections { connection.close(0u32.into(), b"token revoked"); }
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionDto {
+    pub id: String,
+    pub device_name: Option<String>,
+    pub created_at: i64,
+    pub last_seen_at: i64,
+    pub current: bool,
+}
+
+/// GET /api/auth/sessions: the caller's signed-in devices, most recently seen first.
+pub async fn list_sessions_handler(auth: AuthUser, State(state): State<ArcSharedState>) -> Result<Json<Vec<SessionDto>>, ServerError> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+    let rows = sqlx::query_as::<_, (String, Option<String>, i64, i64)>(
+        "SELECT id, device_name, created_at, COALESCE(last_seen_at, created_at) AS seen FROM sessions
+         WHERE user_id = ? AND expires_at > ? ORDER BY seen DESC, created_at DESC",
+    ).bind(auth.user_id.to_string()).bind(now).fetch_all(&state.pool).await?;
+    Ok(Json(rows.into_iter().map(|(id, device_name, created_at, last_seen_at)| SessionDto {
+        current: id == auth.session_id, id, device_name, created_at, last_seen_at,
+    }).collect()))
+}
+
+/// DELETE /api/auth/sessions/{id}: ends one of the caller's own sessions.
+pub async fn end_session_handler(
+    auth: AuthUser,
+    State(state): State<ArcSharedState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<StatusCode, ServerError> {
+    let deleted = sqlx::query("DELETE FROM sessions WHERE id = ? AND user_id = ?")
+        .bind(&id).bind(auth.user_id.to_string()).execute(&state.pool).await?;
+    if deleted.rows_affected() == 0 {
+        return Err(ServerError::NotFound("Session not found".to_string()));
+    }
+    close_session_connections(&state, &[id]);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// POST /api/auth/sessions/revoke-others: ends every session of the caller except this one.
+pub async fn revoke_other_sessions_handler(auth: AuthUser, State(state): State<ArcSharedState>) -> Result<StatusCode, ServerError> {
+    let ids: Vec<String> = sqlx::query_scalar("DELETE FROM sessions WHERE user_id = ? AND id != ? RETURNING id")
+        .bind(auth.user_id.to_string()).bind(&auth.session_id).fetch_all(&state.pool).await?;
+    close_session_connections(&state, &ids);
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // ─── API DTOs & Handlers ────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -256,12 +307,22 @@ pub struct RegisterRequest {
     pub display_name: Option<String>,
     /// Required when the server only registers people with an invitation.
     pub invite_code: Option<String>,
+    /// Shown in the list of signed-in devices.
+    pub device_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
+    /// Shown in the list of signed-in devices.
+    pub device_name: Option<String>,
+}
+
+/// Trimmed device label, at most 64 characters; empty means none.
+fn clean_device_name(name: Option<&str>) -> Option<String> {
+    let name = name?.trim();
+    if name.is_empty() { None } else { Some(name.chars().take(64).collect()) }
 }
 
 #[derive(Debug, Serialize)]
@@ -362,10 +423,12 @@ pub async fn register_handler(
 
             // Store session
             let exp = now + (state.config.auth.jwt_expiration_hours * 3600);
-            sqlx::query("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
+            sqlx::query("INSERT INTO sessions (id, user_id, expires_at, created_at, device_name, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)")
                 .bind(jti)
                 .bind(user_id.to_string())
                 .bind(exp)
+                .bind(now)
+                .bind(clean_device_name(payload.device_name.as_deref()))
                 .bind(now)
                 .execute(&state.pool)
                 .await?;
@@ -463,10 +526,12 @@ pub async fn login_handler(
         .as_secs() as i64;
     let exp = now + (state.config.auth.jwt_expiration_hours * 3600);
 
-    sqlx::query("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
+    sqlx::query("INSERT INTO sessions (id, user_id, expires_at, created_at, device_name, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)")
         .bind(jti)
         .bind(&user_id_str)
         .bind(exp)
+        .bind(now)
+        .bind(clean_device_name(payload.device_name.as_deref()))
         .bind(now)
         .execute(&state.pool)
         .await?;
@@ -505,8 +570,9 @@ pub async fn refresh_handler(
         .unwrap_or_default()
         .as_secs() as i64;
     let exp = now + (state.config.auth.jwt_expiration_hours * 3600);
-    let updated = sqlx::query("UPDATE sessions SET expires_at = ? WHERE id = ? AND user_id = ?")
+    let updated = sqlx::query("UPDATE sessions SET expires_at = ?, last_seen_at = ? WHERE id = ? AND user_id = ?")
         .bind(exp)
+        .bind(now)
         .bind(&auth.session_id)
         .bind(&user_id_str)
         .execute(&state.pool)
