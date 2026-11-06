@@ -368,6 +368,14 @@ fn find_device_by_name(host: &cpal::Host, target_name: &str) -> Option<cpal::Dev
     None
 }
 
+fn resolve_source(wanted: &AudioSourceKind, supported: bool) -> AudioSourceKind {
+    if supported {
+        wanted.clone()
+    } else {
+        AudioSourceKind::Device
+    }
+}
+
 /// System audio loopback capturer and Opus encoder.
 ///
 /// Captures output audio via CPAL (WASAPI loopback on Windows), converts it to
@@ -378,6 +386,8 @@ pub struct ScreenAudioCapturer {
     source: AudioSourceKind,
     running: Arc<AtomicBool>,
     _stream: Option<cpal::Stream>,
+    #[cfg(windows)]
+    process: Option<crate::process_loopback::ProcessLoopback>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
     receiver: Receiver<MediaPacket>,
 }
@@ -388,7 +398,56 @@ pub type AudioLoopback = ScreenAudioCapturer;
 impl ScreenAudioCapturer {
     /// Start loopback capture and Opus encoding with the specified configuration.
     pub fn start(config: ScreenAudioConfig) -> Result<Self, LoopbackAudioError> {
+        #[cfg(windows)]
+        let supported = crate::process_loopback::process_loopback_supported();
+        #[cfg(not(windows))]
+        let supported = false;
+        let source = resolve_source(&config.source, supported);
+        #[cfg(windows)]
+        if source != AudioSourceKind::Device {
+            match Self::start_process_capture(config.clone(), source) {
+                Ok(capture) => return Ok(capture),
+                Err(error) => {
+                    tracing::warn!("Process loopback unavailable; using device loopback: {error}")
+                }
+            }
+        }
+        #[cfg(not(windows))]
+        let _ = source;
         Self::start_device_capture(config)
+    }
+
+    #[cfg(windows)]
+    fn start_process_capture(
+        config: ScreenAudioConfig,
+        source: AudioSourceKind,
+    ) -> Result<Self, LoopbackAudioError> {
+        let (mut prod, cons) = HeapRb::<f32>::new(RINGBUF_CAPACITY).split();
+        let (pid, include) = match source {
+            AudioSourceKind::OnlyProcess(pid) => (pid, true),
+            _ => (std::process::id(), false),
+        };
+        let process =
+            crate::process_loopback::ProcessLoopback::start(pid, include, move |samples| {
+                let _ = prod.push_slice(samples);
+            })?;
+        let running = Arc::new(AtomicBool::new(true));
+        let (thread_handle, receiver) = spawn_encoder_thread(
+            config.clone(),
+            SAMPLE_RATE,
+            CHANNELS,
+            cons,
+            Arc::clone(&running),
+        )?;
+        Ok(Self {
+            config,
+            source,
+            running,
+            _stream: None,
+            process: Some(process),
+            thread_handle: Some(thread_handle),
+            receiver,
+        })
     }
 
     fn start_device_capture(config: ScreenAudioConfig) -> Result<Self, LoopbackAudioError> {
@@ -472,6 +531,8 @@ impl ScreenAudioCapturer {
             source: AudioSourceKind::Device,
             running,
             _stream: Some(stream),
+            #[cfg(windows)]
+            process: None,
             thread_handle: Some(thread_handle),
             receiver: rx,
         })
@@ -486,6 +547,10 @@ impl ScreenAudioCapturer {
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
         self._stream = None;
+        #[cfg(windows)]
+        {
+            self.process = None;
+        }
         if let Some(handle) = self.thread_handle.take() {
             let _ = handle.join();
         }
@@ -723,6 +788,26 @@ mod tests {
 #[cfg(test)]
 mod source_tests {
     use super::*;
+    #[test]
+    fn old_windows_falls_back_to_device_loopback() {
+        assert_eq!(
+            resolve_source(&AudioSourceKind::AllExceptSelf, false),
+            AudioSourceKind::Device
+        );
+    }
+    #[test]
+    fn new_windows_keeps_the_wanted_source() {
+        assert_eq!(
+            resolve_source(&AudioSourceKind::OnlyProcess(7), true),
+            AudioSourceKind::OnlyProcess(7)
+        );
+    }
+    #[cfg(windows)]
+    #[test]
+    fn capturer_reports_all_except_self() {
+        let capture = ScreenAudioCapturer::start(ScreenAudioConfig::default()).unwrap();
+        assert_eq!(capture.source(), &AudioSourceKind::AllExceptSelf);
+    }
     #[test]
     fn default_config_asks_for_all_except_self() {
         assert_eq!(

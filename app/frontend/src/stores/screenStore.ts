@@ -2,11 +2,11 @@ import { api } from '../services/api';
 import type { SessionEvents } from '../types';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
-import { endedShare, isSharing, resetScreenState, setEndedShare, setIsSharing, setScreenSources, setSharingInfo, setWatching, sharingInfo, watching } from './screenState';
+import { setScreenAudioSource, endedShare, isSharing, resetScreenState, setEndedShare, setIsSharing, setScreenSources, setSharingInfo, setWatching, sharingInfo, watching } from './screenState';
 import { allVoiceParticipants, setVoiceParticipants } from './voiceStore';
 import { endReasonFromServer } from '../components/screen/viewerState';
 
-export { endedShare, isSharing, screenSources, sharingInfo, watching } from './screenState';
+export { screenAudioSource, setScreenAudioSource, endedShare, isSharing, screenSources, sharingInfo, watching } from './screenState';
 
 export { screenAudioKey } from './volumeStore';
 
@@ -20,6 +20,7 @@ export async function loadScreenSources() {
 
 /** Start sharing; returns the reason when it did not work (the picker shows it), else `null`. */
 export async function startSharing(kind: 'monitor' | 'window', id: number, withAudio = false, label = ''): Promise<string | null> {
+  setScreenAudioSource(null);
   try {
     await api.startScreenShare(kind, id, withAudio);
     setIsSharing(true);
@@ -32,6 +33,7 @@ export async function startSharing(kind: 'monitor' | 'window', id: number, withA
 
 export async function stopSharing() {
   setIsSharing(false);
+  setScreenAudioSource(null);
   setSharingInfo(null);
   try {
     await api.stopScreenShare();
@@ -82,7 +84,7 @@ const markSharing = (peerId: number, sharing: boolean) =>
     participant.peer_id === peerId ? { ...participant, is_sharing: sharing } : participant));
 
 export const screenHandlers: Pick<{ [K in keyof SessionEvents]: (payload: SessionEvents[K]) => void },
-  'screen-share-started' | 'screen-share-stopped' | 'screen-share-ended' | 'screen-audio-failed'> = {
+  'screen-share-started' | 'screen-share-stopped' | 'screen-share-ended' | 'screen-audio-failed' | 'screen-audio-source'> = {
   'screen-share-started': (data) => {
     markSharing(data.peer_id, true);
     // The share we watch restarted, perhaps under a new peer id: keep following it.
@@ -92,9 +94,11 @@ export const screenHandlers: Pick<{ [K in keyof SessionEvents]: (payload: Sessio
     noteEnded(data.peer_id, data.reason);
     markSharing(data.peer_id, false);
   },
+  'screen-audio-source': (data) => setScreenAudioSource(data.source),
   'screen-audio-failed': (reason) => setAppError(t('Screen sound is not shared: {reason}', { reason })),
   'screen-share-ended': (reason) => {
     setIsSharing(false);
+    setScreenAudioSource(null);
     setSharingInfo(null);
     setAppError(t('Screen sharing stopped: {reason}', { reason }));
   },

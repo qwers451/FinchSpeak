@@ -1,7 +1,9 @@
 import { createSignal } from 'solid-js';
-import type { ScreenSources, WatchedShare } from '../types';
+import type { SessionEvents, ScreenSources, WatchedShare } from '../types';
 
 // Signals only, no imports from other stores: voiceStore and screenStore both need them.
+
+export const [screenAudioSource, setScreenAudioSource] = createSignal<SessionEvents['screen-audio-source']['source'] | null>(null);
 
 /** We are sharing our screen. */
 export const [isSharing, setIsSharing] = createSignal<boolean>(false);
@@ -16,11 +18,13 @@ export const [screenSources, setScreenSources] = createSignal<ScreenSources>({ m
 /** Our own share ends with the connection; what we watch is resumed after a reconnect. */
 export function resetScreenStateOnDisconnect() {
   setIsSharing(false);
+  setScreenAudioSource(null);
   setSharingInfo(null);
 }
 
 export function resetScreenState() {
   setIsSharing(false);
+  setScreenAudioSource(null);
   setSharingInfo(null);
   setWatching(null);
   setEndedShare(null);

@@ -233,6 +233,7 @@ export interface SessionEvents {
   'screen-share-ended': string;
   /** The sound of the shared screen could not be captured; the picture still goes out. */
   'screen-audio-failed': string;
+  'screen-audio-source': { source: 'all-except-self' | 'only-process' | 'device' };
   'presence-update': { user_id: string; status: UserStatus; status_text?: string | null };
   'avatar-changed': { user_id: string; avatar_url: string | null };
   /** The tray menu asked to mute or unmute. */

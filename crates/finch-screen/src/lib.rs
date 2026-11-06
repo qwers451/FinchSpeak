@@ -15,7 +15,7 @@ pub mod thumbnail;
 pub mod yuv;
 
 pub use audio_loopback::{
-    list_loopback_devices, AudioLoopback, LoopbackAudioError, ResamplerConverter,
+    list_loopback_devices, AudioSourceKind, AudioLoopback, LoopbackAudioError, ResamplerConverter,
     ScreenAudioCapturer, ScreenAudioConfig, ScreenAudioEncoder, CHANNELS, DEFAULT_BITRATE_BPS,
     FRAME_DURATION_MS, MAX_OPUS_PAYLOAD_SIZE, SAMPLES_PER_CHANNEL, SAMPLE_RATE,
     STEREO_FRAME_SAMPLES,

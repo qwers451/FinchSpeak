@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 use finch_client_core::screen::{encoded_size, AudioPacketSource, ScreenAudioForwarder, FrameSource, MonitorSource, ScreenSharer, ScreenViewer, ShareConfig, WindowSource};
 use finch_protocol::messages::ClientMessage;
 use finch_protocol::models::VideoCodec;
-use finch_screen::{capture_monitor, capture_window, list_monitors, list_windows, thumbnail_jpeg, ScreenAudioCapturer, ScreenAudioConfig, ThumbnailCache};
+use finch_screen::{capture_monitor, capture_window, list_monitors, list_windows, thumbnail_jpeg, AudioSourceKind, ScreenAudioCapturer, ScreenAudioConfig, ThumbnailCache};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tracing::info;
@@ -132,11 +132,20 @@ pub async fn start_screen_share(
         // Best effort: the picture is already going out, so a failure here is only reported.
         let (channel_id, sender_peer_id) = (short_id, state.session_peer_id.load(Ordering::SeqCst));
         let connection = state.quic_connection.read().await.clone();
+        let source_app_handle = audio_app_handle.clone();
         let started = connection.map(|connection| {
             ScreenAudioForwarder::start(connection, move || {
                 let config = ScreenAudioConfig { channel_id, sender_peer_id, ..ScreenAudioConfig::default() };
                 ScreenAudioCapturer::start(config)
-                    .map(|capturer| Box::new(capturer) as Box<dyn AudioPacketSource>)
+                    .map(|capturer| {
+                        let source = match capturer.source() {
+                            AudioSourceKind::AllExceptSelf => "all-except-self",
+                            AudioSourceKind::OnlyProcess(_) => "only-process",
+                            AudioSourceKind::Device => "device",
+                        };
+                        let _ = source_app_handle.emit("screen-audio-source", serde_json::json!({ "source": source }));
+                        Box::new(capturer) as Box<dyn AudioPacketSource>
+                    })
                     .map_err(|e| e.to_string())
             })
         });

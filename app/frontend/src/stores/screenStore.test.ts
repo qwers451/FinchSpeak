@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../services/api';
 import { appError, setAppError } from './notificationStore';
-import { isSharing, loadScreenSources, screenAudioKey, screenSources, sharingInfo, startSharing, stopSharing, stopWatching, watchShare, watching } from './screenStore';
+import { screenAudioSource, isSharing, loadScreenSources, screenAudioKey, screenSources, sharingInfo, startSharing, stopSharing, stopWatching, watchShare, watching } from './screenStore';
 import { sessionHandlers, resetSessionState } from './sessionStore';
 import { allVoiceParticipants, setVoiceParticipants } from './voiceStore';
 
@@ -141,4 +141,15 @@ it('AUD-018 the screen sound is requested only when asked for, and failures are 
 it('AUD-018 the screen sound has its own volume key, apart from the voice', () => {
   expect(screenAudioKey(7)).toBe(7 + 0x40000000);
   expect(screenAudioKey(7)).not.toBe(7);
+});
+
+it('tracks the actual screen audio source and clears it when sharing ends', async () => {
+  sessionHandlers['screen-audio-source']({ source: 'device' });
+  expect(screenAudioSource()).toBe('device');
+  vi.spyOn(api, 'stopScreenShare').mockResolvedValue();
+  await stopSharing();
+  expect(screenAudioSource()).toBeNull();
+  sessionHandlers['screen-audio-source']({ source: 'all-except-self' });
+  sessionHandlers['screen-share-ended']('window closed');
+  expect(screenAudioSource()).toBeNull();
 });
