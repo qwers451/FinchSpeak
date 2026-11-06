@@ -9,7 +9,7 @@ import {
   authError,
   setAuthError,
 } from '../stores/authStore';
-import { pendingInvite } from '../stores/inviteLink';
+import { linkServerDiffers, pendingInvite, setPendingInvite } from '../stores/inviteLink';
 import { Button, Field, Icon, Toggle } from '../ui';
 import { passwordStrength } from '../ui/passwordStrength';
 import { t } from '../i18n';
@@ -114,7 +114,11 @@ export function AuthModal() {
 
           <div class="col g16">
             <Field label={t('Server address')} icon="db" value={serverUrl()} error={serverError()} placeholder="https://your-server:8443"
-              onInput={(value) => { setServerUrl(value); setServerError(undefined); }} />
+              onInput={(value) => {
+                setServerUrl(value);
+                setServerError(undefined);
+                if (linkServerDiffers(pendingInvite(), value)) setPendingInvite(null);
+              }} />
             <Show when={isRegister()}>
               <Field label={t('Invite code')} icon="ticket" value={inviteCode()} onInput={setInviteCode} placeholder="K7M2QX9TPW4B" error={inviteError()}
                 help={t('Ask the server admin for a code. It works a limited number of times and expires.')} />

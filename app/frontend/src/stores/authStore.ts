@@ -71,6 +71,7 @@ export async function loginUser(username: string, password: string, stay = true)
     lastAttempt = null;
     remember(serverUrl(), username);
     setRememberedUsername(username);
+    setPendingInvite(null);
     setCurrentUser(user);
     await loadChannels();
     return true;
@@ -134,6 +135,7 @@ export async function logoutUser() {
   setPendingTofu(null);
   setPendingMismatch(null);
   setSessionEnded(null);
+  setPendingInvite(null);
   setCurrentUser(null);
   if (failure) setAppError(describeError(failure));
 }

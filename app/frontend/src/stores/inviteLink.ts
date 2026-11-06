@@ -48,18 +48,26 @@ export function parseInviteLink(url: string): InviteLink | null {
     return null;
   }
   if (serverUrl.protocol !== 'https:') return null;
+  // Only the origin is kept: user name, password, path and query of the address are dropped.
+  const origin = serverUrl.origin;
 
   const code = (parsed.searchParams.get('code') ?? '').trim();
   if (!CODE_PATTERN.test(code)) return null;
 
-  const rawFingerprint = (parsed.searchParams.get('fp') ?? '').trim();
-  let fp: string | null = null;
-  if (rawFingerprint) {
-    const normalized = normalizeFingerprint(rawFingerprint);
-    if (!FINGERPRINT_PATTERN.test(normalized)) return null;
-    fp = normalized.match(/.{2}/g)!.join(':');
+  // A malformed fingerprint does not make the link useless: it simply pins nothing, so the normal dialog shows.
+  const normalized = normalizeFingerprint(parsed.searchParams.get('fp') ?? '');
+  const fp = FINGERPRINT_PATTERN.test(normalized) ? normalized.match(/.{2}/g)!.join(':') : null;
+  return { server: origin, code, fp };
+}
+
+/** True when a typed server address points at another host than the link, so the link's invite no longer applies. */
+export function linkServerDiffers(link: InviteLink | null, server: string): boolean {
+  if (!link) return false;
+  try {
+    return new URL(server.trim()).host !== new URL(link.server).host;
+  } catch {
+    return true;
   }
-  return { server, code, fp };
 }
 
 /** The link the admin copies: the exact format parseInviteLink reads back. */

@@ -31,6 +31,17 @@ describe('invite links', () => {
     });
   });
 
+  it('keeps a link whose fingerprint is malformed, without a fingerprint', () => {
+    expect(parseInviteLink(`finchspeak://join?server=${encodeURIComponent('https://chat.example.com')}&code=K7M2&fp=zz-not-hex`)).toEqual({
+      server: 'https://chat.example.com', code: 'K7M2', fp: null,
+    });
+  });
+
+  it('keeps only the origin of the server address', () => {
+    const link = parseInviteLink(`finchspeak://join?server=${encodeURIComponent('https://user:pw@chat.example.com:8443/path?x=1')}&code=K7M2`);
+    expect(link?.server).toBe('https://chat.example.com:8443');
+  });
+
   it('compares fingerprints ignoring case, spaces and colons', () => {
     expect(fingerprintsMatch(FP, FP.toLowerCase().replace(/:/g, ' '))).toBe(true);
     expect(fingerprintsMatch(FP, FP.replace('00', 'FF'))).toBe(false);

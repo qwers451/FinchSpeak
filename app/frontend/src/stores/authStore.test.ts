@@ -65,3 +65,32 @@ it('resume is skipped without a remembered username', async () => {
   expect(spy).not.toHaveBeenCalled();
   vi.restoreAllMocks();
 });
+
+it('a successful sign-in forgets the pending invite', async () => {
+  const { setPendingInvite, pendingInvite } = await import('./inviteLink');
+  const { loginUser } = await import('./authStore');
+  setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: null });
+  vi.spyOn(api, 'login').mockResolvedValue({ id: 'u', username: 'alice', display_name: 'Alice', role: 'member' });
+  await loginUser('alice', 'hunter2hunter2');
+  expect(pendingInvite()).toBeNull();
+  setCurrentUser(null);
+  vi.restoreAllMocks();
+});
+
+it('sign-out forgets the pending invite', async () => {
+  const { setPendingInvite, pendingInvite } = await import('./inviteLink');
+  setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: null });
+  vi.spyOn(api, 'logout').mockResolvedValue();
+  await logoutUser();
+  expect(pendingInvite()).toBeNull();
+  vi.restoreAllMocks();
+});
+
+it('a session that the server ended forgets the pending invite', async () => {
+  const { setPendingInvite, pendingInvite } = await import('./inviteLink');
+  const { sessionHandlers } = await import('./sessionStore');
+  setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: null });
+  sessionHandlers['connection-lost']('token revoked');
+  expect(pendingInvite()).toBeNull();
+  sessionHandlers['connection-lost']('');
+});

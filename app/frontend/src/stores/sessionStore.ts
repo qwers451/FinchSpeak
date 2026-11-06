@@ -1,7 +1,7 @@
 import { createSignal } from 'solid-js';
 import type { DeviceSession, SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
 import { setPendingMismatch, setPendingTofu } from './tofuStore';
-import { receiveInviteLink } from './inviteLink';
+import { receiveInviteLink, setPendingInvite } from './inviteLink';
 import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
 import { activeVoiceChannel, toggleMute, handleHotkey, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
@@ -149,7 +149,10 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'connection-lost': (reason) => {
     resetMicPreview();
     const ended = classifyEnd(reason);
-    if (ended) setSessionEnded(ended);
+    if (ended) {
+      setSessionEnded(ended);
+      setPendingInvite(null);
+    }
     setConnectionStatus('disconnected');
     setConnectionError(reason);
     setVoiceParticipants([]);

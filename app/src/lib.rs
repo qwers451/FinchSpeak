@@ -24,11 +24,20 @@ pub fn invite_argument(args: impl IntoIterator<Item = String>) -> Option<String>
     args.into_iter().find(|arg| arg.len() <= 4096 && arg.to_ascii_lowercase().starts_with("finchspeak://"))
 }
 
-/// Keeps the raw link for a cold start and tells a running window. The window validates it; nothing is trusted here.
-fn deliver_invite(app: &AppHandle, link: String) {
-    if let Ok(mut slot) = PENDING_INVITE.lock() {
-        *slot = Some(link.clone());
+/// Keeps a cold-start link until the window asks for it once. Only the launch path calls this.
+fn stash_invite(slot: &Mutex<Option<String>>, link: String) {
+    if let Ok(mut held) = slot.lock() {
+        *held = Some(link);
     }
+}
+
+/// Hands over the stashed link and forgets it.
+fn take_invite(slot: &Mutex<Option<String>>) -> Option<String> {
+    slot.lock().ok().and_then(|mut held| held.take())
+}
+
+/// Tells a running window about a link. The window validates it; nothing is trusted here.
+fn announce_invite(app: &AppHandle, link: String) {
     if let Err(e) = app.emit("invite-link", link) {
         tracing::warn!("Could not announce the invite link: {e}");
     }
@@ -36,7 +45,7 @@ fn deliver_invite(app: &AppHandle, link: String) {
 
 /// The invite link waiting from the last launch, if any; read once by the window at start.
 pub fn take_pending_invite() -> Option<String> {
-    PENDING_INVITE.lock().ok().and_then(|mut slot| slot.take())
+    take_invite(&PENDING_INVITE)
 }
 
 /// Load pinned server fingerprints from `<app data dir>/known_servers.txt`.
@@ -86,7 +95,7 @@ pub fn run() {
     if let Err(e) = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(link) = invite_argument(argv) {
-                deliver_invite(app, link);
+                announce_invite(app, link);
             }
             tray::show_window(app)
         }))
@@ -112,7 +121,8 @@ pub fn run() {
                 }
             }
             if let Some(link) = invite_argument(std::env::args()) {
-                deliver_invite(app.handle(), link);
+                stash_invite(&PENDING_INVITE, link.clone());
+                announce_invite(app.handle(), link);
             }
             connection::spawn_sleep_watch(app.state::<AppState>().inner().clone());
             let language = match app.state::<AppState>().known_servers_path.blocking_read().as_deref().and_then(|path| path.parent()) {
@@ -265,7 +275,15 @@ mod profile_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{invite_argument, should_start_hidden};
+    use super::{invite_argument, should_start_hidden, stash_invite, take_invite};
+
+    #[test]
+    fn a_stashed_invite_is_taken_once() {
+        let slot = std::sync::Mutex::new(None);
+        stash_invite(&slot, "finchspeak://join?x".to_string());
+        assert_eq!(take_invite(&slot), Some("finchspeak://join?x".to_string()));
+        assert_eq!(take_invite(&slot), None);
+    }
 
     #[test]
     fn invite_argument_takes_only_finchspeak_links() {

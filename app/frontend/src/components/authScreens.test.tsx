@@ -243,3 +243,27 @@ it('a matching invite link trusts the server through the same confirm path, with
   expect(transport.invoke).toHaveBeenCalledWith('trust_fingerprint', { hostname: 'h', fingerprint: FP });
   setPendingInvite(null);
 });
+
+it('changing the server to another host forgets the invite link', async () => {
+  const { setPendingInvite, pendingInvite } = await import('../stores/inviteLink');
+  const { setServerUrl, serverUrl } = await import('../stores/authStore');
+  const before = serverUrl();
+  setPendingInvite({ server: 'https://chat.finch.example:8443', code: 'K7M2QX9TPW4B', fp: INVITE_FP });
+  const host = mount(() => <AuthModal />);
+  const address = host.querySelector('input') as HTMLInputElement;
+  address.value = 'https://other.example:8443';
+  address.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  expect(pendingInvite()).toBeNull();
+  setServerUrl(before);
+});
+
+it('a matching invite link does not show the trust dialog while it trusts the server', async () => {
+  const { setPendingInvite } = await import('../stores/inviteLink');
+  transport.invoke.mockImplementation(async (cmd: string) => (cmd === 'trust_fingerprint' ? new Promise(() => {}) : null));
+  setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: FP });
+  setPendingTofu({ hostname: 'h', fingerprint: FP });
+  const host = mount(() => <TofuModal />);
+  await vi.waitFor(() => expect(transport.invoke).toHaveBeenCalledWith('trust_fingerprint', { hostname: 'h', fingerprint: FP }));
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
+  setPendingInvite(null);
+});

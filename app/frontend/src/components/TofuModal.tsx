@@ -35,6 +35,8 @@ export function TofuModal() {
   };
 
   // An invite link that pins this very fingerprint confirms itself through the same confirm() as the button.
+  // While the link's own trust runs, the dialog stays closed; if trusting fails, it opens again.
+  const [autoTrusting, setAutoTrusting] = createSignal<unknown>(null);
   let autoTrusted: unknown = null;
   createEffect(() => {
     const data = pendingTofu();
@@ -42,7 +44,8 @@ export function TofuModal() {
     if (!data || !link || autoTrusted === data) return;
     if (fingerprintsMatch(link.fp, data.fingerprint)) {
       autoTrusted = data;
-      untrack(() => void confirm());
+      setAutoTrusting(data);
+      untrack(() => void confirm().catch(() => setAutoTrusting(null)));
     }
   });
 
@@ -53,7 +56,7 @@ export function TofuModal() {
   };
 
   return (
-    <Modal open={!!pendingTofu()} onClose={dismiss} title={t('Trust this server?')} width="560px">
+    <Modal open={!!pendingTofu() && autoTrusting() !== pendingTofu()} onClose={dismiss} title={t('Trust this server?')} width="560px">
       <Show when={pendingTofu()}>
         {(data) => (
           <div class="col g20">
