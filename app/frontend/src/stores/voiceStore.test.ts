@@ -103,3 +103,26 @@ it('AUD-024 tells the user when a device disappears or is replaced by the defaul
   sessionHandlers['audio-device-failed'](null);
   expect(appError()).toMatch(/rejoin/i);
 });
+
+it('switching to another room ends our screen share and the share we watched', async () => {
+  const { isSharing, setIsSharing, setSharingInfo, sharingInfo, setWatching, watching } = await import('./screenState');
+  vi.spyOn(api, 'setAudioDevices').mockResolvedValue();
+  vi.spyOn(api, 'joinVoiceChannel').mockResolvedValue();
+  setIsSharing(true);
+  setSharingInfo({ label: 'Notes', audio: false });
+  setWatching(7 as never);
+  await joinVoice({ id: 'other', short_id: 2, name: 'other', channel_type: 'voice', position: 1, bitrate_kbps: 64 });
+  expect(isSharing()).toBe(false);
+  expect(sharingInfo()).toBeNull();
+  expect(watching()).toBeNull();
+});
+
+it('rejoining the same room keeps our screen share', async () => {
+  const { isSharing, setIsSharing } = await import('./screenState');
+  vi.spyOn(api, 'setAudioDevices').mockResolvedValue();
+  vi.spyOn(api, 'joinVoiceChannel').mockResolvedValue();
+  setIsSharing(true);
+  await joinVoice({ id: 'ours', short_id: 1, name: 'ours', channel_type: 'voice', position: 0, bitrate_kbps: 64 });
+  expect(isSharing()).toBe(true);
+  setIsSharing(false);
+});

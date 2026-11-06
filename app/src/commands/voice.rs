@@ -40,8 +40,9 @@ pub async fn join_voice_channel(
     let tx = tx_opt.ok_or_else(|| "Not connected via QUIC".to_string())?;
 
     if *state.current_voice_channel.read().await != Some(short_id) {
-        // Switching rooms also cancels a screen preflight that has not produced its first frame.
+        // Switching rooms ends our share (the server tells the old room) and the share we watched there, as leaving does; it also cancels a preflight still waiting for its first frame. The frontend clears its sharing state when the join succeeds.
         state.stop_screen_share();
+        state.stop_watching().await;
     }
     tx.send(ClientMessage::JoinVoice { channel_id: ch_uuid })
         .await

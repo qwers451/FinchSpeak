@@ -239,8 +239,11 @@ export function restoreVoiceSettings() {
 export async function joinVoice(channel: Channel) {
   await restoreAudioDevices();
   await restoreVoiceSettings();
+  const previous = activeVoiceChannel();
   try {
     await api.joinVoiceChannel(channel.id, channel.short_id);
+    // The backend stops our share and the one we watched when the room changes, like on leave.
+    if (previous && previous.id !== channel.id) resetScreenState();
     setActiveVoiceChannel(channel);
   } catch (err) {
     console.error('Failed to join voice channel:', err);
