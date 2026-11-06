@@ -412,6 +412,17 @@ impl ApiClient {
         self.admin_action(user_id, "unban").await
     }
 
+    /// Admin: give a member a new temporary password (returned once); they are signed out everywhere.
+    pub async fn reset_password(&self, user_id: Uuid) -> Result<String, ClientError> {
+        #[derive(Deserialize)]
+        struct TemporaryPasswordReply {
+            temporary_password: String,
+        }
+        let req = self.authorized(self.http.post(self.url(&format!("/api/admin/users/{user_id}/password-reset"))));
+        let reply: TemporaryPasswordReply = parse_json(self.send(req).await?).await?;
+        Ok(reply.temporary_password)
+    }
+
     async fn admin_action(&self, user_id: Uuid, action: &str) -> Result<(), ClientError> {
         let req = self.authorized(self.http.post(self.url(&format!("/api/admin/users/{user_id}/{action}"))));
         check_status(self.send(req).await?).await?;

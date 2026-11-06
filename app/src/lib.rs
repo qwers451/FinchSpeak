@@ -187,6 +187,7 @@ pub fn run() {
             commands::admin::kick_user,
             commands::admin::ban_user,
             commands::admin::unban_user,
+            commands::admin::reset_user_password,
             commands::admin::update_channel,
             commands::admin::delete_channel,
             commands::admin::reorder_channels,

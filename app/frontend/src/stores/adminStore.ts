@@ -61,6 +61,16 @@ export async function moderate(userId: string, action: MemberAction, durationSec
   await loadMembers();
 }
 
+/** A temporary password for a member (shown once by the caller); null if it failed, and the error is shown. */
+export async function resetPassword(userId: string): Promise<string | null> {
+  try {
+    return await api.resetPassword(userId);
+  } catch (err) {
+    setAppError(describeError(err));
+    return null;
+  }
+}
+
 // --- action log -----------------------------------------------------------------------------
 
 export const AUDIT_PAGE = 50;

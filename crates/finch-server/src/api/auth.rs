@@ -94,6 +94,9 @@ impl FromRef<ArcSharedState> for ArcSharedState {
     }
 }
 
+/// Shortest password accepted when registering or choosing a new one (older, shorter ones still log in).
+pub const MIN_PASSWORD_LEN: usize = 8;
+
 /// Hash a password using Argon2id.
 pub fn hash_password(password: &str) -> Result<String, ServerError> {
     let salt = SaltString::generate(&mut OsRng);
@@ -360,9 +363,9 @@ pub async fn register_handler(
             "Username must be between 3 and 32 characters".to_string(),
         ));
     }
-    if payload.password.len() < 6 {
+    if payload.password.len() < MIN_PASSWORD_LEN {
         return Err(ServerError::BadRequest(
-            "Password must be at least 6 characters".to_string(),
+            "The password must be at least 8 characters".to_string(),
         ));
     }
 
@@ -679,8 +682,8 @@ pub async fn change_password_handler(
     State(state): State<ArcSharedState>,
     Json(request): Json<ChangePasswordRequest>,
 ) -> Result<StatusCode, ServerError> {
-    if request.new_password.len() < 6 {
-        return Err(ServerError::BadRequest("Password must be at least 6 characters".into()));
+    if request.new_password.len() < MIN_PASSWORD_LEN {
+        return Err(ServerError::BadRequest("The password must be at least 8 characters".into()));
     }
     let hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")
         .bind(auth.user_id.to_string())

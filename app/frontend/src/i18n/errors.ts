@@ -14,6 +14,7 @@ const RULES: readonly Rule[] = [
   { pattern: /^Logged out locally, but could not revoke/i, key: 'Signed out on this computer. The server could not be reached to end the session.' },
   { pattern: /^Invalid server address/i, key: 'The server address is not valid' },
   { pattern: /^Not authenticated$/i, key: 'Not authenticated' },
+  { pattern: /^The password must be at least 8 characters$/i, key: 'The password must be at least 8 characters' },
 ];
 
 /** The one place that turns a backend error into text in the interface language; unknown errors pass through unchanged. */

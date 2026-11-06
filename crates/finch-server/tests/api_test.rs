@@ -492,3 +492,113 @@ async fn refresh_touches_last_seen() -> anyhow::Result<()> {
     assert!(seen > 1_000_000);
     Ok(())
 }
+
+/// Register a user and return (token, user id).
+async fn register_named(app: &axum::Router, name: &str, password: &str) -> anyhow::Result<(String, String)> {
+    let body = auth_json(app, "/api/auth/register", json!({"username": name, "password": password})).await?;
+    Ok((body["token"].as_str().unwrap().to_string(), body["user"]["id"].as_str().unwrap().to_string()))
+}
+
+async fn post_empty(app: &axum::Router, uri: &str, token: &str) -> anyhow::Result<(StatusCode, Value)> {
+    let request = Request::builder().method("POST").uri(uri)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())?;
+    let response = app.clone().oneshot(request).await?;
+    let status = response.status();
+    let bytes = response.into_body().collect().await?.to_bytes();
+    Ok((status, serde_json::from_slice(&bytes).unwrap_or(Value::Null)))
+}
+
+async fn login_status(app: &axum::Router, name: &str, password: &str) -> anyhow::Result<StatusCode> {
+    let request = Request::builder().method("POST").uri("/api/auth/login")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({"username": name, "password": password}).to_string()))?;
+    Ok(app.clone().oneshot(request).await?.status())
+}
+
+#[tokio::test]
+async fn admin_reset_issues_a_working_temporary_password() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool, open_registration(), finch_server::session::SessionManager::new());
+    let (admin, _) = register_named(&app, "admin", "admin_pass_1").await?;
+    let (alice, alice_id) = register_named(&app, "alice", "old_password_1").await?;
+
+    let (status, body) = post_empty(&app, &format!("/api/admin/users/{alice_id}/password-reset"), &admin).await?;
+    assert_eq!(status, StatusCode::OK);
+    let temporary = body["temporary_password"].as_str().unwrap().to_string();
+    assert_eq!(temporary.chars().count(), 12);
+    assert!(temporary.chars().all(|c| "ABCDEFGHJKMNPQRSTUVWXYZ23456789".contains(c)), "{temporary}");
+
+    assert_eq!(login_status(&app, "alice", &temporary).await?, StatusCode::OK);
+    assert_eq!(login_status(&app, "alice", "old_password_1").await?, StatusCode::UNAUTHORIZED);
+    assert_eq!(call(&app, "GET", "/api/auth/me", &alice).await?.0, StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn member_cannot_reset() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool, open_registration(), finch_server::session::SessionManager::new());
+    let (_admin, _) = register_named(&app, "admin", "admin_pass_1").await?;
+    let (alice, _) = register_named(&app, "alice", "alice_pass_1").await?;
+    let (_bob, bob_id) = register_named(&app, "bob", "bob_pass_123").await?;
+    let (status, _) = post_empty(&app, &format!("/api/admin/users/{bob_id}/password-reset"), &alice).await?;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(login_status(&app, "bob", "bob_pass_123").await?, StatusCode::OK);
+    Ok(())
+}
+
+#[tokio::test]
+async fn admin_cannot_reset_another_admin() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool.clone(), open_registration(), finch_server::session::SessionManager::new());
+    let (admin, _) = register_named(&app, "admin", "admin_pass_1").await?;
+    let (_second, second_id) = register_named(&app, "second", "second_pass_1").await?;
+    sqlx::query("UPDATE users SET role = 'admin' WHERE username = 'second'").execute(&pool).await?;
+    let (status, _) = post_empty(&app, &format!("/api/admin/users/{second_id}/password-reset"), &admin).await?;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(login_status(&app, "second", "second_pass_1").await?, StatusCode::OK);
+    Ok(())
+}
+
+#[tokio::test]
+async fn reset_of_unknown_user_is_404() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool, open_registration(), finch_server::session::SessionManager::new());
+    let (admin, _) = register_named(&app, "admin", "admin_pass_1").await?;
+    let missing = uuid::Uuid::new_v4();
+    let (status, _) = post_empty(&app, &format!("/api/admin/users/{missing}/password-reset"), &admin).await?;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    Ok(())
+}
+
+#[tokio::test]
+async fn reset_is_audited_without_the_password() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool.clone(), open_registration(), finch_server::session::SessionManager::new());
+    let (admin, _) = register_named(&app, "admin", "admin_pass_1").await?;
+    let (_alice, alice_id) = register_named(&app, "alice", "alice_pass_1").await?;
+    let (status, body) = post_empty(&app, &format!("/api/admin/users/{alice_id}/password-reset"), &admin).await?;
+    assert_eq!(status, StatusCode::OK);
+    let temporary = body["temporary_password"].as_str().unwrap().to_string();
+    let rows: Vec<(String, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT action, target, details FROM audit_log WHERE action = 'password_reset'").fetch_all(&pool).await?;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].1.as_deref(), Some("alice"));
+    assert!(!rows[0].2.clone().unwrap_or_default().contains(&temporary));
+    Ok(())
+}
+
+#[tokio::test]
+async fn short_password_is_rejected_at_registration() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool, open_registration(), finch_server::session::SessionManager::new());
+    let request = Request::builder().method("POST").uri("/api/auth/register")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({"username":"alice", "password":"1234567"}).to_string()))?;
+    let response = app.oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body: Value = serde_json::from_slice(&response.into_body().collect().await?.to_bytes())?;
+    assert_eq!(body["error"], "The password must be at least 8 characters");
+    Ok(())
+}

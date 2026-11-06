@@ -55,6 +55,7 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .route("/api/admin/users/{id}/kick", post(admin::kick_handler))
         .route("/api/admin/users/{id}/ban", post(admin::ban_handler))
         .route("/api/admin/users/{id}/unban", post(admin::unban_handler))
+        .route("/api/admin/users/{id}/password-reset", post(admin::reset_password_handler))
         .route("/api/admin/users/{id}/voice", post(admin::moderate_voice_handler))
         .route("/api/admin/audit", get(admin::audit_handler))
         .route("/api/admin/server", get(admin::overview_handler))

@@ -411,6 +411,12 @@ export const api = {
     }
   },
 
+  /** A new temporary password for a member, returned once. */
+  resetPassword: async (userId: string): Promise<string> => {
+    if (isTauri()) return invoke<string>('reset_user_password', { userId });
+    return '';
+  },
+
   updateChannel: async (channelId: string, name?: string, topic?: string): Promise<void> => {
     if (isTauri()) {
       return invoke('update_channel', { channelId, name: name ?? null, topic: topic ?? null });
