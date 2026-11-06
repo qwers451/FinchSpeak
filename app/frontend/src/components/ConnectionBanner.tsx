@@ -1,7 +1,9 @@
 import { Show } from 'solid-js';
-import { currentUser } from '../stores/authStore';
+import { currentUser, logoutUser } from '../stores/authStore';
+import { sessionEnded } from '../stores/sessionEnd';
+import { api } from '../services/api';
 import { connectionError, connectionStatus, reconnectInfo } from '../stores/sessionStore';
-import { Icon } from '../ui';
+import { Button, Icon } from '../ui';
 import { t } from '../i18n';
 
 /** Splash shown while the interface subscribes to the backend (A5). */
@@ -34,6 +36,12 @@ export function ConnectionBanner() {
               : t('Connection lost')}
         </span>
         <Show when={connectionError()}><span class="t3 fs12">{connectionError()}</span></Show>
+        <Show when={connectionStatus() === 'reconnecting'}>
+          <Button size="sm" onClick={() => { void api.reconnectNow(); }}>{t('Retry now')}</Button>
+        </Show>
+        <Show when={connectionStatus() === 'failed' && !sessionEnded()}>
+          <Button size="sm" onClick={() => { void logoutUser(); }}>{t('Back to sign in')}</Button>
+        </Show>
       </div>
     </Show>
   );

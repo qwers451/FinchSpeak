@@ -186,6 +186,8 @@ pub struct AppState {
     pub last_connect: Arc<RwLock<Option<ConnectParams>>>,
     /// Bumped on every login and logout; a reconnect loop stops when it changes.
     pub session_generation: Arc<AtomicU64>,
+    /// Cuts the reconnect backoff pause short (PC woke from sleep, "Retry now").
+    pub reconnect_wake: Arc<tokio::sync::Notify>,
     /// File with pinned server fingerprints (set at startup from the app data dir).
     pub known_servers_path: Arc<RwLock<Option<PathBuf>>>,
     /// Pending TOFU fingerprint to be accepted: (hostname, fingerprint)
@@ -270,6 +272,7 @@ impl AppState {
             known_servers_path: Arc::new(RwLock::new(None)),
             last_connect: Arc::new(RwLock::new(None)),
             session_generation: Arc::new(AtomicU64::new(0)),
+            reconnect_wake: Arc::new(tokio::sync::Notify::new()),
             pending_fingerprint: Arc::new(RwLock::new(None)),
             video_channel: Arc::new(RwLock::new(None)),
             audio_engine: Arc::new(Mutex::new(crate::audio_engine::AudioEngine::new())),

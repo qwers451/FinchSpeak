@@ -274,6 +274,12 @@ pub async fn logout(state: State<'_, AppState>) -> Result<(), String> {
     }
 }
 
+/// "Retry now": stop waiting out the reconnect backoff.
+#[tauri::command]
+pub fn reconnect_now(state: State<'_, AppState>) {
+    state.reconnect_wake.notify_one();
+}
+
 #[tauri::command]
 pub async fn get_current_user(state: State<'_, AppState>) -> Result<Option<UserDto>, String> {
     Ok(state.current_user.read().await.clone())

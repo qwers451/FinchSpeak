@@ -217,7 +217,7 @@ async fn reconnect(
         }
     };
     let result = tokio::select! {
-        r = reconnect_with_progress(params, state.saved_fingerprints.clone(), Backoff::default(), |attempt, wait| {
+        r = reconnect_with_progress(params, state.saved_fingerprints.clone(), Backoff::default(), state.reconnect_wake.clone(), |attempt, wait| {
             let _ = app_handle.emit("reconnect-attempt", serde_json::json!({ "attempt": attempt, "retry_in_secs": wait.as_secs() }));
         }) => r,
         _ = superseded => {
@@ -569,10 +569,44 @@ async fn screen_viewer_ticker(state: AppState, generation: u64) {
     }
 }
 
+/// Wall-clock gap beyond which the PC is taken to have slept.
+const SLEEP_GAP: Duration = Duration::from_secs(30);
+
+/// True iff `wall` exceeds the `expected` tick by more than the sleep gap.
+fn slept(expected: Duration, wall: Duration) -> bool {
+    wall > expected + SLEEP_GAP
+}
+
+/// Notice a PC that went to sleep (the wall clock jumps while the timer was paused) and
+/// make a pending reconnect try again at once instead of finishing its backoff wait.
+pub fn spawn_sleep_watch(state: AppState) {
+    tauri::async_runtime::spawn(async move {
+        let tick = Duration::from_secs(5);
+        let mut last = SystemTime::now();
+        loop {
+            tokio::time::sleep(tick).await;
+            let now = SystemTime::now();
+            let wall = now.duration_since(last).unwrap_or_default();
+            last = now;
+            if slept(tick, wall) {
+                info!("The PC woke up after {wall:?}; reconnecting at once");
+                state.reconnect_wake.notify_one();
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use finch_testbed::{client::TestClient, server::TestServer};
+
+    #[test]
+    fn slept_detects_large_gap() {
+        let tick = Duration::from_secs(5);
+        assert!(!slept(tick, Duration::from_secs(5)));
+        assert!(slept(tick, Duration::from_secs(60)));
+    }
 
     #[tokio::test]
     async fn replacing_session_waits_for_voice_transition() {

@@ -359,15 +359,18 @@ pub async fn reconnect_with_backoff(
     fingerprints: Arc<DashMap<String, String>>,
     backoff: Backoff,
 ) -> Result<(Session, mpsc::Receiver<SessionEvent>), ClientError> {
-    reconnect_with_progress(params, fingerprints, backoff, |_, _| {}).await
+    reconnect_with_progress(params, fingerprints, backoff, Arc::new(tokio::sync::Notify::new()), |_, _| {}).await
 }
 
 /// Like [`reconnect_with_backoff`], and tells `on_retry(attempt, wait)` before each pause
 /// (`attempt` counts failed tries from 1) so the UI can show "retrying in 4 s".
+/// A `wake` notification (PC woke from sleep, "Retry now") cuts the pause short and
+/// restarts the backoff from its initial delay.
 pub async fn reconnect_with_progress(
     params: ConnectParams,
     fingerprints: Arc<DashMap<String, String>>,
     backoff: Backoff,
+    wake: Arc<tokio::sync::Notify>,
     mut on_retry: impl FnMut(u32, Duration),
 ) -> Result<(Session, mpsc::Receiver<SessionEvent>), ClientError> {
     let mut delay = backoff.initial;
@@ -384,8 +387,10 @@ pub async fn reconnect_with_progress(
                 attempt += 1;
                 info!("Reconnect to {} failed ({e}); retrying in {delay:?}", params.quic_addr);
                 on_retry(attempt, delay);
-                tokio::time::sleep(delay).await;
-                delay = (delay * 2).min(backoff.max);
+                tokio::select! {
+                    _ = tokio::time::sleep(delay) => { delay = (delay * 2).min(backoff.max); }
+                    _ = wake.notified() => { delay = backoff.initial; }
+                }
             }
         }
     }

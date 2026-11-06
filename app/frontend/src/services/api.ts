@@ -58,6 +58,11 @@ export const api = {
     return null;
   },
 
+  /** Stop waiting out the reconnect pause and try again now. */
+  reconnectNow: async (): Promise<void> => {
+    if (isTauri()) await invoke('reconnect_now');
+  },
+
   logout: async (): Promise<void> => {
     if (isTauri()) {
       return invoke('logout');

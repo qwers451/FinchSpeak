@@ -73,6 +73,7 @@ pub fn run() {
         .setup(|app| {
             tracing::info!("Tauri setup initialized");
             load_known_servers(app)?;
+            connection::spawn_sleep_watch(app.state::<AppState>().inner().clone());
             if let Err(e) = tray::setup(app.handle()) {
                 tracing::warn!("Could not create the tray icon: {e}");
             }
@@ -122,6 +123,7 @@ pub fn run() {
             commands::auth::register,
             commands::auth::resume_session,
             commands::auth::logout,
+            commands::auth::reconnect_now,
             commands::auth::get_current_user,
             commands::auth::get_session_snapshot,
             commands::auth::trust_fingerprint,
