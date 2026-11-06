@@ -1,5 +1,5 @@
 import { Show } from 'solid-js';
-import { sharingInfo, stopSharing } from '../../stores/screenStore';
+import { screenAudioSource, sharingInfo, stopSharing } from '../../stores/screenStore';
 import { Button, Icon } from '../../ui';
 import { t } from '../../i18n';
 
@@ -13,6 +13,11 @@ export function SharerPill() {
           <div class="col grow" style={{ 'min-width': 0 }}>
             <strong class="fs13 trunc">{t('You are sharing {label}', { label: info().label || t('your screen') })}</strong>
             <span class="t2 fs12">{info().audio ? t('With system sound · 30 fps') : t('Without sound · 30 fps')}</span>
+            <Show when={info().audio && screenAudioSource() === 'device'}>
+              <div class="auth-banner amber" role="note">
+                <span class="fs12">{t('This version of Windows cannot leave FinchSpeak out of the sound: people in the room will hear themselves with a delay. Update to Windows 10 2004 or newer.')}</span>
+              </div>
+            </Show>
           </div>
           <Icon name={info().audio ? 'vol' : 'vol-off'} size="sm" class="t2" title={info().audio ? t('System sound is shared') : t('System sound is not shared')} />
           <Button size="sm" variant="danger" icon="stop" onClick={() => void stopSharing()}>{t('Stop sharing')}</Button>

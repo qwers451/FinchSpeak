@@ -5,13 +5,13 @@ use std::sync::atomic::Ordering;
 use finch_client_core::screen::{encoded_size, AudioPacketSource, ScreenAudioForwarder, FrameSource, MonitorSource, ScreenSharer, ScreenViewer, ShareConfig, WindowSource};
 use finch_protocol::messages::ClientMessage;
 use finch_protocol::models::VideoCodec;
-use finch_screen::{capture_monitor, capture_window, list_monitors, list_windows, thumbnail_jpeg, ScreenAudioCapturer, ScreenAudioConfig, ThumbnailCache};
+use finch_screen::{capture_monitor, capture_window, list_monitors, list_windows, thumbnail_jpeg, window_process_id, AudioSourceKind, ScreenAudioCapturer, ScreenAudioConfig, ThumbnailCache};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::state::{AppState, VideoChunkPayload};
+use crate::state::{AppState, ScreenShareReservation, VideoChunkPayload};
 
 const SHARE_FPS: u8 = 30;
 
@@ -61,109 +61,187 @@ pub async fn list_screen_sources() -> Result<ScreenSourcesDto, String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Start sharing a monitor (`kind` = "monitor") or a window (`kind` = "window") in the current
-/// voice channel.
+/// Probe activation as well as the version: some Windows builds pass the version gate
+/// but do not implement process loopback. Never promise exclusion on those machines.
+#[tauri::command]
+pub async fn process_loopback_supported() -> bool {
+    #[cfg(windows)]
+    {
+        tokio::task::spawn_blocking(|| {
+            finch_screen::process_loopback::process_loopback_supported()
+                && finch_screen::process_loopback::ProcessLoopback::start(std::process::id(), false, |_| {}).is_ok()
+        }).await.unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    { false }
+}
+
+fn scope_to_source(scope: Option<&str>, kind: &str, window_pid: Option<u32>) -> AudioSourceKind {
+    match (scope, kind, window_pid) {
+        (Some("window"), "window", Some(pid)) => AudioSourceKind::OnlyProcess(pid),
+        _ => AudioSourceKind::AllExceptSelf,
+    }
+}
+
+fn requested_audio_source(scope: Option<&str>, kind: &str, window_pid: Option<u32>) -> Result<AudioSourceKind, String> {
+    if scope == Some("window") && kind == "window" && window_pid.is_none() {
+        return Err("window-audio-unavailable".into());
+    }
+    Ok(scope_to_source(scope, kind, window_pid))
+}
+
+/// Reserve before any await, including membership reads and the first frame.
+async fn prepare_screen_share<T, F: std::future::Future<Output = Result<T, String>>>(
+    state: &AppState,
+    prepare: impl FnOnce(u64) -> F,
+) -> Result<(ScreenShareReservation, T), String> {
+    let reservation = state.reserve_screen_share()?;
+    let prepared = prepare(reservation.generation()).await?;
+    state.with_screen_share(reservation.generation(), || Ok(()))?;
+    Ok((reservation, prepared))
+}
+
+/// Publish membership-dependent controls in the same order as stop/leave/logout.
+async fn announce_screen_share(
+    state: &AppState,
+    generation: u64,
+    channel_id: u32,
+    session_generation: u64,
+    tx: &tokio::sync::mpsc::Sender<ClientMessage>,
+    announcement: ClientMessage,
+    install: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    let _transition = state.voice_transition.lock().await;
+    if *state.current_voice_channel.read().await != Some(channel_id)
+        || state.session_generation.load(Ordering::SeqCst) != session_generation {
+        return Err("screen-share-ended-before-start".into());
+    }
+    let permit = tx.reserve().await.map_err(|e| format!("Failed to announce the screen share: {e}"))?;
+    state.with_screen_share(generation, || {
+        permit.send(announcement);
+        install()
+    })
+}
+
+/// Keep the control transition locked through joining, Stop, and the end event.
+/// A newer generation may reserve preflight meanwhile, but cannot publish Start.
+async fn finish_screen_share(state: &AppState, generation: Option<u64>, on_stopped: impl FnOnce(u64)) -> bool {
+    let _transition = state.voice_transition.lock().await;
+    let tx = state.control_tx.read().await.clone();
+    let ended_generation = match generation {
+        Some(generation) => generation,
+        None => match state.screen_share_generation() { Ok(generation) => generation, Err(_) => return false },
+    };
+    let stopped = match generation {
+        Some(generation) => state.stop_screen_share_generation(generation),
+        None => state.stop_screen_share(),
+    };
+    if stopped {
+        if let Some(tx) = tx { let _ = tx.send(ClientMessage::StopScreenShare).await; }
+        on_stopped(ended_generation);
+    }
+    stopped
+}
+
+/// Start sharing a monitor or window. The returned generation also tags its end
+/// event, so a queued event or invoke reply cannot resurrect/hide another share.
 #[tauri::command]
 pub async fn start_screen_share(
     kind: String,
     id: u32,
     with_audio: Option<bool>,
+    audio_scope: Option<String>,
     state: State<'_, AppState>,
     app_handle: AppHandle,
-) -> Result<(), String> {
-    let short_id = (*state.current_voice_channel.read().await)
-        .ok_or_else(|| "Join a voice channel before sharing your screen".to_string())?;
-    let tx = state.control_tx.read().await.clone().ok_or_else(|| "Not connected via QUIC".to_string())?;
-    let connection = state.quic_connection.read().await.clone().ok_or_else(|| "Not connected via QUIC".to_string())?;
-    if state.screen_sharer.lock().map_err(|_| "screen share state poisoned".to_string())?.is_some() {
-        return Err("You are already sharing your screen".into());
-    }
-
-    let mut source: Box<dyn FrameSource> = match kind.as_str() {
-        "monitor" => Box::new(MonitorSource(id as usize)),
-        "window" => Box::new(WindowSource(id)),
-        other => return Err(format!("Unknown screen source kind: {other}")),
-    };
-    // Capture one frame first: it proves capture works and gives the size to announce.
-    let (source, width, height) = tokio::task::spawn_blocking(move || {
-        let frame = source.next_frame()?;
-        Ok::<_, String>((source, frame.width, frame.height))
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| format!("Could not capture the screen: {e}"))?;
-    // Screens beyond 4K are scaled down before encoding; announce the size viewers will get.
-    let (width, height) = encoded_size(width, height);
-
-    tx.send(ClientMessage::StartScreenShare { codec: VideoCodec::H264, width, height, fps: SHARE_FPS })
-        .await
-        .map_err(|e| format!("Failed to announce the screen share: {e}"))?;
-
+) -> Result<u64, String> {
+    let preflight_state = (*state).clone();
+    let source_kind = kind.clone();
+    let (reservation, (source, width, height, short_id, tx, connection, sender_peer_id, session_generation)) =
+        prepare_screen_share(&state, move |generation| async move {
+            let (short_id, tx, connection, sender_peer_id, session_generation) = {
+                let _transition = preflight_state.voice_transition.lock().await;
+                preflight_state.with_screen_share(generation, || Ok(()))?;
+                let short_id = (*preflight_state.current_voice_channel.read().await)
+                    .ok_or_else(|| "Join a voice channel before sharing your screen".to_string())?;
+                let tx = preflight_state.control_tx.read().await.clone().ok_or_else(|| "Not connected via QUIC".to_string())?;
+                let connection = preflight_state.quic_connection.read().await.clone().ok_or_else(|| "Not connected via QUIC".to_string())?;
+                (short_id, tx, connection, preflight_state.session_peer_id.load(Ordering::SeqCst), preflight_state.session_generation.load(Ordering::SeqCst))
+            };
+            let mut source: Box<dyn FrameSource> = match source_kind.as_str() {
+                "monitor" => Box::new(MonitorSource(id as usize)),
+                "window" => Box::new(WindowSource(id)),
+                other => return Err(format!("Unknown screen source kind: {other}")),
+            };
+            let (source, width, height) = tokio::task::spawn_blocking(move || {
+                let frame = source.next_frame()?;
+                Ok::<_, String>((source, frame.width, frame.height))
+            }).await.map_err(|e| e.to_string())?
+                .map_err(|e| format!("Could not capture the screen: {e}"))?;
+            let (width, height) = encoded_size(width, height);
+            Ok((source, width, height, short_id, tx, connection, sender_peer_id, session_generation))
+        }).await?;
+    let generation = reservation.generation();
     let audio_app_handle = app_handle.clone();
     let runtime = tokio::runtime::Handle::current();
     let on_end = {
         let state = (*state).clone();
         let runtime = runtime.clone();
         move |reason: String| {
-            // Runs on the capture thread: finish on the runtime (joining that thread from itself
-            // would deadlock).
             runtime.spawn(async move {
-                if state.stop_screen_share() {
-                    if let Some(tx) = state.control_tx.read().await.clone() {
-                        let _ = tx.send(ClientMessage::StopScreenShare).await;
-                    }
-                    let _ = app_handle.emit("screen-share-ended", reason);
-                }
+                finish_screen_share(&state, Some(generation), move |generation| {
+                    let _ = app_handle.emit("screen-share-ended", serde_json::json!({ "generation": generation, "reason": reason }));
+                }).await;
             });
         }
     };
-    let sharer = ScreenSharer::start(
-        connection,
-        runtime,
-        short_id,
-        state.session_peer_id.load(Ordering::SeqCst),
-        ShareConfig { fps: SHARE_FPS, bitrate_bps: None },
-        source,
-        on_end,
-    );
-    *state.screen_sharer.lock().map_err(|_| "screen share state poisoned".to_string())? = Some(sharer);
+    let audio_connection = connection.clone();
+    announce_screen_share(&state, generation, short_id, session_generation, &tx,
+        ClientMessage::StartScreenShare { codec: VideoCodec::H264, width, height, fps: SHARE_FPS }, || {
+            let sharer = ScreenSharer::start(connection, runtime, short_id, sender_peer_id,
+                ShareConfig { fps: SHARE_FPS, bitrate_bps: None }, source, on_end);
+            *state.screen_sharer.lock().map_err(|_| "screen share state poisoned".to_string())? = Some(sharer);
+            Ok(())
+        }).await?;
 
     if with_audio.unwrap_or(false) {
-        // Best effort: the picture is already going out, so a failure here is only reported.
-        let (channel_id, sender_peer_id) = (short_id, state.session_peer_id.load(Ordering::SeqCst));
-        let connection = state.quic_connection.read().await.clone();
-        let started = connection.map(|connection| {
-            ScreenAudioForwarder::start(connection, move || {
-                let config = ScreenAudioConfig { channel_id, sender_peer_id, ..ScreenAudioConfig::default() };
-                ScreenAudioCapturer::start(config)
-                    .map(|capturer| Box::new(capturer) as Box<dyn AudioPacketSource>)
-                    .map_err(|e| e.to_string())
-            })
+        let window_pid = if kind == "window" && audio_scope.as_deref() == Some("window") {
+            tokio::task::spawn_blocking(move || window_process_id(id)).await.unwrap_or(None)
+        } else { None };
+        let audio_source = requested_audio_source(audio_scope.as_deref(), &kind, window_pid);
+        let source_app_handle = audio_app_handle.clone();
+        let source_state = (*state).clone();
+        let started = ScreenAudioForwarder::start(audio_connection, move || {
+            let config = ScreenAudioConfig { source: audio_source?, channel_id: short_id, sender_peer_id, ..ScreenAudioConfig::default() };
+            ScreenAudioCapturer::start(config).map_err(|e| e.to_string())
+                .and_then(|capturer| source_state.with_screen_share(generation, || {
+                    let source = match capturer.source() {
+                        AudioSourceKind::AllExceptSelf => "all-except-self",
+                        AudioSourceKind::OnlyProcess(_) => "only-process",
+                        AudioSourceKind::Device => "device",
+                    };
+                    let _ = source_app_handle.emit("screen-audio-source", serde_json::json!({ "source": source }));
+                    Ok(Box::new(capturer) as Box<dyn AudioPacketSource>)
+                }))
         });
         match started {
-            Some(Ok(forwarder)) => {
-                if let Ok(mut slot) = state.screen_audio.lock() {
-                    *slot = Some(forwarder);
-                }
-            }
-            Some(Err(e)) => {
+            Ok(forwarder) => state.with_screen_share(generation, || {
+                *state.screen_audio.lock().map_err(|_| "screen share state poisoned".to_string())? = Some(forwarder);
+                Ok(())
+            })?,
+            Err(e) => state.with_screen_share(generation, || {
                 let _ = audio_app_handle.emit("screen-audio-failed", e);
-            }
-            None => {}
+                Ok(())
+            })?,
         }
     }
+    state.with_screen_share(generation, || Ok(()))?;
     info!("Started sharing {kind} {id} ({width}x{height})");
-    Ok(())
+    Ok(reservation.commit())
 }
 
 #[tauri::command]
 pub async fn stop_screen_share(state: State<'_, AppState>) -> Result<(), String> {
-    if state.stop_screen_share() {
-        if let Some(tx) = state.control_tx.read().await.clone() {
-            let _ = tx.send(ClientMessage::StopScreenShare).await;
-        }
-        info!("Stopped sharing the screen");
-    }
+    if finish_screen_share(&state, None, |_| {}).await { info!("Stopped sharing the screen"); }
     Ok(())
 }
 
@@ -268,4 +346,161 @@ pub async fn capture_thumbnail(kind: String, id: u32, max_width: Option<u32>) ->
     .await
     .map_err(|e| e.to_string())??;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[cfg(test)]
+mod audio_scope_tests {
+    use super::*;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn stop_during_first_frame_prevents_start_announcement() {
+        let state = AppState::new();
+        *state.current_voice_channel.write().await = Some(7);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
+        let worker_state = state.clone();
+        let worker = tokio::spawn(async move {
+            let (reservation, ()) = prepare_screen_share(&worker_state, |_| async move {
+                let _ = entered_tx.send(());
+                resume_rx.await.map_err(|e| e.to_string())?;
+                Ok(())
+            }).await?;
+            announce_screen_share(&worker_state, reservation.generation(), 7, 0, &tx,
+                ClientMessage::StartScreenShare { codec: VideoCodec::H264, width: 640, height: 480, fps: 30 }, || Ok(())).await
+        });
+        entered_rx.await.unwrap();
+        let was_active = state.stop_screen_share();
+        resume_tx.send(()).unwrap();
+        let result = worker.await.unwrap();
+        assert!(was_active);
+        assert_eq!(result, Err("screen-share-ended-before-start".to_string()));
+        assert!(rx.try_recv().is_err(), "a canceled preflight must not announce a new share");
+        assert!(state.begin_screen_share().is_ok());
+        state.stop_screen_share();
+    }
+
+    #[tokio::test]
+    async fn failed_first_frame_releases_the_start_reservation() {
+        let state = AppState::new();
+        let result = prepare_screen_share(&state, |_| async { Err::<(), _>("capture failed".to_string()) }).await;
+        assert!(matches!(result, Err(ref reason) if reason == "capture failed"));
+        assert!(state.begin_screen_share().is_ok());
+        state.stop_screen_share();
+    }
+
+    struct WaitingFrame {
+        entered: Option<tokio::sync::oneshot::Sender<()>>,
+        resume: std::sync::mpsc::Receiver<()>,
+    }
+    impl FrameSource for WaitingFrame {
+        fn next_frame(&mut self) -> Result<finch_screen::RawFrame, String> {
+            if let Some(entered) = self.entered.take() {
+                let _ = entered.send(());
+                self.resume.recv().map_err(|e| e.to_string())?;
+            }
+            Ok(finch_screen::RawFrame::new(64, 64, finch_screen::PixelFormat::Bgra, bytes::Bytes::from(vec![90; 64 * 64 * 4])))
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn stop_publishes_control_and_end_before_next_start() -> anyhow::Result<()> {
+        let server = finch_testbed::server::TestServer::start().await?;
+        let client = finch_testbed::client::TestClient::register(&server, "stopjoinrace").await?;
+        let state = AppState::new();
+        *state.current_voice_channel.write().await = Some(7);
+        let old = state.begin_screen_share().unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        *state.control_tx.write().await = Some(tx.clone());
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        let sharer = ScreenSharer::start(client.session.connection.clone(), tokio::runtime::Handle::current(),
+            7, client.session.session_peer_id, ShareConfig::default(),
+            Box::new(WaitingFrame { entered: Some(entered_tx), resume: resume_rx }), |_| {});
+        *state.screen_sharer.lock().unwrap() = Some(sharer);
+        entered_rx.await.unwrap();
+        let stopping_state = state.clone();
+        let end_published = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopped_event = end_published.clone();
+        let stopping = tokio::spawn(async move {
+            finish_screen_share(&stopping_state, Some(old), move |ended| {
+                assert_eq!(ended, old);
+                stopped_event.store(true, Ordering::SeqCst);
+            }).await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while state.screen_share_generation().unwrap() == old { tokio::task::yield_now().await; }
+        }).await?;
+        let new = state.begin_screen_share().unwrap();
+        let starting_state = state.clone();
+        let starting = tokio::spawn(async move {
+            announce_screen_share(&starting_state, new, 7, 0, &tx,
+                ClientMessage::StartScreenShare { codec: VideoCodec::H264, width: 640, height: 480, fps: 30 }, || {
+                    assert!(end_published.load(Ordering::SeqCst), "publish the old end before installing new video");
+                    Ok(())
+                }).await
+        });
+        let premature = tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await;
+        // Release the real capture thread even when a regression makes Start arrive too early.
+        resume_tx.send(()).unwrap();
+        assert!(stopping.await?);
+        assert!(starting.await?.is_ok());
+        assert!(premature.is_err(), "a new Start must wait while old workers are being joined");
+        assert!(matches!(rx.recv().await, Some(ClientMessage::StopScreenShare)));
+        assert!(matches!(rx.recv().await, Some(ClientMessage::StartScreenShare { .. })));
+        state.stop_screen_share();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn dropped_preflight_cancels_its_reservation() {
+        let state = AppState::new();
+        let worker_state = state.clone();
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let worker = tokio::spawn(async move {
+            prepare_screen_share(&worker_state, |_| async move {
+                let _ = entered_tx.send(());
+                std::future::pending::<Result<(), String>>().await
+            }).await.is_ok()
+        });
+        entered_rx.await.unwrap();
+        worker.abort();
+        assert!(worker.await.unwrap_err().is_cancelled());
+        assert!(state.begin_screen_share().is_ok());
+        state.stop_screen_share();
+    }
+
+    #[tokio::test]
+    async fn a_frame_from_another_room_or_session_cannot_be_announced() {
+        let state = AppState::new();
+        *state.current_voice_channel.write().await = Some(7);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        for (channel, session_generation) in [(8, 0), (7, 1)] {
+            let reservation = state.reserve_screen_share().unwrap();
+            *state.current_voice_channel.write().await = Some(channel);
+            state.session_generation.store(session_generation, Ordering::SeqCst);
+            let result = announce_screen_share(&state, reservation.generation(), 7, 0, &tx,
+                ClientMessage::StartScreenShare { codec: VideoCodec::H264, width: 640, height: 480, fps: 30 }, || panic!("stale frame must not install video")).await;
+            assert_eq!(result, Err("screen-share-ended-before-start".to_string()));
+            assert!(rx.try_recv().is_err());
+        }
+    }
+
+    #[test]
+    fn missing_window_pid_disables_audio_instead_of_sharing_the_computer() {
+        assert_eq!(requested_audio_source(Some("window"), "window", None), Err("window-audio-unavailable".to_string()));
+        assert_eq!(requested_audio_source(Some("window"), "window", Some(7)), Ok(AudioSourceKind::OnlyProcess(7)));
+    }
+    #[test]
+    fn scope_to_source_table() {
+        for (scope, kind, pid, expected) in [
+            (Some("window"), "window", Some(7), AudioSourceKind::OnlyProcess(7)),
+            (Some("window"), "window", None, AudioSourceKind::AllExceptSelf),
+            (Some("window"), "monitor", Some(7), AudioSourceKind::AllExceptSelf),
+            (None, "window", Some(7), AudioSourceKind::AllExceptSelf),
+            (Some("system"), "window", Some(7), AudioSourceKind::AllExceptSelf),
+            (Some("invalid"), "window", Some(7), AudioSourceKind::AllExceptSelf),
+        ] {
+            assert_eq!(scope_to_source(scope, kind, pid), expected);
+        }
+    }
 }

@@ -250,6 +250,7 @@ pub fn run() {
             commands::screen::unsubscribe_screen_share,
             commands::screen::request_idr_keyframe,
             commands::screen::list_screen_sources,
+            commands::screen::process_loopback_supported,
             commands::screen::start_screen_share,
             commands::screen::stop_screen_share,
         ])

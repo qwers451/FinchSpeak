@@ -127,6 +127,14 @@ async fn activate_session(session: &Session, state: &AppState, app_handle: &taur
     );
 }
 
+/// Disconnect cancels pending first-frame capture as well as installed workers.
+async fn stop_share_on_connection_loss(state: &AppState, generation: u64) -> bool {
+    let _transition = state.voice_transition.lock().await;
+    if state.session_generation.load(Ordering::SeqCst) != generation { return false; }
+    state.stop_screen_share();
+    true
+}
+
 /// Forward session events; after a drop, reconnect and continue with the new session.
 async fn run_session(
     mut events: mpsc::Receiver<SessionEvent>,
@@ -138,7 +146,7 @@ async fn run_session(
         let Some(reason) = forward_events(&mut events, &state, &app_handle, generation).await else {
             return;
         };
-        if state.session_generation.load(Ordering::SeqCst) != generation { return; }
+        if !stop_share_on_connection_loss(&state, generation).await { return; }
         *state.mixer.lock().await = finch_audio::AudioMixer::new();
         let _ = app_handle.emit("connection-lost", reason);
         match reconnect(&state, &app_handle, generation).await {
@@ -606,6 +614,18 @@ mod tests {
         let tick = Duration::from_secs(5);
         assert!(!slept(tick, Duration::from_secs(5)));
         assert!(slept(tick, Duration::from_secs(60)));
+    }
+
+    #[tokio::test]
+    async fn connection_loss_cancels_pending_screen_preflight_without_touching_a_new_session() {
+        let state = AppState::new();
+        let reservation = state.reserve_screen_share().unwrap();
+        assert!(stop_share_on_connection_loss(&state, 0).await);
+        assert!(state.with_screen_share(reservation.generation(), || Ok(())).is_err());
+        let current = state.reserve_screen_share().unwrap();
+        state.session_generation.store(1, Ordering::SeqCst);
+        assert!(!stop_share_on_connection_loss(&state, 0).await);
+        assert!(state.with_screen_share(current.generation(), || Ok(())).is_ok());
     }
 
     #[tokio::test]

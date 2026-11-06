@@ -1,7 +1,8 @@
 import { beforeEach, expect, it, vi } from 'vitest';
+import { t } from '../i18n';
 import { api } from '../services/api';
 import { appError, setAppError } from './notificationStore';
-import { isSharing, loadScreenSources, screenAudioKey, screenSources, sharingInfo, startSharing, stopSharing, stopWatching, watchShare, watching } from './screenStore';
+import { screenAudioSource, isSharing, loadScreenSources, screenAudioKey, screenSources, sharingInfo, startSharing, stopSharing, stopWatching, watchShare, watching } from './screenStore';
 import { sessionHandlers, resetSessionState } from './sessionStore';
 import { allVoiceParticipants, setVoiceParticipants } from './voiceStore';
 
@@ -131,9 +132,9 @@ it('AUD-018 the snapshot tells a late joiner who is already sharing', () => {
 it('AUD-018 the screen sound is requested only when asked for, and failures are shown', async () => {
   const start = vi.spyOn(api, 'startScreenShare').mockResolvedValue();
   await startSharing('monitor', 1);
-  expect(start).toHaveBeenLastCalledWith('monitor', 1, false);
+  expect(start).toHaveBeenLastCalledWith('monitor', 1, false, 'system');
   await startSharing('monitor', 1, true);
-  expect(start).toHaveBeenLastCalledWith('monitor', 1, true);
+  expect(start).toHaveBeenLastCalledWith('monitor', 1, true, 'system');
   sessionHandlers['screen-audio-failed']('no output device');
   expect(appError()).toContain('no output device');
 });
@@ -141,4 +142,78 @@ it('AUD-018 the screen sound is requested only when asked for, and failures are 
 it('AUD-018 the screen sound has its own volume key, apart from the voice', () => {
   expect(screenAudioKey(7)).toBe(7 + 0x40000000);
   expect(screenAudioKey(7)).not.toBe(7);
+});
+
+it('tracks the actual screen audio source and clears it when sharing ends', async () => {
+  sessionHandlers['screen-audio-source']({ source: 'device' });
+  expect(screenAudioSource()).toBe('device');
+  vi.spyOn(api, 'stopScreenShare').mockResolvedValue();
+  await stopSharing();
+  expect(screenAudioSource()).toBeNull();
+  sessionHandlers['screen-audio-source']({ source: 'all-except-self' });
+  sessionHandlers['screen-share-ended']('window closed');
+  expect(screenAudioSource()).toBeNull();
+});
+
+it('explains a missing window without broadening the chosen audio scope', () => {
+  sessionHandlers['screen-audio-failed']('window-audio-unavailable');
+  expect(appError()).toBe(t('Screen sound is not shared: the selected window is no longer available.'));
+});
+it('does not resurrect a share that ended while audio was starting', async () => {
+  let complete!: () => void;
+  vi.spyOn(api, 'startScreenShare').mockImplementation(() => new Promise<void>((resolve) => { complete = resolve; }));
+  const pending = startSharing('window', 9, true, 'Notes', 'window');
+  sessionHandlers['screen-share-ended']('window closed');
+  complete();
+  expect(await pending).toBe(t('Screen sharing stopped before it could start.'));
+  expect(isSharing()).toBe(false);
+  expect(sharingInfo()).toBeNull();
+});
+
+it('ignores a previous generation ending while a new share starts', async () => {
+  vi.spyOn(api, 'startScreenShare').mockResolvedValue(10);
+  await startSharing('window', 9, true, 'Old', 'window');
+  vi.spyOn(api, 'stopScreenShare').mockResolvedValue();
+  await stopSharing();
+  let complete!: (generation: number) => void;
+  vi.spyOn(api, 'startScreenShare').mockImplementation(() => new Promise<number>((resolve) => { complete = resolve; }));
+  const pending = startSharing('window', 12, true, 'New', 'window');
+  sessionHandlers['screen-share-ended']({ generation: 10, reason: 'old window closed' });
+  complete(20);
+  expect(await pending).toBeNull();
+  expect(isSharing()).toBe(true);
+  expect(sharingInfo()?.label).toBe('New');
+  sessionHandlers['screen-share-ended']({ generation: 10, reason: 'old window closed' });
+  expect(isSharing()).toBe(true);
+  sessionHandlers['screen-share-ended']({ generation: 20, reason: 'new window closed' });
+  expect(isSharing()).toBe(false);
+});
+
+it('remembers an end event received before the successful invoke reply', async () => {
+  let complete!: (generation: number) => void;
+  vi.spyOn(api, 'startScreenShare').mockImplementation(() => new Promise<number>((resolve) => { complete = resolve; }));
+  const pending = startSharing('window', 9, true, 'Notes', 'window');
+  sessionHandlers['screen-share-ended']({ generation: 30, reason: 'window closed' });
+  complete(30);
+  expect(await pending).toBe(t('Screen sharing stopped before it could start.'));
+  expect(isSharing()).toBe(false);
+  expect(sharingInfo()).toBeNull();
+});
+
+it('a room-changed end of an older share does not hide a share started during the switch', async () => {
+  vi.spyOn(api, 'startScreenShare').mockResolvedValue(40);
+  expect(await startSharing('window', 9, false, 'New room share', 'window')).toBeNull();
+  sessionHandlers['screen-share-ended']({ generation: 39, reason: 'room-changed' });
+  expect(isSharing()).toBe(true);
+  expect(sharingInfo()?.label).toBe('New room share');
+  expect(appError()).toBeNull();
+});
+
+it('a room-changed end of our current share stops it without an error message', async () => {
+  vi.spyOn(api, 'startScreenShare').mockResolvedValue(41);
+  await startSharing('window', 9, false, 'Notes', 'window');
+  sessionHandlers['screen-share-ended']({ generation: 41, reason: 'room-changed' });
+  expect(isSharing()).toBe(false);
+  expect(sharingInfo()).toBeNull();
+  expect(appError()).toBeNull();
 });

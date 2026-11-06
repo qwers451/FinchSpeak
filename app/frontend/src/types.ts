@@ -234,9 +234,10 @@ export interface SessionEvents {
   'screen-share-started': { user_id: string; peer_id: number; width: number; height: number; fps: number };
   'screen-share-stopped': { peer_id: number; reason?: string };
   /** Our own share ended by itself (capture failed, window closed). */
-  'screen-share-ended': string;
+  'screen-share-ended': string | { generation: number; reason: string };
   /** The sound of the shared screen could not be captured; the picture still goes out. */
   'screen-audio-failed': string;
+  'screen-audio-source': { source: 'all-except-self' | 'only-process' | 'device' };
   'presence-update': { user_id: string; status: UserStatus; status_text?: string | null };
   'avatar-changed': { user_id: string; avatar_url: string | null };
   /** The tray menu asked to mute or unmute. */

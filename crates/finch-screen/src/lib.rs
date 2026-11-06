@@ -15,13 +15,13 @@ pub mod thumbnail;
 pub mod yuv;
 
 pub use audio_loopback::{
-    list_loopback_devices, AudioLoopback, LoopbackAudioError, ResamplerConverter,
+    list_loopback_devices, AudioSourceKind, AudioLoopback, LoopbackAudioError, ResamplerConverter,
     ScreenAudioCapturer, ScreenAudioConfig, ScreenAudioEncoder, CHANNELS, DEFAULT_BITRATE_BPS,
     FRAME_DURATION_MS, MAX_OPUS_PAYLOAD_SIZE, SAMPLES_PER_CHANNEL, SAMPLE_RATE,
     STEREO_FRAME_SAMPLES,
 };
 pub use capture::{
-    capture_monitor, capture_window, list_monitors, list_windows, MonitorInfo, PixelFormat,
+    capture_monitor, capture_window, list_monitors, list_windows, window_process_id, MonitorInfo, PixelFormat,
     RawFrame, ScreenCaptureError, ScreenCapturer, WindowInfo,
 };
 pub use fragmenter::{slice_p_frame, slice_p_frame_with_chunk, AssembledFrame, FrameAssembler, DELTA_FRAME_TIMEOUT};
@@ -29,3 +29,6 @@ pub use thumbnail::{thumbnail_jpeg, ThumbnailCache, MAX_THUMBNAIL_WIDTH};
 pub use hw_encoder::{
     EncodedFrame, H264EncoderError, H264VideoEncoder, VideoEncoderConfig, MAX_HEIGHT, MAX_WIDTH,
 };
+
+#[cfg(windows)]
+pub mod process_loopback;

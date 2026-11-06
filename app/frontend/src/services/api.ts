@@ -447,6 +447,11 @@ export const api = {
     }
   },
 
+  processLoopbackSupported: async (): Promise<boolean> => {
+    if (isTauri()) return invoke('process_loopback_supported');
+    return false;
+  },
+
   // Screen sharing
   listScreenSources: async (): Promise<ScreenSources> => {
     if (isTauri()) {
@@ -455,9 +460,9 @@ export const api = {
     return { monitors: [], windows: [] };
   },
 
-  startScreenShare: async (kind: 'monitor' | 'window', id: number, withAudio = false): Promise<void> => {
+  startScreenShare: async (kind: 'monitor' | 'window', id: number, withAudio = false, audioScope: 'system' | 'window' = 'system'): Promise<number | void> => {
     if (isTauri()) {
-      return invoke('start_screen_share', { kind, id, withAudio });
+      return invoke('start_screen_share', { kind, id, withAudio, audioScope });
     }
   },
 
