@@ -72,6 +72,11 @@ async function flashTaskbar() {
   } catch { /* optional */ }
 }
 
+/** True while my status is "Do not disturb": no OS notifications, taskbar flash or mention tone. */
+export function isDoNotDisturb(): boolean {
+  return currentUser()?.status === 'donotdisturb';
+}
+
 /** What to do about a message that just arrived (not ours): returns what was done, for tests. */
 export function reactToMessage(
   message: Pick<Message, 'channel_id' | 'author_id' | 'author_name' | 'content' | 'mentions'>,
@@ -81,6 +86,7 @@ export function reactToMessage(
   const user = currentUser();
   const settings = prefs().notifications;
   if (!user || message.author_id === user.id) return 'none';
+  if (isDoNotDisturb()) return 'none';
   if (isChannelMuted(message.channel_id)) return 'none';
   const viewing = focused && activeChannel()?.id === message.channel_id;
   if (viewing) return 'none';
@@ -100,7 +106,7 @@ export function reactToVoiceMovement(kind: 'join' | 'leave', name: string, userI
   const settings = prefs().notifications;
   if (!settings.voiceJoin || userId === currentUser()?.id) return;
   playTone(kind);
-  if (kind === 'join' && !focused) void notifyDesktop(t('{name} joined {room}', { name, room: activeVoiceChannel()?.name ?? t('your voice room') }), '');
+  if (kind === 'join' && !focused && !isDoNotDisturb()) void notifyDesktop(t('{name} joined {room}', { name, room: activeVoiceChannel()?.name ?? t('your voice room') }), '');
 }
 
 // ---- tray and window --------------------------------------------------------------------------
