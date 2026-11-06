@@ -5,8 +5,9 @@ import { clearToasts, toasts } from '../ui';
 import {
   changeVoiceSettings, chooseHotkey, choosePushToTalkKey, deafenKey, DEFAULT_VOICE_SETTINGS, handleHotkey, isDeafened, isMuted, muteKey,
   pushToTalkKey, restoreVoiceSettings, setActiveVoiceChannel, setDeafenKey, setIsDeafened, setIsMuted, setMuteKey, setPushToTalkKey, setVoiceSettings,
-  shortcutFromEvent, voiceSettings,
+  shortcutFromEvent, hotkeyErrorText, voiceSettings,
 } from './voiceStore';
+import { DEFAULT_PREFS, setPrefs } from './settingsStore';
 
 const press = (code: string, mods: Partial<{ ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }> = {}) =>
   shortcutFromEvent({ code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods });
@@ -213,5 +214,33 @@ it('a key that fails to register does not stop the other keys or the settings', 
   expect(toasts().map((toast) => toast.title)).toEqual(['Could not use F9 for "Mute microphone": another program may be using it.']);
   await changeVoiceSettings({ monitor: true });
   expect(JSON.parse(localStorage.getItem('finchspeak.voiceSettings')!)).toMatchObject({ muteKey: 'F9', deafenKey: 'F10' });
-  expect(saved).not.toBeNull();
+  expect(JSON.parse(saved!)).toMatchObject({ muteKey: 'F9', deafenKey: 'F10' }); // what was stored is what was kept
+});
+
+it('backend key errors are shown in Russian', () => {
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'ru' } });
+  try {
+    expect(hotkeyErrorText('Error: "Foo" cannot be used as a key: bad name')).toBe('«Foo» нельзя использовать как клавишу: bad name');
+    expect(hotkeyErrorText('Could not use "F9" as a key: taken')).toBe('Не удалось использовать «F9» как клавишу: taken');
+    expect(hotkeyErrorText('"F9" is already used by another action')).toBe('Клавиша «F9» уже используется для другого действия');
+    expect(hotkeyErrorText('Keys are unavailable')).toBe('Клавиши сейчас недоступны');
+  } finally {
+    setPrefs(DEFAULT_PREFS);
+  }
+});
+
+it('a failed push-to-talk key is pushed as off but the preference stays stored', async () => {
+  const stored = JSON.stringify({
+    settings: { input_gain: 1, vad_threshold_db: -45, push_to_talk: true, monitor: false, voice_enhancement: true },
+    key: 'F8', muteKey: null, deafenKey: null,
+  });
+  localStorage.setItem('finchspeak.voiceSettings', stored);
+  vi.spyOn(api, 'setPushToTalkKey').mockRejectedValue('taken');
+  const send = vi.spyOn(api, 'setVoiceSettings').mockResolvedValue();
+  await restoreVoiceSettings();
+  expect(send).toHaveBeenCalledWith(expect.objectContaining({ push_to_talk: false }));
+  expect(toasts()).toHaveLength(1);
+  expect(pushToTalkKey()).toBe('F8');
+  await changeVoiceSettings({ monitor: true });
+  expect(JSON.parse(localStorage.getItem('finchspeak.voiceSettings')!)).toMatchObject({ key: 'F8', settings: { push_to_talk: true } });
 });

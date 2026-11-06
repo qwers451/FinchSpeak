@@ -216,10 +216,10 @@ export function changeVoiceSettings(change: Partial<VoiceSettings>) {
 
 /** Backend key errors are English text; show them translated. */
 export function hotkeyErrorText(err: unknown): string {
-  const message = String(err).replace(/^Error:s*/, '');
-  let match = /^"(.*)" cannot be used as a key: ([sS]*)$/.exec(message);
+  const message = String(err).replace(/^Error:\s*/, '');
+  let match = /^"(.*)" cannot be used as a key: ([\s\S]*)$/.exec(message);
   if (match) return t('"{key}" cannot be used as a key: {detail}', { key: match[1], detail: match[2] });
-  match = /^Could not use "(.*)" as a key: ([sS]*)$/.exec(message);
+  match = /^Could not use "(.*)" as a key: ([\s\S]*)$/.exec(message);
   if (match) return t('Could not use "{key}" as a key: {detail}', { key: match[1], detail: match[2] });
   match = /^"(.*)" is already used by another action$/.exec(message);
   if (match) return t('"{key}" is already used by another action', { key: match[1] });
@@ -276,8 +276,7 @@ export function restoreVoiceSettings() {
   return queueSettingsWrite(async () => {
     const saved = readSavedVoice();
     if (!saved) return;
-    const failed = (action: HotkeyAction, key: string, err: unknown) => {
-      void err; // the toast says which key; the backend reason adds nothing the person can act on
+    const failed = (action: HotkeyAction, key: string) => {
       pushToast({ kind: 'warn', title: t('Could not use {key} for "{action}": another program may be using it.', { key, action: t(HOTKEY_LABELS[action]) }) });
     };
     // Each key on its own: one that is taken must not cost the others or the microphone settings.
@@ -286,9 +285,9 @@ export function restoreVoiceSettings() {
     if (saved.key) {
       try {
         await api.setPushToTalkKey(saved.key);
-      } catch (err) {
+      } catch {
         pushToTalkWorks = false;
-        failed('push_to_talk', saved.key, err);
+        failed('push_to_talk', saved.key);
       }
     }
     setPushToTalkKey(saved.key);
@@ -296,15 +295,16 @@ export function restoreVoiceSettings() {
       if (key) {
         try {
           await api.setHotkey(action, key);
-        } catch (err) {
-          failed(action, key, err);
+        } catch {
+          failed(action, key);
         }
       }
       hotkeySignals[action][1](key);
     }
     try {
-      const settings = { ...saved.settings, key_down: false, push_to_talk: saved.settings.push_to_talk && pushToTalkWorks };
-      await api.setVoiceSettings(settings);
+      // The preference stays as saved; only the backend is told false while the key is not registered.
+      const settings = { ...saved.settings, key_down: false, push_to_talk: saved.settings.push_to_talk && !!saved.key };
+      await api.setVoiceSettings({ ...settings, push_to_talk: settings.push_to_talk && pushToTalkWorks });
       setVoiceSettings(settings);
     } catch (err) {
       setAppError(String(err));
