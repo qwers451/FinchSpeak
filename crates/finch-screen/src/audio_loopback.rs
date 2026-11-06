@@ -291,9 +291,21 @@ fn extract_stereo(channels: &[f32], count: usize) -> (f32, f32) {
     }
 }
 
+/// Where screen audio comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AudioSourceKind {
+    /// Everything the computer plays except this process (Windows 10 2004+).
+    AllExceptSelf,
+    /// Only this process tree (sharing one window).
+    OnlyProcess(u32),
+    /// The whole output device (fallback).
+    Device,
+}
+
 /// Configuration settings for the screen audio loopback capturer.
 #[derive(Debug, Clone)]
 pub struct ScreenAudioConfig {
+    pub source: AudioSourceKind,
     /// Target voice/media channel ID (u32 session id).
     pub channel_id: u32,
     /// Local sender peer ID (u32 session id).
@@ -309,6 +321,7 @@ pub struct ScreenAudioConfig {
 impl Default for ScreenAudioConfig {
     fn default() -> Self {
         Self {
+            source: AudioSourceKind::AllExceptSelf,
             channel_id: 0,
             sender_peer_id: 0,
             bitrate_kbps: 96,
@@ -358,6 +371,7 @@ fn find_device_by_name(host: &cpal::Host, target_name: &str) -> Option<cpal::Dev
 /// [`MediaPacket`] datagrams with [`MediaType::ScreenAudio`] and a 20-byte [`MediaHeader`].
 pub struct ScreenAudioCapturer {
     config: ScreenAudioConfig,
+    source: AudioSourceKind,
     running: Arc<AtomicBool>,
     _stream: Option<cpal::Stream>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
@@ -370,6 +384,10 @@ pub type AudioLoopback = ScreenAudioCapturer;
 impl ScreenAudioCapturer {
     /// Start loopback capture and Opus encoding with the specified configuration.
     pub fn start(config: ScreenAudioConfig) -> Result<Self, LoopbackAudioError> {
+        Self::start_device_capture(config)
+    }
+
+    fn start_device_capture(config: ScreenAudioConfig) -> Result<Self, LoopbackAudioError> {
         let host = cpal::default_host();
         let device = match &config.device_name {
             Some(name) => find_device_by_name(&host, name)
@@ -393,7 +411,7 @@ impl ScreenAudioCapturer {
 
         // Lock-free ring buffer for real-time CPAL callback to dedicated thread communication
         let rb = HeapRb::<f32>::new(RINGBUF_CAPACITY);
-        let (mut prod, mut cons) = rb.split();
+        let (mut prod, cons) = rb.split();
 
         let err_fn = move |err: cpal::StreamError| {
             tracing::error!("CPAL audio loopback stream error: {err}");
@@ -435,10 +453,69 @@ impl ScreenAudioCapturer {
 
         stream.play()?;
 
-        let (tx, rx) = channel();
         let running = Arc::new(AtomicBool::new(true));
+        let (thread_handle, rx) = spawn_encoder_thread(config.clone(), source_rate, source_channels, cons, Arc::clone(&running))?;
+
+        Ok(Self {
+            config,
+            source: AudioSourceKind::Device,
+            running,
+            _stream: Some(stream),
+            thread_handle: Some(thread_handle),
+            receiver: rx,
+        })
+    }
+
+    /// The capture source actually in use, after fallback.
+    pub fn source(&self) -> &AudioSourceKind {
+        &self.source
+    }
+
+    /// Stop loopback capture and shutdown background processing thread.
+    pub fn stop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+        self._stream = None;
+        if let Some(handle) = self.thread_handle.take() {
+            let _ = handle.join();
+        }
+    }
+
+    /// Check if audio capture is currently running.
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::Relaxed)
+    }
+
+    /// Non-blocking receive for the next encoded audio media packet.
+    pub fn try_recv(&self) -> Option<MediaPacket> {
+        self.receiver.try_recv().ok()
+    }
+
+    /// Blocking receive for the next encoded audio media packet.
+    pub fn recv(&self) -> Result<MediaPacket, RecvError> {
+        self.receiver.recv()
+    }
+
+    /// Reference to the internal channel receiver.
+    pub fn receiver(&self) -> &Receiver<MediaPacket> {
+        &self.receiver
+    }
+
+    /// Current capture configuration.
+    pub fn config(&self) -> &ScreenAudioConfig {
+        &self.config
+    }
+}
+
+fn spawn_encoder_thread(
+    config: ScreenAudioConfig,
+    source_rate: u32,
+    source_channels: usize,
+    mut cons: ringbuf::HeapCons<f32>,
+    running: Arc<AtomicBool>,
+) -> Result<(std::thread::JoinHandle<()>, Receiver<MediaPacket>), LoopbackAudioError> {
+        let (tx, rx) = channel();
         let running_thread = Arc::clone(&running);
-        let thread_config = config.clone();
+        let thread_config = config;
 
         let thread_handle = std::thread::Builder::new()
             .name("finch-audio-loopback".to_string())
@@ -496,48 +573,7 @@ impl ScreenAudioCapturer {
             })
             .map_err(LoopbackAudioError::ThreadSpawnError)?;
 
-        Ok(Self {
-            config,
-            running,
-            _stream: Some(stream),
-            thread_handle: Some(thread_handle),
-            receiver: rx,
-        })
-    }
-
-    /// Stop loopback capture and shutdown background processing thread.
-    pub fn stop(&mut self) {
-        self.running.store(false, Ordering::Relaxed);
-        self._stream = None;
-        if let Some(handle) = self.thread_handle.take() {
-            let _ = handle.join();
-        }
-    }
-
-    /// Check if audio capture is currently running.
-    pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::Relaxed)
-    }
-
-    /// Non-blocking receive for the next encoded audio media packet.
-    pub fn try_recv(&self) -> Option<MediaPacket> {
-        self.receiver.try_recv().ok()
-    }
-
-    /// Blocking receive for the next encoded audio media packet.
-    pub fn recv(&self) -> Result<MediaPacket, RecvError> {
-        self.receiver.recv()
-    }
-
-    /// Reference to the internal channel receiver.
-    pub fn receiver(&self) -> &Receiver<MediaPacket> {
-        &self.receiver
-    }
-
-    /// Current capture configuration.
-    pub fn config(&self) -> &ScreenAudioConfig {
-        &self.config
-    }
+    Ok((thread_handle, rx))
 }
 
 impl Drop for ScreenAudioCapturer {
@@ -673,5 +709,14 @@ mod tests {
     fn test_device_enumeration() {
         // Enumerate loopback devices without panic
         let _ = list_loopback_devices();
+    }
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+    #[test]
+    fn default_config_asks_for_all_except_self() {
+        assert_eq!(ScreenAudioConfig::default().source, AudioSourceKind::AllExceptSelf);
     }
 }
