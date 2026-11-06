@@ -13,8 +13,9 @@ pub mod state;
 pub mod credentials;
 
 use state::AppState;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, RunEvent};
 
 /// An invite link that arrived before the window was listening; the window takes it once at start.
 static PENDING_INVITE: Mutex<Option<String>> = Mutex::new(None);
@@ -79,6 +80,31 @@ pub fn should_start_hidden(args: impl IntoIterator<Item = String>) -> bool {
     args.into_iter().any(|a| a == "--minimized")
 }
 
+/// Set once the quit cleanup has started; the first exit request starts it.
+static QUIT_CLEANUP_STARTED: AtomicBool = AtomicBool::new(false);
+/// Set when the quit cleanup has finished; the exit it repeats is then let through.
+static QUIT_CLEANUP_DONE: AtomicBool = AtomicBool::new(false);
+
+/// Every exit (tray Quit, Windows log-off, updater) first leaves the voice room and closes the
+/// session, so others see us leave at once. The exit is held until that finishes, then repeated.
+fn on_run_event(app: &AppHandle, event: RunEvent) {
+    let RunEvent::ExitRequested { api, .. } = event else { return };
+    if QUIT_CLEANUP_DONE.load(Ordering::SeqCst) {
+        return;
+    }
+    api.prevent_exit();
+    if QUIT_CLEANUP_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let state = app.state::<AppState>().inner().clone();
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        connection::shutdown_session(&state).await;
+        QUIT_CLEANUP_DONE.store(true, Ordering::SeqCst);
+        app.exit(0);
+    });
+}
+
 pub fn run() {
     // Initialize tracing subscriber
     let _ = tracing_subscriber::fmt()
@@ -92,7 +118,7 @@ pub fn run() {
 
     let state = AppState::new();
 
-    if let Err(e) = tauri::Builder::default()
+    match tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(link) = invite_argument(argv) {
                 announce_invite(app, link);
@@ -254,9 +280,10 @@ pub fn run() {
             commands::screen::start_screen_share,
             commands::screen::stop_screen_share,
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
     {
-        tracing::error!("Error while running FinchSpeak application: {e}");
+        Ok(app) => app.run(on_run_event),
+        Err(e) => tracing::error!("Error while running FinchSpeak application: {e}"),
     }
 }
 

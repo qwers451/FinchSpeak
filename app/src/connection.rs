@@ -20,6 +20,37 @@ use tracing::{info, warn};
 
 use crate::state::{AppState, VideoChunkPayload};
 
+/// How long a quit may take in total; the app exits after this whatever the network does.
+const QUIT_BOUND: Duration = Duration::from_millis(1500);
+/// How long leaving the voice room may take before the connection is closed anyway.
+const QUIT_LEAVE_BOUND: Duration = Duration::from_millis(1000);
+/// Gives the queued LeaveVoice time to reach the wire before the connection closes.
+const QUIT_LEAVE_FLUSH: Duration = Duration::from_millis(100);
+/// Gives the connection close time to leave the endpoint before the process exits.
+const QUIT_CLOSE_FLUSH: Duration = Duration::from_millis(250);
+
+/// Quit path (tray Quit, Windows log-off, updater restart): leaves the voice room and closes the
+/// QUIC session, so the server drops us at once instead of after its 15 s idle timeout. Best effort
+/// and bounded by `QUIT_BOUND`, whatever the network or a stuck voice transition does.
+pub async fn shutdown_session(state: &AppState) {
+    let routine = async {
+        if state.current_voice_channel.read().await.is_some() {
+            if tokio::time::timeout(QUIT_LEAVE_BOUND, crate::commands::voice::leave_room(state)).await.is_err() {
+                warn!("Leaving the voice room timed out while quitting");
+            }
+            tokio::time::sleep(QUIT_LEAVE_FLUSH).await;
+        }
+        let connection = state.quic_connection.write().await.take();
+        if let Some(connection) = connection {
+            connection.close(0u32.into(), b"quit");
+            tokio::time::sleep(QUIT_CLOSE_FLUSH).await;
+        }
+    };
+    if tokio::time::timeout(QUIT_BOUND, routine).await.is_err() {
+        warn!("Quitting timed out before the session was closed");
+    }
+}
+
 async fn supersede_session(state: &AppState) -> u64 {
     let _transition = state.voice_transition.lock().await;
     let generation = state.session_generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -759,5 +790,58 @@ mod tests {
         *state.control_tx.write().await = Some(tx);
         resubscribe(&state).await;
         assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quitting_tells_the_room_at_once_instead_of_after_the_idle_timeout() -> anyhow::Result<()> {
+        let server = TestServer::start().await?;
+        let mut alice = TestClient::register(&server, "quitalice").await?;
+        let mut bob = TestClient::register(&server, "quitbob").await?;
+        let (_, alice_short) = alice.join_voice().await?;
+        bob.join_voice().await?;
+        let alice_peer = alice.session.session_peer_id;
+        let state = AppState::new();
+        *state.control_tx.write().await = Some(alice.session.control_tx.clone());
+        *state.quic_connection.write().await = Some(alice.session.connection.clone());
+        *state.current_voice_channel.write().await = Some(alice_short);
+
+        let started = Instant::now();
+        shutdown_session(&state).await;
+        bob.expect_control(Duration::from_secs(1), |m| match m {
+            ServerMessage::UserLeftVoice { peer_id, .. } if *peer_id == alice_peer => Some(()),
+            _ => None,
+        })
+        .await?;
+        assert!(started.elapsed() < Duration::from_secs(1), "quit must not wait for the 15 s idle timeout");
+        assert!(state.quic_connection.read().await.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn quitting_without_a_connection_returns_within_the_bound() {
+        let state = AppState::new();
+        let started = Instant::now();
+        shutdown_session(&state).await;
+        assert!(started.elapsed() < QUIT_BOUND, "no connection must not block quitting");
+    }
+
+    #[tokio::test]
+    async fn quitting_still_closes_the_connection_when_a_voice_transition_is_stuck() -> anyhow::Result<()> {
+        let server = TestServer::start().await?;
+        let client = TestClient::register(&server, "quitstuck").await?;
+        let state = AppState::new();
+        *state.quic_connection.write().await = Some(client.session.connection.clone());
+        *state.control_tx.write().await = Some(client.session.control_tx.clone());
+        *state.current_voice_channel.write().await = Some(1);
+        let stuck = state.voice_transition.lock().await;
+
+        let started = Instant::now();
+        shutdown_session(&state).await;
+        assert!(started.elapsed() < QUIT_BOUND, "a stuck transition must not hold quitting");
+        drop(stuck);
+        tokio::time::timeout(Duration::from_millis(500), client.session.connection.closed())
+            .await
+            .expect("quit must close the QUIC connection even when the leave cannot finish");
+        Ok(())
     }
 }

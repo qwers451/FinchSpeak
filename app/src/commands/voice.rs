@@ -83,8 +83,9 @@ pub async fn join_voice_channel(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn leave_voice_channel(state: State<'_, AppState>) -> Result<(), String> {
+/// Leaves the voice room: tells the server and stops our audio, share and viewing. Used by the
+/// Leave command and when the app quits.
+pub(crate) async fn leave_room(state: &AppState) {
     let _transition = state.voice_transition.lock().await;
     let tx_opt = state.control_tx.read().await.clone();
     if let Some(tx) = tx_opt {
@@ -99,6 +100,11 @@ pub async fn leave_voice_channel(state: State<'_, AppState>) -> Result<(), Strin
     state.mixer.lock().await.clear_playout();
 
     info!("Left voice channel");
+}
+
+#[tauri::command]
+pub async fn leave_voice_channel(state: State<'_, AppState>) -> Result<(), String> {
+    leave_room(state.inner()).await;
     Ok(())
 }
 
