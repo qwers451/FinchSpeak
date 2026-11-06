@@ -1,0 +1,60 @@
+/* "My colors": the Claude theme's shapes and fonts, painted with the person's colors.
+   The variables themselves are set on <html> by applyAppearance(). */
+
+/* Text that sits right on the accent or signal color picks dark or light, whichever reads. */
+[data-theme="user"] :is(.btn.primary, .av.c1, .av.c6, .av.c2, .av.c8) { color:var(--on-accent); }
+[data-theme="user"] :is(.ctl.live, .av.c4, .av.c5) { color:var(--on-signal); }
+[data-theme="user"] ::selection { background:var(--yellow); color:var(--on-accent); }
+
+/* Choosing a theme: every color blends into the new one instead of jumping. */
+html[data-theme-blend],
+html[data-theme-blend] body,
+html[data-theme-blend] *,
+html[data-theme-blend] *::before,
+html[data-theme-blend] *::after {
+  transition:
+    background-color 420ms var(--ease-out),
+    border-color 420ms var(--ease-out),
+    color 420ms var(--ease-out),
+    fill 420ms var(--ease-out),
+    stroke 420ms var(--ease-out),
+    outline-color 420ms var(--ease-out),
+    box-shadow 420ms var(--ease-out) !important;
+}
+
+/* The theme editor on the Appearance page. */
+.theme-presets { display:grid; grid-template-columns:repeat(auto-fill, minmax(118px, 1fr)); gap:8px; }
+.theme-preset {
+  display:flex; flex-direction:column; gap:8px; padding:10px; text-align:left; cursor:pointer;
+  background:var(--bg-card); color:var(--text-2); border:1px solid var(--line-soft); border-radius:var(--r-md);
+  font:550 12px/1.2 var(--font-ui);
+  transition:border-color 140ms var(--ease-out), transform 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+.theme-preset:hover { border-color:var(--line); color:var(--text); transform:translateY(-1px); }
+.theme-preset:active { transform:translateY(0) scale(.98); }
+.theme-preset[aria-pressed="true"] { border-color:var(--yellow); color:var(--text); box-shadow:var(--glow-focus); }
+.theme-preset .chips { display:flex; height:22px; border-radius:var(--r-sm); overflow:hidden; box-shadow:inset 0 0 0 1px #0002; }
+.theme-preset .chips i { flex:1; }
+
+.theme-colors { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:8px 16px; }
+.theme-color { display:flex; align-items:center; gap:12px; min-height:48px; }
+.theme-color .swatch {
+  position:relative; flex:none; width:38px; height:38px; border-radius:var(--r-sm); overflow:hidden; cursor:pointer;
+  box-shadow:inset 0 0 0 1px #ffffff22, 0 0 0 1px var(--line);
+  transition:transform 140ms var(--ease-out), box-shadow 140ms var(--ease-out);
+}
+.theme-color .swatch:hover { transform:scale(1.06); }
+.theme-color .swatch:focus-within { box-shadow:inset 0 0 0 1px #ffffff22, var(--glow-focus); }
+.theme-color .swatch input { position:absolute; inset:-8px; width:calc(100% + 16px); height:calc(100% + 16px); border:0; padding:0; cursor:pointer; opacity:0; }
+.theme-color .swatch i { position:absolute; inset:0; pointer-events:none; transition:background-color 160ms var(--ease-out); }
+.theme-color .hex { width:84px; height:30px; padding:0 8px; background:var(--bg-deep); color:var(--text); border:1px solid var(--line); border-radius:var(--r-sm); font:500 12px/30px ui-monospace, 'Cascadia Mono', monospace; text-transform:lowercase; }
+.theme-color .hex:focus { outline:none; border-color:var(--yellow); box-shadow:var(--glow-focus); }
+.theme-color .hex[aria-invalid="true"] { border-color:var(--red); }
+.theme-editor { display:flex; flex-direction:column; gap:14px; padding:14px 0 6px; animation:theme-editor-in 240ms var(--ease-out) both; }
+@keyframes theme-editor-in { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+
+.theme-preset.from-image { border-style:dashed; }
+.theme-preset.from-image.over { border-color:var(--yellow); border-style:solid; background:var(--tint-accent); color:var(--text); }
+.theme-preset.from-image.busy { cursor:progress; opacity:.75; }
+.theme-preset .chips.picture { display:flex; align-items:center; justify-content:center; background:var(--bg-deep); color:var(--text-3); }
+.theme-preset .chips.picture img { width:100%; height:100%; object-fit:cover; animation:theme-editor-in 240ms var(--ease-out) both; }

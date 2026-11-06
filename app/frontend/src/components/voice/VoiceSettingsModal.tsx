@@ -1,8 +1,10 @@
-import { createEffect, createSignal, For, on, Show } from 'solid-js';
+import { createEffect, createSignal, For, on, onMount, Show } from 'solid-js';
 import {
-  availableDevices, changeVoiceSettings, chooseAudioDevice, choosePushToTalkKey, isMuted, levelFraction, loadAudioDevices, micLevelDb, micActivation,
-  micTestPhase, pushToTalkKey, selectedDevices, shortcutFromEvent, startMicTest, voiceSettings, type DeviceSelection,
+  availableDevices, changeVoiceSettings, chooseAudioDevice, isMuted, levelFraction, loadAudioDevices, micLevelDb, micActivation,
+  micTestPhase, selectedDevices, startMicTest, voiceSettings, type DeviceSelection,
 } from '../../stores/voiceStore';
+import { HotkeyButton } from './HotkeyButton';
+import { resetSeats, seats, setSpatialEnabled, spatialEnabled } from '../../stores/spatialStore';
 import type { AudioDevice } from '../../types';
 import { Button, Icon, Modal, Slider, Toggle } from '../../ui';
 import { t } from '../../i18n';
@@ -33,15 +35,13 @@ function DevicePicker(props: { kind: keyof DeviceSelection; label: string; devic
   );
 }
 
-/** D3: devices, microphone level with the speech threshold, push-to-talk, hear myself, test. */
-export function VoiceSettingsModal(props: { open: boolean; onClose: () => void }) {
-  const [capturing, setCapturing] = createSignal(false);
+/** D3: devices, microphone level with the speech threshold, keys, hear myself, test. */
+function VoiceSettingsBody() {
   const [diagnosticsBusy, setDiagnosticsBusy] = createSignal(false);
   const [diagnosticsAction, setDiagnosticsAction] = createSignal<'start' | 'stop' | 'save' | null>(null);
   const [diagnosticsStatus, setDiagnosticsStatus] = createSignal('');
   const [diagnosticsError, setDiagnosticsError] = createSignal('');
   const [diagnosticCapture, setDiagnosticCapture] = createSignal(false);
-  createEffect(on(() => props.open, (open) => { if (open) void loadAudioDevices(); }));
 
   const startDiagnostics = async () => {
     setDiagnosticsBusy(true);
@@ -106,24 +106,10 @@ export function VoiceSettingsModal(props: { open: boolean; onClose: () => void }
     }
   };
 
-  const captureKey = (event: KeyboardEvent) => {
-    event.preventDefault();
-    event.stopPropagation(); // while choosing a key, Esc must not reach the dialog and close it
-    if (event.code === 'Escape') {
-      setCapturing(false);
-      return;
-    }
-    const shortcut = shortcutFromEvent(event);
-    if (!shortcut) return; // a modifier on its own: wait for the real key
-    setCapturing(false);
-    void choosePushToTalkKey(shortcut);
-  };
-
   const meterWidth = () => `${Math.round(levelFraction(isMuted() ? -120 : micLevelDb()) * 100)}%`;
   const thresholdLeft = () => `${Math.round(levelFraction(voiceSettings().vad_threshold_db) * 100)}%`;
 
   return (
-    <Modal open={props.open} onClose={props.onClose} title={t('Voice and audio')} width="560px">
       <div class="col g20">
         <DevicePicker kind="input" label={t('Microphone')} devices={availableDevices().inputs} />
         <DevicePicker kind="output" label={t('Speakers')} devices={availableDevices().outputs} />
@@ -165,21 +151,24 @@ export function VoiceSettingsModal(props: { open: boolean; onClose: () => void }
           <div class="col grow"><strong class="fs13">{t('Push to talk')}</strong><span class="t3 fs12">{t('The microphone is open only while the key is held; it works while FinchSpeak is in the background.')}</span></div>
           <Toggle label={t('Push to talk')} checked={voiceSettings().push_to_talk} onChange={(checked) => void changeVoiceSettings({ push_to_talk: checked })} />
         </div>
-        <div class="row g8">
-          <button
-            type="button"
-            class={`btn secondary${capturing() ? ' is-focus' : ''}`}
-            aria-label={t('Push-to-talk key')}
-            onClick={() => setCapturing(true)}
-            onKeyDown={(event) => capturing() && captureKey(event)}
-            onBlur={() => setCapturing(false)}
-          >
-            <Icon name="key" size="sm" />{capturing() ? t('Press a key… (Esc cancels)') : pushToTalkKey() ?? t('Choose key')}
-          </button>
-          <Show when={pushToTalkKey()}>
-            <Button iconOnly size="sm" variant="ghost" icon="x" label={t('Remove the key')} onClick={() => void choosePushToTalkKey(null)} />
-          </Show>
+        <HotkeyButton action="push_to_talk" />
+
+        <div class="setrow">
+          <div class="col grow"><strong class="fs13">{t('Mute microphone')}</strong><span class="t3 fs12">{t('Pressed to mute or unmute; works in the background.')}</span></div>
+          <HotkeyButton action="toggle_mute" />
         </div>
+        <div class="setrow">
+          <div class="col grow"><strong class="fs13">{t('Turn sound off')}</strong><span class="t3 fs12">{t('Pressed to turn all sound off or on; works in the background.')}</span></div>
+          <HotkeyButton action="toggle_deafen" />
+        </div>
+
+        <div class="setrow">
+          <div class="col grow"><strong class="fs13">{t('Spatial audio')}</strong><span class="t3 fs12">{t('Everyone in the room is heard from their own side. Best with headphones; drag people on the stage in the room to move them.')}</span></div>
+          <Toggle label={t('Spatial audio')} checked={spatialEnabled()} onChange={setSpatialEnabled} />
+        </div>
+        <Show when={spatialEnabled() && Object.keys(seats()).length > 0}>
+          <div class="row"><Button size="sm" variant="ghost" icon="refresh" onClick={() => resetSeats()}>{t('Spread everyone out again')}</Button></div>
+        </Show>
 
         <div class="setrow">
           <div class="col grow"><strong class="fs13">{t('Hear myself')}</strong><span class="t3 fs12">{t('Plays processed microphone audio continuously, except during a microphone test.')}</span></div>
@@ -211,6 +200,23 @@ export function VoiceSettingsModal(props: { open: boolean; onClose: () => void }
           <Show when={diagnosticsError()}><span class="err" role="alert"><Icon name="warn" size="sm" />{diagnosticsError()}</span></Show>
         </div>
 
+      </div>
+  );
+}
+
+/** Voice and audio as a page inside the settings window. */
+export function VoiceSettingsPage() {
+  onMount(() => void loadAudioDevices());
+  return <VoiceSettingsBody />;
+}
+
+/** Voice and audio as its own dialog, opened from the voice room. */
+export function VoiceSettingsModal(props: { open: boolean; onClose: () => void }) {
+  createEffect(on(() => props.open, (open) => { if (open) void loadAudioDevices(); }));
+  return (
+    <Modal open={props.open} onClose={props.onClose} title={t('Voice and audio')} width="560px">
+      <div class="col g20">
+        <VoiceSettingsBody />
         <div class="row" style={{ 'justify-content': 'flex-end' }}><Button variant="primary" onClick={props.onClose}>{t('Done')}</Button></div>
       </div>
     </Modal>

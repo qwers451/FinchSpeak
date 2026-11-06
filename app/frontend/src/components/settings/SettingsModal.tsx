@@ -9,13 +9,14 @@ import { presence, statusTexts } from '../../stores/sessionStore';
 import {
   isChannelMuted, muteChannel, prefs, unmuteChannel, updateAppearance, updateNotifications,
 } from '../../stores/settingsStore';
-import { choosePushToTalkKey, pushToTalkKey, shortcutFromEvent } from '../../stores/voiceStore';
 import type { UserStatus } from '../../types';
 import { Avatar, Button, Field, Icon, type IconName, Modal, pushToast, Slider, Toggle } from '../../ui';
 import { passwordStrength } from '../../ui/passwordStrength';
 import { AvatarCropDialog, checkAvatarFile } from './AvatarCropDialog';
 import { t } from '../../i18n';
-import { VoiceSettingsModal } from '../voice/VoiceSettingsModal';
+import { VoiceSettingsPage } from '../voice/VoiceSettingsModal';
+import { HotkeyButton } from '../voice/HotkeyButton';
+import { ThemeEditor } from './ThemeEditor';
 
 export const APP_VERSION = '0.1.0';
 
@@ -181,7 +182,8 @@ function AppearancePage() {
   );
   return (
     <div class="col g8">
-      <Row title={t('Theme')} control={seg(t('Theme'), a().theme, [['claude', 'Claude Dark'], ['custom', 'Finch Custom']], (theme) => updateAppearance({ theme }))} />
+      <Row title={t('Theme')} control={seg(t('Theme'), a().theme, [['claude', 'Claude Dark'], ['custom', 'Finch Custom'], ['user', t('My colors')]], (theme) => updateAppearance({ theme }))} />
+      <Show when={a().theme === 'user'}><ThemeEditor /></Show>
       <Row title={t('Language')} control={seg(t('Language'), a().language, [['ru', 'Русский'], ['en', 'English']], (language) => updateAppearance({ language }))} />
       <Row title={t('Density')} hint={t('Compact fits more messages on the screen.')} control={seg(t('Density'), a().density, [['comfortable', t('Comfortable')], ['compact', t('Compact')]], (density) => updateAppearance({ density }))} />
       <Row title={t('Text size')} control={seg(t('Text size'), a().textSize, [['small', t('Small')], ['medium', t('Medium')], ['large', t('Large')]], (textSize) => updateAppearance({ textSize }))} />
@@ -193,7 +195,6 @@ function AppearancePage() {
 }
 
 function KeysPage() {
-  const [capturing, setCapturing] = createSignal(false);
   const [info, setInfo] = createSignal<{ server_url: string | null; hostname: string | null; fingerprint: string | null }>({ server_url: null, hostname: null, fingerprint: null });
   const [version, setVersion] = createSignal(APP_VERSION);
   const [update, setUpdate] = createSignal<{ version: string; notes: string } | null>(null);
@@ -220,15 +221,6 @@ function KeysPage() {
     try { await api.installUpdate(); } catch (err) { pushToast({ kind: 'error', title: t('The update was not installed'), text: String(err).replace(/^Error:\s*/, '') }); }
   };
 
-  const capture = (event: KeyboardEvent) => {
-    event.preventDefault();
-    event.stopPropagation(); // while choosing a key, Esc must not reach the dialog and close it
-    if (event.code === 'Escape') { setCapturing(false); return; }
-    const shortcut = shortcutFromEvent(event);
-    if (!shortcut) return;
-    setCapturing(false);
-    void choosePushToTalkKey(shortcut);
-  };
   const diagnostics = createMemo(() => [
     `FinchSpeak ${version()}`,
     `Server: ${info().server_url ?? 'unknown'}`,
@@ -242,10 +234,15 @@ function KeysPage() {
       <span class="field-label">{t('Keys')}</span>
       <div class="setrow">
         <div class="col grow"><strong class="fs13">{t('Push to talk')}</strong><span class="t3 fs12">{t('Held to speak; works in the background.')}</span></div>
-        <button type="button" class={`btn secondary${capturing() ? ' is-focus' : ''}`} aria-label={t('Push-to-talk key')} onClick={() => setCapturing(true)} onKeyDown={(e) => capturing() && capture(e)} onBlur={() => setCapturing(false)}>
-          <Icon name="key" size="sm" />{capturing() ? t('Press a key… (Esc cancels)') : pushToTalkKey() ?? t('Choose key')}
-        </button>
-        <Show when={pushToTalkKey()}><Button iconOnly size="sm" variant="ghost" icon="x" label={t('Remove the key')} onClick={() => void choosePushToTalkKey(null)} /></Show>
+        <HotkeyButton action="push_to_talk" />
+      </div>
+      <div class="setrow">
+        <div class="col grow"><strong class="fs13">{t('Mute microphone')}</strong><span class="t3 fs12">{t('Pressed to mute or unmute; works in the background.')}</span></div>
+        <HotkeyButton action="toggle_mute" />
+      </div>
+      <div class="setrow">
+        <div class="col grow"><strong class="fs13">{t('Turn sound off')}</strong><span class="t3 fs12">{t('Pressed to turn all sound off or on; works in the background.')}</span></div>
+        <HotkeyButton action="toggle_deafen" />
       </div>
       <div class="col g8">
         <For each={[['Enter', 'Send the message'], ['Shift + Enter', 'New line'], ['Esc', 'Cancel an edit, a reply or a dialog'], ['@', 'Mention someone']]}>
@@ -278,19 +275,13 @@ function KeysPage() {
 /** F1-F4 in one window: profile, notifications, appearance, keys and about. */
 export function SettingsModal() {
   const [page, setPage] = createSignal<Page>('profile');
-  const [voiceOpen, setVoiceOpen] = createSignal(false);
-  const [returnPage, setReturnPage] = createSignal<Page>('profile');
   return (
-    <>
     <Modal open={profileOpen()} onClose={() => { setProfileOpen(false); setProfileMessage(null); }} title={t('Settings')} width="860px">
       <div class="settings">
         <nav class="setnav" aria-label={t('Settings sections')}>
           <For each={PAGES}>
             {(item) => (
-              <button type="button" class={`si${page() === item.id ? ' on' : ''}`} aria-current={page() === item.id ? 'page' : undefined} onClick={() => {
-                if (item.id === 'voice') { setReturnPage(page()); setPage('voice'); setProfileOpen(false); setVoiceOpen(true); }
-                else setPage(item.id);
-              }}>
+              <button type="button" class={`si${page() === item.id ? ' on' : ''}`} aria-current={page() === item.id ? 'page' : undefined} onClick={() => setPage(item.id)}>
                 <Icon name={item.icon} size="sm" />{t(item.label)}
               </button>
             )}
@@ -300,11 +291,10 @@ export function SettingsModal() {
           <Show when={page() === 'profile'}><ProfilePage /></Show>
           <Show when={page() === 'notifications'}><NotificationsPage /></Show>
           <Show when={page() === 'appearance'}><AppearancePage /></Show>
+          <Show when={page() === 'voice'}><VoiceSettingsPage /></Show>
           <Show when={page() === 'keys'}><KeysPage /></Show>
         </div>
       </div>
     </Modal>
-    <VoiceSettingsModal open={voiceOpen()} onClose={() => { setVoiceOpen(false); setPage(returnPage()); setProfileOpen(true); }} />
-    </>
   );
 }

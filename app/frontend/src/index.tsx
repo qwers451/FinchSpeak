@@ -6,6 +6,8 @@ import './styles/custom-tokens.css';
 import './styles/themes.css';
 import './styles/motion.css';
 import './styles/polish.css';
+import './styles/user-theme.css';
+import './styles/spatial.css';
 import { App } from './App';
 
 const root = document.getElementById('root');

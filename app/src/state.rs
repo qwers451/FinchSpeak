@@ -204,6 +204,8 @@ pub struct AppState {
     /// The user chose Quit: really close.
     pub quitting: Arc<std::sync::atomic::AtomicBool>,
     pub mic_test_request: Arc<std::sync::atomic::AtomicU32>,
+    /// System-wide keys for push to talk, mute and deafen.
+    pub hotkeys: Arc<crate::hotkeys::Hotkeys>,
 }
 
 impl Default for AppState {
@@ -273,6 +275,7 @@ impl AppState {
             close_to_tray: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             quitting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             mic_test_request: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            hotkeys: Arc::new(crate::hotkeys::Hotkeys::default()),
         }
     }
 }

@@ -426,6 +426,20 @@ export const api = {
     }
   },
 
+  /** Spatial audio on (each voice from its own side) or off (plain mono). */
+  setSpatialAudio: async (enabled: boolean): Promise<void> => {
+    if (isTauri()) {
+      return invoke('set_spatial_audio', { enabled });
+    }
+  },
+
+  /** Where a voice sits: -1 left, 0 centre, 1 right. */
+  setSpeakerPan: async (peerId: number, pan: number): Promise<void> => {
+    if (isTauri()) {
+      return invoke('set_speaker_pan', { peerId, pan });
+    }
+  },
+
   setTrayState: async (state: 'idle' | 'voice' | 'muted' | 'live', language: 'ru' | 'en' = 'ru'): Promise<void> => {
     if (isTauri()) return invoke('set_tray_state', { state, language });
   },
@@ -477,7 +491,14 @@ export const api = {
   /** Push-to-talk key such as "F8" or "Control+Space"; null removes it. Works in the background. */
   setPushToTalkKey: async (key: string | null): Promise<void> => {
     if (isTauri()) {
-      return invoke('set_push_to_talk_key', { key });
+      return invoke('set_hotkey', { action: 'push_to_talk', key });
+    }
+  },
+
+  /** System-wide key that toggles the microphone or all sound; null removes it. */
+  setHotkey: async (action: 'toggle_mute' | 'toggle_deafen', key: string | null): Promise<void> => {
+    if (isTauri()) {
+      return invoke('set_hotkey', { action, key });
     }
   },
 

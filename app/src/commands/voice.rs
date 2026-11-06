@@ -159,6 +159,20 @@ pub async fn set_audio_devices(
     Ok(())
 }
 
+/// Spatial audio on or off: on, each voice is placed by its pan; off, plain mono.
+#[tauri::command]
+pub async fn set_spatial_audio(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state.mixer.lock().await.set_spatial(enabled);
+    Ok(())
+}
+
+/// Place a voice between left (-1) and right (1).
+#[tauri::command]
+pub async fn set_speaker_pan(peer_id: u32, pan: f32, state: State<'_, AppState>) -> Result<(), String> {
+    state.mixer.lock().await.set_speaker_pan(peer_id, pan);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn set_speaker_volume(
     peer_id: u32,
@@ -182,17 +196,18 @@ pub async fn set_voice_settings(settings: VoiceSettingsDto, state: State<'_, App
     Ok(())
 }
 
-/// Choose the push-to-talk key (e.g. "F8", "Control+Space"); works while the app is in the
-/// background. Passing `None` removes the key.
+/// Choose the key (e.g. "F8", "Control+Space") for `action`: `push_to_talk`, `toggle_mute` or
+/// `toggle_deafen`. The keys work while the app is in the background. `None` removes the key.
 #[tauri::command]
-pub async fn set_push_to_talk_key(key: Option<String>, app_handle: AppHandle) -> Result<(), String> {
-    use tauri_plugin_global_shortcut::GlobalShortcutExt;
-    let shortcuts = app_handle.global_shortcut();
-    shortcuts.unregister_all().map_err(|e| format!("Could not clear the old key: {e}"))?;
-    if let Some(key) = key.filter(|k| !k.trim().is_empty()) {
-        shortcuts.register(key.as_str()).map_err(|e| format!("Could not use \"{key}\" as the push-to-talk key: {e}"))?;
-    }
-    Ok(())
+pub async fn set_hotkey(
+    action: String,
+    key: Option<String>,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let action = crate::hotkeys::HotkeyAction::parse(&action)
+        .ok_or_else(|| format!("Unknown key action: {action}"))?;
+    crate::hotkeys::set(&app_handle, &state, action, key.as_deref())
 }
 
 /// Record a few seconds of the processed microphone and play them back (nothing is sent to the

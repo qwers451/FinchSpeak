@@ -7,6 +7,7 @@ mod capture_privacy;
 pub mod updater;
 pub mod commands;
 mod tray;
+pub mod hotkeys;
 pub mod connection;
 pub mod state;
 
@@ -57,11 +58,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    use tauri_plugin_global_shortcut::ShortcutState;
-                    let settings = app.state::<AppState>().voice_settings.clone();
-                    settings.set_key_down(event.state() == ShortcutState::Pressed);
-                })
+                .with_handler(|app, shortcut, event| hotkeys::handle(app, shortcut, event.state()))
                 .build(),
         )
         .manage(state)
@@ -150,9 +147,11 @@ pub fn run() {
             commands::voice::get_audio_devices,
             commands::voice::set_audio_devices,
             commands::voice::set_speaker_volume,
+            commands::voice::set_spatial_audio,
+            commands::voice::set_speaker_pan,
             commands::voice::get_voice_settings,
             commands::voice::set_voice_settings,
-            commands::voice::set_push_to_talk_key,
+            commands::voice::set_hotkey,
             // Administration
             commands::admin::create_invite,
             commands::admin::list_invites,
