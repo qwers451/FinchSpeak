@@ -197,16 +197,30 @@ pub async fn set_push_to_talk_key(key: Option<String>, app_handle: AppHandle) ->
 
 /// Record a few seconds of the processed microphone and play them back (nothing is sent to the
 /// others meanwhile). Progress comes as `mic-test` events: `recording`, `playing`, `done`.
+/// Outside a call the devices are opened just for the test and closed again afterwards.
 #[tauri::command]
-pub async fn test_microphone(seconds: Option<u32>, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn test_microphone(
+    seconds: Option<u32>,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
     use std::sync::atomic::Ordering;
-    if !state.audio_engine.lock().await.is_running() {
-        return Err("Join a voice channel first: the microphone is only open during a call".to_string());
-    }
+    // Serialised with join/leave, so a local test never replaces a call that just started.
+    let _transition = state.voice_transition.lock().await;
     if state.is_muted.load(Ordering::SeqCst) {
         return Err("Unmute yourself first".to_string());
     }
+    let in_call = state.current_voice_channel.read().await.is_some();
+    let mut engine = state.audio_engine.lock().await;
+    if in_call && !engine.is_running() {
+        return Err("Voice audio is not running. Rejoin the voice channel to retry.".to_string());
+    }
     state.mic_test_request.store(seconds.unwrap_or(3).clamp(1, 10), Ordering::SeqCst);
+    if !in_call {
+        engine
+            .start_local_mic_test((*state).clone(), app_handle)
+            .map_err(|e| format!("Failed to open the audio devices: {}", e))?;
+    }
     Ok(())
 }
 

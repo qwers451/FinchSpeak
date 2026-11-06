@@ -144,8 +144,10 @@ export const ru: Readonly<Record<string, string>> = {
   'This computer cannot play the video': 'Этот компьютер не может воспроизвести видео',
   'Its graphics driver has no H.264 decoder. Voice still works. Update the graphics driver, or ask for a window share at lower quality.': 'В графическом драйвере нет декодера H.264. Голос продолжает работать. Обновите драйвер или попросите показать окно в более низком качестве.',
   "{name}'s shared screen": 'Демонстрация экрана: {name}',
-  'Join a voice channel first: the microphone is only open during a call': 'Сначала подключитесь к голосовой комнате: микрофон работает только во время звонка', 'Unmute yourself first': 'Сначала включите микрофон',
-  'The old certificate was forgotten. Sign in again and compare the new fingerprint.': 'Старый сертификат удалён из доверенных. Войдите ещё раз и сравните новый отпечаток.',
+  'Unmute yourself first': 'Сначала включите микрофон',
+  'Voice audio is not running. Rejoin the voice channel to retry.': 'Звук звонка не работает. Переподключитесь к голосовой комнате, чтобы попробовать снова.',
+  'The microphone test needs a working microphone and speakers': 'Для проверки нужны работающие микрофон и динамики',
+  'An audio device was disconnected during the microphone test': 'Во время проверки отключилось аудиоустройство',  'The old certificate was forgotten. Sign in again and compare the new fingerprint.': 'Старый сертификат удалён из доверенных. Войдите ещё раз и сравните новый отпечаток.',
   'a channel': 'канале', '{name} mentioned you in #{channel}': '{name} упомянул вас в канале #{channel}', '{name} in #{channel}': '{name} в канале #{channel}', 'your voice room': 'вашей голосовой комнате', '{name} joined {room}': '{name} присоединился к комнате {room}',
 };
 

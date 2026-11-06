@@ -112,6 +112,9 @@ enum AudioCommand {
         channel_id: u32,
         state: AppState,
         app_handle: tauri::AppHandle,
+        /// Microphone test outside a call: nothing is mixed in or sent, and the streams close
+        /// as soon as the test is over.
+        local_only: bool,
     },
     Stop,
 }
@@ -176,6 +179,26 @@ impl AudioEngine {
                 channel_id,
                 state,
                 app_handle,
+                local_only: false,
+            })
+            .map_err(|e| AudioEngineError::ChannelClosed(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Opens the devices just for a microphone test outside a call. The test must already be
+    /// requested in `state.mic_test_request`; the streams close once it is over. Joining a
+    /// channel meanwhile replaces it with the call.
+    pub fn start_local_mic_test(
+        &mut self,
+        state: AppState,
+        app_handle: tauri::AppHandle,
+    ) -> Result<(), AudioEngineError> {
+        self.cmd_tx
+            .send(AudioCommand::Start {
+                channel_id: 0,
+                state,
+                app_handle,
+                local_only: true,
             })
             .map_err(|e| AudioEngineError::ChannelClosed(e.to_string()))?;
         Ok(())
@@ -217,6 +240,14 @@ impl ProcessingFailures {
         if self.consecutive >= 3 { self.reported = true; true } else { false }
     }
     fn succeeded(&mut self) { if !self.reported { self.consecutive = 0; } }
+}
+
+const MIC_TEST_NO_DEVICES: &str = "The microphone test needs a working microphone and speakers";
+const MIC_TEST_DEVICE_LOST: &str = "An audio device was disconnected during the microphone test";
+
+/// End the test in the UI and say why it could not run.
+fn emit_mic_test_failed(app_handle: &tauri::AppHandle, error: &str) {
+    let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done", "error": error }));
 }
 
 /// The meter is updated every second frame: 25 times a second.
@@ -498,9 +529,16 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 channel_id,
                 state,
                 app_handle,
+                local_only,
             } => {
                 is_running.store(true, Ordering::SeqCst);
-                info!("Starting audio worker streams for channel {}", channel_id);
+                if local_only {
+                    info!("Starting audio worker streams for a local microphone test");
+                } else {
+                    // A test asked for just before a local test closed must not start in the call.
+                    state.mic_test_request.store(0, Ordering::SeqCst);
+                    info!("Starting audio worker streams for channel {}", channel_id);
+                }
 
                 let selection = state.audio_devices.read().map(|s| s.clone()).unwrap_or_default();
                 let diagnostics = state.audio_diagnostics.clone();
@@ -611,6 +649,10 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     diagnostics.tick("startup-failed", state.is_muted.load(Ordering::Relaxed), state.is_deafened.load(Ordering::Relaxed));
                     error!("Both playback and capture audio streams failed to initialize");
                     is_running.store(false, Ordering::SeqCst);
+                    if local_only {
+                        state.mic_test_request.store(0, Ordering::SeqCst);
+                        emit_mic_test_failed(&app_handle, MIC_TEST_NO_DEVICES);
+                    }
                     continue;
                 }
 
@@ -678,6 +720,16 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     let input_lost = input_failed.swap(false, Ordering::SeqCst);
                     let output_lost = output.as_ref().is_some_and(|out| out.failed.swap(false, Ordering::SeqCst));
                     if let Some(reopen) = reopen_after(input_lost, output_lost) {
+                        if local_only {
+                            // Nothing to keep alive outside a call: end the test.
+                            warn!("Audio device lost during a local microphone test");
+                            if mic_test.take().is_some() {
+                                state.voice_settings.set_mic_test(false);
+                                emit_mic_test_failed(&app_handle, MIC_TEST_DEVICE_LOST);
+                            }
+                            is_running.store(false, Ordering::SeqCst);
+                            break;
+                        }
                         let now = Instant::now();
                         restart_times.retain(|t| now.duration_since(*t) < RESTART_WINDOW);
                         restart_times.push_back(now);
@@ -696,6 +748,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     channel_id,
                                     state: state.clone(),
                                     app_handle: app_handle.clone(),
+                                    local_only: false,
                                 });
                                 break;
                             }
@@ -744,13 +797,20 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             monitor_queue.clear();
                             mic_test = Some(MicTest::new(requested));
                             let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "recording", "seconds": requested }));
+                        } else if capture_stream.is_none() || output.is_none() {
+                            emit_mic_test_failed(&app_handle, MIC_TEST_NO_DEVICES);
                         } else {
                             let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
                         }
                     }
+                    // A local test owns the streams only for as long as it runs.
+                    if local_only && mic_test.is_none() {
+                        is_running.store(false, Ordering::SeqCst);
+                        break;
+                    }
 
                     // A-. Once a second: how good is each speaker's link (loss of the last second).
-                    if last_quality_report.elapsed() >= Duration::from_secs(1) {
+                    if !local_only && last_quality_report.elapsed() >= Duration::from_secs(1) {
                         last_quality_report = Instant::now();
                         let counters = state.mixer.blocking_lock().loss_counters();
                         let report: Vec<_> = quality_tracker
@@ -776,8 +836,12 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                 }
                                 previous_playback_refill = Some((diagnostic_epoch, now));
                             } else { previous_playback_refill = None; }
-                            let speech_events =
-                                mix_next_frame(&state.mixer, &mut playback_frame_48k, Instant::now());
+                            let speech_events = if local_only {
+                                playback_frame_48k.fill(0.0);
+                                Vec::new()
+                            } else {
+                                mix_next_frame(&state.mixer, &mut playback_frame_48k, Instant::now())
+                            };
                             if let Some(test) = &mut mic_test {
                                 if let Some(recorded) = test.next_playback_frame() {
                                     for (out, mine) in playback_frame_48k.iter_mut().zip(recorded.iter()) {
@@ -1012,7 +1076,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         }
                                     }
 
-                                    if !output.packets.is_empty()
+                                    if !local_only && !output.packets.is_empty()
                                         && state.voice_settings.privacy_snapshot() == (generation, true) {
                                         if let Ok(conn_guard) = state.quic_connection.try_read() {
                                             if let Some(conn) = &*conn_guard {
@@ -1042,11 +1106,19 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     state.voice_settings.set_mic_test(false);
                     let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
                 }
+                if local_only {
+                    // No call keeps the meter moving: let it fall back to silence.
+                    let _ = app_handle.emit("mic-level", serde_json::json!({ "db": -120.0, "speaking": false }));
+                }
 
                 diagnostics.stream_active(true, false);
                 diagnostics.stream_active(false, false);
                 diagnostics.tick("stopped", state.is_muted.load(Ordering::Relaxed), state.is_deafened.load(Ordering::Relaxed));
-                info!("Audio streams for channel {} stopped", channel_id);
+                if local_only {
+                    info!("Audio streams for the local microphone test stopped");
+                } else {
+                    info!("Audio streams for channel {} stopped", channel_id);
+                }
             }
             AudioCommand::Stop => {
                 is_running.store(false, Ordering::SeqCst);

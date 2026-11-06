@@ -45,8 +45,9 @@ export function resetMicPreview() {
   setMicTestPhase('idle');
 }
 
-export function handleMicTest(test: { phase: 'recording' | 'playing' | 'done' }) {
+export function handleMicTest(test: { phase: 'recording' | 'playing' | 'done'; error?: string }) {
   setMicTestPhase(test.phase === 'done' ? 'idle' : test.phase);
+  if (test.error) setAppError(t(test.error));
 }
 
 export function handleVoiceQuality(report: { peer_id: number; quality: LinkQuality; loss: number }[]) {
