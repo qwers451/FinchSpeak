@@ -405,6 +405,11 @@ export const api = {
     }
   },
 
+  processLoopbackSupported: async (): Promise<boolean> => {
+    if (isTauri()) return invoke('process_loopback_supported');
+    return false;
+  },
+
   // Screen sharing
   listScreenSources: async (): Promise<ScreenSources> => {
     if (isTauri()) {

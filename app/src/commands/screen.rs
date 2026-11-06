@@ -61,6 +61,21 @@ pub async fn list_screen_sources() -> Result<ScreenSourcesDto, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Probe activation as well as the version: some Windows builds pass the version gate
+/// but do not implement process loopback. Never promise exclusion on those machines.
+#[tauri::command]
+pub async fn process_loopback_supported() -> bool {
+    #[cfg(windows)]
+    {
+        tokio::task::spawn_blocking(|| {
+            finch_screen::process_loopback::process_loopback_supported()
+                && finch_screen::process_loopback::ProcessLoopback::start(std::process::id(), false, |_| {}).is_ok()
+        }).await.unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    { false }
+}
+
 /// Start sharing a monitor (`kind` = "monitor") or a window (`kind` = "window") in the current
 /// voice channel.
 #[tauri::command]
