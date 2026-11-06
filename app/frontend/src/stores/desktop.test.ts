@@ -13,7 +13,8 @@ vi.mock('@tauri-apps/plugin-notification', () => ({
   sendNotification: (...args: unknown[]) => sendNotification(...args),
 }));
 
-import { mentionCount, reactToMessage, startDesktopSync } from './desktop';
+import { isDoNotDisturb, mentionCount, reactToMessage, startDesktopSync } from './desktop';
+import { sessionHandlers, setPresence } from './sessionStore';
 import { setCurrentUser } from './authStore';
 import { setChannels } from './chatStore';
 import { setUnread } from './activityStore';
@@ -79,4 +80,12 @@ it('late_focus_does_not_jump', async () => {
   await vi.advanceTimersByTimeAsync(3 * 60_000);
   window.dispatchEvent(new Event('focus'));
   expect(selectChannel).not.toHaveBeenCalled();
+});
+
+it('dnd_from_presence_survives_sign_in_without_status_field', () => {
+  // The self presence-update arrives before setCurrentUser and the user has no status field.
+  sessionHandlers['presence-update']({ user_id: 'me', status: 'donotdisturb' });
+  setCurrentUser({ id: 'me', username: 'me', display_name: 'Me', role: 'member' });
+  expect(isDoNotDisturb()).toBe(true);
+  setPresence({});
 });

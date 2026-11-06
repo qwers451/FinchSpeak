@@ -28,6 +28,15 @@ export const [presence, setPresence] = createSignal<Record<string, UserStatus>>(
 /** What people wrote next to their status. */
 export const [statusTexts, setStatusTexts] = createSignal<Record<string, string>>({});
 export const onlineUsers = () => knownUsers().filter((user) => (presence()[user.id] ?? user.status) !== 'offline');
+/**
+ * My own status. The presence map wins: the server's self presence-update can arrive before the
+ * user record is set, and the user record has no status field from the server at sign-in.
+ */
+export function myStatus(): UserStatus {
+  const me = currentUser();
+  if (!me) return 'online';
+  return presence()[me.id] ?? me.status ?? 'online';
+}
 /** Signed-in devices of the current account; cleared with the rest of the session on sign-out. */
 export const [sessions, setSessions] = createSignal<DeviceSession[]>([]);
 

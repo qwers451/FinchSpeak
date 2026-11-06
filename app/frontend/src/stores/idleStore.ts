@@ -1,5 +1,6 @@
 import { api } from '../services/api';
 import { currentUser, setCurrentUser } from './authStore';
+import { myStatus, setPresence } from './sessionStore';
 import type { UserStatus } from '../types';
 
 export const AUTO_IDLE_AFTER_S = 600;
@@ -17,6 +18,7 @@ async function sendQuietly(status: UserStatus): Promise<boolean> {
     await api.setStatus(status, me.status_text || null);
     const now = currentUser();
     if (now) setCurrentUser({ ...now, status });
+    setPresence((previous) => ({ ...previous, [me.id]: status }));
     return true;
   } catch (err) {
     console.warn('automatic status not saved', err);
@@ -45,13 +47,14 @@ export function startAutoIdle(): () => void {
     const me = currentUser();
     if (!me) return;
     if (idle >= AUTO_IDLE_AFTER_S) {
-      if (!autoIdled && me.status === 'online') {
+      if (!autoIdled && myStatus() === 'online') {
         autoIdled = await sendQuietly('idle');
       }
       return;
     }
     if (!autoIdled) return;
-    if (me.status === 'donotdisturb' || me.status === 'offline') {
+    const status = myStatus();
+    if (status === 'donotdisturb' || status === 'offline') {
       autoIdled = false;
       return;
     }

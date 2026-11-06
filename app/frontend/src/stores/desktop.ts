@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import type { Message } from '../types';
 import { currentUser } from './authStore';
 import { activeChannel, channels, selectChannel } from './chatStore';
+import { myStatus } from './sessionStore';
 import { unread } from './activityStore';
 import { isChannelMuted, prefs } from './settingsStore';
 import { isSharing } from './screenState';
@@ -83,7 +84,7 @@ async function flashTaskbar() {
 
 /** True while my status is "Do not disturb": no OS notifications, taskbar flash or mention tone. */
 export function isDoNotDisturb(): boolean {
-  return currentUser()?.status === 'donotdisturb';
+  return currentUser() !== null && myStatus() === 'donotdisturb';
 }
 
 /** What to do about a message that just arrived (not ours): returns what was done, for tests. */

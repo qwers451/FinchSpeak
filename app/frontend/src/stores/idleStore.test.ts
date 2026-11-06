@@ -6,6 +6,7 @@ vi.mock('../services/api', () => ({ api: { systemIdleSeconds, setStatus } }));
 
 import { setCurrentUser } from './authStore';
 import { appError, setAppError } from './notificationStore';
+import { sessionHandlers, setPresence } from './sessionStore';
 import { startAutoIdle } from './idleStore';
 
 const POLL_MS = 30_000;
@@ -19,8 +20,10 @@ function touch() {
   lastInputAt = Date.now();
 }
 
+/** Signs in and lets the self presence echo arrive, as the server sends it. */
 function signIn(status: 'online' | 'idle' | 'donotdisturb' | 'offline', text: string | null = null) {
   setCurrentUser({ id: 'me', username: 'me', display_name: 'Me', role: 'member', status, status_text: text });
+  setPresence({ me: status });
 }
 
 beforeEach(() => {
@@ -123,6 +126,23 @@ it('does not restore online when the user switched to do not disturb while away'
   touch();
   await vi.advanceTimersByTimeAsync(POLL_MS * 2);
   expect(setStatus).toHaveBeenCalledTimes(1);
+});
+
+it('auto_idle_reads_my_status_from_presence_when_user_has_no_status', async () => {
+  // Restart: the presence echo ('online') came before the user record, which has no status field.
+  sessionHandlers['presence-update']({ user_id: 'me', status: 'online' });
+  setCurrentUser({ id: 'me', username: 'me', display_name: 'Me', role: 'member' });
+  stop = startAutoIdle();
+  await vi.advanceTimersByTimeAsync(IDLE_AFTER_MS);
+  expect(setStatus).toHaveBeenCalledWith('idle', null);
+});
+
+it('auto_idle_respects_do_not_disturb_from_presence_when_user_has_no_status', async () => {
+  sessionHandlers['presence-update']({ user_id: 'me', status: 'donotdisturb' });
+  setCurrentUser({ id: 'me', username: 'me', display_name: 'Me', role: 'member' });
+  stop = startAutoIdle();
+  await vi.advanceTimersByTimeAsync(IDLE_AFTER_MS * 2);
+  expect(setStatus).not.toHaveBeenCalled();
 });
 
 it('stops polling when the returned function is called', async () => {

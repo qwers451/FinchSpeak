@@ -16,7 +16,7 @@ import {
   participantsForChannel,
   speakingPeers,
 } from '../stores/voiceStore';
-import { connectionStatus, knownUsers, presence, statusTexts } from '../stores/sessionStore';
+import { connectionStatus, knownUsers, myStatus as ownStatus, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
 import { currentUser } from '../stores/authStore';
 import type { Channel } from '../types';
@@ -97,8 +97,7 @@ export function Sidebar() {
   const textChannels = () => channels().filter((c) => c.channel_type === 'text');
   const voiceChannels = () => channels().filter((c) => c.channel_type === 'voice');
   const myStatus = () => {
-    const user = currentUser();
-    const status = user ? presence()[user.id] ?? user.status ?? 'online' : 'online';
+    const status = ownStatus();
     return status === 'donotdisturb' ? 'dnd' : status === 'idle' ? 'idle' : 'on';
   };
   const statusLabel = () => t(({ on: 'Online', idle: 'Idle', dnd: 'Do not disturb' })[myStatus()]);
