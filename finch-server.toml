@@ -16,4 +16,4 @@ max_file_size_mb = 50
 [auth]
 # No jwt_secret here: a random one is generated on first start and kept in jwt_secret_file.
 jwt_secret_file = "./data/jwt_secret"
-jwt_expiration_hours = 72
+jwt_expiration_hours = 720
