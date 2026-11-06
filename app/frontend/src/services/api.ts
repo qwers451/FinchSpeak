@@ -512,10 +512,6 @@ export const api = {
     if (isTauri()) return invoke('set_attention', { mentions, language });
   },
 
-  setCloseToTray: async (enabled: boolean): Promise<void> => {
-    if (isTauri()) return invoke('set_close_to_tray', { enabled });
-  },
-
   appVersion: async (): Promise<string> => {
     if (isTauri()) return invoke('app_version');
     return 'dev';

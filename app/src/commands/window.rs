@@ -1,7 +1,5 @@
 //! Window and tray behaviour controlled from the interface.
 
-use std::sync::atomic::Ordering;
-
 use tauri::{AppHandle, Manager, State};
 
 use crate::state::AppState;
@@ -11,13 +9,6 @@ use crate::tray::{self, TrayState};
 #[tauri::command]
 pub fn take_invite_link() -> Option<String> {
     crate::take_pending_invite()
-}
-
-/// Closing the window hides it to the tray (`true`) or quits (`false`).
-#[tauri::command]
-pub async fn set_close_to_tray(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
-    state.close_to_tray.store(enabled, Ordering::SeqCst);
-    Ok(())
 }
 
 /// What the tray icon shows: `idle`, `voice`, `muted` or `live`.

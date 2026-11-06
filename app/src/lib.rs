@@ -158,8 +158,9 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 use std::sync::atomic::Ordering;
+                // The close button always keeps FinchSpeak running in the tray; only the tray's Quit really closes.
                 let state = window.app_handle().state::<AppState>();
-                if state.close_to_tray.load(Ordering::SeqCst) && !state.quitting.load(Ordering::SeqCst) {
+                if !state.quitting.load(Ordering::SeqCst) {
                     api.prevent_close();
                     let _ = window.hide();
                 }
@@ -169,7 +170,6 @@ pub fn run() {
             commands::update::app_version,
             commands::update::check_update,
             commands::update::install_update,
-            commands::window::set_close_to_tray,
             commands::window::set_tray_state,
             commands::window::set_attention,
             commands::window::show_main_window,

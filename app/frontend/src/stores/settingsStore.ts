@@ -26,8 +26,6 @@ export interface AppearancePrefs {
   textSize: 'small' | 'medium' | 'large';
   reduceMotion: boolean;
   showMembers: boolean;
-  /** The window's close button hides it to the tray instead of quitting. */
-  closeToTray: boolean;
 }
 
 export interface Prefs {
@@ -39,7 +37,7 @@ export interface Prefs {
 
 export const DEFAULT_PREFS: Prefs = {
   notifications: { mentions: true, allMessages: false, voiceJoin: true, sounds: true, soundVolume: 0.6, flash: true },
-  appearance: { theme: 'claude', customColors: DEFAULT_THEME_COLORS, language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, showMembers: true, closeToTray: true },
+  appearance: { theme: 'claude', customColors: DEFAULT_THEME_COLORS, language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, showMembers: true },
   mutedChannels: {},
 };
 
@@ -83,7 +81,6 @@ export function parsePrefs(raw: string | null): Prefs {
       textSize: pick(a.textSize, ['small', 'medium', 'large'] as const, d.appearance.textSize),
       reduceMotion: bool(a.reduceMotion, d.appearance.reduceMotion),
       showMembers: bool(a.showMembers, d.appearance.showMembers),
-      closeToTray: bool(a.closeToTray, d.appearance.closeToTray),
     },
     mutedChannels: muted,
   };

@@ -276,3 +276,9 @@ it('signs out everywhere else', async () => {
   await flush();
   expect(others).toHaveBeenCalled();
 });
+
+it('has no close-to-tray toggle: the close button always keeps FinchSpeak in the tray', async () => {
+  button('Appearance').click();
+  await flush();
+  expect(document.body.textContent).not.toContain('Close button hides to the tray');
+});

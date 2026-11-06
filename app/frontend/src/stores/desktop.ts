@@ -161,8 +161,5 @@ export function startDesktopSync() {
       void api.setAttention(mentionCount(), prefs().appearance.language).catch(() => {});
     });
     window.addEventListener('focus', jumpToNotifiedChannel);
-    createEffect(() => {
-      void api.setCloseToTray(prefs().appearance.closeToTray).catch(() => {});
-    });
   });
 }
