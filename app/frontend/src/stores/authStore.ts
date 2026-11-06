@@ -64,11 +64,11 @@ export async function retryPendingSignIn(): Promise<boolean> {
 
 export async function loginUser(username: string, password: string, stay = true) {
   cancelResumeRetry();
-  await settleResumeInFlight();
-  lastAttempt = { kind: 'login', username, password, stay };
-  setAuthLoading(true);
   setAuthError(null);
+  setAuthLoading(true);
   try {
+    await settleResumeInFlight();
+    lastAttempt = { kind: 'login', username, password, stay };
     const user = await api.login(serverUrl(), username, password, stay);
     lastAttempt = null;
     remember(serverUrl(), username);
@@ -88,11 +88,11 @@ export async function loginUser(username: string, password: string, stay = true)
 
 export async function registerUser(username: string, displayName: string, password: string, inviteCode?: string, stay = true) {
   cancelResumeRetry();
-  await settleResumeInFlight();
-  lastAttempt = { kind: 'register', username, displayName, password, inviteCode, stay };
-  setAuthLoading(true);
   setAuthError(null);
+  setAuthLoading(true);
   try {
+    await settleResumeInFlight();
+    lastAttempt = { kind: 'register', username, displayName, password, inviteCode, stay };
     const user = await api.register(serverUrl(), username, displayName, password, inviteCode, stay);
     lastAttempt = null;
     setPendingInvite(null);

@@ -341,3 +341,35 @@ it('Retry after a failed automatic resume resumes the session, not an empty-pass
   expect(login).not.toHaveBeenCalled();
   vi.restoreAllMocks();
 });
+
+it('a second submit while the sign-in waits for an automatic sign-in does not log in twice', async () => {
+  const { api } = await import('../services/api');
+  const { resumeLastSession, setRememberedUsername, setServerUrl, serverUrl, setCurrentUser: resetUser } = await import('../stores/authStore');
+  const before = serverUrl();
+  resetUser(null);
+  setServerUrl('https://x.example:8443');
+  setRememberedUsername('alice');
+  let finishResume!: (value: null) => void;
+  vi.spyOn(api, 'resumeSession').mockReturnValue(new Promise<null>((resolve) => { finishResume = resolve; }));
+  transport.invoke.mockImplementation(async (cmd: string) => (cmd === 'login'
+    ? { id: 'u', username: 'alice', display_name: 'Alice', role: 'member' }
+    : null));
+  const pending = resumeLastSession();
+  const host = mount(() => <AuthModal />);
+  const [, user, pass] = Array.from(host.querySelectorAll('input'));
+  for (const [el, value] of [[user, 'alice'], [pass, 'hunter2hunter2']] as const) {
+    el.value = value;
+    el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  }
+  const form = host.querySelector('form')!;
+  form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  finishResume(null);
+  await pending;
+  await vi.waitFor(() => expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'login')).toHaveLength(1));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'login')).toHaveLength(1);
+  vi.restoreAllMocks();
+  setServerUrl(before);
+});

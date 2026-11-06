@@ -299,3 +299,21 @@ it('a resumed session signed out while its channels load does not run the after-
   expect(afterResume).not.toHaveBeenCalled();
   vi.restoreAllMocks();
 });
+
+it('a sign-in shows progress at once while it waits for a running automatic sign-in', async () => {
+  const { resumeLastSession, loginUser, setRememberedUsername, authLoading } = await import('./authStore');
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  const inFlight = deferred<null>();
+  vi.spyOn(api, 'resumeSession').mockReturnValue(inFlight.promise);
+  vi.spyOn(api, 'login').mockResolvedValue(bob);
+  const pending = resumeLastSession();
+  const signIn = loginUser('bob', 'hunter2hunter2');
+  expect(authLoading()).toBe(true);
+  inFlight.resolve(null);
+  await signIn;
+  await pending;
+  expect(authLoading()).toBe(false);
+  setCurrentUser(null);
+  vi.restoreAllMocks();
+});
