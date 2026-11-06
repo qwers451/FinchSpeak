@@ -210,6 +210,10 @@ pub async fn handle_connection(
     // 3. Verify JWT
     let claims = match check_active_jwt(&auth_msg, &jwt_secret, &pool).await {
         Ok(c) => c,
+        Err(crate::api::auth::TokenProblem::Internal) => {
+            // Not the token's fault: drop the connection without an auth verdict, so the client just retries.
+            return Err(anyhow::anyhow!("Session lookup failed"));
+        }
         Err(problem) => {
             let err = ServerMessage::Error {
                 code: 401,

@@ -381,3 +381,15 @@ async fn expired_and_revoked_tokens_are_told_apart() -> anyhow::Result<()> {
     assert!(matches!(check_active_jwt("garbage", &secret, &pool).await, Err(TokenProblem::Invalid)));
     Ok(())
 }
+
+#[tokio::test]
+async fn database_failure_is_not_reported_as_a_bad_token() -> anyhow::Result<()> {
+    use finch_server::api::auth::{check_active_jwt, TokenProblem};
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool.clone(), open_registration(), finch_server::session::SessionManager::new());
+    let token = register_alice(&app).await?;
+    let secret = open_registration().auth.jwt_secret;
+    pool.close().await;
+    assert!(matches!(check_active_jwt(&token, &secret, &pool).await, Err(TokenProblem::Internal)));
+    Ok(())
+}

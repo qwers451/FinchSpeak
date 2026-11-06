@@ -181,6 +181,8 @@ pub enum TokenProblem {
     Revoked,
     /// Not a token this server signed.
     Invalid,
+    /// The check itself failed (database trouble); says nothing about the token.
+    Internal,
 }
 
 impl TokenProblem {
@@ -190,6 +192,7 @@ impl TokenProblem {
             TokenProblem::Expired => "Session expired",
             TokenProblem::Revoked => "Session revoked",
             TokenProblem::Invalid => "Invalid token",
+            TokenProblem::Internal => "Server error, try again",
         }
     }
 }
@@ -213,7 +216,10 @@ pub async fn check_active_jwt(token: &str, secret: &str, pool: &SqlitePool) -> R
         "SELECT u.username, u.role, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.id = ? AND s.user_id = ?",
     ).bind(&claims.jti).bind(&claims.sub).fetch_optional(pool).await
-        .map_err(|_| TokenProblem::Invalid)?
+        .map_err(|e| {
+            tracing::error!("Session lookup failed: {e}");
+            TokenProblem::Internal
+        })?
         .ok_or(TokenProblem::Revoked)?;
     if row.2 <= now {
         return Err(TokenProblem::Expired);
@@ -225,7 +231,10 @@ pub async fn check_active_jwt(token: &str, secret: &str, pool: &SqlitePool) -> R
 
 /// Like [`check_active_jwt`], for REST handlers: any problem is a plain 401.
 pub async fn verify_active_jwt(token: &str, secret: &str, pool: &SqlitePool) -> Result<Claims, ServerError> {
-    check_active_jwt(token, secret, pool).await.map_err(|_| ServerError::Unauthorized)
+    check_active_jwt(token, secret, pool).await.map_err(|problem| match problem {
+        TokenProblem::Internal => ServerError::Internal("Session lookup failed".to_string()),
+        _ => ServerError::Unauthorized,
+    })
 }
 
 pub async fn logout_handler(auth: AuthUser, State(state): State<ArcSharedState>) -> Result<StatusCode, ServerError> {
