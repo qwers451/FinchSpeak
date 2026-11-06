@@ -98,3 +98,20 @@ it('sign-in form remembers address and login but never the password', async () =
   expect(stored).toContain('x.example');
   expect(stored).not.toContain('hunter2');
 });
+
+it('stay signed in is on by default and is passed to login', async () => {
+  const { api } = await import('../services/api');
+  const spy = vi.spyOn(api, 'login').mockResolvedValue({ id: 'u', username: 'alice', display_name: 'Alice', role: 'member' });
+  const host = mount(() => <AuthModal />);
+  const [, user, pass] = Array.from(host.querySelectorAll('input'));
+  for (const [el, value] of [[user, 'alice'], [pass, 'hunter2hunter2']] as const) {
+    el.value = value;
+    el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  }
+  const toggle = host.querySelector('[role="switch"]')!;
+  expect(toggle.getAttribute('aria-checked')).toBe('true');
+  host.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+  expect(spy.mock.calls[0][3]).toBe(true);
+  spy.mockRestore();
+});

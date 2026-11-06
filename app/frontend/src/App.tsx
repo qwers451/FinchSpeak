@@ -1,5 +1,5 @@
 import { createSignal, onMount, onCleanup, Show } from 'solid-js';
-import { currentUser, setCurrentUser } from './stores/authStore';
+import { currentUser, setCurrentUser, resumeLastSession, resuming } from './stores/authStore';
 import { activeChannel, loadChannels } from './stores/chatStore';
 import { setAppError } from './stores/sessionStore';
 import { subscribeSessionEvents } from './services/sessionEvents';
@@ -38,6 +38,9 @@ export function App() {
         setCurrentUser(user);
         await loadChannels();
         await subscriptions.refresh();
+      } else if (await resumeLastSession()) {
+        if (disposed) return;
+        await subscriptions.refresh();
       }
       setEventsReady(true);
     } catch (e) {
@@ -57,7 +60,7 @@ export function App() {
       <IconSprite />
       <Titlebar />
       <ConnectionBanner />
-      <Show when={eventsReady()} fallback={<Splash />}>
+      <Show when={eventsReady() && !resuming()} fallback={<Splash />}>
         <Show when={!sessionEnded()} fallback={<SessionEndedScreen />}>
         <Show when={currentUser()} fallback={<AuthModal />}>
           <div class="app-layout">

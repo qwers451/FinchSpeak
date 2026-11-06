@@ -9,7 +9,7 @@ import {
   authError,
   setAuthError,
 } from '../stores/authStore';
-import { Button, Field, Icon } from '../ui';
+import { Button, Field, Icon, Toggle } from '../ui';
 import { passwordStrength } from '../ui/passwordStrength';
 import { t } from '../i18n';
 
@@ -37,6 +37,7 @@ export function AuthModal() {
   const [displayName, setDisplayName] = createSignal('');
   const [password, setPassword] = createSignal('');
   const [inviteCode, setInviteCode] = createSignal('');
+  const [stay, setStay] = createSignal(true);
 
   const strength = () => passwordStrength(password());
   const inviteError = () => (authError() ?? '').toLowerCase().includes('invite') ? t('A valid invite code is required to register') : undefined;
@@ -50,8 +51,8 @@ export function AuthModal() {
   const submit = async (event: Event) => {
     event.preventDefault();
     if (authLoading()) return;
-    if (isRegister()) await registerUser(username().trim(), displayName().trim(), password(), inviteCode());
-    else await loginUser(username().trim(), password());
+    if (isRegister()) await registerUser(username().trim(), displayName().trim(), password(), inviteCode(), stay());
+    else await loginUser(username().trim(), password(), stay());
   };
 
   const switchMode = () => {
@@ -86,7 +87,7 @@ export function AuthModal() {
                   <Show when={look().hint}><span class="t2 fs12">{t(look().hint!)}</span></Show>
                 </div>
                 <Show when={look().retry}>
-                  <Button size="sm" variant="secondary" onClick={() => void (isRegister() ? undefined : loginUser(username().trim(), password()))}>{t('Retry')}</Button>
+                  <Button size="sm" variant="secondary" onClick={() => void (isRegister() ? undefined : loginUser(username().trim(), password(), stay()))}>{t('Retry')}</Button>
                 </Show>
               </div>
             )}
@@ -116,6 +117,11 @@ export function AuthModal() {
                 </div>
               </Show>
             </div>
+          </div>
+
+          <div class="row g12" style={{ 'align-items': 'center' }}>
+            <Toggle checked={stay()} onChange={setStay} label={t('Stay signed in')} />
+            <span class="fs13">{t('Stay signed in')}</span>
           </div>
 
           <Button type="submit" variant="primary" size="lg" block loading={authLoading()}>

@@ -27,16 +27,17 @@ const remembered = readRemembered();
 export const [serverUrl, setServerUrl] = createSignal<string>(remembered.serverUrl);
 export const [rememberedUsername, setRememberedUsername] = createSignal<string>(remembered.username);
 export const [authLoading, setAuthLoading] = createSignal<boolean>(false);
+export const [resuming, setResuming] = createSignal<boolean>(false);
 export const [authError, setAuthError] = createSignal<string | null>(null);
 
 // The certificate-confirmation state lives in a leaf module (see tofuStore.ts); re-exported here.
 export { pendingMismatch, pendingTofu, setPendingMismatch, setPendingTofu };
 
-export async function loginUser(username: string, password: string) {
+export async function loginUser(username: string, password: string, stay = true) {
   setAuthLoading(true);
   setAuthError(null);
   try {
-    const user = await api.login(serverUrl(), username, password);
+    const user = await api.login(serverUrl(), username, password, stay);
     remember(serverUrl(), username);
     setRememberedUsername(username);
     setCurrentUser(user);
@@ -50,11 +51,11 @@ export async function loginUser(username: string, password: string) {
   }
 }
 
-export async function registerUser(username: string, displayName: string, password: string, inviteCode?: string) {
+export async function registerUser(username: string, displayName: string, password: string, inviteCode?: string, stay = true) {
   setAuthLoading(true);
   setAuthError(null);
   try {
-    const user = await api.register(serverUrl(), username, displayName, password, inviteCode);
+    const user = await api.register(serverUrl(), username, displayName, password, inviteCode, stay);
     remember(serverUrl(), username);
     setRememberedUsername(username);
     setCurrentUser(user);
@@ -65,6 +66,25 @@ export async function registerUser(username: string, displayName: string, passwo
     return false;
   } finally {
     setAuthLoading(false);
+  }
+}
+
+/** Signs in with the session saved on this device for the last server; false means show the form. */
+export async function resumeLastSession(): Promise<boolean> {
+  const username = rememberedUsername();
+  if (!username) return false;
+  setResuming(true);
+  try {
+    const user = await api.resumeSession(serverUrl(), username);
+    if (!user) return false;
+    setCurrentUser(user);
+    await loadChannels();
+    return true;
+  } catch (err: any) {
+    setAuthError(String(err));
+    return false;
+  } finally {
+    setResuming(false);
   }
 }
 

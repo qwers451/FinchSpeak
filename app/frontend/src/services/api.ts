@@ -10,9 +10,9 @@ let browserUser: User | null = null;
 
 export const api = {
   // Auth
-  login: async (serverUrl: string, username: string, password: string): Promise<User> => {
+  login: async (serverUrl: string, username: string, password: string, remember = false): Promise<User> => {
     if (isTauri()) {
-      return invoke('login', { serverUrl, username, password });
+      return invoke('login', { serverUrl, username, password, remember });
     }
     const cleanUrl = serverUrl.replace(/\/+$/, '');
     const resp = await fetch(`${cleanUrl}/api/auth/login`, {
@@ -31,9 +31,9 @@ export const api = {
     return data.user;
   },
 
-  register: async (serverUrl: string, username: string, displayName: string, password: string, inviteCode?: string): Promise<User> => {
+  register: async (serverUrl: string, username: string, displayName: string, password: string, inviteCode?: string, remember = false): Promise<User> => {
     if (isTauri()) {
-      return invoke('register', { serverUrl, username, displayName, password, inviteCode: inviteCode || null });
+      return invoke('register', { serverUrl, username, displayName, password, inviteCode: inviteCode || null, remember });
     }
     const cleanUrl = serverUrl.replace(/\/+$/, '');
     const resp = await fetch(`${cleanUrl}/api/auth/register`, {
@@ -50,6 +50,11 @@ export const api = {
     browserServerUrl = cleanUrl;
     browserUser = data.user;
     return data.user;
+  },
+
+  resumeSession: async (serverUrl: string, username: string): Promise<User | null> => {
+    if (isTauri()) return invoke('resume_session', { serverUrl, username });
+    return null;
   },
 
   logout: async (): Promise<void> => {
