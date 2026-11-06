@@ -1,6 +1,7 @@
 import { createSignal } from 'solid-js';
 import type { DeviceSession, SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
 import { setPendingMismatch, setPendingTofu } from './tofuStore';
+import { receiveInviteLink } from './inviteLink';
 import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
 import { activeVoiceChannel, toggleMute, handleHotkey, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
@@ -100,6 +101,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'voice-quality': handleVoiceQuality,
   'tofu-required': setPendingTofu,
   'tofu-mismatch': setPendingMismatch,
+  'invite-link': (url) => { receiveInviteLink(url); },
   'reconnect-attempt': ({ attempt, retry_in_secs }) => setReconnectInfo({ attempt, retryInSecs: retry_in_secs }),
   'channel-created': ({ channel }) => handleChannelCreated(channel),
   'channel-updated': ({ channel }) => handleChannelUpdated(channel),

@@ -218,6 +218,7 @@ export interface SessionEvents {
   'ping-rtt': { rtt_ms: number };
   'tofu-required': { hostname: string; fingerprint: string };
   'tofu-mismatch': { hostname: string; expected: string; actual: string };
+  'invite-link': string;
   'reconnect-attempt': { attempt: number; retry_in_secs: number };
   'channel-created': { channel: Channel };
   'user-joined-voice': VoiceParticipant;

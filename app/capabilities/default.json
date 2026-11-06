@@ -34,6 +34,7 @@
     "core:window:allow-unminimize",
     "autostart:allow-enable",
     "autostart:allow-disable",
-    "autostart:allow-is-enabled"
+    "autostart:allow-is-enabled",
+    "deep-link:default"
   ]
 }

@@ -1,6 +1,7 @@
-import { createMemo, createSignal, For, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js';
 import { pendingMismatch, discardPendingSignIn, pendingTofu, retryPendingSignIn, setAuthError, setPendingMismatch, setPendingTofu } from '../stores/authStore';
 import { api } from '../services/api';
+import { fingerprintsMatch, pendingInvite } from '../stores/inviteLink';
 import { Button, Field, Icon, Modal } from '../ui';
 import { t } from '../i18n';
 
@@ -33,6 +34,24 @@ export function TofuModal() {
     await retryPendingSignIn();
   };
 
+  // An invite link that pins this very fingerprint confirms itself through the same confirm() as the button.
+  let autoTrusted: unknown = null;
+  createEffect(() => {
+    const data = pendingTofu();
+    const link = pendingInvite();
+    if (!data || !link || autoTrusted === data) return;
+    if (fingerprintsMatch(link.fp, data.fingerprint)) {
+      autoTrusted = data;
+      untrack(() => void confirm());
+    }
+  });
+
+  // The link names a fingerprint, but the server presents another one: the dialog shows, with a warning.
+  const linkMismatch = (fingerprint: string) => {
+    const link = pendingInvite();
+    return !!link && !!link.fp && !fingerprintsMatch(link.fp, fingerprint);
+  };
+
   return (
     <Modal open={!!pendingTofu()} onClose={dismiss} title={t('Trust this server?')} width="560px">
       <Show when={pendingTofu()}>
@@ -42,6 +61,12 @@ export function TofuModal() {
               <div class="av s56 c3"><Icon name="shield" size="lg" /></div>
               <span class="t2">{t('This is the first time you connect to {host}.', { host: hostOf(data().hostname) })}</span>
             </div>
+            <Show when={linkMismatch(data().fingerprint)}>
+              <div class="auth-banner red" role="alert">
+                <Icon name="warn" class="tr" />
+                <span class="fs13">{t('The fingerprint in the invite link does not match this server.')}</span>
+              </div>
+            </Show>
             <div class="col g8">
               <span class="sec-label">{t('Certificate fingerprint · SHA-256')}</span>
               <div class="fp-grid" data-testid="fingerprint">

@@ -1,4 +1,4 @@
-import { createSignal, Show } from 'solid-js';
+import { createEffect, createSignal, on, Show } from 'solid-js';
 import {
   serverUrl,
   setServerUrl,
@@ -9,6 +9,7 @@ import {
   authError,
   setAuthError,
 } from '../stores/authStore';
+import { pendingInvite } from '../stores/inviteLink';
 import { Button, Field, Icon, Toggle } from '../ui';
 import { passwordStrength } from '../ui/passwordStrength';
 import { t } from '../i18n';
@@ -33,12 +34,25 @@ export function describeAuthError(raw: string): ErrorLook {
 }
 
 export function AuthModal() {
-  const [isRegister, setIsRegister] = createSignal(false);
+  // An invite link opens the register form with its server and code filled in; the user still types the rest and submits.
+  const fromLink = pendingInvite();
+  if (fromLink) setServerUrl(fromLink.server);
+  const [isRegister, setIsRegister] = createSignal(!!fromLink);
   const [username, setUsername] = createSignal(rememberedUsername());
   const [displayName, setDisplayName] = createSignal('');
   const [password, setPassword] = createSignal('');
-  const [inviteCode, setInviteCode] = createSignal('');
+  const [inviteCode, setInviteCode] = createSignal(fromLink?.code ?? '');
   const [stay, setStay] = createSignal(true);
+  const [serverError, setServerError] = createSignal<string | undefined>(undefined);
+
+  createEffect(on(pendingInvite, (link) => {
+    if (!link) return;
+    setServerUrl(link.server);
+    setInviteCode(link.code);
+    setIsRegister(true);
+    setServerError(undefined);
+    setAuthError(null);
+  }, { defer: true }));
 
   const strength = () => passwordStrength(password());
   const inviteError = () => (authError() ?? '').toLowerCase().includes('invite') ? t('A valid invite code is required to register') : undefined;
@@ -52,6 +66,10 @@ export function AuthModal() {
   const submit = async (event: Event) => {
     event.preventDefault();
     if (authLoading()) return;
+    if (!serverUrl().trim()) {
+      setServerError(t('Enter the server address'));
+      return;
+    }
     if (isRegister()) await registerUser(username().trim(), displayName().trim(), password(), inviteCode(), stay());
     else await loginUser(username().trim(), password(), stay());
   };
@@ -95,7 +113,8 @@ export function AuthModal() {
           </Show>
 
           <div class="col g16">
-            <Field label={t('Server address')} icon="db" value={serverUrl()} onInput={setServerUrl} placeholder="https://chat.example.com:8443" />
+            <Field label={t('Server address')} icon="db" value={serverUrl()} error={serverError()} placeholder="https://your-server:8443"
+              onInput={(value) => { setServerUrl(value); setServerError(undefined); }} />
             <Show when={isRegister()}>
               <Field label={t('Invite code')} icon="ticket" value={inviteCode()} onInput={setInviteCode} placeholder="K7M2QX9TPW4B" error={inviteError()}
                 help={t('Ask the server admin for a code. It works a limited number of times and expires.')} />

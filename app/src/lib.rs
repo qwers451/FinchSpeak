@@ -13,7 +13,31 @@ pub mod state;
 pub mod credentials;
 
 use state::AppState;
-use tauri::Manager;
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, Manager};
+
+/// An invite link that arrived before the window was listening; the window takes it once at start.
+static PENDING_INVITE: Mutex<Option<String>> = Mutex::new(None);
+
+/// The `finchspeak://` argument of a launch or of a second launch that was handed to the running instance.
+pub fn invite_argument(args: impl IntoIterator<Item = String>) -> Option<String> {
+    args.into_iter().find(|arg| arg.len() <= 4096 && arg.to_ascii_lowercase().starts_with("finchspeak://"))
+}
+
+/// Keeps the raw link for a cold start and tells a running window. The window validates it; nothing is trusted here.
+fn deliver_invite(app: &AppHandle, link: String) {
+    if let Ok(mut slot) = PENDING_INVITE.lock() {
+        *slot = Some(link.clone());
+    }
+    if let Err(e) = app.emit("invite-link", link) {
+        tracing::warn!("Could not announce the invite link: {e}");
+    }
+}
+
+/// The invite link waiting from the last launch, if any; read once by the window at start.
+pub fn take_pending_invite() -> Option<String> {
+    PENDING_INVITE.lock().ok().and_then(|mut slot| slot.take())
+}
 
 /// Load pinned server fingerprints from `<app data dir>/known_servers.txt`.
 fn profile_directory(default: std::path::PathBuf, explicit: Option<std::ffi::OsString>) -> std::io::Result<std::path::PathBuf> {
@@ -60,7 +84,13 @@ pub fn run() {
     let state = AppState::new();
 
     if let Err(e) = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| tray::show_window(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(link) = invite_argument(argv) {
+                deliver_invite(app, link);
+            }
+            tray::show_window(app)
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
@@ -73,6 +103,17 @@ pub fn run() {
         .setup(|app| {
             tracing::info!("Tauri setup initialized");
             load_known_servers(app)?;
+            #[cfg(windows)]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                // Registers finchspeak:// for this user so that links open FinchSpeak (installer-independent).
+                if let Err(e) = app.deep_link().register_all() {
+                    tracing::warn!("Could not register the finchspeak:// links: {e}");
+                }
+            }
+            if let Some(link) = invite_argument(std::env::args()) {
+                deliver_invite(app.handle(), link);
+            }
             connection::spawn_sleep_watch(app.state::<AppState>().inner().clone());
             let language = match app.state::<AppState>().known_servers_path.blocking_read().as_deref().and_then(|path| path.parent()) {
                 Some(dir) => tray::saved_language(dir),
@@ -137,6 +178,7 @@ pub fn run() {
             commands::auth::trust_fingerprint,
             commands::auth::forget_server_fingerprint,
             commands::auth::server_info,
+            commands::window::take_invite_link,
             commands::chat::mark_channel_read,
             commands::chat::upload_avatar,
             commands::chat::remove_avatar,
@@ -223,7 +265,15 @@ mod profile_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::should_start_hidden;
+    use super::{invite_argument, should_start_hidden};
+
+    #[test]
+    fn invite_argument_takes_only_finchspeak_links() {
+        let args = ["finch-app.exe", "--minimized", "finchspeak://join?server=x&code=y"].map(String::from);
+        assert_eq!(invite_argument(args), Some("finchspeak://join?server=x&code=y".to_string()));
+        assert_eq!(invite_argument(["finch-app.exe".to_string(), "https://example.com".to_string()]), None);
+        assert_eq!(invite_argument(["finch-app.exe".to_string(), format!("finchspeak://{}", "a".repeat(5000))]), None);
+    }
 
     #[test]
     fn should_start_hidden_only_with_flag() {

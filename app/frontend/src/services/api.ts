@@ -174,6 +174,12 @@ export const api = {
     return { server_url: null, hostname: null, fingerprint: null };
   },
 
+  /** The invite link that started the app, handed over once; null when there is none. */
+  takeInviteLink: async (): Promise<string | null> => {
+    if (isTauri()) return invoke('take_invite_link');
+    return null;
+  },
+
   autostartEnabled: async (): Promise<boolean> => {
     if (isTauri()) return isEnabled();
     return false;

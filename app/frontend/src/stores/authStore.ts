@@ -8,10 +8,11 @@ import { setAppError } from './notificationStore';
 import { setSessionEnded } from './sessionEnd';
 import { pendingMismatch, pendingTofu, setPendingMismatch, setPendingTofu } from './tofuStore';
 import { describeError } from '../i18n/errors';
+import { setPendingInvite } from './inviteLink';
 
 export const [currentUser, setCurrentUser] = createSignal<User | null>(null);
 const REMEMBER_KEY = 'finchspeak.login';
-const DEFAULT_SERVER = 'https://127.0.0.1:8443';
+const DEFAULT_SERVER = '';
 
 // Only the address and the login name are remembered; the password never is.
 function readRemembered(): { serverUrl: string; username: string } {
@@ -89,6 +90,7 @@ export async function registerUser(username: string, displayName: string, passwo
   try {
     const user = await api.register(serverUrl(), username, displayName, password, inviteCode, stay);
     lastAttempt = null;
+    setPendingInvite(null);
     remember(serverUrl(), username);
     setRememberedUsername(username);
     setCurrentUser(user);

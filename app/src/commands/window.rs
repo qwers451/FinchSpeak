@@ -7,6 +7,12 @@ use tauri::{AppHandle, Manager, State};
 use crate::state::AppState;
 use crate::tray::{self, TrayState};
 
+/// The invite link that started the app (cold start), handed over once.
+#[tauri::command]
+pub fn take_invite_link() -> Option<String> {
+    crate::take_pending_invite()
+}
+
 /// Closing the window hides it to the tray (`true`) or quits (`false`).
 #[tauri::command]
 pub async fn set_close_to_tray(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {

@@ -127,3 +127,9 @@
 ## Daily Discord parity: Task 4 (mention badge, jump after notification)
 - [ ] Windows: get an @mention while the window is in the background; the taskbar button shows a red dot and the tray tooltip ends with "· N упоминание/упоминания/упоминаний". Reading the channel clears both.
 - [ ] Click an OS notification (window in background) and bring the window to front within 20 s: the notified channel opens. After more than 20 s it does not.
+
+## Account and first run: Task 5 (invite links)
+- [ ] Windows: build the installer, install it, then press Win+R and open `finchspeak://join?server=https%3A%2F%2F<server>%3A8443&code=<code>&fp=<fingerprint from About>`. FinchSpeak opens (or comes to the front) on the register form with server and invite code filled in; nothing is submitted.
+- [ ] Same link, with the fingerprint from the server's About page: no certificate dialog appears, and the sign-up completes after the username and password are entered and submitted.
+- [ ] Same link with a wrong fingerprint: the certificate dialog shows with the red note "The fingerprint in the invite link does not match this server."
+- [ ] Admin copies an invite link (Invitations tab, "Copy invite link") and it opens the register form with the same values on another machine.

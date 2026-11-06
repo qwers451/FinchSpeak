@@ -7,6 +7,8 @@ import { currentUser } from '../../stores/authStore';
 import { channels } from '../../stores/chatStore';
 import { moveChannel, removeChannel, renameChannel } from '../../stores/channelAdminStore';
 import type { AdminUser, Channel } from '../../types';
+import { api } from '../../services/api';
+import { buildInviteLink } from '../../stores/inviteLink';
 import { Avatar, Button, ConfirmDialog, Field, Icon, type IconName, Modal, pushToast, Toggle } from '../../ui';
 import { formatBytes, formatDuration, locale, t } from '../../i18n';
 
@@ -165,6 +167,18 @@ function MembersTab(props: { isAdmin: boolean }) {
   );
 }
 
+/** Copies a link that opens the register form on this server with the fingerprint the server admin sees. */
+async function copyInviteLink(code: string) {
+  try {
+    const info = await api.serverInfo();
+    if (!info.server_url?.startsWith('https://') || !info.fingerprint) throw new Error(t('The server address or certificate is not known yet.'));
+    await navigator.clipboard.writeText(buildInviteLink(info.server_url, code, info.fingerprint));
+    pushToast({ kind: 'success', title: t('Invite link copied') });
+  } catch (err) {
+    pushToast({ kind: 'error', title: t('Could not copy the invite link'), text: String(err).replace(/^Error:\s*/, '') });
+  }
+}
+
 function InvitesTab() {
   const [maxUses, setMaxUses] = createSignal('1');
   const [hours, setHours] = createSignal('72');
@@ -185,6 +199,7 @@ function InvitesTab() {
             <span class="t2 fs12">{t('New code')}</span>
             <strong class="invite-code">{code()}</strong>
             <Button size="sm" variant="secondary" icon="copy" onClick={() => { void navigator.clipboard?.writeText(code()); pushToast({ kind: 'success', title: t('Code copied') }); }}>{t('Copy')}</Button>
+            <Button size="sm" variant="secondary" icon="copy" onClick={() => void copyInviteLink(code())}>{t('Copy invite link')}</Button>
           </div>
         )}
       </Show>

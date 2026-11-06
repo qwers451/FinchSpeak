@@ -178,3 +178,68 @@ it('keeps the attempt when the certificate event arrives after the rejection', a
   Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.includes('trust server'))!.click();
   await vi.waitFor(() => expect(logins).toBe(2));
 });
+
+// ---- invite links: the link only prefills the form and pins its fingerprint; trust still goes through the dialog's confirm
+
+const INVITE_FP = FP;
+
+it('a matching invite link prefills server and code and opens register mode', async () => {
+  const { setPendingInvite } = await import('../stores/inviteLink');
+  const { setServerUrl, serverUrl } = await import('../stores/authStore');
+  const before = serverUrl();
+  setPendingInvite({ server: 'https://chat.finch.example:8443', code: 'K7M2QX9TPW4B', fp: INVITE_FP });
+  const host = mount(() => <AuthModal />);
+  expect(host.textContent).toContain('Join the flock');
+  const inputs = Array.from(host.querySelectorAll('input')) as HTMLInputElement[];
+  expect(inputs[0].value).toBe('https://chat.finch.example:8443');
+  expect(inputs.some((el) => el.value === 'K7M2QX9TPW4B')).toBe(true);
+  expect(transport.invoke).not.toHaveBeenCalled();
+  setPendingInvite(null);
+  setServerUrl(before);
+});
+
+it('submitting with an empty server address shows the plain error and does not sign in', async () => {
+  const { setServerUrl, serverUrl } = await import('../stores/authStore');
+  const before = serverUrl();
+  setServerUrl('');
+  const host = mount(() => <AuthModal />);
+  host.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  expect(host.textContent).toContain('Enter the server address');
+  expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'login' || cmd === 'register')).toHaveLength(0);
+  setServerUrl(before);
+});
+
+it('mismatched_link_fingerprint_is_not_trusted', async () => {
+  const { setPendingInvite } = await import('../stores/inviteLink');
+  setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: FP.replace('00', 'FF') });
+  setPendingTofu({ hostname: 'h', fingerprint: FP });
+  const host = mount(() => <TofuModal />);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'trust_fingerprint')).toHaveLength(0);
+  expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(host.textContent).toContain('The fingerprint in the invite link does not match this server.');
+  setPendingInvite(null);
+});
+
+it('a matching invite link trusts the server through the same confirm path, without the dialog', async () => {
+  const { setPendingInvite } = await import('../stores/inviteLink');
+  const user = { id: 'u', username: 'alice', display_name: 'Alice', role: 'member' };
+  let logins = 0;
+  transport.invoke.mockImplementation(async (cmd: string) => {
+    if (cmd === 'login') {
+      logins += 1;
+      if (logins === 1) {
+        setPendingTofu({ hostname: 'h', fingerprint: FP });
+        throw 'Server certificate of h is not trusted yet';
+      }
+      return user;
+    }
+    return null;
+  });
+  setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: FP.toLowerCase().replace(/:/g, '') });
+  mount(() => <TofuModal />);
+  expect(await loginUser('alice', 'hunter2hunter2', false)).toBe(false);
+  await vi.waitFor(() => expect(logins).toBe(2));
+  expect(transport.invoke).toHaveBeenCalledWith('trust_fingerprint', { hostname: 'h', fingerprint: FP });
+  setPendingInvite(null);
+});

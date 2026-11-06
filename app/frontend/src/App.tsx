@@ -3,6 +3,7 @@ import { currentUser, setCurrentUser, resumeLastSession, resuming } from './stor
 import { activeChannel, loadChannels } from './stores/chatStore';
 import { setAppError } from './stores/sessionStore';
 import { subscribeSessionEvents } from './services/sessionEvents';
+import { receiveInviteLink } from './stores/inviteLink';
 import { api } from './services/api';
 import { Sidebar } from './components/Sidebar';
 import { prefs } from './stores/settingsStore';
@@ -36,6 +37,9 @@ export function App() {
       const subscriptions = await subscribeSessionEvents();
       if (disposed) { subscriptions.dispose(); return; }
       unlisten = subscriptions.dispose;
+      // A finchspeak:// link that started the app arrived before this window listened: take it now.
+      const waitingLink = await api.takeInviteLink();
+      if (waitingLink) receiveInviteLink(waitingLink);
       // Keys work system-wide, so register them at start, not only on joining a room.
       void restoreAudioDevices(); // the Voice settings page and the out-of-call mic test use the saved devices
       void restoreVoiceSettings();
