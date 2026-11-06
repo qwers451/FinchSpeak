@@ -107,7 +107,8 @@ export const screenHandlers: Pick<{ [K in keyof SessionEvents]: (payload: Sessio
     }
     const reason = typeof data === 'string' ? data : data.reason;
     endLocalScreenShare();
-    setAppError(t('Screen sharing stopped: {reason}', { reason }));
+    // A room switch ends our share on purpose: the user did not lose it to an error.
+    if (reason !== 'room-changed') setAppError(t('Screen sharing stopped: {reason}', { reason }));
   },
 };
 

@@ -4,11 +4,25 @@ use std::sync::atomic::Ordering;
 
 use finch_audio::{list_input_devices, list_output_devices};
 use finch_protocol::messages::ClientMessage;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tracing::info;
 use uuid::Uuid;
 
 use crate::state::{AppState, AudioDeviceSelection, VoiceSettingsDto};
+
+/// Ends our screen share for a room switch. Returns the generation that was ended, or `None`
+/// when we were not sharing (then nothing is sent).
+async fn end_share_for_room_change(
+    state: &AppState,
+    tx: &tokio::sync::mpsc::Sender<ClientMessage>,
+) -> Option<u64> {
+    let generation = state.screen_share_generation().ok()?;
+    if !state.stop_screen_share() {
+        return None;
+    }
+    let _ = tx.send(ClientMessage::StopScreenShare).await;
+    Some(generation)
+}
 
 #[derive(serde::Serialize)]
 pub struct AudioDeviceDto {
@@ -39,17 +53,25 @@ pub async fn join_voice_channel(
     let tx_opt = state.control_tx.read().await.clone();
     let tx = tx_opt.ok_or_else(|| "Not connected via QUIC".to_string())?;
 
-    if *state.current_voice_channel.read().await != Some(short_id) {
-        // Switching rooms ends our share (the server tells the old room) and the share we watched there, as leaving does; it also cancels a preflight still waiting for its first frame. The frontend clears its sharing state when the join succeeds.
-        state.stop_screen_share();
-        state.stop_watching().await;
-    }
+    let switching = *state.current_voice_channel.read().await != Some(short_id);
+    // Nothing is stopped until the join is sent, so a failed send leaves our share running.
     tx.send(ClientMessage::JoinVoice { channel_id: ch_uuid })
         .await
         .map_err(|e| format!("Failed to send JoinVoice: {}", e))?;
 
     *state.current_voice_channel.write().await = Some(short_id);
     state.mixer.lock().await.clear_playout();
+
+    if switching {
+        // Switching rooms ends our share and the share we watched there, as leaving does. The UI learns the ended generation from the event, even if the engine start below fails.
+        if let Some(generation) = end_share_for_room_change(&state, &tx).await {
+            let _ = app_handle.emit(
+                "screen-share-ended",
+                serde_json::json!({ "generation": generation, "reason": "room-changed" }),
+            );
+        }
+        state.stop_watching().await;
+    }
 
     // Start audio engine capture and playback
     let mut engine = state.audio_engine.lock().await;
@@ -228,4 +250,20 @@ pub fn stop_audio_diagnostics(state: State<'_, AppState>) {
 #[tauri::command]
 pub fn get_audio_diagnostics(state: State<'_, AppState>) -> Result<String, String> {
     state.audio_diagnostics.report().map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod room_change_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn room_change_ends_our_share_once_and_reports_its_generation() {
+        let state = AppState::new();
+        let generation = state.begin_screen_share().unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        assert_eq!(end_share_for_room_change(&state, &tx).await, Some(generation));
+        assert!(matches!(rx.recv().await, Some(ClientMessage::StopScreenShare)));
+        assert_eq!(end_share_for_room_change(&state, &tx).await, None);
+        assert!(rx.try_recv().is_err(), "no second StopScreenShare when nothing was shared");
+    }
 }

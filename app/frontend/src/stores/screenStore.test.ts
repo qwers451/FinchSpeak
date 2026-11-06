@@ -199,3 +199,21 @@ it('remembers an end event received before the successful invoke reply', async (
   expect(isSharing()).toBe(false);
   expect(sharingInfo()).toBeNull();
 });
+
+it('a room-changed end of an older share does not hide a share started during the switch', async () => {
+  vi.spyOn(api, 'startScreenShare').mockResolvedValue(40);
+  expect(await startSharing('window', 9, false, 'New room share', 'window')).toBeNull();
+  sessionHandlers['screen-share-ended']({ generation: 39, reason: 'room-changed' });
+  expect(isSharing()).toBe(true);
+  expect(sharingInfo()?.label).toBe('New room share');
+  expect(appError()).toBeNull();
+});
+
+it('a room-changed end of our current share stops it without an error message', async () => {
+  vi.spyOn(api, 'startScreenShare').mockResolvedValue(41);
+  await startSharing('window', 9, false, 'Notes', 'window');
+  sessionHandlers['screen-share-ended']({ generation: 41, reason: 'room-changed' });
+  expect(isSharing()).toBe(false);
+  expect(sharingInfo()).toBeNull();
+  expect(appError()).toBeNull();
+});

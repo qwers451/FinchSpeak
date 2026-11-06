@@ -104,17 +104,24 @@ it('AUD-024 tells the user when a device disappears or is replaced by the defaul
   expect(appError()).toMatch(/rejoin/i);
 });
 
-it('switching to another room ends our screen share and the share we watched', async () => {
-  const { isSharing, setIsSharing, setSharingInfo, sharingInfo, setWatching, watching } = await import('./screenState');
+it('switching to another room clears the share we watched; our own share ends on the backend event', async () => {
+  const { isSharing, setIsSharing, setSharingInfo, sharingInfo, setScreenShareGeneration, setWatching, watching, setEndedShare, endedShare } = await import('./screenState');
   vi.spyOn(api, 'setAudioDevices').mockResolvedValue();
   vi.spyOn(api, 'joinVoiceChannel').mockResolvedValue();
   setIsSharing(true);
   setSharingInfo({ label: 'Notes', audio: false });
-  setWatching(7 as never);
+  setScreenShareGeneration(11);
+  setWatching({ user_id: 'bob', peer_id: 7 });
+  setEndedShare(null);
   await joinVoice({ id: 'other', short_id: 2, name: 'other', channel_type: 'voice', position: 1, bitrate_kbps: 64 });
+  expect(watching()).toBeNull();
+  expect(endedShare()).toBeNull();
+  // The join itself does not end our share: the backend reports it with the generation.
+  expect(isSharing()).toBe(true);
+  sessionHandlers['screen-share-ended']({ generation: 11, reason: 'room-changed' });
   expect(isSharing()).toBe(false);
   expect(sharingInfo()).toBeNull();
-  expect(watching()).toBeNull();
+  expect(appError()).toBeNull();
 });
 
 it('rejoining the same room keeps our screen share', async () => {

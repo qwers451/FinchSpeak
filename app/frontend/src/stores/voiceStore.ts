@@ -3,7 +3,7 @@ import { t } from '../i18n';
 import type { AudioDevice, Channel, VoiceParticipant, VoiceSettings } from '../types';
 import { api } from '../services/api';
 import { setAppError } from './notificationStore';
-import { resetScreenState } from './screenState';
+import { resetScreenState, setEndedShare, setWatching } from './screenState';
 
 export const [activeVoiceChannel, setActiveVoiceChannel] = createSignal<Channel | null>(null);
 export const [isMuted, setIsMuted] = createSignal<boolean>(false);
@@ -239,11 +239,15 @@ export function restoreVoiceSettings() {
 export async function joinVoice(channel: Channel) {
   await restoreAudioDevices();
   await restoreVoiceSettings();
-  const previous = activeVoiceChannel();
   try {
+    const previous = activeVoiceChannel();
     await api.joinVoiceChannel(channel.id, channel.short_id);
-    // The backend stops our share and the one we watched when the room changes, like on leave.
-    if (previous && previous.id !== channel.id) resetScreenState();
+    // The backend ends our share (announced by screen-share-ended) and stops the one we watched;
+    // only the watched share is cleared here.
+    if (previous && previous.id !== channel.id) {
+      setWatching(null);
+      setEndedShare(null);
+    }
     setActiveVoiceChannel(channel);
   } catch (err) {
     console.error('Failed to join voice channel:', err);
