@@ -186,8 +186,9 @@ it('an automatic resume that fails after a manual sign-in is not retried and sho
   const manual = { id: 'bob', username: 'bob', display_name: 'Bob', role: 'member' as const };
   vi.spyOn(api, 'login').mockResolvedValue(manual);
   const pending = resumeLastSession();
-  await loginUser('bob', 'hunter2hunter2');
+  const signIn = loginUser('bob', 'hunter2hunter2');
   inFlight.reject('Cannot reach the server: connection refused');
+  await signIn;
   await expect(pending).resolves.toBe(false);
   await vi.advanceTimersByTimeAsync(120_000);
   expect(resume).toHaveBeenCalledTimes(1);
@@ -208,9 +209,10 @@ it('an automatic resume that succeeds after a manual sign-in does not replace th
   const manual = { id: 'bob', username: 'bob', display_name: 'Bob', role: 'member' as const };
   vi.spyOn(api, 'login').mockResolvedValue(manual);
   const pending = resumeLastSession();
-  await loginUser('bob', 'hunter2hunter2');
+  const signIn = loginUser('bob', 'hunter2hunter2');
   inFlight.resolve({ id: 'alice', username: 'alice', display_name: 'Alice', role: 'member' });
   await expect(pending).resolves.toBe(false);
+  await signIn;
   expect(currentUser()).toEqual(manual);
   setCurrentUser(null);
   vi.restoreAllMocks();
@@ -232,5 +234,68 @@ it('Retry while an automatic resume is in flight does not start a second resume'
   expect(resume).toHaveBeenCalledTimes(1);
   expect(currentUser()).toEqual(user);
   setCurrentUser(null);
+  vi.restoreAllMocks();
+});
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+const alice = { id: 'alice', username: 'alice', display_name: 'Alice', role: 'member' as const };
+const bob = { id: 'bob', username: 'bob', display_name: 'Bob', role: 'member' as const };
+
+it('a manual sign-in waits for a running automatic resume, so its login is the last backend call', async () => {
+  const { resumeLastSession, loginUser, setRememberedUsername } = await import('./authStore');
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  const calls: string[] = [];
+  const inFlight = deferred<typeof alice>();
+  vi.spyOn(api, 'resumeSession').mockImplementation(() => { calls.push('resume'); return inFlight.promise; });
+  const login = vi.spyOn(api, 'login').mockImplementation(async () => { calls.push('login'); return bob; });
+  const pending = resumeLastSession();
+  const signIn = loginUser('bob', 'hunter2hunter2');
+  await settle();
+  expect(login).not.toHaveBeenCalled();
+  inFlight.resolve(alice);
+  await expect(signIn).resolves.toBe(true);
+  await pending;
+  expect(calls).toEqual(['resume', 'login']);
+  expect(currentUser()).toEqual(bob);
+  setCurrentUser(null);
+  vi.restoreAllMocks();
+});
+
+it('a sign-out waits for a running automatic resume, then ends the session the resume opened', async () => {
+  const { resumeLastSession, setRememberedUsername } = await import('./authStore');
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  const calls: string[] = [];
+  const inFlight = deferred<typeof alice>();
+  vi.spyOn(api, 'resumeSession').mockImplementation(() => { calls.push('resume'); return inFlight.promise; });
+  const logout = vi.spyOn(api, 'logout').mockImplementation(async () => { calls.push('logout'); });
+  const pending = resumeLastSession();
+  const signOut = logoutUser();
+  await settle();
+  expect(logout).not.toHaveBeenCalled();
+  inFlight.resolve(alice);
+  await signOut;
+  await pending;
+  expect(calls).toEqual(['resume', 'logout']);
+  expect(currentUser()).toBeNull();
+  vi.restoreAllMocks();
+});
+
+it('a resumed session signed out while its channels load does not run the after-resume refresh', async () => {
+  const { resumeLastSession, setRememberedUsername } = await import('./authStore');
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  vi.spyOn(api, 'resumeSession').mockResolvedValue(alice);
+  const channels = deferred<never[]>();
+  vi.spyOn(api, 'listChannels').mockReturnValue(channels.promise);
+  const afterResume = vi.fn(async () => {});
+  const pending = resumeLastSession(afterResume);
+  await settle();
+  expect(currentUser()).toEqual(alice);
+  setCurrentUser(null);
+  channels.resolve([]);
+  await expect(pending).resolves.toBe(false);
+  expect(afterResume).not.toHaveBeenCalled();
   vi.restoreAllMocks();
 });

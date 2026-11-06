@@ -64,6 +64,7 @@ export async function retryPendingSignIn(): Promise<boolean> {
 
 export async function loginUser(username: string, password: string, stay = true) {
   cancelResumeRetry();
+  await settleResumeInFlight();
   lastAttempt = { kind: 'login', username, password, stay };
   setAuthLoading(true);
   setAuthError(null);
@@ -87,6 +88,7 @@ export async function loginUser(username: string, password: string, stay = true)
 
 export async function registerUser(username: string, displayName: string, password: string, inviteCode?: string, stay = true) {
   cancelResumeRetry();
+  await settleResumeInFlight();
   lastAttempt = { kind: 'register', username, displayName, password, inviteCode, stay };
   setAuthLoading(true);
   setAuthError(null);
@@ -167,9 +169,20 @@ async function attemptResume(): Promise<boolean> {
   if (!user) return false;
   setAuthError(null);
   setCurrentUser(user);
+  // The generation is taken after this attempt's own cancelResumeRetry(); a later cancel or a sign-out makes it stale.
+  const applied = attemptGeneration;
+  const stillCurrent = () => applied === attemptGeneration && currentUser() === user;
   await loadChannels();
+  if (!stillCurrent()) return false;
   await afterResume?.();
   return true;
+}
+
+// A manual sign-in or sign-out runs after an automatic resume still in flight: the resume may already have
+// opened a backend session, and the user action must replace it or end it. The resume result is ignored here.
+async function settleResumeInFlight() {
+  const pending = resumeInFlight;
+  if (pending) await pending.catch(() => false);
 }
 
 function startResumeAttempt(): Promise<boolean> {
@@ -201,6 +214,7 @@ export async function resumeLastSession(onSignedIn?: () => Promise<void>): Promi
 export async function logoutUser() {
   lastAttempt = null;
   cancelResumeRetry();
+  await settleResumeInFlight();
   let failure: unknown;
   try { await api.logout(); } catch (error) { failure = error; }
   resetSessionState();
