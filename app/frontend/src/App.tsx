@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onMount, onCleanup, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, onMount, onCleanup, Show } from 'solid-js';
 import { currentUser, setCurrentUser, resumeLastSession, resuming } from './stores/authStore';
 import { activeChannel, loadChannels } from './stores/chatStore';
 import { setAppError } from './stores/sessionStore';
@@ -52,8 +52,9 @@ export function App() {
   });
 
   // Background update checks run only while somebody is signed in.
+  const signedIn = createMemo(() => !!currentUser());
   createEffect(() => {
-    if (!currentUser()) return;
+    if (!signedIn()) return;
     onCleanup(startUpdateChecks());
   });
 

@@ -143,3 +143,18 @@ it('checks for updates 15 seconds after sign-in', async () => {
     vi.useRealTimers();
   }
 });
+
+it('a profile update does not restart the update timer', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+  try {
+    mount();
+    const me = { id: 'me', username: 'me', display_name: 'Me', role: 'member' as const };
+    setCurrentUser(me);
+    await vi.advanceTimersByTimeAsync(10_000);
+    setCurrentUser({ ...me, display_name: 'Renamed' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'check_update')).toHaveLength(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});

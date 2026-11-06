@@ -163,3 +163,18 @@ it('dismissing the certificate prompt forgets the password', async () => {
   expect(await retryPendingSignIn()).toBe(false);
   expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'login')).toHaveLength(1);
 });
+
+it('keeps the attempt when the certificate event arrives after the rejection', async () => {
+  let logins = 0;
+  transport.invoke.mockImplementation(async (cmd: string) => {
+    if (cmd !== 'login') return null;
+    logins += 1;
+    if (logins === 1) throw 'Server certificate of h is not trusted yet';
+    return { id: 'u', username: 'alice', display_name: 'Alice', role: 'member' };
+  });
+  await loginUser('alice', 'hunter2hunter2');
+  setPendingTofu({ hostname: 'h', fingerprint: FP });
+  const host = mount(() => <TofuModal />);
+  Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.includes('trust server'))!.click();
+  await vi.waitFor(() => expect(logins).toBe(2));
+});

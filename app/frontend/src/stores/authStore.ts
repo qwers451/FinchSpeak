@@ -40,6 +40,11 @@ type Attempt =
   | { kind: 'register'; username: string; displayName: string; password: string; inviteCode?: string; stay: boolean };
 let lastAttempt: Attempt | null = null;
 
+// The error of an untrusted server arrives before (or after) the tofu-required event, so look at both.
+function awaitsCertificateTrust(err: unknown): boolean {
+  return pendingTofu() !== null || String(err).includes('is not trusted yet');
+}
+
 /** Forgets the saved attempt (and its password), e.g. when the certificate prompt is dismissed. */
 export function discardPendingSignIn() {
   lastAttempt = null;
@@ -51,12 +56,12 @@ export async function retryPendingSignIn(): Promise<boolean> {
   lastAttempt = null;
   if (!attempt) return false;
   return attempt.kind === 'login'
-    ? loginUser(attempt.username, attempt.password, attempt.stay, true)
-    : registerUser(attempt.username, attempt.displayName, attempt.password, attempt.inviteCode, attempt.stay, true);
+    ? loginUser(attempt.username, attempt.password, attempt.stay)
+    : registerUser(attempt.username, attempt.displayName, attempt.password, attempt.inviteCode, attempt.stay);
 }
 
-export async function loginUser(username: string, password: string, stay = true, isRetry = false) {
-  if (!isRetry) lastAttempt = { kind: 'login', username, password, stay };
+export async function loginUser(username: string, password: string, stay = true) {
+  lastAttempt = { kind: 'login', username, password, stay };
   setAuthLoading(true);
   setAuthError(null);
   try {
@@ -69,15 +74,15 @@ export async function loginUser(username: string, password: string, stay = true,
     return true;
   } catch (err: any) {
     setAuthError(String(err));
-    if (!pendingTofu()) lastAttempt = null; // keep the password only while the certificate prompt can replay it
+    if (!awaitsCertificateTrust(err)) lastAttempt = null; // keep the password only while the certificate prompt can replay it
     return false;
   } finally {
     setAuthLoading(false);
   }
 }
 
-export async function registerUser(username: string, displayName: string, password: string, inviteCode?: string, stay = true, isRetry = false) {
-  if (!isRetry) lastAttempt = { kind: 'register', username, displayName, password, inviteCode, stay };
+export async function registerUser(username: string, displayName: string, password: string, inviteCode?: string, stay = true) {
+  lastAttempt = { kind: 'register', username, displayName, password, inviteCode, stay };
   setAuthLoading(true);
   setAuthError(null);
   try {
@@ -90,7 +95,7 @@ export async function registerUser(username: string, displayName: string, passwo
     return true;
   } catch (err: any) {
     setAuthError(String(err));
-    if (!pendingTofu()) lastAttempt = null; // keep the password only while the certificate prompt can replay it
+    if (!awaitsCertificateTrust(err)) lastAttempt = null; // keep the password only while the certificate prompt can replay it
     return false;
   } finally {
     setAuthLoading(false);
