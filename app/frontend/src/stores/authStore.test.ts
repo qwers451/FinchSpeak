@@ -2,7 +2,17 @@ import { expect, it, vi } from 'vitest';
 import { api } from '../services/api';
 import { currentUser, logoutUser, setCurrentUser } from './authStore';
 import { appError } from './notificationStore';
+import { sessions } from './profileStore';
+import { setSessions } from './sessionStore';
 import { isMuted, isDeafened, setIsMuted, setIsDeafened } from './voiceStore';
+
+it('sign-out clears the device list so the next account never sees it', async () => {
+  setSessions([{ id: 's1', device_name: 'DESKTOP-HOME', created_at: 1, last_seen_at: 1, current: true }]);
+  vi.spyOn(api, 'logout').mockResolvedValue();
+  await logoutUser();
+  expect(sessions()).toEqual([]);
+  vi.restoreAllMocks();
+});
 
 it('preserves mute preferences when Rust logout preserves its audio flags', async () => {
   vi.spyOn(api, 'logout').mockResolvedValue();

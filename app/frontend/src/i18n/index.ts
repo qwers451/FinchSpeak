@@ -33,6 +33,7 @@ export const ru: Readonly<Record<string, string>> = {
   'About': 'О программе', 'Version': 'Версия', 'Updates': 'Обновления', 'You have the newest version': 'Установлена последняя версия', 'Check for updates': 'Проверить обновления',
   'Install {version}': 'Установить {version}', 'FinchSpeak {version} is available': 'Доступна FinchSpeak {version}', 'Install it from Settings → Keys and about.': 'Установите её в Настройки → Клавиши и о программе.', 'Leave the voice room to install.': 'Выйдите из голосовой комнаты, чтобы установить.', 'Server': 'Сервер', 'Certificate fingerprint (SHA-256)': 'Отпечаток сертификата (SHA-256)', 'Copy fingerprint': 'Скопировать отпечаток', 'Copy diagnostics': 'Скопировать диагностику',
   'unknown': 'неизвестно', 'Welcome to FinchSpeak': 'Добро пожаловать в FinchSpeak', 'Pick a channel on the left to start chatting or talking.': 'Выберите канал слева, чтобы начать переписку или разговор.',
+  'Not authenticated': 'Вы не вошли в аккаунт',
   'Cancel': 'Отмена', 'System default': 'По умолчанию', ' (default)': ' (по умолчанию)',
   'This device is not connected; the system default is used instead.': 'Это устройство не подключено, используется устройство по умолчанию.',
   'Voice and audio': 'Голос и звук', 'Microphone': 'Микрофон', 'Speakers': 'Динамики', 'Voice enhancement': 'Улучшение голоса',

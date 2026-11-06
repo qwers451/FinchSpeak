@@ -16,6 +16,7 @@ it.each([
   ['The certificate of x changed since you trusted it', 'Сертификат сервера изменился. Не входите, пока администратор не подтвердит замену.'],
   ['Logged out locally, but could not revoke the session', 'Вы вышли на этом компьютере. Сервер недоступен, поэтому сессия на нём не завершена.'],
   ['Invalid server address: x', 'Неверный адрес сервера'],
+  ['Not authenticated', 'Вы не вошли в аккаунт'],
 ])('translates %s', (raw, expected) => {
   expect(describeError(raw)).toBe(expected);
 });

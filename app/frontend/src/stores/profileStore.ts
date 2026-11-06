@@ -1,6 +1,7 @@
 import { createSignal } from 'solid-js';
 import { api } from '../services/api';
 import { currentUser, logoutUser, setCurrentUser } from './authStore';
+import { sessions, setSessions } from './sessionStore';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
 import type { DeviceSession, UserStatus } from '../types';
@@ -35,7 +36,7 @@ export async function savePassword(current: string, next: string, again: string)
   }
 }
 
-export const [sessions, setSessions] = createSignal<DeviceSession[]>([]);
+export { sessions };
 
 /** Fetch the signed-in devices of this account. */
 export async function loadSessions(): Promise<DeviceSession[]> {

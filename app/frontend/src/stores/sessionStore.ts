@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import type { SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
+import type { DeviceSession, SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
 import { setPendingMismatch, setPendingTofu } from './tofuStore';
 import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
 import { activeVoiceChannel, toggleMute, handleHotkey, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
@@ -27,9 +27,12 @@ export const [presence, setPresence] = createSignal<Record<string, UserStatus>>(
 /** What people wrote next to their status. */
 export const [statusTexts, setStatusTexts] = createSignal<Record<string, string>>({});
 export const onlineUsers = () => knownUsers().filter((user) => (presence()[user.id] ?? user.status) !== 'offline');
+/** Signed-in devices of the current account; cleared with the rest of the session on sign-out. */
+export const [sessions, setSessions] = createSignal<DeviceSession[]>([]);
 
 export function resetSessionState() {
   resetMicPreview();
+  setSessions([]);
   setConnectionStatus('disconnected');
   setConnectionError(null);
   setReconnectInfo(null);

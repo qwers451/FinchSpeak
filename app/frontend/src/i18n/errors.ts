@@ -13,6 +13,7 @@ const RULES: readonly Rule[] = [
   { pattern: /certificate of .* changed since you trusted it/i, key: 'The server certificate has changed. Do not sign in until the admin confirms the change.' },
   { pattern: /^Logged out locally, but could not revoke/i, key: 'Signed out on this computer. The server could not be reached to end the session.' },
   { pattern: /^Invalid server address/i, key: 'The server address is not valid' },
+  { pattern: /^Not authenticated$/i, key: 'Not authenticated' },
 ];
 
 /** The one place that turns a backend error into text in the interface language; unknown errors pass through unchanged. */
