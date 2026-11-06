@@ -7,7 +7,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) })
 
 import { AuthModal, describeAuthError } from './AuthModal';
 import { CertChangedModal, TofuModal, diffBytes, fingerprintGroups } from './TofuModal';
-import { loginUser, retryPendingSignIn, setPendingMismatch, setPendingTofu } from '../stores/authStore';
+import { loginUser, retryPendingSignIn, setCurrentUser, setPendingMismatch, setPendingTofu } from '../stores/authStore';
 import { passwordStrength } from '../ui/passwordStrength';
 
 let dispose: (() => void) | undefined;
@@ -326,6 +326,7 @@ it('Retry after a failed automatic resume resumes the session, not an empty-pass
   const { api } = await import('../services/api');
   const { resumeLastSession, setRememberedUsername } = await import('../stores/authStore');
   const user = { id: 'u', username: 'alice', display_name: 'Alice', role: 'member' as const };
+  setCurrentUser(null);
   setRememberedUsername('alice');
   const resume = vi.spyOn(api, 'resumeSession')
     .mockRejectedValueOnce('Cannot reach the server: timeout')

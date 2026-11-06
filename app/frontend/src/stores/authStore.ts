@@ -115,6 +115,10 @@ export const [resumeFailed, setResumeFailed] = createSignal<boolean>(false);
 const RESUME_RETRY_WAITS_MS = [2_000, 5_000, 15_000, 30_000];
 let resumeRetryTimer: ReturnType<typeof setTimeout> | undefined;
 let resumeRetriesDone = 0;
+// Bumped by cancelResumeRetry(): an attempt that started earlier is stale and must not touch the state.
+let attemptGeneration = 0;
+// The one resume attempt in flight; Retry joins it instead of starting a second one.
+let resumeInFlight: Promise<boolean> | null = null;
 // Runs after a resumed session (the App refreshes the live session state there).
 let afterResume: (() => Promise<void>) | undefined;
 
@@ -123,6 +127,7 @@ let afterResume: (() => Promise<void>) | undefined;
  * signs in with what the user typed. Called when the user types or signs in.
  */
 export function cancelResumeRetry() {
+  attemptGeneration++;
   if (resumeRetryTimer !== undefined) clearTimeout(resumeRetryTimer);
   resumeRetryTimer = undefined;
   resumeRetriesDone = 0;
@@ -137,21 +142,27 @@ function isServerUnreachable(err: unknown): boolean {
 async function attemptResume(): Promise<boolean> {
   const username = rememberedUsername();
   if (!username) return false;
+  const generation = attemptGeneration;
+  // Stale once the user cancelled the retries (typed or signed in) or signed in meanwhile.
+  const stale = () => generation !== attemptGeneration || currentUser() !== null;
   let user: User | null;
   try {
     user = await api.resumeSession(serverUrl(), username);
   } catch (err: any) {
+    if (stale()) return false;
     setAuthError(String(err));
     setResumeFailed(true);
     if (isServerUnreachable(err) && resumeRetriesDone < RESUME_RETRY_WAITS_MS.length) {
       const wait = RESUME_RETRY_WAITS_MS[resumeRetriesDone++];
       resumeRetryTimer = setTimeout(() => {
         resumeRetryTimer = undefined;
-        attemptResume().catch((error) => setAppError(describeError(error)));
+        if (currentUser() !== null || resumeInFlight) return;
+        startResumeAttempt().catch((error) => setAppError(describeError(error)));
       }, wait);
     }
     return false;
   }
+  if (stale()) return false;
   cancelResumeRetry();
   if (!user) return false;
   setAuthError(null);
@@ -161,17 +172,27 @@ async function attemptResume(): Promise<boolean> {
   return true;
 }
 
+function startResumeAttempt(): Promise<boolean> {
+  const attempt = attemptResume().finally(() => {
+    if (resumeInFlight === attempt) resumeInFlight = null;
+  });
+  resumeInFlight = attempt;
+  return attempt;
+}
+
 /**
  * Signs in with the session saved on this device for the last server; false means show the form.
  * `onSignedIn` runs after a session is resumed, including one resumed by a scheduled retry.
+ * While an attempt is already running, this joins it rather than starting a second one.
  */
 export async function resumeLastSession(onSignedIn?: () => Promise<void>): Promise<boolean> {
   if (!rememberedUsername()) return false;
-  cancelResumeRetry();
   if (onSignedIn) afterResume = onSignedIn;
+  if (resumeInFlight) return resumeInFlight;
+  cancelResumeRetry();
   setResuming(true);
   try {
-    return await attemptResume();
+    return await startResumeAttempt();
   } finally {
     setResuming(false);
   }

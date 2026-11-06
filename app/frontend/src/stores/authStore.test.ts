@@ -168,3 +168,69 @@ it('logging out with an already revoked token is not an error', async () => {
   expect(appError()).toBeNull();
   vi.restoreAllMocks();
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+it('an automatic resume that fails after a manual sign-in is not retried and shows no error', async () => {
+  vi.useFakeTimers();
+  const { resumeLastSession, loginUser, setRememberedUsername, resumeFailed, authError } = await import('./authStore');
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  const inFlight = deferred<null>();
+  const resume = vi.spyOn(api, 'resumeSession').mockReturnValue(inFlight.promise as never);
+  const manual = { id: 'bob', username: 'bob', display_name: 'Bob', role: 'member' as const };
+  vi.spyOn(api, 'login').mockResolvedValue(manual);
+  const pending = resumeLastSession();
+  await loginUser('bob', 'hunter2hunter2');
+  inFlight.reject('Cannot reach the server: connection refused');
+  await expect(pending).resolves.toBe(false);
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect(resume).toHaveBeenCalledTimes(1);
+  expect(currentUser()).toEqual(manual);
+  expect(authError()).toBeNull();
+  expect(resumeFailed()).toBe(false);
+  setCurrentUser(null);
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+it('an automatic resume that succeeds after a manual sign-in does not replace the manual user', async () => {
+  const { resumeLastSession, loginUser, setRememberedUsername } = await import('./authStore');
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  const inFlight = deferred<{ id: string; username: string; display_name: string; role: 'member' }>();
+  vi.spyOn(api, 'resumeSession').mockReturnValue(inFlight.promise);
+  const manual = { id: 'bob', username: 'bob', display_name: 'Bob', role: 'member' as const };
+  vi.spyOn(api, 'login').mockResolvedValue(manual);
+  const pending = resumeLastSession();
+  await loginUser('bob', 'hunter2hunter2');
+  inFlight.resolve({ id: 'alice', username: 'alice', display_name: 'Alice', role: 'member' });
+  await expect(pending).resolves.toBe(false);
+  expect(currentUser()).toEqual(manual);
+  setCurrentUser(null);
+  vi.restoreAllMocks();
+});
+
+it('Retry while an automatic resume is in flight does not start a second resume', async () => {
+  const { resumeLastSession, setRememberedUsername } = await import('./authStore');
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  const inFlight = deferred<{ id: string; username: string; display_name: string; role: 'member' }>();
+  const resume = vi.spyOn(api, 'resumeSession').mockReturnValue(inFlight.promise);
+  const first = resumeLastSession();
+  const retry = resumeLastSession();
+  expect(resume).toHaveBeenCalledTimes(1);
+  const user = { id: 'alice', username: 'alice', display_name: 'Alice', role: 'member' as const };
+  inFlight.resolve(user);
+  await expect(first).resolves.toBe(true);
+  await expect(retry).resolves.toBe(true);
+  expect(resume).toHaveBeenCalledTimes(1);
+  expect(currentUser()).toEqual(user);
+  setCurrentUser(null);
+  vi.restoreAllMocks();
+});
