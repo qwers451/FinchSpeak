@@ -31,6 +31,9 @@
     "core:window:allow-set-focus",
     "core:window:allow-show",
     "core:window:allow-hide",
-    "core:window:allow-unminimize"
+    "core:window:allow-unminimize",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
   ]
 }

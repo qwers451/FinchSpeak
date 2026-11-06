@@ -10,6 +10,8 @@ export const ru: Readonly<Record<string, string>> = {
   'Text size': 'Размер текста', 'Small': 'Маленький', 'Medium': 'Средний', 'Large': 'Большой', 'Reduce motion': 'Уменьшить анимацию',
   'Turns off pulsing rings and slides.': 'Отключает пульсацию и скользящие переходы.', 'Close button hides to the tray': 'Сворачивать в область уведомлений',
   'FinchSpeak keeps running (and keeps you in the call). Quit from the tray menu.': 'FinchSpeak продолжит работу, и звонок не прервётся. Выход доступен в меню значка приложения.',
+  'Start with Windows': 'Запускать вместе с Windows', 'Starts hidden in the tray and signs you in.': 'Запускается свёрнутым в трей и входит в аккаунт.',
+  'Could not change the startup setting': 'Не удалось изменить автозапуск',
   'Members panel': 'Список участников', 'The list of people on the right.': 'Список пользователей справа.',
   'Change picture': 'Изменить изображение', 'Upload picture': 'Загрузить изображение', 'Remove': 'Удалить', 'PNG, JPEG or WebP, up to 12 MB. You choose which part people see.': 'PNG, JPEG или WebP, до 12 МБ. Вы сами выбираете, какую часть изображения увидят другие.',
   'Picture changed.': 'Изображение изменено.', 'Display name': 'Отображаемое имя', 'Shown to everyone. Up to 32 characters.': 'Видно всем. Не более 32 символов.',

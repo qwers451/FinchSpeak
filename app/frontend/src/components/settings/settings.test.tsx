@@ -104,6 +104,19 @@ it('appearance changes reach the page', async () => {
   setPrefs(DEFAULT_PREFS);
 });
 
+it('autostart toggle reflects and changes the OS setting', async () => {
+  vi.spyOn(api, 'autostartEnabled').mockResolvedValue(false);
+  const set = vi.spyOn(api, 'setAutostart').mockResolvedValue();
+  button('Appearance').click();
+  await flush();
+  const toggle = document.querySelector<HTMLElement>('[aria-label="Start with Windows"]')!;
+  expect(toggle.getAttribute('aria-checked')).toBe('false');
+  toggle.click();
+  await flush();
+  expect(set).toHaveBeenCalledWith(true);
+  expect(toggle.getAttribute('aria-checked')).toBe('true');
+});
+
 it('switches the mounted settings dialog language and updates the document language', async () => {
   button('Appearance').click();
   await flush();

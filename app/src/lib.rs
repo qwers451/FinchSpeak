@@ -40,6 +40,11 @@ fn load_known_servers(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
+/// True when the app was launched by the Windows autostart entry and must stay in the tray.
+pub fn should_start_hidden(args: impl IntoIterator<Item = String>) -> bool {
+    args.into_iter().any(|a| a == "--minimized")
+}
+
 pub fn run() {
     // Initialize tracing subscriber
     let _ = tracing_subscriber::fmt()
@@ -55,6 +60,7 @@ pub fn run() {
 
     if let Err(e) = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| tray::show_window(app)))
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(
@@ -73,10 +79,15 @@ pub fn run() {
             if let Err(e) = tray::setup(app.handle()) {
                 tracing::warn!("Could not create the tray icon: {e}");
             }
+            let hidden = should_start_hidden(std::env::args());
             if let Some(window) = app.get_webview_window("main") {
-                tracing::info!("Main window found, ensuring show and focus");
-                let _ = window.show();
-                let _ = window.set_focus();
+                if hidden {
+                    tracing::info!("Started with --minimized, staying in the tray");
+                } else {
+                    tracing::info!("Main window found, ensuring show and focus");
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
             } else {
                 tracing::warn!("Main window not created by config, creating manually");
                 let window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
@@ -84,8 +95,10 @@ pub fn run() {
                     .inner_size(1280.0, 800.0)
                     .min_inner_size(900.0, 600.0)
                     .build()?;
-                let _ = window.show();
-                let _ = window.set_focus();
+                if !hidden {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
             }
             Ok(())
         })
@@ -194,5 +207,16 @@ mod profile_tests {
         assert_eq!(profile_directory(default.clone(), Some(isolated.clone())).unwrap(), std::path::PathBuf::from(isolated));
         assert!(profile_directory(default.clone(), Some("relative".into())).is_err());
         assert!(profile_directory(default, Some("".into())).is_err());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_start_hidden;
+
+    #[test]
+    fn should_start_hidden_only_with_flag() {
+        assert!(!should_start_hidden(["finch-app.exe".to_string()]));
+        assert!(should_start_hidden(["finch-app.exe".to_string(), "--minimized".to_string()]));
     }
 }

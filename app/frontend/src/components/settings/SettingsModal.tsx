@@ -174,6 +174,18 @@ function NotificationsPage() {
 
 function AppearancePage() {
   const a = () => prefs().appearance;
+  const [autostart, setAutostart] = createSignal(false);
+  onMount(async () => {
+    try { setAutostart(await api.autostartEnabled()); } catch { /* shown as off */ }
+  });
+  const changeAutostart = async (on: boolean) => {
+    try {
+      await api.setAutostart(on);
+      setAutostart(on);
+    } catch (err) {
+      pushToast({ kind: 'error', title: t('Could not change the startup setting'), text: String(err).replace(/^Error:s*/, '') });
+    }
+  };
   const seg = <T extends string>(label: string, value: T, options: [T, string][], set: (v: T) => void) => (
     <div class="seg" role="radiogroup" aria-label={label}>
       <For each={options}>{([id, text]) => <span role="radio" tabindex="0" aria-checked={value === id} class={value === id ? 'on' : ''} onClick={() => set(id)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && set(id)}>{text}</span>}</For>
@@ -187,6 +199,7 @@ function AppearancePage() {
       <Row title={t('Text size')} control={seg(t('Text size'), a().textSize, [['small', t('Small')], ['medium', t('Medium')], ['large', t('Large')]], (textSize) => updateAppearance({ textSize }))} />
       <Row title={t('Reduce motion')} hint={t('Turns off pulsing rings and slides.')} control={<Toggle label={t('Reduce motion')} checked={a().reduceMotion} onChange={(v) => updateAppearance({ reduceMotion: v })} />} />
       <Row title={t('Close button hides to the tray')} hint={t('FinchSpeak keeps running (and keeps you in the call). Quit from the tray menu.')} control={<Toggle label={t('Close button hides to the tray')} checked={a().closeToTray} onChange={(v) => updateAppearance({ closeToTray: v })} />} />
+      <Row title={t('Start with Windows')} hint={t('Starts hidden in the tray and signs you in.')} control={<Toggle label={t('Start with Windows')} checked={autostart()} onChange={(v) => void changeAutostart(v)} />} />
       <Row title={t('Members panel')} hint={t('The list of people on the right.')} control={<Toggle label={t('Members panel')} checked={a().showMembers} onChange={(v) => updateAppearance({ showMembers: v })} />} />
     </div>
   );

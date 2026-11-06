@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { AuditEntry, Role, SearchHit, ServerOverview, UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
 
@@ -166,6 +167,17 @@ export const api = {
   serverInfo: async (): Promise<{ server_url: string | null; hostname: string | null; fingerprint: string | null }> => {
     if (isTauri()) return invoke('server_info');
     return { server_url: null, hostname: null, fingerprint: null };
+  },
+
+  autostartEnabled: async (): Promise<boolean> => {
+    if (isTauri()) return isEnabled();
+    return false;
+  },
+
+  setAutostart: async (on: boolean): Promise<void> => {
+    if (isTauri()) {
+      if (on) await enable(); else await disable();
+    }
   },
 
   uploadAvatar: async (data: number[], contentType: string): Promise<User> => {
