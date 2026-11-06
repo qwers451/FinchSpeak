@@ -198,6 +198,9 @@ export const ru: Readonly<Record<string, string>> = {
   'The server certificate has changed. Do not sign in until the admin confirms the change.': 'Сертификат сервера изменился. Не входите, пока администратор не подтвердит замену.',
   'Signed out on this computer. The server could not be reached to end the session.': 'Вы вышли на этом компьютере. Сервер недоступен, поэтому сессия на нём не завершена.',
   'The server address is not valid': 'Неверный адрес сервера',
+  'Session revoked': 'Сеанс отозван',
+  'Invalid token': 'Недействительный токен',
+  'Something went wrong': 'Что-то пошло не так',
 };
 
 /** Russian plural forms, keyed by the English `other` form that `plural()` is called with. */

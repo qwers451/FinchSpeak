@@ -38,3 +38,15 @@ it.each([
 ])('the length error is in Russian in every flow: %s', (raw, expected) => {
   expect(describeError(raw)).toBe(expected);
 });
+
+it('an empty error still says something went wrong', () => {
+  expect(describeError('')).toBe('Что-то пошло не так');
+  expect(describeError('Error: ')).toBe('Что-то пошло не так');
+});
+
+it.each([
+  ['Session revoked', 'Сеанс отозван'],
+  ['Invalid token', 'Недействительный токен'],
+])('the session end reason %s is translated', (raw, expected) => {
+  expect(describeError(raw)).toBe(expected);
+});

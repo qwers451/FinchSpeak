@@ -16,11 +16,15 @@ const RULES: readonly Rule[] = [
   { pattern: /^Invalid server address/i, key: 'The server address is not valid' },
   { pattern: /^Not authenticated$/i, key: 'Not authenticated' },
   { pattern: /^The password must be at least 8 characters$/i, key: 'The password must be at least 8 characters' },
+  // Session end reasons from the server (shown in the connection banner).
+  { pattern: /^Session revoked$/i, key: 'Session revoked' },
+  { pattern: /^Invalid token$/i, key: 'Invalid token' },
 ];
 
 /** The one place that turns a backend error into text in the interface language; unknown errors pass through unchanged. */
 export function describeError(error: unknown): string {
   const text = String(error).replace(/^Error:\s*/, '');
+  if (!text.trim()) return t('Something went wrong');
   // An HTTP status from the client ("HTTP 400: <server text>"): keep the code, translate the text.
   const http = text.match(/^(HTTP \d{3}: )([\s\S]*)$/);
   if (http) return http[1] + describeError(http[2]);

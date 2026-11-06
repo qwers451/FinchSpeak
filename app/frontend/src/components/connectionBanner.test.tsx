@@ -45,3 +45,18 @@ it('offers "Back to sign in" once reconnecting has failed', () => {
   button('Back to sign in')!.click();
   expect(mocks.logoutUser).toHaveBeenCalledTimes(1);
 });
+
+it.each(['Session revoked', 'Invalid token'])('the connection error %s is shown in the interface language', async (reason) => {
+  const { setConnectionError } = await import('../stores/sessionStore');
+  const { DEFAULT_PREFS, setPrefs } = await import('../stores/settingsStore');
+  const translated = reason === 'Session revoked' ? 'Сеанс отозван' : 'Недействительный токен';
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'ru' } });
+  setCurrentUser(user);
+  setConnectionError(reason);
+  setConnectionStatus('failed');
+  dispose = render(() => <ConnectionBanner />, document.body);
+  expect(document.body.textContent).toContain(translated);
+  expect(document.body.textContent).not.toContain(reason);
+  setConnectionError(null);
+  setPrefs(DEFAULT_PREFS);
+});

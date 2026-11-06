@@ -5,6 +5,7 @@ import { api } from '../services/api';
 import { connectionError, connectionStatus, reconnectInfo } from '../stores/sessionStore';
 import { Button, Icon } from '../ui';
 import { t } from '../i18n';
+import { describeError } from '../i18n/errors';
 
 /** Splash shown while the interface subscribes to the backend (A5). */
 export function Splash() {
@@ -35,7 +36,7 @@ export function ConnectionBanner() {
               ? t('Could not reconnect')
               : t('Connection lost')}
         </span>
-        <Show when={connectionError()}><span class="t3 fs12">{connectionError()}</span></Show>
+        <Show when={connectionError()}><span class="t3 fs12">{describeError(connectionError())}</span></Show>
         <Show when={connectionStatus() === 'reconnecting'}>
           <Button size="sm" onClick={() => { void api.reconnectNow(); }}>{t('Retry now')}</Button>
         </Show>

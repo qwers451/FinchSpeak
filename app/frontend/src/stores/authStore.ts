@@ -190,5 +190,6 @@ export async function logoutUser() {
   setSessionEnded(null);
   setPendingInvite(null);
   setCurrentUser(null);
-  if (failure) setAppError(describeError(failure));
+  // A token the server already revoked (401) is signed out all the same: nothing is left to end.
+  if (failure && !/\bHTTP 401\b/.test(String(failure))) setAppError(describeError(failure));
 }

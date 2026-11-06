@@ -158,3 +158,13 @@ it('typing a sign-in stops the automatic resume retries', async () => {
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
+
+it('logging out with an already revoked token is not an error', async () => {
+  const { appError } = await import('./notificationStore');
+  vi.spyOn(api, 'logout').mockRejectedValue('Logged out locally, but could not revoke server token: HTTP 401: Session revoked');
+  setCurrentUser({ id: 'me', username: 'me', display_name: 'Me', role: 'member' });
+  await expect(logoutUser()).resolves.toBeUndefined();
+  expect(currentUser()).toBeNull();
+  expect(appError()).toBeNull();
+  vi.restoreAllMocks();
+});
