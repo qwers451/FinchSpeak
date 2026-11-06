@@ -142,7 +142,7 @@ export const ru: Readonly<Record<string, string>> = {
   'The password must be at least 8 characters': 'Пароль должен быть не короче 8 символов', 'Reset password': 'Сбросить пароль', 'Reset password for {name}?': 'Сбросить пароль: {name}?',
   '{name} is signed out everywhere. Their current password stops working at once.': '{name} выходит со всех устройств. Текущий пароль перестаёт работать сразу.',
   'New temporary password': 'Новый временный пароль', 'Give it to {name} privately. They should change it in Settings → Profile after signing in.': 'Передайте его {name} лично. После входа пусть сменит его в «Настройки → Профиль».',
-  'Password copied': 'Пароль скопирован',
+  'Password copied': 'Пароль скопирован', 'Could not copy the password': 'Не удалось скопировать пароль',
   'Use a PNG, JPEG or WebP picture': 'Выберите изображение в формате PNG, JPEG или WebP', 'That picture is too large. Pick one under 12 MB': 'Изображение слишком большое. Выберите файл размером до 12 МБ', 'That picture could not be opened. Try another file': 'Не удалось открыть изображение. Попробуйте другой файл', 'The picture could not be prepared': 'Не удалось подготовить изображение', 'The picture must be smaller than 2 MB': 'Размер изображения должен быть меньше 2 МБ',
   'Invitations': 'Приглашения', 'Log': 'Журнал', 'Moderator': 'Модератор',
   'Weak': 'Слабый', 'Fair': 'Средний', 'Good': 'Хороший', 'Strong': 'Сильный',

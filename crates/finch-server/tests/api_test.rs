@@ -602,3 +602,36 @@ async fn short_password_is_rejected_at_registration() -> anyhow::Result<()> {
     assert_eq!(body["error"], "The password must be at least 8 characters");
     Ok(())
 }
+
+#[tokio::test]
+async fn password_length_counts_characters_not_bytes() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool, open_registration(), finch_server::session::SessionManager::new());
+    // Four Cyrillic letters are eight bytes but only four characters.
+    for (name, password, expected) in [("dana", "абвг", StatusCode::BAD_REQUEST), ("erik", "абвгдеж", StatusCode::BAD_REQUEST), ("fay", "абвгдежз", StatusCode::CREATED)] {
+        let request = Request::builder().method("POST").uri("/api/auth/register")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"username": name, "password": password}).to_string()))?;
+        assert_eq!(app.clone().oneshot(request).await?.status(), expected, "{password}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn change_password_counts_characters_not_bytes() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool, open_registration(), finch_server::session::SessionManager::new());
+    let token = register_alice(&app).await?;
+    let change = |new_password: &str| {
+        Request::builder().method("POST").uri("/api/auth/password")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"current_password": "password_123", "new_password": new_password}).to_string()))
+    };
+    let short = app.clone().oneshot(change("абвг")?).await?;
+    assert_eq!(short.status(), StatusCode::BAD_REQUEST);
+    let body: Value = serde_json::from_slice(&short.into_body().collect().await?.to_bytes())?;
+    assert_eq!(body["error"], "The password must be at least 8 characters");
+    assert_eq!(app.clone().oneshot(change("абвгдежз")?).await?.status(), StatusCode::NO_CONTENT);
+    Ok(())
+}

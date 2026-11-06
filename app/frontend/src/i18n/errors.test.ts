@@ -29,3 +29,12 @@ it('strips the Error prefix', () => {
 it('unknown_error_passes_through', () => {
   expect(describeError('Error: something odd')).toBe('something odd');
 });
+
+it.each([
+  ['The password must be at least 8 characters', 'Пароль должен быть не короче 8 символов'],
+  ['Registration failed: The password must be at least 8 characters', 'Не удалось зарегистрироваться: Пароль должен быть не короче 8 символов'],
+  ['Registration failed: HTTP 400: The password must be at least 8 characters', 'Не удалось зарегистрироваться: HTTP 400: Пароль должен быть не короче 8 символов'],
+  ['HTTP 400: The password must be at least 8 characters', 'HTTP 400: Пароль должен быть не короче 8 символов'],
+])('the length error is in Russian in every flow: %s', (raw, expected) => {
+  expect(describeError(raw)).toBe(expected);
+});

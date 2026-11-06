@@ -363,7 +363,7 @@ pub async fn register_handler(
             "Username must be between 3 and 32 characters".to_string(),
         ));
     }
-    if payload.password.len() < MIN_PASSWORD_LEN {
+    if payload.password.chars().count() < MIN_PASSWORD_LEN {
         return Err(ServerError::BadRequest(
             "The password must be at least 8 characters".to_string(),
         ));
@@ -682,7 +682,7 @@ pub async fn change_password_handler(
     State(state): State<ArcSharedState>,
     Json(request): Json<ChangePasswordRequest>,
 ) -> Result<StatusCode, ServerError> {
-    if request.new_password.len() < MIN_PASSWORD_LEN {
+    if request.new_password.chars().count() < MIN_PASSWORD_LEN {
         return Err(ServerError::BadRequest("The password must be at least 8 characters".into()));
     }
     let hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")

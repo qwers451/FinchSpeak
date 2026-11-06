@@ -8,7 +8,7 @@ import { auditEntries, describeAudit, overview, setAdminOpen, setAuditEntries, s
 import { setCurrentUser } from '../../stores/authStore';
 import { resetSessionState, sessionHandlers, setKnownUsers, setLocalPeerId } from '../../stores/sessionStore';
 import { setActiveVoiceChannel, setSpeakingPeers, setVoiceParticipants } from '../../stores/voiceStore';
-import { clearToasts } from '../../ui';
+import { clearToasts, toasts } from '../../ui';
 import { DEFAULT_PREFS, setPrefs } from '../../stores/settingsStore';
 import { VoicePanel } from '../VoicePanel';
 import { AdminModal } from './AdminModal';
@@ -274,4 +274,21 @@ it('a moderator and the rows of admins get no reset button', () => {
   open(mod);
   const rows = Array.from(document.querySelectorAll('tbody tr'));
   expect(button('Reset password', rows.find((r) => r.textContent?.includes('ALICE'))!)).toBeFalsy();
+});
+
+it('a failed copy of the temporary password says so, and does not claim success', async () => {
+  vi.spyOn(api, 'resetPassword').mockResolvedValue('K7M2QX9TPW4B');
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn(async () => { throw new Error('denied'); }) }, configurable: true });
+  open(boss);
+  await flush();
+  const alice = Array.from(document.querySelectorAll('tbody tr')).find((r) => r.textContent?.includes('ALICE'))!;
+  button('Reset password', alice).click();
+  await flush();
+  button('Reset password', dialog()).click();
+  await flush();
+  await flush();
+  button('Copy', dialog()).click();
+  await flush();
+  await flush();
+  expect(toasts().map((toast) => [toast.kind, toast.title])).toEqual([['error', 'Could not copy the password']]);
 });

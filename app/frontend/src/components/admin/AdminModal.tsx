@@ -139,7 +139,14 @@ function MembersTab(props: { isAdmin: boolean }) {
             <div class="col g12">
               <span class="t2 fs13">{t('Give it to {name} privately. They should change it in Settings → Profile after signing in.', { name: result().name })}</span>
               <strong class="invite-code">{result().password}</strong>
-              <Button variant="secondary" icon="copy" onClick={() => { void navigator.clipboard?.writeText(result().password); pushToast({ kind: 'success', title: t('Password copied') }); }}>{t('Copy')}</Button>
+              <Button variant="secondary" icon="copy" onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(result().password);
+                  pushToast({ kind: 'success', title: t('Password copied') });
+                } catch (err) {
+                  pushToast({ kind: 'error', title: t('Could not copy the password'), text: String(err).replace(/^Error:\s*/, '') });
+                }
+              }}>{t('Copy')}</Button>
               <Button variant="primary" onClick={() => setIssued(null)}>{t('Done')}</Button>
             </div>
           )}
