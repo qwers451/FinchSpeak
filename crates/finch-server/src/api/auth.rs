@@ -123,30 +123,41 @@ pub fn issue_jwt(
     secret: &str,
     expiration_hours: i64,
 ) -> Result<(String, String), ServerError> {
+    let jti = Uuid::new_v4().to_string();
+    let token = issue_jwt_for_session(user_id, username, role, secret, expiration_hours, &jti)?;
+    Ok((token, jti))
+}
+
+/// Issue a JWT for an existing session id (used to refresh a session in place).
+pub fn issue_jwt_for_session(
+    user_id: &Uuid,
+    username: &str,
+    role: &str,
+    secret: &str,
+    expiration_hours: i64,
+    jti: &str,
+) -> Result<String, ServerError> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
 
     let exp = now + (expiration_hours as u64 * 3600);
-    let jti = Uuid::new_v4().to_string();
 
     let claims = Claims {
         sub: user_id.to_string(),
         username: username.to_string(),
         role: role.to_string(),
         exp: exp as usize,
-        jti: jti.clone(),
+        jti: jti.to_string(),
     };
 
-    let token = encode(
+    encode(
         &Header::default(),
         &claims,
         &EncodingKey::from_secret(secret.as_bytes()),
     )
-    .map_err(|e| ServerError::Internal(format!("Failed to issue JWT: {e}")))?;
-
-    Ok((token, jti))
+    .map_err(|e| ServerError::Internal(format!("Failed to issue JWT: {e}")))
 }
 
 /// Verify and decode a JWT token.
@@ -423,6 +434,57 @@ pub async fn login_handler(
     };
 
     Ok(Json(response))
+}
+
+/// Handler for POST /api/auth/refresh: slides the session forward and returns a fresh token.
+pub async fn refresh_handler(
+    auth: AuthUser,
+    State(state): State<ArcSharedState>,
+) -> Result<Json<AuthResponse>, ServerError> {
+    let user_id_str = auth.user_id.to_string();
+    let (username, display_name, role, avatar_version) = sqlx::query_as::<_, (String, String, String, Option<i64>)>(
+        "SELECT username, display_name, role, avatar_version FROM users WHERE id = ?"
+    )
+    .bind(&user_id_str)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(ServerError::Unauthorized)?;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let exp = now + (state.config.auth.jwt_expiration_hours * 3600);
+    let updated = sqlx::query("UPDATE sessions SET expires_at = ? WHERE id = ? AND user_id = ?")
+        .bind(exp)
+        .bind(&auth.session_id)
+        .bind(&user_id_str)
+        .execute(&state.pool)
+        .await?;
+    if updated.rows_affected() != 1 {
+        return Err(ServerError::Unauthorized);
+    }
+
+    let token = issue_jwt_for_session(
+        &auth.user_id,
+        &username,
+        &role,
+        &state.config.auth.jwt_secret,
+        state.config.auth.jwt_expiration_hours,
+        &auth.session_id,
+    )?;
+
+    Ok(Json(AuthResponse {
+        quic_port: state.config.server.quic_port,
+        token,
+        user: UserDto {
+            avatar_url: crate::api::avatars::avatar_url(&user_id_str, avatar_version),
+            id: user_id_str,
+            username,
+            display_name,
+            role,
+        },
+    }))
 }
 
 /// Handler for GET /api/auth/me

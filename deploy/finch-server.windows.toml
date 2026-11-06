@@ -13,7 +13,7 @@ max_file_size_mb = 50
 # "invite": people register with a code from an admin (the first account on an empty
 # server becomes the admin). "open": anyone who can reach the server may register.
 registration = "invite"
-token_expiry_hours = 72
+token_expiry_hours = 720
 
 [backup]
 enabled = true

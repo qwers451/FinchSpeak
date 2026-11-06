@@ -285,3 +285,77 @@ async fn health_does_not_leak_users_or_channels() -> anyhow::Result<()> {
     assert!(!text.contains("general") && !text.contains("user"), "health must stay minimal: {text}");
     Ok(())
 }
+
+async fn register_alice(app: &axum::Router) -> anyhow::Result<String> {
+    let request = Request::builder().method("POST").uri("/api/auth/register")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({"username":"alice", "password":"password_123"}).to_string()))?;
+    let response = app.clone().oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = response.into_body().collect().await?.to_bytes();
+    Ok(serde_json::from_slice::<Value>(&body)?["token"].as_str().unwrap().to_string())
+}
+
+#[tokio::test]
+async fn refresh_extends_the_same_session() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool.clone(), open_registration(), finch_server::session::SessionManager::new());
+    let old_token = register_alice(&app).await?;
+    sqlx::query("UPDATE sessions SET expires_at = expires_at - 3600").execute(&pool).await?;
+    let before: i64 = sqlx::query_scalar("SELECT expires_at FROM sessions").fetch_one(&pool).await?;
+    // JWT exp has one-second resolution; wait so the refreshed token differs.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    let request = Request::builder().method("POST").uri("/api/auth/refresh")
+        .header(header::AUTHORIZATION, format!("Bearer {old_token}"))
+        .body(Body::empty())?;
+    let response = app.clone().oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await?.to_bytes();
+    let new_token = serde_json::from_slice::<Value>(&body)?["token"].as_str().unwrap().to_string();
+    assert_ne!(new_token, old_token);
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions").fetch_one(&pool).await?;
+    assert_eq!(count, 1);
+    let after: i64 = sqlx::query_scalar("SELECT expires_at FROM sessions").fetch_one(&pool).await?;
+    assert!(after > before);
+    let request = Request::builder().uri("/api/auth/me")
+        .header(header::AUTHORIZATION, format!("Bearer {new_token}"))
+        .body(Body::empty())?;
+    assert_eq!(app.oneshot(request).await?.status(), StatusCode::OK);
+    Ok(())
+}
+
+#[tokio::test]
+async fn refresh_rejects_a_revoked_session() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool.clone(), open_registration(), finch_server::session::SessionManager::new());
+    let token = register_alice(&app).await?;
+    sqlx::query("DELETE FROM sessions").execute(&pool).await?;
+    let request = Request::builder().method("POST").uri("/api/auth/refresh")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())?;
+    assert_eq!(app.oneshot(request).await?.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn refreshed_token_survives_logout_of_other_device() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool, open_registration(), finch_server::session::SessionManager::new());
+    let token0 = register_alice(&app).await?;
+    let request = Request::builder().method("POST").uri("/api/auth/login")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({"username":"alice", "password":"password_123"}).to_string()))?;
+    let response = app.clone().oneshot(request).await?;
+    assert!(response.status().is_success());
+    let body = response.into_body().collect().await?.to_bytes();
+    let token1 = serde_json::from_slice::<Value>(&body)?["token"].as_str().unwrap().to_string();
+    let request = Request::builder().method("POST").uri("/api/auth/logout")
+        .header(header::AUTHORIZATION, format!("Bearer {token0}"))
+        .body(Body::empty())?;
+    assert_eq!(app.clone().oneshot(request).await?.status(), StatusCode::NO_CONTENT);
+    let request = Request::builder().method("POST").uri("/api/auth/refresh")
+        .header(header::AUTHORIZATION, format!("Bearer {token1}"))
+        .body(Body::empty())?;
+    assert_eq!(app.oneshot(request).await?.status(), StatusCode::OK);
+    Ok(())
+}

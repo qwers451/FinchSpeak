@@ -251,7 +251,7 @@ fn default_jwt_secret() -> String {
 }
 
 fn default_jwt_expiration_hours() -> i64 {
-    72 // 3 days
+    720 // 30 days, sliding: POST /api/auth/refresh extends it
 }
 
 fn default_jwt_secret_file() -> String {
@@ -327,7 +327,7 @@ mod tests {
         assert_eq!(config.server.quic_port, 4433);
         assert_eq!(config.server.http_port, 8443);
         assert_eq!(config.storage.max_file_size_mb, 50);
-        assert_eq!(config.auth.jwt_expiration_hours, 72);
+        assert_eq!(config.auth.jwt_expiration_hours, 720);
     }
 
     #[test]

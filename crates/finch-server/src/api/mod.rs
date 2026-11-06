@@ -39,6 +39,7 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .route("/api/auth/register", post(auth::register_handler))
         .route("/api/auth/login", post(auth::login_handler))
         .route("/api/auth/logout", post(auth::logout_handler))
+        .route("/api/auth/refresh", post(auth::refresh_handler))
         .route("/api/auth/me", get(auth::me_handler).patch(auth::update_profile_handler))
         .route("/api/auth/password", post(auth::change_password_handler))
         .route("/api/auth/avatar", post(avatars::upload_handler).delete(avatars::delete_handler).layer(DefaultBodyLimit::max(4 * 1024 * 1024)))
