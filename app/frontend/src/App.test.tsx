@@ -34,6 +34,13 @@ afterEach(() => { dispose?.(); dispose = undefined; vi.restoreAllMocks(); vi.uns
 const mount = () => { dispose = render(() => <App />, document.getElementById('root')!); };
 const emit = (event: string, payload: unknown) => transport.callbacks.get(event)!({ payload });
 
+it('puts the saved audio devices on the backend at start', async () => {
+  localStorage.setItem('finchspeak.audioDevices', JSON.stringify({ input: 'Mic A', output: 'Spk B' }));
+  mount();
+  await vi.waitFor(() => expect(transport.invoke).toHaveBeenCalledWith('set_audio_devices', { input: 'Mic A', output: 'Spk B' }));
+  localStorage.clear();
+});
+
 it('waits for session listeners before showing sign-in', async () => {
   let finish!: (dispose: () => void) => void;
   transport.listen.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));

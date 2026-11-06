@@ -70,6 +70,16 @@ export function placeSeat(userId: string, pan: number) {
   persist();
 }
 
+/** Move someone while a drag is going on: the screen follows, storage waits for `commitSeats`. */
+export function dragSeat(userId: string, pan: number) {
+  setSeats((previous) => ({ ...previous, [userId]: Math.round(clampPan(pan) * 100) / 100 }));
+}
+
+/** A drag ended: remember where everyone is. */
+export function commitSeats() {
+  persist();
+}
+
 /** Let someone (or, with no id, everyone) go back to the automatic layout. */
 export function resetSeats(userId?: string) {
   setSeats((previous) => {
@@ -89,13 +99,28 @@ export async function syncSpatial() {
   } catch { /* the mixer keeps its last layout; the next change tries again */ }
 }
 
+const SYNC_INTERVAL_MS = 50;
+let lastSync = 0;
+let syncTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Sync with the mixer at most every 50 ms; whatever is newest when the timer fires is what is sent. */
+export function scheduleSpatialSync() {
+  if (syncTimer !== undefined) return;
+  const wait = Math.max(0, SYNC_INTERVAL_MS - (Date.now() - lastSync));
+  syncTimer = setTimeout(() => {
+    syncTimer = undefined;
+    lastSync = Date.now();
+    void syncSpatial();
+  }, wait);
+}
+
 // Keep the mixer in step with the switch, the room and the layout.
 if (typeof document !== 'undefined') {
   createRoot(() => {
     createEffect(() => {
       spatialEnabled();
       currentLayout();
-      void syncSpatial();
+      scheduleSpatialSync();
     });
   });
 }

@@ -3,6 +3,7 @@ import { t } from '../i18n';
 import type { AudioDevice, Channel, VoiceParticipant, VoiceSettings } from '../types';
 import { api } from '../services/api';
 import { setAppError } from './notificationStore';
+import { pushToast } from '../ui/toastStore';
 import { resetScreenState } from './screenState';
 
 export const [activeVoiceChannel, setActiveVoiceChannel] = createSignal<Channel | null>(null);
@@ -118,7 +119,7 @@ export async function chooseAudioDevice(kind: keyof DeviceSelection, name: strin
 }
 
 /** Push the remembered devices to the backend (it forgets them when the app restarts). */
-async function restoreAudioDevices() {
+export async function restoreAudioDevices() {
   const saved = readSavedDevices();
   if (!saved) return;
   try {
@@ -213,6 +214,19 @@ export function changeVoiceSettings(change: Partial<VoiceSettings>) {
   });
 }
 
+/** Backend key errors are English text; show them translated. */
+export function hotkeyErrorText(err: unknown): string {
+  const message = String(err).replace(/^Error:s*/, '');
+  let match = /^"(.*)" cannot be used as a key: ([sS]*)$/.exec(message);
+  if (match) return t('"{key}" cannot be used as a key: {detail}', { key: match[1], detail: match[2] });
+  match = /^Could not use "(.*)" as a key: ([sS]*)$/.exec(message);
+  if (match) return t('Could not use "{key}" as a key: {detail}', { key: match[1], detail: match[2] });
+  match = /^"(.*)" is already used by another action$/.exec(message);
+  if (match) return t('"{key}" is already used by another action', { key: match[1] });
+  if (message === 'Keys are unavailable') return t('Keys are unavailable');
+  return message;
+}
+
 const sendHotkey = (action: HotkeyAction, key: string | null) =>
   action === 'push_to_talk' ? api.setPushToTalkKey(key) : api.setHotkey(action, key);
 
@@ -226,7 +240,7 @@ export async function chooseHotkey(action: HotkeyAction, key: string | null) {
   try {
     await sendHotkey(action, key);
   } catch (err) {
-    setAppError(String(err));
+    setAppError(hotkeyErrorText(err));
     return;
   }
   hotkeySignals[action][1](key);
@@ -238,6 +252,7 @@ export const choosePushToTalkKey = (key: string | null) => chooseHotkey('push_to
 
 /** A mute or deafen key was pressed somewhere in the system. */
 export async function handleHotkey(action: string) {
+  if (!activeVoiceChannel()) return; // outside a room there is nothing to mute
   try {
     if (action === 'toggle_mute') await toggleMute();
     else if (action === 'toggle_deafen') await toggleDeafen();
@@ -261,14 +276,34 @@ export function restoreVoiceSettings() {
   return queueSettingsWrite(async () => {
     const saved = readSavedVoice();
     if (!saved) return;
-    try {
-      if (saved.key) await api.setPushToTalkKey(saved.key);
-      setPushToTalkKey(saved.key);
-      for (const [action, key] of [['toggle_mute', saved.muteKey], ['toggle_deafen', saved.deafenKey]] as const) {
-        if (key) await api.setHotkey(action, key);
-        hotkeySignals[action][1](key);
+    const failed = (action: HotkeyAction, key: string, err: unknown) => {
+      void err; // the toast says which key; the backend reason adds nothing the person can act on
+      pushToast({ kind: 'warn', title: t('Could not use {key} for "{action}": another program may be using it.', { key, action: t(HOTKEY_LABELS[action]) }) });
+    };
+    // Each key on its own: one that is taken must not cost the others or the microphone settings.
+    // The signals keep the saved key either way, so saving later does not forget it.
+    let pushToTalkWorks = !!saved.key;
+    if (saved.key) {
+      try {
+        await api.setPushToTalkKey(saved.key);
+      } catch (err) {
+        pushToTalkWorks = false;
+        failed('push_to_talk', saved.key, err);
       }
-      const settings = { ...saved.settings, key_down: false, push_to_talk: saved.settings.push_to_talk && !!saved.key };
+    }
+    setPushToTalkKey(saved.key);
+    for (const [action, key] of [['toggle_mute', saved.muteKey], ['toggle_deafen', saved.deafenKey]] as const) {
+      if (key) {
+        try {
+          await api.setHotkey(action, key);
+        } catch (err) {
+          failed(action, key, err);
+        }
+      }
+      hotkeySignals[action][1](key);
+    }
+    try {
+      const settings = { ...saved.settings, key_down: false, push_to_talk: saved.settings.push_to_talk && pushToTalkWorks };
       await api.setVoiceSettings(settings);
       setVoiceSettings(settings);
     } catch (err) {

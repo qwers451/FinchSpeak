@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, Show } from 'solid-js';
-import { currentLayout, placeSeat, resetSeats, seats } from '../../stores/spatialStore';
+import { commitSeats, currentLayout, dragSeat, placeSeat, resetSeats, seats } from '../../stores/spatialStore';
 import { speakingPeers } from '../../stores/voiceStore';
 import { Avatar, Button, Icon } from '../../ui';
 import { t } from '../../i18n';
@@ -37,8 +37,8 @@ export function SpatialStage() {
         </Show>
       </div>
       <div class="stage-area" ref={stage} classList={{ dragging: dragging() !== null }}>
-        <span class="stage-side l" aria-hidden="true">L</span>
-        <span class="stage-side r" aria-hidden="true">R</span>
+        <span class="stage-side l" aria-hidden="true">{t('L')}</span>
+        <span class="stage-side r" aria-hidden="true">{t('R')}</span>
         <For each={people()}>
           {(participant) => {
             const seat = () => ({ participant, ...seatOf(participant.user_id) });
@@ -56,10 +56,10 @@ export function SpatialStage() {
                 setDragging(seat().participant.user_id);
               }}
               onPointerMove={(event) => {
-                if (dragging() === seat().participant.user_id) placeSeat(seat().participant.user_id, panAt(event.clientX));
+                if (dragging() === seat().participant.user_id) dragSeat(seat().participant.user_id, panAt(event.clientX));
               }}
-              onPointerUp={() => setDragging(null)}
-              onPointerCancel={() => setDragging(null)}
+              onPointerUp={() => { setDragging(null); commitSeats(); }}
+              onPointerCancel={() => { setDragging(null); commitSeats(); }}
               onDblClick={() => resetSeats(seat().participant.user_id)}
               onKeyDown={(event) => {
                 if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {

@@ -1,9 +1,10 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../services/api';
 import { appError, setAppError } from './notificationStore';
+import { clearToasts, toasts } from '../ui';
 import {
   changeVoiceSettings, chooseHotkey, choosePushToTalkKey, deafenKey, DEFAULT_VOICE_SETTINGS, handleHotkey, isDeafened, isMuted, muteKey,
-  pushToTalkKey, restoreVoiceSettings, setDeafenKey, setIsDeafened, setIsMuted, setMuteKey, setPushToTalkKey, setVoiceSettings,
+  pushToTalkKey, restoreVoiceSettings, setActiveVoiceChannel, setDeafenKey, setIsDeafened, setIsMuted, setMuteKey, setPushToTalkKey, setVoiceSettings,
   shortcutFromEvent, voiceSettings,
 } from './voiceStore';
 
@@ -14,6 +15,8 @@ beforeEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
   setAppError(null);
+  clearToasts();
+  setActiveVoiceChannel(null);
   setVoiceSettings(DEFAULT_VOICE_SETTINGS);
   setPushToTalkKey(null);
   setMuteKey(null);
@@ -166,7 +169,10 @@ it('one key cannot serve two actions', async () => {
   expect(appError()).toContain('F8');
 });
 
+const room = { id: 'room', short_id: 2, name: 'Room', channel_type: 'voice' as const, position: 0, bitrate_kbps: 64 };
+
 it('a pressed mute or deafen key toggles the microphone or the sound', async () => {
+  setActiveVoiceChannel(room);
   const state = vi.spyOn(api, 'setVoiceState').mockResolvedValue();
   await handleHotkey('toggle_mute');
   expect(isMuted()).toBe(true);
@@ -179,4 +185,33 @@ it('a pressed mute or deafen key toggles the microphone or the sound', async () 
   await handleHotkey('toggle_deafen');
   expect(isDeafened()).toBe(false);
   expect(isMuted()).toBe(false);
+});
+
+it('mute hotkey outside a room is ignored', async () => {
+  const state = vi.spyOn(api, 'setVoiceState').mockResolvedValue();
+  await handleHotkey('toggle_mute');
+  await handleHotkey('toggle_deafen');
+  expect(isMuted()).toBe(false);
+  expect(isDeafened()).toBe(false);
+  expect(state).not.toHaveBeenCalled();
+  expect(appError()).toBeNull();
+  expect(toasts()).toHaveLength(0);
+});
+
+it('a key that fails to register does not stop the other keys or the settings', async () => {
+  localStorage.setItem('finchspeak.voiceSettings', JSON.stringify({
+    settings: { input_gain: 1.5, vad_threshold_db: -45, push_to_talk: false, monitor: false, voice_enhancement: true },
+    key: null, muteKey: 'F9', deafenKey: 'F10',
+  }));
+  const saved = localStorage.getItem('finchspeak.voiceSettings');
+  const hotkey = vi.spyOn(api, 'setHotkey').mockRejectedValueOnce('taken').mockResolvedValue();
+  const send = vi.spyOn(api, 'setVoiceSettings').mockResolvedValue();
+  await restoreVoiceSettings();
+  expect(hotkey).toHaveBeenCalledWith('toggle_mute', 'F9');
+  expect(hotkey).toHaveBeenCalledWith('toggle_deafen', 'F10');
+  expect(send).toHaveBeenCalledWith(expect.objectContaining({ input_gain: 1.5 }));
+  expect(toasts().map((toast) => toast.title)).toEqual(['Could not use F9 for "Mute microphone": another program may be using it.']);
+  await changeVoiceSettings({ monitor: true });
+  expect(JSON.parse(localStorage.getItem('finchspeak.voiceSettings')!)).toMatchObject({ muteKey: 'F9', deafenKey: 'F10' });
+  expect(saved).not.toBeNull();
 });
