@@ -21,7 +21,7 @@ pub use audio_loopback::{
     STEREO_FRAME_SAMPLES,
 };
 pub use capture::{
-    capture_monitor, capture_window, list_monitors, list_windows, MonitorInfo, PixelFormat,
+    capture_monitor, capture_window, list_monitors, list_windows, window_process_id, MonitorInfo, PixelFormat,
     RawFrame, ScreenCaptureError, ScreenCapturer, WindowInfo,
 };
 pub use fragmenter::{slice_p_frame, slice_p_frame_with_chunk, AssembledFrame, FrameAssembler, DELTA_FRAME_TIMEOUT};

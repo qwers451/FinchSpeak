@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 use finch_client_core::screen::{encoded_size, AudioPacketSource, ScreenAudioForwarder, FrameSource, MonitorSource, ScreenSharer, ScreenViewer, ShareConfig, WindowSource};
 use finch_protocol::messages::ClientMessage;
 use finch_protocol::models::VideoCodec;
-use finch_screen::{capture_monitor, capture_window, list_monitors, list_windows, thumbnail_jpeg, AudioSourceKind, ScreenAudioCapturer, ScreenAudioConfig, ThumbnailCache};
+use finch_screen::{capture_monitor, capture_window, list_monitors, list_windows, thumbnail_jpeg, window_process_id, AudioSourceKind, ScreenAudioCapturer, ScreenAudioConfig, ThumbnailCache};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tracing::info;
@@ -76,6 +76,20 @@ pub async fn process_loopback_supported() -> bool {
     { false }
 }
 
+fn scope_to_source(scope: Option<&str>, kind: &str, window_pid: Option<u32>) -> AudioSourceKind {
+    match (scope, kind, window_pid) {
+        (Some("window"), "window", Some(pid)) => AudioSourceKind::OnlyProcess(pid),
+        _ => AudioSourceKind::AllExceptSelf,
+    }
+}
+
+fn requested_audio_source(scope: Option<&str>, kind: &str, window_pid: Option<u32>) -> Result<AudioSourceKind, String> {
+    if scope == Some("window") && kind == "window" && window_pid.is_none() {
+        return Err("window-audio-unavailable".into());
+    }
+    Ok(scope_to_source(scope, kind, window_pid))
+}
+
 /// Start sharing a monitor (`kind` = "monitor") or a window (`kind` = "window") in the current
 /// voice channel.
 #[tauri::command]
@@ -83,6 +97,7 @@ pub async fn start_screen_share(
     kind: String,
     id: u32,
     with_audio: Option<bool>,
+    audio_scope: Option<String>,
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -110,9 +125,11 @@ pub async fn start_screen_share(
     // Screens beyond 4K are scaled down before encoding; announce the size viewers will get.
     let (width, height) = encoded_size(width, height);
 
-    tx.send(ClientMessage::StartScreenShare { codec: VideoCodec::H264, width, height, fps: SHARE_FPS })
-        .await
-        .map_err(|e| format!("Failed to announce the screen share: {e}"))?;
+    let generation = state.begin_screen_share()?;
+    if let Err(error) = tx.send(ClientMessage::StartScreenShare { codec: VideoCodec::H264, width, height, fps: SHARE_FPS }).await {
+        state.stop_screen_share_generation(generation);
+        return Err(format!("Failed to announce the screen share: {error}"));
+    }
 
     let audio_app_handle = app_handle.clone();
     let runtime = tokio::runtime::Handle::current();
@@ -123,7 +140,7 @@ pub async fn start_screen_share(
             // Runs on the capture thread: finish on the runtime (joining that thread from itself
             // would deadlock).
             runtime.spawn(async move {
-                if state.stop_screen_share() {
+                if state.stop_screen_share_generation(generation) {
                     if let Some(tx) = state.control_tx.read().await.clone() {
                         let _ = tx.send(ClientMessage::StopScreenShare).await;
                     }
@@ -141,41 +158,52 @@ pub async fn start_screen_share(
         source,
         on_end,
     );
-    *state.screen_sharer.lock().map_err(|_| "screen share state poisoned".to_string())? = Some(sharer);
+    state.with_screen_share(generation, || {
+        *state.screen_sharer.lock().map_err(|_| "screen share state poisoned".to_string())? = Some(sharer);
+        Ok(())
+    })?;
 
     if with_audio.unwrap_or(false) {
+        let window_pid = if kind == "window" && audio_scope.as_deref() == Some("window") {
+            tokio::task::spawn_blocking(move || window_process_id(id)).await.unwrap_or(None)
+        } else { None };
+        let audio_source = requested_audio_source(audio_scope.as_deref(), &kind, window_pid);
         // Best effort: the picture is already going out, so a failure here is only reported.
         let (channel_id, sender_peer_id) = (short_id, state.session_peer_id.load(Ordering::SeqCst));
         let connection = state.quic_connection.read().await.clone();
         let source_app_handle = audio_app_handle.clone();
+        let source_state = (*state).clone();
         let started = connection.map(|connection| {
             ScreenAudioForwarder::start(connection, move || {
-                let config = ScreenAudioConfig { channel_id, sender_peer_id, ..ScreenAudioConfig::default() };
+                let config = ScreenAudioConfig { source: audio_source?, channel_id, sender_peer_id, ..ScreenAudioConfig::default() };
                 ScreenAudioCapturer::start(config)
-                    .map(|capturer| {
+                    .map_err(|e| e.to_string())
+                    .and_then(|capturer| source_state.with_screen_share(generation, || {
                         let source = match capturer.source() {
                             AudioSourceKind::AllExceptSelf => "all-except-self",
                             AudioSourceKind::OnlyProcess(_) => "only-process",
                             AudioSourceKind::Device => "device",
                         };
                         let _ = source_app_handle.emit("screen-audio-source", serde_json::json!({ "source": source }));
-                        Box::new(capturer) as Box<dyn AudioPacketSource>
-                    })
-                    .map_err(|e| e.to_string())
+                        Ok(Box::new(capturer) as Box<dyn AudioPacketSource>)
+                    }))
             })
         });
         match started {
             Some(Ok(forwarder)) => {
-                if let Ok(mut slot) = state.screen_audio.lock() {
-                    *slot = Some(forwarder);
-                }
+                state.with_screen_share(generation, || {
+                    *state.screen_audio.lock().map_err(|_| "screen share state poisoned".to_string())? = Some(forwarder);
+                    Ok(())
+                })?;
             }
+            Some(Err(e)) if e == "screen-share-ended-before-start" => return Err(e),
             Some(Err(e)) => {
                 let _ = audio_app_handle.emit("screen-audio-failed", e);
             }
             None => {}
         }
     }
+    state.with_screen_share(generation, || Ok(()))?;
     info!("Started sharing {kind} {id} ({width}x{height})");
     Ok(())
 }
@@ -292,4 +320,27 @@ pub async fn capture_thumbnail(kind: String, id: u32, max_width: Option<u32>) ->
     .await
     .map_err(|e| e.to_string())??;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[cfg(test)]
+mod audio_scope_tests {
+    use super::*;
+    #[test]
+    fn missing_window_pid_disables_audio_instead_of_sharing_the_computer() {
+        assert_eq!(requested_audio_source(Some("window"), "window", None), Err("window-audio-unavailable".to_string()));
+        assert_eq!(requested_audio_source(Some("window"), "window", Some(7)), Ok(AudioSourceKind::OnlyProcess(7)));
+    }
+    #[test]
+    fn scope_to_source_table() {
+        for (scope, kind, pid, expected) in [
+            (Some("window"), "window", Some(7), AudioSourceKind::OnlyProcess(7)),
+            (Some("window"), "window", None, AudioSourceKind::AllExceptSelf),
+            (Some("window"), "monitor", Some(7), AudioSourceKind::AllExceptSelf),
+            (None, "window", Some(7), AudioSourceKind::AllExceptSelf),
+            (Some("system"), "window", Some(7), AudioSourceKind::AllExceptSelf),
+            (Some("invalid"), "window", Some(7), AudioSourceKind::AllExceptSelf),
+        ] {
+            assert_eq!(scope_to_source(scope, kind, pid), expected);
+        }
+    }
 }

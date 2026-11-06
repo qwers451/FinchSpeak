@@ -418,9 +418,9 @@ export const api = {
     return { monitors: [], windows: [] };
   },
 
-  startScreenShare: async (kind: 'monitor' | 'window', id: number, withAudio = false): Promise<void> => {
+  startScreenShare: async (kind: 'monitor' | 'window', id: number, withAudio = false, audioScope: 'system' | 'window' = 'system'): Promise<void> => {
     if (isTauri()) {
-      return invoke('start_screen_share', { kind, id, withAudio });
+      return invoke('start_screen_share', { kind, id, withAudio, audioScope });
     }
   },
 

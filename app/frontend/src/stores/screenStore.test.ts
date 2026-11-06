@@ -1,4 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
+import { t } from '../i18n';
 import { api } from '../services/api';
 import { appError, setAppError } from './notificationStore';
 import { screenAudioSource, isSharing, loadScreenSources, screenAudioKey, screenSources, sharingInfo, startSharing, stopSharing, stopWatching, watchShare, watching } from './screenStore';
@@ -131,9 +132,9 @@ it('AUD-018 the snapshot tells a late joiner who is already sharing', () => {
 it('AUD-018 the screen sound is requested only when asked for, and failures are shown', async () => {
   const start = vi.spyOn(api, 'startScreenShare').mockResolvedValue();
   await startSharing('monitor', 1);
-  expect(start).toHaveBeenLastCalledWith('monitor', 1, false);
+  expect(start).toHaveBeenLastCalledWith('monitor', 1, false, 'system');
   await startSharing('monitor', 1, true);
-  expect(start).toHaveBeenLastCalledWith('monitor', 1, true);
+  expect(start).toHaveBeenLastCalledWith('monitor', 1, true, 'system');
   sessionHandlers['screen-audio-failed']('no output device');
   expect(appError()).toContain('no output device');
 });
@@ -152,4 +153,19 @@ it('tracks the actual screen audio source and clears it when sharing ends', asyn
   sessionHandlers['screen-audio-source']({ source: 'all-except-self' });
   sessionHandlers['screen-share-ended']('window closed');
   expect(screenAudioSource()).toBeNull();
+});
+
+it('explains a missing window without broadening the chosen audio scope', () => {
+  sessionHandlers['screen-audio-failed']('window-audio-unavailable');
+  expect(appError()).toBe(t('Screen sound is not shared: the selected window is no longer available.'));
+});
+it('does not resurrect a share that ended while audio was starting', async () => {
+  let complete!: () => void;
+  vi.spyOn(api, 'startScreenShare').mockImplementation(() => new Promise<void>((resolve) => { complete = resolve; }));
+  const pending = startSharing('window', 9, true, 'Notes', 'window');
+  sessionHandlers['screen-share-ended']('window closed');
+  complete();
+  expect(await pending).toBe(t('Screen sharing stopped before it could start.'));
+  expect(isSharing()).toBe(false);
+  expect(sharingInfo()).toBeNull();
 });

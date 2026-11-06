@@ -162,6 +162,24 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>, ScreenCaptureError> {
     Ok(infos)
 }
 
+/// The process owning a window, if it still exists and the platform exposes its PID.
+pub fn window_process_id(window_id: u32) -> Option<u32> {
+    #[cfg(windows)]
+    {
+        Window::all()
+            .ok()?
+            .into_iter()
+            .find(|window| window.id() == window_id)
+            .map(|window| window.process_id())
+            .filter(|pid| *pid != 0)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window_id;
+        None
+    }
+}
+
 /// Captures a single frame from the specified monitor by index or monitor ID.
 ///
 /// Returns a [`RawFrame`] with [`PixelFormat::Rgba`].

@@ -27,6 +27,14 @@ fn failure(message: &str) -> LoopbackAudioError {
     LoopbackAudioError::Wasapi(format!("HRESULT 0x80004005: {message}"))
 }
 
+pub(crate) fn wait_for_activation(
+    completed: &mpsc::Receiver<()>,
+) -> Result<(), LoopbackAudioError> {
+    completed
+        .recv_timeout(Duration::from_secs(2))
+        .map_err(|_| failure("ActivateCompleted timed out"))
+}
+
 /// Version gate requested by the client. Activation failure still falls back at runtime.
 pub fn process_loopback_supported() -> bool {
     let mut version = OSVERSIONINFOW {
@@ -92,7 +100,7 @@ impl ProcessLoopback {
             running,
             thread: Some(thread),
         };
-        match rx.recv_timeout(Duration::from_secs(5)) {
+        match rx.recv_timeout(Duration::from_secs(3)) {
             Ok(Ok(())) => Ok(capture),
             Ok(Err(error)) => {
                 capture.stop();
@@ -168,8 +176,7 @@ fn capture(
             &handler,
         )
         .map_err(wasapi)?;
-        rx.recv_timeout(Duration::from_secs(5))
-            .map_err(|_| failure("ActivateCompleted timed out"))?;
+        wait_for_activation(&rx)?;
         let mut hr = HRESULT(0);
         let mut unknown = None;
         operation

@@ -2,7 +2,7 @@ import { api } from '../services/api';
 import type { SessionEvents } from '../types';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
-import { setScreenAudioSource, endedShare, isSharing, resetScreenState, setEndedShare, setIsSharing, setScreenSources, setSharingInfo, setWatching, sharingInfo, watching } from './screenState';
+import { endLocalScreenShare, screenShareEpoch, setScreenAudioSource, endedShare, isSharing, resetScreenState, setEndedShare, setIsSharing, setScreenSources, setSharingInfo, setWatching, sharingInfo, watching } from './screenState';
 import { allVoiceParticipants, setVoiceParticipants } from './voiceStore';
 import { endReasonFromServer } from '../components/screen/viewerState';
 
@@ -19,22 +19,23 @@ export async function loadScreenSources() {
 }
 
 /** Start sharing; returns the reason when it did not work (the picker shows it), else `null`. */
-export async function startSharing(kind: 'monitor' | 'window', id: number, withAudio = false, label = ''): Promise<string | null> {
+export async function startSharing(kind: 'monitor' | 'window', id: number, withAudio = false, label = '', audioScope: 'system' | 'window' = 'system'): Promise<string | null> {
+  const epoch = screenShareEpoch();
   setScreenAudioSource(null);
   try {
-    await api.startScreenShare(kind, id, withAudio);
+    await api.startScreenShare(kind, id, withAudio, audioScope);
+    if (screenShareEpoch() !== epoch) return t('Screen sharing stopped before it could start.');
     setIsSharing(true);
     setSharingInfo({ label, audio: withAudio });
     return null;
   } catch (err) {
-    return String(err).replace(/^Error:\s*/, '');
+    const reason = String(err).replace(/^Error:\s*/, '');
+    return reason === 'screen-share-ended-before-start' ? t('Screen sharing stopped before it could start.') : reason;
   }
 }
 
 export async function stopSharing() {
-  setIsSharing(false);
-  setScreenAudioSource(null);
-  setSharingInfo(null);
+  endLocalScreenShare();
   try {
     await api.stopScreenShare();
   } catch (err) {
@@ -95,11 +96,11 @@ export const screenHandlers: Pick<{ [K in keyof SessionEvents]: (payload: Sessio
     markSharing(data.peer_id, false);
   },
   'screen-audio-source': (data) => setScreenAudioSource(data.source),
-  'screen-audio-failed': (reason) => setAppError(t('Screen sound is not shared: {reason}', { reason })),
+  'screen-audio-failed': (reason) => setAppError(reason === 'window-audio-unavailable'
+    ? t('Screen sound is not shared: the selected window is no longer available.')
+    : t('Screen sound is not shared: {reason}', { reason })),
   'screen-share-ended': (reason) => {
-    setIsSharing(false);
-    setScreenAudioSource(null);
-    setSharingInfo(null);
+    endLocalScreenShare();
     setAppError(t('Screen sharing stopped: {reason}', { reason }));
   },
 };

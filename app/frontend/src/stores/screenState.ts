@@ -15,17 +15,22 @@ export const [watching, setWatching] = createSignal<WatchedShare | null>(null);
 export const [endedShare, setEndedShare] = createSignal<{ user_id: string; peer_id: number; name: string; reason: 'stopped' | 'left' | 'disconnected' | 'room-closed' } | null>(null);
 export const [screenSources, setScreenSources] = createSignal<ScreenSources>({ monitors: [], windows: [] });
 
-/** Our own share ends with the connection; what we watch is resumed after a reconnect. */
-export function resetScreenStateOnDisconnect() {
+/** Invalidates pending starts when a stop, disconnect or natural end wins the race. */
+export const [screenShareEpoch, setScreenShareEpoch] = createSignal(0);
+export function endLocalScreenShare() {
+  setScreenShareEpoch((epoch) => epoch + 1);
   setIsSharing(false);
   setScreenAudioSource(null);
   setSharingInfo(null);
 }
 
+/** Our own share ends with the connection; what we watch is resumed after a reconnect. */
+export function resetScreenStateOnDisconnect() {
+  endLocalScreenShare();
+}
+
 export function resetScreenState() {
-  setIsSharing(false);
-  setScreenAudioSource(null);
-  setSharingInfo(null);
+  endLocalScreenShare();
   setWatching(null);
   setEndedShare(null);
 }

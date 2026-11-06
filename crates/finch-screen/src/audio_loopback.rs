@@ -402,19 +402,51 @@ impl ScreenAudioCapturer {
         let supported = crate::process_loopback::process_loopback_supported();
         #[cfg(not(windows))]
         let supported = false;
-        let source = resolve_source(&config.source, supported);
         #[cfg(windows)]
+        {
+            Self::start_with_sources(
+                config,
+                supported,
+                Self::start_process_capture,
+                Self::start_device_capture,
+            )
+        }
+        #[cfg(not(windows))]
+        Self::start_with_sources(
+            config,
+            supported,
+            |_, _| Err(LoopbackAudioError::UnsupportedSampleFormat),
+            Self::start_device_capture,
+        )
+    }
+
+    fn start_with_sources(
+        config: ScreenAudioConfig,
+        supported: bool,
+        start_process: impl FnOnce(
+            ScreenAudioConfig,
+            AudioSourceKind,
+        ) -> Result<Self, LoopbackAudioError>,
+        start_device: impl FnOnce(ScreenAudioConfig) -> Result<Self, LoopbackAudioError>,
+    ) -> Result<Self, LoopbackAudioError> {
+        // A window restriction is never widened, even on an unsupported OS.
+        let restricted = matches!(config.source, AudioSourceKind::OnlyProcess(_));
+        if restricted && !supported {
+            return Err(LoopbackAudioError::Wasapi(
+                "HRESULT 0x80004001: window audio capture is unavailable".into(),
+            ));
+        }
+        let source = resolve_source(&config.source, supported);
         if source != AudioSourceKind::Device {
-            match Self::start_process_capture(config.clone(), source) {
+            match start_process(config.clone(), source) {
                 Ok(capture) => return Ok(capture),
+                Err(error) if restricted => return Err(error),
                 Err(error) => {
                     tracing::warn!("Process loopback unavailable; using device loopback: {error}")
                 }
             }
         }
-        #[cfg(not(windows))]
-        let _ = source;
-        Self::start_device_capture(config)
+        start_device(config)
     }
 
     #[cfg(windows)]
@@ -788,6 +820,72 @@ mod tests {
 #[cfg(test)]
 mod source_tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn activation_timeout_still_reaches_device_fallback_before_forwarder_deadline() {
+        let (_sender, completed) = std::sync::mpsc::channel();
+        let started = std::time::Instant::now();
+        let result = ScreenAudioCapturer::start_with_sources(
+            ScreenAudioConfig::default(),
+            true,
+            |_, _| {
+                crate::process_loopback::wait_for_activation(&completed)?;
+                Err(LoopbackAudioError::UnsupportedSampleFormat)
+            },
+            |_| Err(LoopbackAudioError::NoDeviceAvailable),
+        );
+        assert!(
+            matches!(result, Err(LoopbackAudioError::NoDeviceAvailable)),
+            "device fallback must be attempted"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "fallback must leave time inside the forwarder's five-second deadline"
+        );
+    }
+    #[test]
+    fn only_process_activation_failure_does_not_capture_other_apps() {
+        let device_called = std::cell::Cell::new(false);
+        let result = ScreenAudioCapturer::start_with_sources(
+            ScreenAudioConfig {
+                source: AudioSourceKind::OnlyProcess(7),
+                ..Default::default()
+            },
+            true,
+            |_, _| {
+                Err(LoopbackAudioError::Wasapi(
+                    "HRESULT 0x80004005: activation failed".into(),
+                ))
+            },
+            |_| {
+                device_called.set(true);
+                Err(LoopbackAudioError::NoDeviceAvailable)
+            },
+        );
+        assert!(matches!(result, Err(LoopbackAudioError::Wasapi(_))));
+        assert!(
+            !device_called.get(),
+            "window scope must never expand to the device"
+        );
+    }
+    #[test]
+    fn unsupported_only_process_does_not_capture_other_apps() {
+        let device_called = std::cell::Cell::new(false);
+        let result = ScreenAudioCapturer::start_with_sources(
+            ScreenAudioConfig {
+                source: AudioSourceKind::OnlyProcess(7),
+                ..Default::default()
+            },
+            false,
+            |_, _| panic!("unsupported process capture must not start"),
+            |_| {
+                device_called.set(true);
+                Err(LoopbackAudioError::NoDeviceAvailable)
+            },
+        );
+        assert!(result.is_err());
+        assert!(!device_called.get());
+    }
     #[test]
     fn old_windows_falls_back_to_device_loopback() {
         assert_eq!(

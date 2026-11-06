@@ -95,7 +95,7 @@ it('the Windows tab lists windows with their app, and starting shares exactly th
   button('Start sharing').click();
   await flush();
   await flush();
-  expect(start).toHaveBeenCalledWith('window', 9, false);
+  expect(start).toHaveBeenCalledWith('window', 9, false, 'system');
   expect(closed).toHaveBeenCalled();
 });
 
@@ -111,7 +111,7 @@ it('unsupported Windows warns that viewers hear themselves, and sound is passed 
   button('Start sharing').click();
   await flush();
   await flush();
-  expect(start).toHaveBeenCalledWith('monitor', 1, true);
+  expect(start).toHaveBeenCalledWith('monitor', 1, true, 'system');
 });
 
 it('a capture that fails stays in the dialog with the reason, and Cancel does not share anything', async () => {
@@ -244,4 +244,38 @@ it('warns about runtime device fallback while the share is active', () => {
   expect(document.querySelector('.auth-banner.amber')?.textContent).toContain('people in the room will hear themselves with a delay');
   setScreenAudioSource('all-except-self');
   expect(document.querySelector('.auth-banner.amber')).toBeNull();
+});
+
+it('offers window sound only for a supported window and sends the selected scope', async () => {
+  vi.spyOn(api, 'processLoopbackSupported').mockResolvedValue(true);
+  const start = vi.spyOn(api, 'startScreenShare').mockResolvedValue();
+  mount(() => <SharePickerModal open onClose={() => {}} />);
+  await flush();
+  (document.querySelector('[aria-label="Share system sound too"]') as HTMLElement).click();
+  await flush();
+  expect(button('Only this window')).toBeUndefined();
+  button('Windows').click();
+  await flush();
+  (document.querySelector('[role="option"]') as HTMLElement).click();
+  await flush();
+  expect(button('Whole computer').getAttribute('aria-pressed')).toBe('true');
+  button('Only this window').click();
+  await flush();
+  expect(button('Only this window').getAttribute('aria-pressed')).toBe('true');
+  expect(document.body.textContent).not.toContain('Everything your computer plays goes out with the picture');
+  button('Start sharing').click();
+  await flush();
+  expect(start).toHaveBeenCalledWith('window', 9, true, 'window');
+});
+
+it('does not offer window scope on unsupported Windows', async () => {
+  vi.spyOn(api, 'processLoopbackSupported').mockResolvedValue(false);
+  mount(() => <SharePickerModal open onClose={() => {}} />);
+  await flush();
+  (document.querySelector('[aria-label="Share system sound too"]') as HTMLElement).click();
+  button('Windows').click();
+  await flush();
+  (document.querySelector('[role="option"]') as HTMLElement).click();
+  await flush();
+  expect(button('Only this window')).toBeUndefined();
 });
