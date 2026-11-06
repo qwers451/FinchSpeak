@@ -118,6 +118,7 @@ pub fn run() {
             commands::update::install_update,
             commands::window::set_close_to_tray,
             commands::window::set_tray_state,
+            commands::window::set_attention,
             commands::window::show_main_window,
             // Auth
             commands::auth::login,

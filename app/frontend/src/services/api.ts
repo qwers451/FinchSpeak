@@ -447,6 +447,10 @@ export const api = {
     if (isTauri()) return invoke('set_tray_state', { state, language });
   },
 
+  setAttention: async (mentions: number, language: 'ru' | 'en' = 'ru'): Promise<void> => {
+    if (isTauri()) return invoke('set_attention', { mentions, language });
+  },
+
   setCloseToTray: async (enabled: boolean): Promise<void> => {
     if (isTauri()) return invoke('set_close_to_tray', { enabled });
   },

@@ -2,7 +2,7 @@
 
 use std::sync::atomic::Ordering;
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::state::AppState;
 use crate::tray::{self, TrayState};
@@ -24,5 +24,16 @@ pub async fn set_tray_state(state: TrayState, language: Option<String>, app: App
 #[tauri::command]
 pub async fn show_main_window(app: AppHandle) -> Result<(), String> {
     tray::show_window(&app);
+    Ok(())
+}
+
+/// Unread mentions: a red badge on the taskbar button (Windows) and a count in the tray tooltip.
+#[tauri::command]
+pub async fn set_attention(mentions: u32, language: Option<String>, app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        // Only Windows has overlay icons; elsewhere the error is ignored.
+        let _ = window.set_overlay_icon(if mentions > 0 { Some(tray::red_badge()) } else { None });
+    }
+    tray::set_mentions(&app, mentions, language.as_deref());
     Ok(())
 }

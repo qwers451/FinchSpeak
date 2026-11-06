@@ -123,3 +123,7 @@
 | S.1 | Запустить приложение, закрыть в трей, запустить exe ещё раз | Одна иконка в трее, окно возвращается, вход в аккаунт сохранён | |
 | S.2 | Включить «Запускать вместе с Windows»; проверить `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (запись `FinchSpeak … --minimized`) | Запись есть; после выключения переключателя исчезает | |
 | S.3 | Выйти из Windows и войти снова | Иконка в трее есть, окна нет, вход в аккаунт выполнен; запуск с ярлыка показывает окно | |
+
+## Daily Discord parity: Task 4 (mention badge, jump after notification)
+- [ ] Windows: get an @mention while the window is in the background; the taskbar button shows a red dot and the tray tooltip ends with "· N упоминание/упоминания/упоминаний". Reading the channel clears both.
+- [ ] Click an OS notification (window in background) and bring the window to front within 20 s: the notified channel opens. After more than 20 s it does not.

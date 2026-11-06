@@ -11,6 +11,9 @@ use crate::state::AppState;
 
 const TRAY_ID: &str = "main";
 
+/// The last state and mention count shown, so each update can rebuild the whole tooltip.
+static SHOWN: std::sync::Mutex<(TrayState, u32)> = std::sync::Mutex::new((TrayState::Idle, 0));
+
 /// What the icon says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -103,6 +106,34 @@ pub fn with_dot(rgba: &[u8], width: u32, height: u32, color: [u8; 3]) -> Vec<u8>
     out
 }
 
+/// A 16x16 transparent image with a red dot: the taskbar overlay for unread mentions.
+pub fn red_badge() -> Image<'static> {
+    let blank = vec![0u8; 16 * 16 * 4];
+    Image::new_owned(with_dot(&blank, 16, 16, [0xF2, 0x3F, 0x43]), 16, 16)
+}
+
+/// "упоминание" / "упоминания" / "упоминаний" for `n`.
+fn russian_mentions(n: u32) -> &'static str {
+    match (n % 10, n % 100) {
+        (_, 11..=14) => "упоминаний",
+        (1, _) => "упоминание",
+        (2..=4, _) => "упоминания",
+        _ => "упоминаний",
+    }
+}
+
+/// `base` plus " · {n} упоминаний" / " · {n} mentions" when there are any.
+fn tooltip_with_mentions(base: &str, mentions: u32, language: &str) -> String {
+    if mentions == 0 {
+        return base.to_string();
+    }
+    if language == "en" {
+        format!("{base} · {mentions} {}", if mentions == 1 { "mention" } else { "mentions" })
+    } else {
+        format!("{base} · {mentions} {}", russian_mentions(mentions))
+    }
+}
+
 fn icon_for(app: &AppHandle, state: TrayState) -> Option<Image<'static>> {
     let base = Image::from_bytes(bird_icon_bytes(state)).ok().or_else(|| app.default_window_icon().cloned())?.to_owned();
     let Some(color) = state.dot() else {
@@ -113,6 +144,27 @@ fn icon_for(app: &AppHandle, state: TrayState) -> Option<Image<'static>> {
 
 pub fn set_state(app: &AppHandle, state: TrayState, language: Option<&str>) {
     let language = language.unwrap_or("ru");
+    let mentions = {
+        let mut shown = SHOWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        shown.0 = state;
+        shown.1
+    };
+    apply(app, state, mentions, language);
+}
+
+/// Update the mention count in the tray tooltip (the icon stays as it is).
+pub fn set_mentions(app: &AppHandle, mentions: u32, language: Option<&str>) {
+    let state = {
+        let mut shown = SHOWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        shown.1 = mentions;
+        shown.0
+    };
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_tooltip(Some(tooltip_with_mentions(state.tooltip(language.unwrap_or("ru")), mentions, language.unwrap_or("ru"))));
+    }
+}
+
+fn apply(app: &AppHandle, state: TrayState, mentions: u32, language: &str) {
     let copy = tray_copy(language);
     if let Some(labels) = app.try_state::<TrayLabels>() {
         let _ = labels.open.set_text(copy.open);
@@ -123,7 +175,7 @@ pub fn set_state(app: &AppHandle, state: TrayState, language: Option<&str>) {
         if let Some(icon) = icon_for(app, state) {
             let _ = tray.set_icon(Some(icon));
         }
-        let _ = tray.set_tooltip(Some(state.tooltip(language)));
+        let _ = tray.set_tooltip(Some(tooltip_with_mentions(state.tooltip(language), mentions, language)));
     }
 }
 
@@ -194,6 +246,26 @@ mod tests {
         assert_eq!(pixel(32 - 5, 32 - 5), &[255, 51, 0, 255], "centre of the dot");
         assert_eq!(pixel(2, 2), &[10, 10, 10, 10], "the rest is untouched");
         assert_eq!(marked.len(), base.len());
+    }
+
+    #[test]
+    fn badge_is_16px_with_opaque_centre() {
+        let badge = red_badge();
+        assert_eq!((badge.width(), badge.height()), (16, 16));
+        let alpha = |x: usize, y: usize| badge.rgba()[(y * 16 + x) * 4 + 3];
+        assert_eq!(alpha(8, 8), 255);
+        assert_eq!(alpha(0, 0), 0);
+    }
+
+    #[test]
+    fn mention_tooltip_uses_russian_plural() {
+        assert!(tooltip_with_mentions("FinchSpeak", 1, "ru").ends_with("1 упоминание"));
+        assert!(tooltip_with_mentions("FinchSpeak", 3, "ru").ends_with("3 упоминания"));
+        assert!(tooltip_with_mentions("FinchSpeak", 5, "ru").ends_with("5 упоминаний"));
+        assert!(tooltip_with_mentions("FinchSpeak", 11, "ru").ends_with("11 упоминаний"));
+        assert!(tooltip_with_mentions("FinchSpeak", 21, "ru").ends_with("21 упоминание"));
+        assert_eq!(tooltip_with_mentions("FinchSpeak", 2, "en"), "FinchSpeak · 2 mentions");
+        assert_eq!(tooltip_with_mentions("FinchSpeak", 0, "ru"), "FinchSpeak");
     }
 
     #[test]
