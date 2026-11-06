@@ -217,6 +217,23 @@ pub struct AppState {
     pub signed_in_key: Arc<RwLock<Option<String>>>,
 }
 
+/// Cancels preflight on an error or a dropped command future; committed workers
+/// are owned by AppState and are stopped through the normal lifecycle.
+pub(crate) struct ScreenShareReservation {
+    state: AppState,
+    generation: u64,
+    committed: bool,
+}
+impl ScreenShareReservation {
+    pub(crate) fn generation(&self) -> u64 { self.generation }
+    pub(crate) fn commit(mut self) -> u64 { self.committed = true; self.generation }
+}
+impl Drop for ScreenShareReservation {
+    fn drop(&mut self) {
+        if !self.committed { self.state.stop_screen_share_generation(self.generation); }
+    }
+}
+
 impl Default for AppState {
     fn default() -> Self {
         Self::new()
@@ -224,6 +241,16 @@ impl Default for AppState {
 }
 
 impl AppState {
+    pub(crate) fn reserve_screen_share(&self) -> Result<ScreenShareReservation, String> {
+        let generation = self.begin_screen_share()?;
+        Ok(ScreenShareReservation { state: self.clone(), generation, committed: false })
+    }
+
+    pub(crate) fn screen_share_generation(&self) -> Result<u64, String> {
+        self.screen_share_lifecycle.lock().map(|lifecycle| lifecycle.generation)
+            .map_err(|_| "screen share state poisoned".to_string())
+    }
+
     /// Reserve one share identity before starting video or audio workers.
     pub(crate) fn begin_screen_share(&self) -> Result<u64, String> {
         let mut lifecycle = self.screen_share_lifecycle.lock().map_err(|_| "screen share state poisoned".to_string())?;

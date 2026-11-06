@@ -39,6 +39,10 @@ pub async fn join_voice_channel(
     let tx_opt = state.control_tx.read().await.clone();
     let tx = tx_opt.ok_or_else(|| "Not connected via QUIC".to_string())?;
 
+    if *state.current_voice_channel.read().await != Some(short_id) {
+        // Switching rooms also cancels a screen preflight that has not produced its first frame.
+        state.stop_screen_share();
+    }
     tx.send(ClientMessage::JoinVoice { channel_id: ch_uuid })
         .await
         .map_err(|e| format!("Failed to send JoinVoice: {}", e))?;

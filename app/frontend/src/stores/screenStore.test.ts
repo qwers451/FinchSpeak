@@ -169,3 +169,33 @@ it('does not resurrect a share that ended while audio was starting', async () =>
   expect(isSharing()).toBe(false);
   expect(sharingInfo()).toBeNull();
 });
+
+it('ignores a previous generation ending while a new share starts', async () => {
+  vi.spyOn(api, 'startScreenShare').mockResolvedValue(10);
+  await startSharing('window', 9, true, 'Old', 'window');
+  vi.spyOn(api, 'stopScreenShare').mockResolvedValue();
+  await stopSharing();
+  let complete!: (generation: number) => void;
+  vi.spyOn(api, 'startScreenShare').mockImplementation(() => new Promise<number>((resolve) => { complete = resolve; }));
+  const pending = startSharing('window', 12, true, 'New', 'window');
+  sessionHandlers['screen-share-ended']({ generation: 10, reason: 'old window closed' });
+  complete(20);
+  expect(await pending).toBeNull();
+  expect(isSharing()).toBe(true);
+  expect(sharingInfo()?.label).toBe('New');
+  sessionHandlers['screen-share-ended']({ generation: 10, reason: 'old window closed' });
+  expect(isSharing()).toBe(true);
+  sessionHandlers['screen-share-ended']({ generation: 20, reason: 'new window closed' });
+  expect(isSharing()).toBe(false);
+});
+
+it('remembers an end event received before the successful invoke reply', async () => {
+  let complete!: (generation: number) => void;
+  vi.spyOn(api, 'startScreenShare').mockImplementation(() => new Promise<number>((resolve) => { complete = resolve; }));
+  const pending = startSharing('window', 9, true, 'Notes', 'window');
+  sessionHandlers['screen-share-ended']({ generation: 30, reason: 'window closed' });
+  complete(30);
+  expect(await pending).toBe(t('Screen sharing stopped before it could start.'));
+  expect(isSharing()).toBe(false);
+  expect(sharingInfo()).toBeNull();
+});
