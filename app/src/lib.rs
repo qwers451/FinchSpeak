@@ -122,6 +122,7 @@ pub fn run() {
             commands::window::set_tray_state,
             commands::window::set_attention,
             commands::window::show_main_window,
+            commands::window::system_idle_seconds,
             // Auth
             commands::auth::login,
             commands::auth::register,

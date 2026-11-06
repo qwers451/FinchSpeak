@@ -21,6 +21,7 @@ import { AdminModal } from './components/admin/AdminModal';
 import { SettingsModal } from './components/settings/SettingsModal';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { startUpdateChecks } from './stores/updateStore';
+import { startAutoIdle } from './stores/idleStore';
 import { t } from './i18n';
 import { describeError } from './i18n/errors';
 
@@ -56,11 +57,12 @@ export function App() {
     }
   });
 
-  // Background update checks run only while somebody is signed in.
+  // Background update checks and automatic idle run only while somebody is signed in.
   const signedIn = createMemo(() => !!currentUser());
   createEffect(() => {
     if (!signedIn()) return;
     onCleanup(startUpdateChecks());
+    onCleanup(startAutoIdle());
   });
 
   onCleanup(() => {

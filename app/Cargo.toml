@@ -54,6 +54,9 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation"] }
+
 [features]
 # Serve the bundled frontend instead of the dev server (set by `tauri build`).
 custom-protocol = ["tauri/custom-protocol"]

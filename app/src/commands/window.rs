@@ -46,3 +46,27 @@ pub async fn set_attention(mentions: u32, language: Option<String>, app: AppHand
     tray::set_mentions(&app, mentions, language.as_deref());
     Ok(())
 }
+
+/// Seconds since the last keyboard or mouse input on this computer; `0` when it cannot be read.
+#[tauri::command]
+pub fn system_idle_seconds() -> u64 {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::SystemInformation::GetTickCount;
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+
+        let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+        // SAFETY: `info` is a valid LASTINPUTINFO whose cbSize is set, as GetLastInputInfo requires.
+        if unsafe { GetLastInputInfo(&mut info) } == 0 {
+            return 0;
+        }
+        // SAFETY: GetTickCount has no preconditions.
+        let now = unsafe { GetTickCount() };
+        // The tick count wraps every ~49 days, so the difference must wrap too.
+        u64::from(now.wrapping_sub(info.dwTime) / 1000)
+    }
+    #[cfg(not(windows))]
+    {
+        0
+    }
+}

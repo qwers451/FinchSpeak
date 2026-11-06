@@ -203,6 +203,12 @@ export const api = {
     if (isTauri()) return invoke('set_status', { status, text });
   },
 
+  /** Seconds since the last keyboard or mouse input on this computer. */
+  systemIdleSeconds: async (): Promise<number> => {
+    if (isTauri()) return invoke('system_idle_seconds');
+    return 0;
+  },
+
   markChannelRead: async (channelId: string, messageId: string): Promise<void> => {
     if (isTauri()) {
       return invoke('mark_channel_read', { channelId, messageId });
