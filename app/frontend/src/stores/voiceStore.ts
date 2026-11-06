@@ -262,8 +262,14 @@ export async function leaveVoice() {
 }
 
 export async function toggleMute() {
+  if (isDeafened()) {
+    // Unmuting while deafened also turns the sound back on (Discord behaviour).
+    await api.setVoiceState(false, false);
+    setIsDeafened(false);
+    setIsMuted(false);
+    return;
+  }
   const next = !isMuted();
-  if (isDeafened()) return;
   await api.setVoiceState(next, isDeafened());
   setIsMuted(next);
 }

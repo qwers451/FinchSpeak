@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../services/api';
-import { setActiveVoiceChannel, setVoiceParticipants, voiceParticipants, toggleDeafen, isMuted, setIsMuted, setIsDeafened,
+import { setActiveVoiceChannel, setVoiceParticipants, voiceParticipants, toggleDeafen, toggleMute, isMuted, isDeafened, setIsMuted, setIsDeafened,
   availableDevices, selectedDevices, setSelectedDevices, loadAudioDevices, chooseAudioDevice, joinVoice } from './voiceStore';
 import { appError, setAppError } from './notificationStore';
 import { sessionHandlers } from './sessionStore';
@@ -31,6 +31,16 @@ it.each([false, true])('AUD-033 restores previous mute=%s after deafen', async (
   expect(isMuted()).toBe(true);
   await toggleDeafen();
   expect(isMuted()).toBe(muted);
+});
+
+it('unmuting while deafened undeafens too', async () => {
+  const spy = vi.spyOn(api, 'setVoiceState').mockResolvedValue();
+  await toggleDeafen();
+  expect(isDeafened()).toBe(true);
+  await toggleMute();
+  expect(spy).toHaveBeenLastCalledWith(false, false);
+  expect(isDeafened()).toBe(false);
+  expect(isMuted()).toBe(false);
 });
 
 // --- AUD-024: choosing the microphone and speakers ---
