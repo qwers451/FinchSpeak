@@ -97,6 +97,8 @@ async fn trusted_api_with(server_url: &str, state: &AppState, emit: Emit<'_>) ->
 /// Remember (or not) the token of a fresh sign-in; sets `signed_in_key` for logout and refresh.
 async fn remember_sign_in(state: &AppState, server_url: &str, username: &str, token: &str, remember: bool) {
     if !remember {
+        // An older token of this account must not survive: the next start would sign in anyway.
+        state.token_store.delete(&credential_key(server_url, username));
         *state.signed_in_key.write().await = None;
         return;
     }
@@ -438,6 +440,21 @@ mod tests {
         let resumed = refresh_stored_session(&server.http_url, "carol", &state, &no_emit).await;
         assert!(resumed.is_err());
         assert!(store.load(&credential_key(&server.http_url, "carol")).is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unticked_stay_signed_in_forgets_an_older_stored_token() -> anyhow::Result<()> {
+        let server = TestServer::start().await?;
+        let store = Arc::new(MemoryStore::default());
+        let state = state_with(store.clone(), &server);
+        sign_in(&state, &server, "gina", true).await?;
+        let key = credential_key(&server.http_url, "gina");
+        assert!(store.load(&key).is_some());
+        // A later sign-in with "Stay signed in" unticked must not leave the older token for the next start.
+        remember_sign_in(&state, &server.http_url, "gina", "fresh-token", false).await;
+        assert_eq!(store.load(&key), None);
+        assert!(state.signed_in_key.read().await.is_none());
         Ok(())
     }
 
