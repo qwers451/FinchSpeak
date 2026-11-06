@@ -15,20 +15,20 @@
 //! - **Packet Packaging**: Prepends a strict 20-byte [`MediaHeader`] with [`MediaType::ScreenAudio`] (0x04)
 //!   and passes [`MediaPacket`] datagrams to the receiver.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, RecvError};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, RecvError, channel};
 use std::time::Duration;
 
 use audiopus::coder::Encoder;
 use audiopus::{Application, Bitrate, Channels, SampleRate};
 use bytes::Bytes;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::HeapRb;
+use ringbuf::traits::{Consumer, Producer, Split};
 
 use finch_protocol::media::{MediaPacket, MediaType};
-use finch_protocol::{MediaHeader, MAX_DATAGRAM_PAYLOAD};
+use finch_protocol::{MAX_DATAGRAM_PAYLOAD, MediaHeader};
 
 /// Standard sample rate for FinchSpeak audio pipeline (48,000 Hz).
 pub const SAMPLE_RATE: u32 = 48_000;
@@ -57,6 +57,8 @@ pub const RINGBUF_CAPACITY: usize = 192_000;
 /// Errors that can occur during system audio capture and Opus loopback encoding.
 #[derive(Debug, thiserror::Error)]
 pub enum LoopbackAudioError {
+    #[error("WASAPI error: {0}")]
+    Wasapi(String),
     #[error("Invalid frame size: expected {expected} samples, got {actual}")]
     InvalidFrameSize { expected: usize, actual: usize },
 
@@ -126,7 +128,9 @@ impl ScreenAudioEncoder {
         &mut self,
         samples: &[f32; STEREO_FRAME_SAMPLES],
     ) -> Result<Bytes, LoopbackAudioError> {
-        let len = self.encoder.encode_float(&samples[..], &mut self.output_buf)?;
+        let len = self
+            .encoder
+            .encode_float(&samples[..], &mut self.output_buf)?;
         Ok(Bytes::copy_from_slice(&self.output_buf[..len]))
     }
 
@@ -390,8 +394,9 @@ impl ScreenAudioCapturer {
     fn start_device_capture(config: ScreenAudioConfig) -> Result<Self, LoopbackAudioError> {
         let host = cpal::default_host();
         let device = match &config.device_name {
-            Some(name) => find_device_by_name(&host, name)
-                .ok_or(LoopbackAudioError::NoDeviceAvailable)?,
+            Some(name) => {
+                find_device_by_name(&host, name).ok_or(LoopbackAudioError::NoDeviceAvailable)?
+            }
             None => host
                 .default_output_device()
                 .or_else(|| host.default_input_device())
@@ -454,7 +459,13 @@ impl ScreenAudioCapturer {
         stream.play()?;
 
         let running = Arc::new(AtomicBool::new(true));
-        let (thread_handle, rx) = spawn_encoder_thread(config.clone(), source_rate, source_channels, cons, Arc::clone(&running))?;
+        let (thread_handle, rx) = spawn_encoder_thread(
+            config.clone(),
+            source_rate,
+            source_channels,
+            cons,
+            Arc::clone(&running),
+        )?;
 
         Ok(Self {
             config,
@@ -513,65 +524,62 @@ fn spawn_encoder_thread(
     mut cons: ringbuf::HeapCons<f32>,
     running: Arc<AtomicBool>,
 ) -> Result<(std::thread::JoinHandle<()>, Receiver<MediaPacket>), LoopbackAudioError> {
-        let (tx, rx) = channel();
-        let running_thread = Arc::clone(&running);
-        let thread_config = config;
+    let (tx, rx) = channel();
+    let running_thread = Arc::clone(&running);
+    let thread_config = config;
 
-        let thread_handle = std::thread::Builder::new()
-            .name("finch-audio-loopback".to_string())
-            .spawn(move || {
-                let mut encoder = match ScreenAudioEncoder::new(thread_config.bitrate_kbps) {
-                    Ok(enc) => enc,
-                    Err(e) => {
-                        tracing::error!("Failed to create ScreenAudioEncoder: {e}");
-                        return;
-                    }
-                };
+    let thread_handle = std::thread::Builder::new()
+        .name("finch-audio-loopback".to_string())
+        .spawn(move || {
+            let mut encoder = match ScreenAudioEncoder::new(thread_config.bitrate_kbps) {
+                Ok(enc) => enc,
+                Err(e) => {
+                    tracing::error!("Failed to create ScreenAudioEncoder: {e}");
+                    return;
+                }
+            };
 
-                let mut resampler = ResamplerConverter::new(source_rate, source_channels);
-                let mut sequence: u16 = 0;
-                let mut timestamp: u32 = 0;
-                let mut temp_chunk = [0.0f32; 2048];
+            let mut resampler = ResamplerConverter::new(source_rate, source_channels);
+            let mut sequence: u16 = 0;
+            let mut timestamp: u32 = 0;
+            let mut temp_chunk = [0.0f32; 2048];
 
-                while running_thread.load(Ordering::Relaxed) {
-                    let read = cons.pop_slice(&mut temp_chunk);
-                    if read > 0 {
-                        resampler.push_raw_samples(&temp_chunk[..read]);
+            while running_thread.load(Ordering::Relaxed) {
+                let read = cons.pop_slice(&mut temp_chunk);
+                if read > 0 {
+                    resampler.push_raw_samples(&temp_chunk[..read]);
 
-                        while resampler.has_frame() {
-                            if let Some(stereo_frame) = resampler.pop_frame() {
-                                match encoder.packetize(
-                                    thread_config.channel_id,
-                                    thread_config.sender_peer_id,
-                                    sequence,
-                                    timestamp,
-                                    thread_config.is_e2ee,
-                                    &stereo_frame,
-                                ) {
-                                    Ok(packet) => {
-                                        sequence = sequence.wrapping_add(1);
-                                        timestamp =
-                                            timestamp.wrapping_add(SAMPLES_PER_CHANNEL as u32);
-                                        if tx.send(packet).is_err() {
-                                            // Receiver was dropped, exit processing thread
-                                            return;
-                                        }
+                    while resampler.has_frame() {
+                        if let Some(stereo_frame) = resampler.pop_frame() {
+                            match encoder.packetize(
+                                thread_config.channel_id,
+                                thread_config.sender_peer_id,
+                                sequence,
+                                timestamp,
+                                thread_config.is_e2ee,
+                                &stereo_frame,
+                            ) {
+                                Ok(packet) => {
+                                    sequence = sequence.wrapping_add(1);
+                                    timestamp = timestamp.wrapping_add(SAMPLES_PER_CHANNEL as u32);
+                                    if tx.send(packet).is_err() {
+                                        // Receiver was dropped, exit processing thread
+                                        return;
                                     }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            "Failed to packetize loopback audio frame: {e}"
-                                        );
-                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Failed to packetize loopback audio frame: {e}");
                                 }
                             }
                         }
-                    } else {
-                        // Sleep briefly to avoid busy-spinning when no audio is playing
-                        std::thread::sleep(Duration::from_millis(5));
                     }
+                } else {
+                    // Sleep briefly to avoid busy-spinning when no audio is playing
+                    std::thread::sleep(Duration::from_millis(5));
                 }
-            })
-            .map_err(LoopbackAudioError::ThreadSpawnError)?;
+            }
+        })
+        .map_err(LoopbackAudioError::ThreadSpawnError)?;
 
     Ok((thread_handle, rx))
 }
@@ -717,6 +725,9 @@ mod source_tests {
     use super::*;
     #[test]
     fn default_config_asks_for_all_except_self() {
-        assert_eq!(ScreenAudioConfig::default().source, AudioSourceKind::AllExceptSelf);
+        assert_eq!(
+            ScreenAudioConfig::default().source,
+            AudioSourceKind::AllExceptSelf
+        );
     }
 }

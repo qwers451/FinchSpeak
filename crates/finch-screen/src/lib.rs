@@ -29,3 +29,6 @@ pub use thumbnail::{thumbnail_jpeg, ThumbnailCache, MAX_THUMBNAIL_WIDTH};
 pub use hw_encoder::{
     EncodedFrame, H264EncoderError, H264VideoEncoder, VideoEncoderConfig, MAX_HEIGHT, MAX_WIDTH,
 };
+
+#[cfg(windows)]
+pub mod process_loopback;
