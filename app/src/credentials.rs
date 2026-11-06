@@ -29,7 +29,10 @@ impl TokenStore for KeyringStore {
 
     fn delete(&self, key: &str) {
         if let Ok(entry) = keyring::Entry::new(SERVICE, key) {
-            let _ = entry.delete_credential();
+            match entry.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => {}
+                Err(e) => tracing::warn!("Failed to delete stored credential: {e}"),
+            }
         }
     }
 }

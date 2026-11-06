@@ -77,6 +77,36 @@ pub async fn start_quic_session(
     Ok(connection)
 }
 
+/// How often the session token is renewed while signed in.
+const TOKEN_REFRESH_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// Renew the session token every 6 h while `generation` is current. Failures are retried next tick.
+pub fn spawn_token_refresher(state: AppState, generation: u64) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(TOKEN_REFRESH_INTERVAL).await;
+            if state.session_generation.load(Ordering::SeqCst) != generation { return; }
+            if let Err(e) = refresh_token_once(&state, generation).await {
+                warn!("Token refresh failed, retrying later: {e}");
+            }
+        }
+    });
+}
+
+/// One refresh: new token into the REST client, `auth_token`, reconnect params and the store.
+pub async fn refresh_token_once(state: &AppState, generation: u64) -> Result<(), String> {
+    let api = state.api.read().await.clone().ok_or("not signed in")?;
+    let auth = api.refresh().await.map_err(|e| e.to_string())?;
+    if state.session_generation.load(Ordering::SeqCst) != generation { return Ok(()); }
+    if let Some(api) = state.api.write().await.as_mut() { api.set_token(auth.token.clone()); }
+    *state.auth_token.write().await = Some(auth.token.clone());
+    if let Some(params) = state.last_connect.write().await.as_mut() { params.token = auth.token.clone(); }
+    if let Some(key) = state.signed_in_key.read().await.clone() {
+        state.token_store.save(&key, &auth.token)?;
+    }
+    Ok(())
+}
+
 /// Make `session` the active one in the app state and tell the UI.
 async fn activate_session(session: &Session, state: &AppState, app_handle: &tauri::AppHandle) {
     // Peer ids and packet sequences belong to this session, not the previous server.

@@ -108,6 +108,7 @@ pub fn run() {
             // Auth
             commands::auth::login,
             commands::auth::register,
+            commands::auth::resume_session,
             commands::auth::logout,
             commands::auth::get_current_user,
             commands::auth::get_session_snapshot,
