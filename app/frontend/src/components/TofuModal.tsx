@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, Show } from 'solid-js';
-import { pendingMismatch, pendingTofu, setAuthError, setPendingMismatch, setPendingTofu } from '../stores/authStore';
+import { pendingMismatch, pendingTofu, retryPendingSignIn, setAuthError, setPendingMismatch, setPendingTofu } from '../stores/authStore';
 import { api } from '../services/api';
 import { Button, Field, Icon, Modal } from '../ui';
 import { t } from '../i18n';
@@ -28,6 +28,7 @@ export function TofuModal() {
     await api.trustFingerprint(data.hostname, data.fingerprint);
     setPendingTofu(null);
     setAuthError(null);
+    await retryPendingSignIn();
   };
 
   return (

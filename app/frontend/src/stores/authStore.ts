@@ -33,11 +33,30 @@ export const [authError, setAuthError] = createSignal<string | null>(null);
 // The certificate-confirmation state lives in a leaf module (see tofuStore.ts); re-exported here.
 export { pendingMismatch, pendingTofu, setPendingMismatch, setPendingTofu };
 
-export async function loginUser(username: string, password: string, stay = true) {
+// The last sign-in attempt, kept in memory only so it can be replayed once after the user trusts the
+// server certificate. Cleared on success, on logout and after one retry.
+type Attempt =
+  | { kind: 'login'; username: string; password: string; stay: boolean }
+  | { kind: 'register'; username: string; displayName: string; password: string; inviteCode?: string; stay: boolean };
+let lastAttempt: Attempt | null = null;
+
+/** Replays the attempt that stopped on the certificate prompt; false if there was none or it failed again. */
+export async function retryPendingSignIn(): Promise<boolean> {
+  const attempt = lastAttempt;
+  lastAttempt = null;
+  if (!attempt) return false;
+  return attempt.kind === 'login'
+    ? loginUser(attempt.username, attempt.password, attempt.stay, true)
+    : registerUser(attempt.username, attempt.displayName, attempt.password, attempt.inviteCode, attempt.stay, true);
+}
+
+export async function loginUser(username: string, password: string, stay = true, isRetry = false) {
+  if (!isRetry) lastAttempt = { kind: 'login', username, password, stay };
   setAuthLoading(true);
   setAuthError(null);
   try {
     const user = await api.login(serverUrl(), username, password, stay);
+    lastAttempt = null;
     remember(serverUrl(), username);
     setRememberedUsername(username);
     setCurrentUser(user);
@@ -51,11 +70,13 @@ export async function loginUser(username: string, password: string, stay = true)
   }
 }
 
-export async function registerUser(username: string, displayName: string, password: string, inviteCode?: string, stay = true) {
+export async function registerUser(username: string, displayName: string, password: string, inviteCode?: string, stay = true, isRetry = false) {
+  if (!isRetry) lastAttempt = { kind: 'register', username, displayName, password, inviteCode, stay };
   setAuthLoading(true);
   setAuthError(null);
   try {
     const user = await api.register(serverUrl(), username, displayName, password, inviteCode, stay);
+    lastAttempt = null;
     remember(serverUrl(), username);
     setRememberedUsername(username);
     setCurrentUser(user);
@@ -89,6 +110,7 @@ export async function resumeLastSession(): Promise<boolean> {
 }
 
 export async function logoutUser() {
+  lastAttempt = null;
   let failure: unknown;
   try { await api.logout(); } catch (error) { failure = error; }
   resetSessionState();

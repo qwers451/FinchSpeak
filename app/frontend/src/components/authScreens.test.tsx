@@ -7,7 +7,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) })
 
 import { AuthModal, describeAuthError } from './AuthModal';
 import { CertChangedModal, TofuModal, diffBytes, fingerprintGroups } from './TofuModal';
-import { setPendingMismatch, setPendingTofu } from '../stores/authStore';
+import { loginUser, setPendingMismatch, setPendingTofu } from '../stores/authStore';
 import { passwordStrength } from '../ui/passwordStrength';
 
 let dispose: (() => void) | undefined;
@@ -114,4 +114,27 @@ it('stay signed in is on by default and is passed to login', async () => {
   await vi.waitFor(() => expect(spy).toHaveBeenCalled());
   expect(spy.mock.calls[0][3]).toBe(true);
   spy.mockRestore();
+});
+
+it('trusting the server retries the sign-in once', async () => {
+  const user = { id: 'u', username: 'alice', display_name: 'Alice', role: 'member' };
+  let logins = 0;
+  transport.invoke.mockImplementation(async (cmd: string) => {
+    if (cmd === 'login') {
+      logins += 1;
+      if (logins === 1) {
+        setPendingTofu({ hostname: 'h', fingerprint: FP });
+        throw 'Server certificate of h is not trusted yet';
+      }
+      return user;
+    }
+    return null;
+  });
+  expect(await loginUser('alice', 'hunter2hunter2', false)).toBe(false);
+  const host = mount(() => <TofuModal />);
+  const trust = Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.includes('trust server'))!;
+  trust.click();
+  await vi.waitFor(() => expect(logins).toBe(2));
+  const calls = transport.invoke.mock.calls.filter(([cmd]) => cmd === 'login');
+  expect(calls[1][1]).toMatchObject({ username: 'alice', password: 'hunter2hunter2', remember: false });
 });
