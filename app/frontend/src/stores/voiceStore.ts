@@ -6,6 +6,8 @@ import { setAppError } from './notificationStore';
 import { pushToast } from '../ui/toastStore';
 import { describeError } from '../i18n/errors';
 import { resetScreenState, setEndedShare, setWatching } from './screenState';
+import { playTone, type Tone } from './tones';
+import { prefs } from './settingsStore';
 
 export const [activeVoiceChannel, setActiveVoiceChannel] = createSignal<Channel | null>(null);
 export const [isMuted, setIsMuted] = createSignal<boolean>(false);
@@ -322,6 +324,17 @@ export function restoreVoiceSettings() {
   });
 }
 
+/** A tone for something I did. Silent when the voice-actions sounds are off; the master sounds switch and volume are in playTone. */
+function feedback(tone: Tone) {
+  if (prefs().notifications.voiceSounds) playTone(tone);
+}
+
+/** Push-to-talk went down or up: a tone, but only in a room and with push-to-talk on. */
+export function handlePushToTalk(pressed: boolean) {
+  if (!activeVoiceChannel() || !voiceSettings().push_to_talk) return;
+  feedback(pressed ? 'ptt-on' : 'ptt-off');
+}
+
 export async function joinVoice(channel: Channel) {
   await restoreAudioDevices();
   await restoreVoiceSettings();
@@ -335,6 +348,7 @@ export async function joinVoice(channel: Channel) {
       setEndedShare(null);
     }
     setActiveVoiceChannel(channel);
+    feedback('join');
   } catch (err) {
     console.error('Failed to join voice channel:', err);
     setAppError(t('Could not join voice: {error}', { error: describeError(err) }));
@@ -342,6 +356,7 @@ export async function joinVoice(channel: Channel) {
 }
 
 export async function leaveVoice() {
+  const wasInRoom = activeVoiceChannel() !== null;
   try {
     await api.leaveVoiceChannel();
     resetScreenState();
@@ -349,6 +364,7 @@ export async function leaveVoice() {
     setSpeakingPeers(new Set<number>());
     resetMicPreview();
     setVoiceQuality({});
+    if (wasInRoom) feedback('leave');
   } catch (err) {
     console.error('Failed to leave voice channel:', err);
   }
@@ -360,11 +376,13 @@ export async function toggleMute() {
     await api.setVoiceState(false, false);
     setIsDeafened(false);
     setIsMuted(false);
+    feedback('undeafen');
     return;
   }
   const next = !isMuted();
   await api.setVoiceState(next, isDeafened());
   setIsMuted(next);
+  feedback(next ? 'mute' : 'unmute');
 }
 
 export async function toggleDeafen() {
@@ -375,6 +393,7 @@ export async function toggleDeafen() {
   if (next) mutedBeforeDeafen = previousMute;
   setIsDeafened(next);
   setIsMuted(muted);
+  feedback(next ? 'deafen' : 'undeafen');
 }
 
 export function handleUserSpeaking(peerId: number, speaking: boolean) {

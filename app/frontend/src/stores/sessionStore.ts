@@ -3,7 +3,7 @@ import type { DeviceSession, SessionEvents, SessionSnapshot, User, UserStatus } 
 import { setPendingMismatch, setPendingTofu } from './tofuStore';
 import { receiveInviteLink, setPendingInvite } from './inviteLink';
 import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
-import { activeVoiceChannel, toggleMute, handleHotkey, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
+import { activeVoiceChannel, allVoiceParticipants, handlePushToTalk, toggleMute, handleHotkey, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
 import { classifyEnd, sessionEnded, setSessionEnded } from './sessionEnd';
@@ -126,10 +126,14 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     if (activeVoiceChannel()?.id === data.channel_id) reactToVoiceMovement('join', data.username, data.user_id);
   },
   'user-left-voice': (data) => {
+    // Decide from the event's room and read the name before the participant is removed.
+    const inMyRoom = activeVoiceChannel()?.id === data.channel_id;
+    const name = allVoiceParticipants().find((participant) => participant.peer_id === data.peer_id)?.username ?? '';
     // Say why the watched share ended while the sharer's name is still known.
     if (watching()?.peer_id === data.peer_id) screenHandlers['screen-share-stopped']({ peer_id: data.peer_id, reason: 'Left' });
     setVoiceParticipants((previous) => previous.filter((participant) => participant.peer_id !== data.peer_id || participant.channel_id !== data.channel_id));
     handleUserSpeaking(data.peer_id, false);
+    if (inMyRoom) reactToVoiceMovement('leave', name, data.user_id);
   },
   'user-voice-state-changed': (data) => setVoiceParticipants((previous) => previous.map((participant) =>
     participant.peer_id === data.peer_id ? { ...participant, is_muted: data.muted, is_deafened: data.deafened } : participant)),
@@ -144,6 +148,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     if (me && me.id === data.user_id) setCurrentUser({ ...me, status: data.status, status_text: data.status_text ?? null });
   },
   'tray-toggle-mute': () => { void toggleMute(); },
+  'push-to-talk': ({ pressed }) => handlePushToTalk(pressed),
   'server-mute-changed': ({ peer_id, server_muted }) => setVoiceParticipants((previous) => previous.map((participant) =>
     participant.peer_id === peer_id ? { ...participant, server_muted } : participant)),
   'voice-kicked': () => {

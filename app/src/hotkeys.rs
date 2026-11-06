@@ -1,6 +1,7 @@
 //! System-wide keys: push to talk, mute the microphone, and turn the sound off.
 //! They work while FinchSpeak is in the background.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter, Manager};
@@ -50,6 +51,8 @@ type Keys = [Option<Shortcut>; 3];
 #[derive(Default)]
 pub struct Hotkeys {
     keys: Mutex<Keys>,
+    /// The push-to-talk key state last reported to the UI; auto-repeat does not change it.
+    push_to_talk_down: AtomicBool,
 }
 
 impl Hotkeys {
@@ -68,13 +71,24 @@ fn conflict(keys: &Keys, action: HotkeyAction, shortcut: &Shortcut) -> Option<Ho
     find_action(keys, shortcut).filter(|other| *other != action)
 }
 
+/// Whether `pressed` changes the key state kept in `down`. Holding a key makes the platform send
+/// the press again and again (auto-repeat), so only the first press and the release count.
+fn key_changed(down: &AtomicBool, pressed: bool) -> bool {
+    down.swap(pressed, Ordering::SeqCst) != pressed
+}
+
 /// Called by the global-shortcut plugin for every registered key.
 pub fn handle(app: &AppHandle, shortcut: &Shortcut, key_state: ShortcutState) {
     let state = app.state::<AppState>();
     let Some(action) = state.hotkeys.action_for(shortcut) else { return };
     let pressed = key_state == ShortcutState::Pressed;
     match action {
-        HotkeyAction::PushToTalk => state.voice_settings.set_key_down(pressed),
+        HotkeyAction::PushToTalk => {
+            state.voice_settings.set_key_down(pressed);
+            if key_changed(&state.hotkeys.push_to_talk_down, pressed) {
+                let _ = app.emit("push-to-talk", serde_json::json!({ "pressed": pressed }));
+            }
+        }
         // The UI owns mute and deafen (it keeps "muted before deafen" and the buttons in sync).
         _ if pressed => {
             let _ = app.emit("hotkey", action.as_str());
@@ -118,6 +132,8 @@ pub fn set(app: &AppHandle, state: &AppState, action: HotkeyAction, key: Option<
     if action == HotkeyAction::PushToTalk {
         // A key that is no longer ours cannot be released by us.
         state.voice_settings.set_key_down(false);
+        // A release we never saw must not make the next press look like a repeat.
+        state.hotkeys.push_to_talk_down.store(false, Ordering::SeqCst);
     }
     Ok(())
 }
@@ -146,6 +162,16 @@ mod tests {
         assert_eq!(find_action(&keys, &key("F10")), None);
         assert_eq!(conflict(&keys, HotkeyAction::ToggleDeafen, &key("F9")), Some(HotkeyAction::ToggleMute));
         assert_eq!(conflict(&keys, HotkeyAction::ToggleMute, &key("F9")), None, "keeping its own key is fine");
+    }
+
+    #[test]
+    fn repeated_presses_are_one_change() {
+        let down = AtomicBool::new(false);
+        assert!(key_changed(&down, true), "the first press is a change");
+        assert!(!key_changed(&down, true), "auto-repeat is not");
+        assert!(!key_changed(&down, true), "auto-repeat is not");
+        assert!(key_changed(&down, false), "the release is a change");
+        assert!(!key_changed(&down, false), "a repeated release is not");
     }
 
     #[test]

@@ -248,6 +248,8 @@ export interface SessionEvents {
   'mic-level': { db: number; speaking: boolean };
   /** A system-wide mute or deafen key was pressed. */
   hotkey: 'toggle_mute' | 'toggle_deafen';
+  /** The push-to-talk key went down (`pressed`) or up; sent only when its state changes. */
+  'push-to-talk': { pressed: boolean };
   'mic-test': { phase: 'recording' | 'playing' | 'done'; seconds?: number; error?: string };
   'voice-quality': { peer_id: number; quality: 'good' | 'fair' | 'poor'; loss: number }[];
   'connection-lost': string;

@@ -65,9 +65,10 @@ it('a window in the background still hears about the channel it has open', () =>
   expect(reactToMessage(message({ channel_id: 'c1' }), true)).toBe('notified');
 });
 
-it('tones are short two-note chirps and the voice-room ones respect the setting', () => {
+it('tones are short chirps and the voice-room ones respect the setting', () => {
   for (const tone of Object.values(TONES)) {
-    expect(tone.notes).toHaveLength(2);
+    expect(tone.notes.length).toBeGreaterThanOrEqual(1);
+    expect(tone.notes.length).toBeLessThanOrEqual(2);
     expect(tone.noteMs).toBeLessThanOrEqual(150);
   }
   const play = vi.fn();

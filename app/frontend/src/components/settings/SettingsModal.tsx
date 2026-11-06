@@ -173,6 +173,7 @@ function NotificationsPage() {
         <div class="col grow"><strong class="fs13">{t('Sound volume')}</strong></div>
         <div style={{ width: '180px' }}><Slider label={t('Sound volume')} min={0} max={1} step={0.05} value={n().soundVolume} onChange={(v) => updateNotifications({ soundVolume: v })} /></div>
       </div>
+      <Row title={t('Sounds for voice actions')} hint={t('Joining and leaving, microphone and sound on or off, push-to-talk.')} control={<Toggle label={t('Sounds for voice actions')} checked={n().voiceSounds} onChange={(v) => updateNotifications({ voiceSounds: v })} />} />
       <Row title={t('Flash the taskbar')} hint={t('While the window is in the background.')} control={<Toggle label={t('Flash the taskbar')} checked={n().flash} onChange={(v) => updateNotifications({ flash: v })} />} />
       <span class="field-label" style={{ 'margin-top': '16px' }}>{t('Muted channels')}</span>
       <For each={textChannels()}>

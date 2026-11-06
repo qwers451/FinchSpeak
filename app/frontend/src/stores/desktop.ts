@@ -9,47 +9,12 @@ import { isChannelMuted, prefs } from './settingsStore';
 import { isSharing } from './screenState';
 import { activeVoiceChannel, isMuted } from './voiceStore';
 import { t } from '../i18n';
+import { playTone } from './tones';
+
+export { TONES, playTone, type Tone } from './tones';
 
 // Desktop behaviour: notifications, tones, the tray icon. Everything here is optional: if the
 // platform refuses, the app keeps working without it.
-
-// ---- tones (made in code: no sound files to ship) ---------------------------------------------
-
-export type Tone = 'mention' | 'join' | 'leave';
-
-/** Notes (Hz) and length (ms) of each tone. */
-export const TONES: Record<Tone, { notes: number[]; noteMs: number }> = {
-  mention: { notes: [988, 1319], noteMs: 110 },
-  join: { notes: [660, 880], noteMs: 90 },
-  leave: { notes: [880, 660], noteMs: 90 },
-};
-
-let context: AudioContext | null = null;
-
-/** Play a tone at the chosen volume; silently does nothing when sounds are off or unavailable. */
-export function playTone(tone: Tone, volume = prefs().notifications.soundVolume) {
-  if (!prefs().notifications.sounds || volume <= 0) return;
-  try {
-    const Audio = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Audio) return;
-    context ??= new Audio();
-    const { notes, noteMs } = TONES[tone];
-    const start = context.currentTime + 0.01;
-    notes.forEach((frequency, index) => {
-      const oscillator = context!.createOscillator();
-      const gain = context!.createGain();
-      const at = start + (index * noteMs) / 1000;
-      oscillator.type = 'sine';
-      oscillator.frequency.value = frequency;
-      gain.gain.setValueAtTime(0, at);
-      gain.gain.linearRampToValueAtTime(Math.min(1, volume) * 0.3, at + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + noteMs / 1000);
-      oscillator.connect(gain).connect(context!.destination);
-      oscillator.start(at);
-      oscillator.stop(at + noteMs / 1000 + 0.02);
-    });
-  } catch { /* no sound is not an error */ }
-}
 
 // ---- notifications ----------------------------------------------------------------------------
 

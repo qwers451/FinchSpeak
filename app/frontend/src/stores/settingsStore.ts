@@ -11,6 +11,8 @@ export interface NotificationPrefs {
   /** Tell me when someone joins the voice room I am in. */
   voiceJoin: boolean;
   sounds: boolean;
+  /** Feedback tones for my own voice actions: joining and leaving, mute and deafen, push-to-talk. */
+  voiceSounds: boolean;
   /** 0..1 */
   soundVolume: number;
   /** Flash the taskbar button while the window is in the background. */
@@ -36,7 +38,7 @@ export interface Prefs {
 }
 
 export const DEFAULT_PREFS: Prefs = {
-  notifications: { mentions: true, allMessages: false, voiceJoin: true, sounds: true, soundVolume: 0.6, flash: true },
+  notifications: { mentions: true, allMessages: false, voiceJoin: true, sounds: true, voiceSounds: true, soundVolume: 0.6, flash: true },
   appearance: { theme: 'claude', customColors: DEFAULT_THEME_COLORS, language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, showMembers: true },
   mutedChannels: {},
 };
@@ -70,6 +72,7 @@ export function parsePrefs(raw: string | null): Prefs {
       allMessages: bool(n.allMessages, d.notifications.allMessages),
       voiceJoin: bool(n.voiceJoin, d.notifications.voiceJoin),
       sounds: bool(n.sounds, d.notifications.sounds),
+      voiceSounds: bool(n.voiceSounds, d.notifications.voiceSounds),
       soundVolume: volume,
       flash: bool(n.flash, d.notifications.flash),
     },
