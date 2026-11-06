@@ -208,6 +208,8 @@ pub struct AppState {
     pub token_store: Arc<dyn crate::credentials::TokenStore>,
     /// Credential key of the current session (used by logout and refresh).
     pub signed_in_key: Arc<RwLock<Option<String>>>,
+    /// System-wide keys for push to talk, mute and deafen.
+    pub hotkeys: Arc<crate::hotkeys::Hotkeys>,
 }
 
 impl Default for AppState {
@@ -279,6 +281,7 @@ impl AppState {
             mic_test_request: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             token_store: Arc::new(crate::credentials::KeyringStore),
             signed_in_key: Arc::new(RwLock::new(None)),
+            hotkeys: Arc::new(crate::hotkeys::Hotkeys::default()),
         }
     }
 }

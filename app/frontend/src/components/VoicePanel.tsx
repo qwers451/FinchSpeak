@@ -10,6 +10,8 @@ import { Dock } from './voice/Dock';
 import { LiveCard } from './voice/LiveCard';
 import { isMeParticipant, ParticipantTile } from './voice/ParticipantTile';
 import { VoiceSettingsModal } from './voice/VoiceSettingsModal';
+import { SpatialStage } from './voice/SpatialStage';
+import { spatialEnabled } from '../stores/spatialStore';
 import { arrange, avatarSizeFor, gridColumns, gridRows } from './voice/voiceLayout';
 import { t } from '../i18n';
 
@@ -87,6 +89,7 @@ export function VoicePanel() {
         </Show>
       </div>
 
+      <Show when={spatialEnabled()}><SpatialStage /></Show>
       <Dock onShare={() => setPicker(true)} onSettings={() => setSettings(true)} />
       <SharePickerModal open={picker()} onClose={() => setPicker(false)} />
       <VoiceSettingsModal open={settings()} onClose={() => setSettings(false)} />

@@ -7,6 +7,7 @@ import { api } from './services/api';
 import { Sidebar } from './components/Sidebar';
 import { prefs } from './stores/settingsStore';
 import { startDesktopSync } from './stores/desktop';
+import { restoreVoiceSettings } from './stores/voiceStore';
 import { MembersPanel } from './components/MembersPanel';
 import { ChatArea } from './components/ChatArea';
 import { VoicePanel } from './components/VoicePanel';
@@ -33,6 +34,8 @@ export function App() {
       const subscriptions = await subscribeSessionEvents();
       if (disposed) { subscriptions.dispose(); return; }
       unlisten = subscriptions.dispose;
+      // Keys work system-wide, so register them at start, not only on joining a room.
+      void restoreVoiceSettings();
       const user = await api.getCurrentUser();
       if (disposed) return;
       if (user) {

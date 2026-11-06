@@ -40,49 +40,68 @@ use crate::capture_privacy::{CaptureClock, CapturedSample, InputBoundary};
 /// Capacity of lock-free ring buffers (16384 samples ~ 341 ms at 48 kHz).
 const RING_BUFFER_CAPACITY: usize = 16384;
 
+/// One output sample: what each ear plays, and the mono mix the echo canceller listens for.
 #[derive(Clone, Copy, Default)]
 struct PlaybackSample {
-    audible: f32,
+    left: f32,
+    right: f32,
     echo_reference: f32,
+}
+
+impl PlaybackSample {
+    /// The mono mix, for a single-channel device and for extra channels.
+    fn mono(&self) -> f32 {
+        (self.left + self.right) * 0.5
+    }
 }
 
 // Only continuous live monitoring is excluded. Recorded microphone tests remain
 // in the reference alongside remote audio: they can echo while capture is private.
+#[cfg(test)]
 fn playback_sample(reference_source: f32, live_monitor: f32) -> PlaybackSample {
-    let combined = reference_source + live_monitor;
-    let scale = combined.abs().max(1.0);
-    PlaybackSample { audible: combined / scale, echo_reference: reference_source / scale }
+    playback_sample_stereo(reference_source, reference_source, live_monitor)
+}
+
+/// Spatial audio places the far end left or right; the echo canceller still gets one mono
+/// signal (what a microphone in the room hears from both speakers together).
+fn playback_sample_stereo(left: f32, right: f32, live_monitor: f32) -> PlaybackSample {
+    let (left_out, right_out) = (left + live_monitor, right + live_monitor);
+    let scale = left_out.abs().max(right_out.abs()).max(1.0);
+    PlaybackSample { left: left_out / scale, right: right_out / scale, echo_reference: (left + right) * 0.5 / scale }
 }
 
 struct PlaybackResampler {
-    audible: OutputResampler,
+    left: OutputResampler,
+    right: OutputResampler,
     reference: OutputResampler,
     rate: u32,
 }
 impl PlaybackResampler {
     fn new(rate: u32) -> Result<Self, String> {
-        Ok(Self { audible: OutputResampler::new(rate).map_err(|e| e.to_string())?,
-            reference: OutputResampler::new(rate).map_err(|e| e.to_string())?, rate })
+        let make = || OutputResampler::new(rate).map_err(|e| e.to_string());
+        Ok(Self { left: make()?, right: make()?, reference: make()?, rate })
     }
     fn passthrough() -> Self {
-        Self { audible: OutputResampler::Passthrough, reference: OutputResampler::Passthrough, rate: 48_000 }
+        Self { left: OutputResampler::Passthrough, right: OutputResampler::Passthrough, reference: OutputResampler::Passthrough, rate: 48_000 }
     }
-    fn process(&mut self, source: &[f32; FRAME_SIZE_48K], monitor: &[f32; FRAME_SIZE_48K]) -> Result<Vec<PlaybackSample>, String> {
-        let result = self.process_frame(source, monitor);
+    fn process(&mut self, left: &[f32; FRAME_SIZE_48K], right: &[f32; FRAME_SIZE_48K], monitor: &[f32; FRAME_SIZE_48K]) -> Result<Vec<PlaybackSample>, String> {
+        let result = self.process_frame(left, right, monitor);
         if result.is_err() { *self = Self::new(self.rate)?; }
         result
     }
-    fn process_frame(&mut self, source: &[f32; FRAME_SIZE_48K], monitor: &[f32; FRAME_SIZE_48K]) -> Result<Vec<PlaybackSample>, String> {
-        let mut audible = [0.0; FRAME_SIZE_48K];
+    fn process_frame(&mut self, left: &[f32; FRAME_SIZE_48K], right: &[f32; FRAME_SIZE_48K], monitor: &[f32; FRAME_SIZE_48K]) -> Result<Vec<PlaybackSample>, String> {
+        let mut left_in = [0.0; FRAME_SIZE_48K];
+        let mut right_in = [0.0; FRAME_SIZE_48K];
         let mut reference = [0.0; FRAME_SIZE_48K];
         for index in 0..FRAME_SIZE_48K {
-            let sample = playback_sample(source[index], monitor[index]);
-            audible[index] = sample.audible; reference[index] = sample.echo_reference;
+            let sample = playback_sample_stereo(left[index], right[index], monitor[index]);
+            left_in[index] = sample.left; right_in[index] = sample.right; reference[index] = sample.echo_reference;
         }
-        let audible = self.audible.process(&audible).map_err(|e| e.to_string())?;
+        let left = self.left.process(&left_in).map_err(|e| e.to_string())?;
+        let right = self.right.process(&right_in).map_err(|e| e.to_string())?;
         let reference = self.reference.process(&reference).map_err(|e| e.to_string())?;
-        if audible.len() != reference.len() { return Err("Playout and echo reference length mismatch".into()); }
-        Ok(audible.into_iter().zip(reference).map(|(audible, echo_reference)| PlaybackSample { audible, echo_reference }).collect())
+        if left.len() != reference.len() || right.len() != reference.len() { return Err("Playout and echo reference length mismatch".into()); }
+        Ok(left.into_iter().zip(right).zip(reference).map(|((left, right), echo_reference)| PlaybackSample { left, right, echo_reference }).collect())
     }
 }
 
@@ -112,6 +131,9 @@ enum AudioCommand {
         channel_id: u32,
         state: AppState,
         app_handle: tauri::AppHandle,
+        /// Microphone test outside a call: nothing is mixed in or sent, and the streams close
+        /// as soon as the test is over.
+        local_only: bool,
     },
     Stop,
 }
@@ -176,6 +198,26 @@ impl AudioEngine {
                 channel_id,
                 state,
                 app_handle,
+                local_only: false,
+            })
+            .map_err(|e| AudioEngineError::ChannelClosed(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Opens the devices just for a microphone test outside a call. The test must already be
+    /// requested in `state.mic_test_request`; the streams close once it is over. Joining a
+    /// channel meanwhile replaces it with the call.
+    pub fn start_local_mic_test(
+        &mut self,
+        state: AppState,
+        app_handle: tauri::AppHandle,
+    ) -> Result<(), AudioEngineError> {
+        self.cmd_tx
+            .send(AudioCommand::Start {
+                channel_id: 0,
+                state,
+                app_handle,
+                local_only: true,
             })
             .map_err(|e| AudioEngineError::ChannelClosed(e.to_string()))?;
         Ok(())
@@ -217,6 +259,14 @@ impl ProcessingFailures {
         if self.consecutive >= 3 { self.reported = true; true } else { false }
     }
     fn succeeded(&mut self) { if !self.reported { self.consecutive = 0; } }
+}
+
+const MIC_TEST_NO_DEVICES: &str = "The microphone test needs a working microphone and speakers";
+const MIC_TEST_DEVICE_LOST: &str = "An audio device was disconnected during the microphone test";
+
+/// End the test in the UI and say why it could not run.
+fn emit_mic_test_failed(app_handle: &tauri::AppHandle, error: &str) {
+    let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done", "error": error }));
 }
 
 /// The meter is updated every second frame: 25 times a second.
@@ -280,10 +330,11 @@ impl MicTest {
 /// skipping the frame instead would insert 20 ms of silence (a click).
 fn mix_next_frame(
     mixer: &tokio::sync::Mutex<AudioMixer>,
-    frame: &mut [f32; FRAME_SIZE_48K],
+    left: &mut [f32; FRAME_SIZE_48K],
+    right: &mut [f32; FRAME_SIZE_48K],
     now: Instant,
 ) -> Vec<(u32, bool)> {
-    mixer.blocking_lock().mix_frame(frame, now)
+    mixer.blocking_lock().mix_frame_stereo(left, right, now)
 }
 
 /// Render paired samples without allowing local monitoring into the AEC reference.
@@ -297,7 +348,14 @@ fn render_playback(
     for chunk in data.chunks_mut(channels) {
         let sample = playback.try_pop().unwrap_or_else(|| { missing += 1; PlaybackSample::default() });
         if reference.try_push(sample.echo_reference).is_err() { reference_dropped += 1; }
-        chunk.fill(sample.audible);
+        match chunk {
+            [left, right, rest @ ..] => {
+                *left = sample.left;
+                *right = sample.right;
+                rest.fill(sample.mono());
+            }
+            _ => chunk.fill(sample.mono()),
+        }
     }
     (missing, reference_dropped)
 }
@@ -498,9 +556,16 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 channel_id,
                 state,
                 app_handle,
+                local_only,
             } => {
                 is_running.store(true, Ordering::SeqCst);
-                info!("Starting audio worker streams for channel {}", channel_id);
+                if local_only {
+                    info!("Starting audio worker streams for a local microphone test");
+                } else {
+                    // A test asked for just before a local test closed must not start in the call.
+                    state.mic_test_request.store(0, Ordering::SeqCst);
+                    info!("Starting audio worker streams for channel {}", channel_id);
+                }
 
                 let selection = state.audio_devices.read().map(|s| s.clone()).unwrap_or_default();
                 let diagnostics = state.audio_diagnostics.clone();
@@ -611,6 +676,10 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     diagnostics.tick("startup-failed", state.is_muted.load(Ordering::Relaxed), state.is_deafened.load(Ordering::Relaxed));
                     error!("Both playback and capture audio streams failed to initialize");
                     is_running.store(false, Ordering::SeqCst);
+                    if local_only {
+                        state.mic_test_request.store(0, Ordering::SeqCst);
+                        emit_mic_test_failed(&app_handle, MIC_TEST_NO_DEVICES);
+                    }
                     continue;
                 }
 
@@ -639,6 +708,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 // The processed microphone, played back to the user while "hear myself" is on.
                 let mut monitor_queue: std::collections::VecDeque<[f32; FRAME_SIZE_48K]> = std::collections::VecDeque::new();
                 let mut playback_frame_48k = [0.0f32; FRAME_SIZE_48K];
+                let mut playback_right_48k = [0.0f32; FRAME_SIZE_48K];
                 let mut monitor_frame_48k = [0.0f32; FRAME_SIZE_48K];
                 let mut capture_frame_48k = [0.0f32; FRAME_SIZE_48K];
                 let mut capture_raw_buf = Vec::with_capacity(4096);
@@ -678,6 +748,16 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     let input_lost = input_failed.swap(false, Ordering::SeqCst);
                     let output_lost = output.as_ref().is_some_and(|out| out.failed.swap(false, Ordering::SeqCst));
                     if let Some(reopen) = reopen_after(input_lost, output_lost) {
+                        if local_only {
+                            // Nothing to keep alive outside a call: end the test.
+                            warn!("Audio device lost during a local microphone test");
+                            if mic_test.take().is_some() {
+                                state.voice_settings.set_mic_test(false);
+                                emit_mic_test_failed(&app_handle, MIC_TEST_DEVICE_LOST);
+                            }
+                            is_running.store(false, Ordering::SeqCst);
+                            break;
+                        }
                         let now = Instant::now();
                         restart_times.retain(|t| now.duration_since(*t) < RESTART_WINDOW);
                         restart_times.push_back(now);
@@ -696,6 +776,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     channel_id,
                                     state: state.clone(),
                                     app_handle: app_handle.clone(),
+                                    local_only: false,
                                 });
                                 break;
                             }
@@ -744,13 +825,20 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             monitor_queue.clear();
                             mic_test = Some(MicTest::new(requested));
                             let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "recording", "seconds": requested }));
+                        } else if capture_stream.is_none() || output.is_none() {
+                            emit_mic_test_failed(&app_handle, MIC_TEST_NO_DEVICES);
                         } else {
                             let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
                         }
                     }
+                    // A local test owns the streams only for as long as it runs.
+                    if local_only && mic_test.is_none() {
+                        is_running.store(false, Ordering::SeqCst);
+                        break;
+                    }
 
                     // A-. Once a second: how good is each speaker's link (loss of the last second).
-                    if last_quality_report.elapsed() >= Duration::from_secs(1) {
+                    if !local_only && last_quality_report.elapsed() >= Duration::from_secs(1) {
                         last_quality_report = Instant::now();
                         let counters = state.mixer.blocking_lock().loss_counters();
                         let report: Vec<_> = quality_tracker
@@ -776,12 +864,18 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                 }
                                 previous_playback_refill = Some((diagnostic_epoch, now));
                             } else { previous_playback_refill = None; }
-                            let speech_events =
-                                mix_next_frame(&state.mixer, &mut playback_frame_48k, Instant::now());
+                            let speech_events = if local_only {
+                                playback_frame_48k.fill(0.0);
+                                playback_right_48k.fill(0.0);
+                                Vec::new()
+                            } else {
+                                mix_next_frame(&state.mixer, &mut playback_frame_48k, &mut playback_right_48k, Instant::now())
+                            };
                             if let Some(test) = &mut mic_test {
                                 if let Some(recorded) = test.next_playback_frame() {
-                                    for (out, mine) in playback_frame_48k.iter_mut().zip(recorded.iter()) {
-                                        *out = (*out + *mine).clamp(-1.0, 1.0);
+                                    for ((left, right), mine) in playback_frame_48k.iter_mut().zip(playback_right_48k.iter_mut()).zip(recorded.iter()) {
+                                        *left = (*left + *mine).clamp(-1.0, 1.0);
+                                        *right = (*right + *mine).clamp(-1.0, 1.0);
                                     }
                                 }
                                 if test.finished() {
@@ -809,7 +903,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                 );
                             }
 
-                            match speakers.resampler.process(&playback_frame_48k, &monitor_frame_48k) {
+                            match speakers.resampler.process(&playback_frame_48k, &playback_right_48k, &monitor_frame_48k) {
                                 Ok(resampled) => {
                                     for &sample in &resampled {
                                         let _ = speakers.playback.try_push(sample);
@@ -1012,7 +1106,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         }
                                     }
 
-                                    if !output.packets.is_empty()
+                                    if !local_only && !output.packets.is_empty()
                                         && state.voice_settings.privacy_snapshot() == (generation, true) {
                                         if let Ok(conn_guard) = state.quic_connection.try_read() {
                                             if let Some(conn) = &*conn_guard {
@@ -1042,11 +1136,19 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     state.voice_settings.set_mic_test(false);
                     let _ = app_handle.emit("mic-test", serde_json::json!({ "phase": "done" }));
                 }
+                if local_only {
+                    // No call keeps the meter moving: let it fall back to silence.
+                    let _ = app_handle.emit("mic-level", serde_json::json!({ "db": -120.0, "speaking": false }));
+                }
 
                 diagnostics.stream_active(true, false);
                 diagnostics.stream_active(false, false);
                 diagnostics.tick("stopped", state.is_muted.load(Ordering::Relaxed), state.is_deafened.load(Ordering::Relaxed));
-                info!("Audio streams for channel {} stopped", channel_id);
+                if local_only {
+                    info!("Audio streams for the local microphone test stopped");
+                } else {
+                    info!("Audio streams for channel {} stopped", channel_id);
+                }
             }
             AudioCommand::Stop => {
                 is_running.store(false, Ordering::SeqCst);
@@ -1081,14 +1183,33 @@ mod tests {
     #[test]
     fn local_preview_is_audible_but_never_becomes_far_end_reference() {
         let local = playback_sample(0.0, 0.4);
-        assert_eq!(local.audible, 0.4);
+        assert_eq!(local.mono(), 0.4);
         assert_eq!(local.echo_reference, 0.0);
         let remote = playback_sample(0.3, 0.0);
-        assert_eq!(remote.audible, 0.3);
+        assert_eq!(remote.mono(), 0.3);
         assert_eq!(remote.echo_reference, 0.3);
         let clipped = playback_sample(0.8, 0.8);
-        assert_eq!(clipped.audible, 1.0);
+        assert_eq!(clipped.mono(), 1.0);
         assert_eq!(clipped.echo_reference, 0.5);
+    }
+
+    #[test]
+    fn spatial_playback_reaches_each_ear_and_the_echo_canceller_hears_the_mono_mix() {
+        let sample = playback_sample_stereo(0.4, 0.1, 0.0);
+        assert_eq!((sample.left, sample.right), (0.4, 0.1));
+        assert!((sample.echo_reference - 0.25).abs() < 1e-6);
+        let (mut producer, mut playback) = HeapRb::<PlaybackSample>::new(4).split();
+        let (mut reference, mut received) = HeapRb::<f32>::new(4).split();
+        assert!(producer.try_push(sample).is_ok());
+        let mut surround = [0.0; 4];
+        render_playback(&mut surround, 4, &mut playback, &mut reference);
+        assert_eq!(&surround[..2], &[0.4, 0.1]);
+        assert!(surround[2..].iter().all(|s| (s - 0.25).abs() < 1e-6), "extra channels get the mono mix");
+        assert!(producer.try_push(sample).is_ok());
+        let mut mono = [0.0; 1];
+        render_playback(&mut mono, 1, &mut playback, &mut reference);
+        assert!((mono[0] - 0.25).abs() < 1e-6);
+        assert!((received.try_pop().unwrap() - 0.25).abs() < 1e-6);
     }
 
     #[test]
@@ -1144,15 +1265,15 @@ mod tests {
             for index in 0..80 {
                 let source = std::array::from_fn(|n| (((index * FRAME_SIZE_48K + n) as f32) * 0.03).sin() * 0.2);
                 let local = if index < 40 { [0.15; FRAME_SIZE_48K] } else { [0.0; FRAME_SIZE_48K] };
-                let pairs = mixed.process(&source, &local).unwrap();
+                let pairs = mixed.process(&source, &source, &local).unwrap();
                 let expected = reference_only.process(&source).unwrap();
                 assert_eq!(pairs.len(), expected.len());
                 for (sample, expected) in pairs.iter().zip(&expected) {
                     assert!((sample.echo_reference - expected).abs() < 1e-6, "far-end reference changed at {rate} Hz");
                 }
-                let own = monitor_only.process(&[0.0; FRAME_SIZE_48K], &local).unwrap();
+                let own = monitor_only.process(&[0.0; FRAME_SIZE_48K], &[0.0; FRAME_SIZE_48K], &local).unwrap();
                 assert!(own.iter().all(|sample| sample.echo_reference == 0.0), "local FFT tail leaked into AEC at {rate} Hz");
-                heard_monitor |= own.iter().any(|sample| sample.audible.abs() > 0.01);
+                heard_monitor |= own.iter().any(|sample| sample.mono().abs() > 0.01);
             }
             assert!(heard_monitor);
         }
@@ -1166,7 +1287,7 @@ mod tests {
         let mut aec = finch_audio::EchoCanceller::new().unwrap();
         let mut final_energy = 0.0;
         for _ in 0..150 {
-            let played = resampler.process(&source, &[0.05; FRAME_SIZE_48K]).unwrap();
+            let played = resampler.process(&source, &source, &[0.05; FRAME_SIZE_48K]).unwrap();
             let reference = std::array::from_fn(|index| played[index].echo_reference);
             assert_eq!(reference, source, "remote/screen/test reference must remain available");
             aec.push_reference(&reference).unwrap();
@@ -1338,7 +1459,8 @@ mod tests {
         locked_rx.recv().unwrap();
 
         let mut frame = [0.0f32; FRAME_SIZE_48K];
-        mix_next_frame(&mixer, &mut frame, now);
+        let mut right = [0.0f32; FRAME_SIZE_48K];
+        mix_next_frame(&mixer, &mut frame, &mut right, now);
         handle.join().unwrap();
         assert!(frame.iter().any(|&s| s != 0.0), "a silent frame was inserted while the mixer was busy");
     }

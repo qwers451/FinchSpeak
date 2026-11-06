@@ -45,8 +45,9 @@ export function resetMicPreview() {
   setMicTestPhase('idle');
 }
 
-export function handleMicTest(test: { phase: 'recording' | 'playing' | 'done' }) {
+export function handleMicTest(test: { phase: 'recording' | 'playing' | 'done'; error?: string }) {
   setMicTestPhase(test.phase === 'done' ? 'idle' : test.phase);
+  if (test.error) setAppError(t(test.error));
 }
 
 export function handleVoiceQuality(report: { peer_id: number; quality: LinkQuality; loss: number }[]) {
@@ -134,10 +135,23 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = { input_gain: 1, vad_thresh
 export const [voiceSettings, setVoiceSettings] = createSignal<VoiceSettings>(DEFAULT_VOICE_SETTINGS);
 /** The push-to-talk key, e.g. "F8". */
 export const [pushToTalkKey, setPushToTalkKey] = createSignal<string | null>(null);
+/** System-wide key that mutes or unmutes the microphone. */
+export const [muteKey, setMuteKey] = createSignal<string | null>(null);
+/** System-wide key that turns all sound off or back on. */
+export const [deafenKey, setDeafenKey] = createSignal<string | null>(null);
+
+export type HotkeyAction = 'push_to_talk' | 'toggle_mute' | 'toggle_deafen';
+const HOTKEY_LABELS: Record<HotkeyAction, string> = { push_to_talk: 'Push to talk', toggle_mute: 'Mute microphone', toggle_deafen: 'Turn sound off' };
+const hotkeySignals: Record<HotkeyAction, [() => string | null, (key: string | null) => void]> = {
+  push_to_talk: [pushToTalkKey, setPushToTalkKey],
+  toggle_mute: [muteKey, setMuteKey],
+  toggle_deafen: [deafenKey, setDeafenKey],
+};
+export const hotkeyFor = (action: HotkeyAction) => hotkeySignals[action][0]();
 
 const VOICE_SETTINGS_KEY = 'finchspeak.voiceSettings';
 
-type SavedVoice = { settings: Omit<VoiceSettings, 'key_down'>; key: string | null };
+type SavedVoice = { settings: Omit<VoiceSettings, 'key_down'>; key: string | null; muteKey: string | null; deafenKey: string | null };
 
 function readSavedVoice(): SavedVoice | null {
   try {
@@ -155,6 +169,8 @@ function readSavedVoice(): SavedVoice | null {
         voice_enhancement: typeof s.voice_enhancement === 'boolean' ? s.voice_enhancement : true,
       },
       key: typeof saved.key === 'string' && saved.key ? saved.key : null,
+      muteKey: typeof saved.muteKey === 'string' && saved.muteKey ? saved.muteKey : null,
+      deafenKey: typeof saved.deafenKey === 'string' && saved.deafenKey ? saved.deafenKey : null,
     };
   } catch {
     return null;
@@ -164,7 +180,7 @@ function readSavedVoice(): SavedVoice | null {
 function saveVoice() {
   try {
     const { key_down: _down, ...settings } = voiceSettings();
-    localStorage.setItem(VOICE_SETTINGS_KEY, JSON.stringify({ settings, key: pushToTalkKey() }));
+    localStorage.setItem(VOICE_SETTINGS_KEY, JSON.stringify({ settings, key: pushToTalkKey(), muteKey: muteKey(), deafenKey: deafenKey() }));
   } catch {
     /* not remembered */
   }
@@ -197,16 +213,37 @@ export function changeVoiceSettings(change: Partial<VoiceSettings>) {
   });
 }
 
-export async function choosePushToTalkKey(key: string | null) {
+const sendHotkey = (action: HotkeyAction, key: string | null) =>
+  action === 'push_to_talk' ? api.setPushToTalkKey(key) : api.setHotkey(action, key);
+
+/** Choose the system-wide key for an action; null removes it. One key serves one action. */
+export async function chooseHotkey(action: HotkeyAction, key: string | null) {
+  const taken = key && (Object.keys(hotkeySignals) as HotkeyAction[]).find((other) => other !== action && hotkeyFor(other) === key);
+  if (taken) {
+    setAppError(t('"{key}" is already used for "{action}"', { key, action: t(HOTKEY_LABELS[taken]) }));
+    return;
+  }
   try {
-    await api.setPushToTalkKey(key);
+    await sendHotkey(action, key);
   } catch (err) {
     setAppError(String(err));
     return;
   }
-  setPushToTalkKey(key);
-  if (!key && voiceSettings().push_to_talk) await changeVoiceSettings({ push_to_talk: false });
+  hotkeySignals[action][1](key);
+  if (action === 'push_to_talk' && !key && voiceSettings().push_to_talk) await changeVoiceSettings({ push_to_talk: false });
   saveVoice();
+}
+
+export const choosePushToTalkKey = (key: string | null) => chooseHotkey('push_to_talk', key);
+
+/** A mute or deafen key was pressed somewhere in the system. */
+export async function handleHotkey(action: string) {
+  try {
+    if (action === 'toggle_mute') await toggleMute();
+    else if (action === 'toggle_deafen') await toggleDeafen();
+  } catch (err) {
+    setAppError(String(err));
+  }
 }
 
 /** Turn a key press into the shortcut text the backend understands ("Control+Shift+K"); null for a bare modifier. */
@@ -227,6 +264,10 @@ export function restoreVoiceSettings() {
     try {
       if (saved.key) await api.setPushToTalkKey(saved.key);
       setPushToTalkKey(saved.key);
+      for (const [action, key] of [['toggle_mute', saved.muteKey], ['toggle_deafen', saved.deafenKey]] as const) {
+        if (key) await api.setHotkey(action, key);
+        hotkeySignals[action][1](key);
+      }
       const settings = { ...saved.settings, key_down: false, push_to_talk: saved.settings.push_to_talk && !!saved.key };
       await api.setVoiceSettings(settings);
       setVoiceSettings(settings);

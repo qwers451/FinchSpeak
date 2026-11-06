@@ -2,8 +2,9 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../services/api';
 import { appError, setAppError } from './notificationStore';
 import {
-  changeVoiceSettings, choosePushToTalkKey, DEFAULT_VOICE_SETTINGS, pushToTalkKey, restoreVoiceSettings,
-  setPushToTalkKey, setVoiceSettings, shortcutFromEvent, voiceSettings,
+  changeVoiceSettings, chooseHotkey, choosePushToTalkKey, deafenKey, DEFAULT_VOICE_SETTINGS, handleHotkey, isDeafened, isMuted, muteKey,
+  pushToTalkKey, restoreVoiceSettings, setDeafenKey, setIsDeafened, setIsMuted, setMuteKey, setPushToTalkKey, setVoiceSettings,
+  shortcutFromEvent, voiceSettings,
 } from './voiceStore';
 
 const press = (code: string, mods: Partial<{ ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }> = {}) =>
@@ -15,6 +16,10 @@ beforeEach(() => {
   setAppError(null);
   setVoiceSettings(DEFAULT_VOICE_SETTINGS);
   setPushToTalkKey(null);
+  setMuteKey(null);
+  setDeafenKey(null);
+  setIsMuted(false);
+  setIsDeafened(false);
 });
 
 it('AUD-042 key presses become shortcut text, modifiers alone do not', () => {
@@ -133,4 +138,45 @@ it('serializes rapid changes and merges them after the preceding acknowledgement
   await Promise.all([first, second]);
   expect(send).toHaveBeenLastCalledWith({ ...DEFAULT_VOICE_SETTINGS, input_gain: 2, voice_enhancement: false });
   expect(voiceSettings()).toMatchObject({ input_gain: 2, voice_enhancement: false });
+});
+
+it('mute and deafen keys are sent, remembered and restored', async () => {
+  const send = vi.spyOn(api, 'setHotkey').mockResolvedValue();
+  await chooseHotkey('toggle_mute', 'F9');
+  await chooseHotkey('toggle_deafen', 'Control+F10');
+  expect(send).toHaveBeenCalledWith('toggle_mute', 'F9');
+  expect(muteKey()).toBe('F9');
+  setMuteKey(null);
+  setDeafenKey(null);
+  send.mockClear();
+  vi.spyOn(api, 'setVoiceSettings').mockResolvedValue();
+  await restoreVoiceSettings();
+  expect(send).toHaveBeenCalledWith('toggle_mute', 'F9');
+  expect(send).toHaveBeenCalledWith('toggle_deafen', 'Control+F10');
+  expect(deafenKey()).toBe('Control+F10');
+});
+
+it('one key cannot serve two actions', async () => {
+  vi.spyOn(api, 'setPushToTalkKey').mockResolvedValue();
+  const send = vi.spyOn(api, 'setHotkey').mockResolvedValue();
+  await choosePushToTalkKey('F8');
+  await chooseHotkey('toggle_mute', 'F8');
+  expect(send).not.toHaveBeenCalled();
+  expect(muteKey()).toBeNull();
+  expect(appError()).toContain('F8');
+});
+
+it('a pressed mute or deafen key toggles the microphone or the sound', async () => {
+  const state = vi.spyOn(api, 'setVoiceState').mockResolvedValue();
+  await handleHotkey('toggle_mute');
+  expect(isMuted()).toBe(true);
+  await handleHotkey('toggle_mute');
+  expect(isMuted()).toBe(false);
+  await handleHotkey('toggle_deafen');
+  expect(isDeafened()).toBe(true);
+  expect(isMuted()).toBe(true);
+  expect(state).toHaveBeenLastCalledWith(true, true);
+  await handleHotkey('toggle_deafen');
+  expect(isDeafened()).toBe(false);
+  expect(isMuted()).toBe(false);
 });

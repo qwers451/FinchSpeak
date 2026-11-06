@@ -215,3 +215,14 @@ it('Esc outside key capture still closes the settings dialog', async () => {
   await flush();
   expect(profileOpen()).toBe(false);
 });
+
+it('voice and audio opens as a page inside the settings window, not as a second dialog', async () => {
+  vi.spyOn(api, 'getAudioDevices').mockResolvedValue({ inputs: [], outputs: [], selected_input: null, selected_output: null });
+  button('Voice and audio').click();
+  await flush();
+  expect(profileOpen()).toBe(true);
+  expect(document.querySelectorAll('[role="dialog"]').length).toBe(1);
+  expect(document.querySelector('[aria-label="Microphone"]')).not.toBeNull();
+  expect(document.querySelector('[aria-label="Mute microphone key"]')).not.toBeNull();
+  expect(button('Voice and audio').getAttribute('aria-current')).toBe('page');
+});

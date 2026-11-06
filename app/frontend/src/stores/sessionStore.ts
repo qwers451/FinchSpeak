@@ -2,7 +2,7 @@ import { createSignal } from 'solid-js';
 import type { SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
 import { setPendingMismatch, setPendingTofu } from './tofuStore';
 import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
-import { activeVoiceChannel, toggleMute, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
+import { activeVoiceChannel, toggleMute, handleHotkey, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
 import { classifyEnd, sessionEnded, setSessionEnded } from './sessionEnd';
@@ -93,6 +93,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'ping-rtt': (data) => setPingRtt(data.rtt_ms),
   'mic-level': handleMicLevel,
   'mic-test': handleMicTest,
+  hotkey: (action) => void handleHotkey(action),
   'voice-quality': handleVoiceQuality,
   'tofu-required': setPendingTofu,
   'tofu-mismatch': setPendingMismatch,

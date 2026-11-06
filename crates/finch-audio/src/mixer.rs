@@ -4,6 +4,7 @@
 //! - Per-speaker volume scaling (0.0 to 2.0).
 //! - Non-linear `x.tanh()` soft limiter prevents harsh clipping when multiple people talk/shout.
 //! - Tracks speaker activity locally (250 ms timeout or silence flag triggers UI speaking border events).
+//! - Spatial audio (optional): each voice sits somewhere between left and right.
 
 use std::collections::hash_map::{Entry, HashMap};
 use std::time::{Duration, Instant};
@@ -25,6 +26,18 @@ pub const fn screen_audio_key(peer_id: u32) -> u32 {
 
 const SCREEN_AUDIO_FLAG: u32 = 0x4000_0000;
 
+/// How much of a fully panned voice still reaches the far ear. Real voices are never heard by
+/// one ear only; on headphones a hard pan sounds like a fault rather than a place.
+pub const FAR_EAR_LEVEL: f32 = 0.25;
+
+/// Left and right gain for a voice at `pan` (-1 = left, 0 = centre, 1 = right). The near ear
+/// always gets the full level, so moving someone never makes them quieter.
+pub fn pan_gains(pan: f32) -> (f32, f32) {
+    let pan = if pan.is_finite() { pan.clamp(-1.0, 1.0) } else { 0.0 };
+    let far = |amount: f32| 1.0 - (1.0 - FAR_EAR_LEVEL) * amount;
+    if pan >= 0.0 { (far(pan), 1.0) } else { (1.0, far(-pan)) }
+}
+
 /// State for a single remote speaker.
 pub struct RemoteSpeaker {
     pub peer_id: u32,
@@ -39,6 +52,9 @@ pub struct AudioMixer {
     speakers: HashMap<u32, RemoteSpeaker>,
     /// Volumes chosen before the speaker's first packet (e.g. remembered from the last call).
     preset_volumes: HashMap<u32, f32>,
+    /// Where each voice sits (-1 left .. 1 right), by peer id; used only while `spatial` is on.
+    pans: HashMap<u32, f32>,
+    spatial: bool,
     scratch_buf: [f32; FRAME_SIZE_48K],
 }
 
@@ -53,8 +69,25 @@ impl AudioMixer {
         Self {
             speakers: HashMap::new(),
             preset_volumes: HashMap::new(),
+            pans: HashMap::new(),
+            spatial: false,
             scratch_buf: [0.0f32; FRAME_SIZE_48K],
         }
+    }
+
+    /// Turn spatial audio on or off. Off, every voice is in the centre (plain mono).
+    pub fn set_spatial(&mut self, enabled: bool) {
+        self.spatial = enabled;
+    }
+
+    pub fn spatial(&self) -> bool {
+        self.spatial
+    }
+
+    /// Place a voice between left (-1) and right (1). Kept even before the first packet.
+    pub fn set_speaker_pan(&mut self, peer_id: u32, pan: f32) {
+        let pan = if pan.is_finite() { pan.clamp(-1.0, 1.0) } else { 0.0 };
+        self.pans.insert(peer_id, pan);
     }
 
     /// Add or update a speaker's volume multiplier (0.0 to 2.0).
@@ -71,6 +104,7 @@ impl AudioMixer {
     pub fn remove_speaker(&mut self, peer_id: u32) {
         self.speakers.remove(&peer_id);
         self.preset_volumes.remove(&peer_id);
+        self.pans.remove(&peer_id);
         let screen = screen_audio_key(peer_id);
         self.speakers.remove(&screen);
         self.preset_volumes.remove(&screen);
@@ -206,6 +240,46 @@ impl AudioMixer {
 
         // Apply tanh() soft-limiting: compresses loud peaks without hard digital clipping
         for sample in output.iter_mut() {
+            *sample = sample.tanh();
+        }
+
+        speech_events
+    }
+
+    /// Like [`Self::mix_frame`], but into left and right. With spatial audio off both sides get
+    /// the same mono mix; on, each voice is placed by its pan. The screen-share sound of a person
+    /// stays in the centre.
+    pub fn mix_frame_stereo(
+        &mut self,
+        left: &mut [f32; FRAME_SIZE_48K],
+        right: &mut [f32; FRAME_SIZE_48K],
+        now: Instant,
+    ) -> Vec<(u32, bool)> {
+        left.fill(0.0);
+        right.fill(0.0);
+        let mut speech_events = Vec::new();
+
+        for speaker in self.speakers.values_mut() {
+            if speaker.is_speaking && now.saturating_duration_since(speaker.last_packet_time) > SPEECH_TIMEOUT {
+                speaker.is_speaking = false;
+                if speaker.peer_id & SCREEN_AUDIO_FLAG == 0 {
+                    speech_events.push((speaker.peer_id, false));
+                }
+            }
+
+            let result = speaker.jitter_buffer.pop_frame(&mut self.scratch_buf);
+            if result == PlayoutResult::Normal || result == PlayoutResult::Concealed {
+                let pan = if self.spatial { self.pans.get(&speaker.peer_id).copied().unwrap_or(0.0) } else { 0.0 };
+                let (left_gain, right_gain) = pan_gains(pan);
+                let (left_gain, right_gain) = (left_gain * speaker.volume, right_gain * speaker.volume);
+                for ((l, r), &sample) in left.iter_mut().zip(right.iter_mut()).zip(self.scratch_buf.iter()) {
+                    *l += sample * left_gain;
+                    *r += sample * right_gain;
+                }
+            }
+        }
+
+        for sample in left.iter_mut().chain(right.iter_mut()) {
             *sample = sample.tanh();
         }
 
@@ -386,5 +460,55 @@ mod tests {
         assert_eq!(mixer.speakers[&8].volume, 2.0);
         mixer.remove_speaker(7);
         assert!(!mixer.preset_volumes.contains_key(&7), "a speaker who left is forgotten");
+    }
+
+    #[test]
+    fn pan_keeps_the_near_ear_full_and_the_far_ear_quieter() {
+        assert_eq!(pan_gains(0.0), (1.0, 1.0));
+        assert_eq!(pan_gains(-1.0), (1.0, FAR_EAR_LEVEL));
+        assert_eq!(pan_gains(1.0), (FAR_EAR_LEVEL, 1.0));
+        let (left, right) = pan_gains(0.5);
+        assert_eq!(right, 1.0);
+        assert!(left > FAR_EAR_LEVEL && left < 1.0);
+        assert_eq!(pan_gains(f32::NAN), (1.0, 1.0));
+        assert_eq!(pan_gains(7.0), pan_gains(1.0));
+    }
+
+    fn feed(mixer: &mut AudioMixer, peer: u32, now: Instant) {
+        let mut encoder = OpusVoiceEncoder::new(64).unwrap();
+        let payload = encoder.encode(&[0.1f32; FRAME_SIZE_48K]).unwrap();
+        for seq in 0..4u16 {
+            let header = MediaHeader::new_audio(1, peer, seq, seq as u32 * 20, false, false);
+            mixer.on_audio_packet(&header, payload.clone(), now);
+        }
+    }
+
+    fn energy(frame: &[f32; FRAME_SIZE_48K]) -> f32 {
+        frame.iter().map(|s| s * s).sum()
+    }
+
+    #[test]
+    fn spatial_off_mixes_the_same_mono_into_both_sides() {
+        let now = Instant::now();
+        let mut mixer = AudioMixer::new();
+        mixer.set_speaker_pan(7, -1.0);
+        feed(&mut mixer, 7, now);
+        let (mut left, mut right) = ([0.0; FRAME_SIZE_48K], [0.0; FRAME_SIZE_48K]);
+        for _ in 0..3 { mixer.mix_frame_stereo(&mut left, &mut right, now); }
+        assert!(energy(&left) > 0.0);
+        assert_eq!(left, right, "with spatial audio off the pan is ignored");
+    }
+
+    #[test]
+    fn spatial_on_places_a_voice_to_one_side() {
+        let now = Instant::now();
+        let mut mixer = AudioMixer::new();
+        mixer.set_spatial(true);
+        mixer.set_speaker_pan(7, -1.0);
+        feed(&mut mixer, 7, now);
+        let (mut left, mut right) = ([0.0; FRAME_SIZE_48K], [0.0; FRAME_SIZE_48K]);
+        for _ in 0..3 { mixer.mix_frame_stereo(&mut left, &mut right, now); }
+        assert!(energy(&left) > energy(&right) * 4.0, "a voice on the left is louder on the left");
+        assert!(energy(&right) > 0.0, "the far ear still hears it a little");
     }
 }

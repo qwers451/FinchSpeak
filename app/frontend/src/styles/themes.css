@@ -185,9 +185,9 @@ button:disabled { cursor:not-allowed; }
 .splash { background:var(--bg-app); text-align:center; padding:32px; }
 .splash > img { width:180px; opacity:.85; }
 .splash h2 { font-weight:500; font-size:26px; letter-spacing:-.04em; }
-[data-theme="claude"] :is(.brand,.titlebar) > img { content:url('/custom/assets/brand/finch-mark.svg'); }
-[data-theme="claude"] .auth-mascot { content:url('/custom/assets/illustrations/mascot.svg'); }
-[data-theme="claude"] .splash > img { content:url('/custom/assets/illustrations/mascot.svg'); }
+:is([data-theme="claude"],[data-theme="user"]) :is(.brand,.titlebar) > img { content:url('/custom/assets/brand/finch-mark.svg'); }
+:is([data-theme="claude"],[data-theme="user"]) .auth-mascot { content:url('/custom/assets/illustrations/mascot.svg'); }
+:is([data-theme="claude"],[data-theme="user"]) .splash > img { content:url('/custom/assets/illustrations/mascot.svg'); }
 /* Finch Custom retains the supplied kit's geometry, colour and assets. */
 [data-theme="custom"] body { font-size:12px; }
 [data-theme="custom"] :is(.brand,.titlebar) > img { content:url('/custom/assets/brand/finch-mark.svg'); }
@@ -324,12 +324,12 @@ button:disabled { cursor:not-allowed; }
 .room-grid.compact { min-height:96px; }
 .room-grid.compact .vc { min-height:80px; }
 [data-theme="custom"] .room-grid .vc { padding:18px 14px; gap:10px; }
-[data-theme="claude"] .empty-chat > img { content:url('/custom/assets/illustrations/mascot.svg'); }
+:is([data-theme="claude"],[data-theme="user"]) .empty-chat > img { content:url('/custom/assets/illustrations/mascot.svg'); }
 [data-theme="custom"] .empty-chat > img { content:url('/custom/assets/illustrations/empty-chat.svg'); }
 
 [data-theme="custom"] .modal[data-tone="danger"] { --edge:var(--red); --edge-width:2px; }
 
-[data-theme="claude"] .cat { text-transform:none; letter-spacing:.01em; font-size:12px; }
+:is([data-theme="claude"],[data-theme="user"]) .cat { text-transform:none; letter-spacing:.01em; font-size:12px; }
 .cat-toggle { white-space:nowrap; }
 @media (max-width:940px) { .cat { font-size:10px; padding-left:4px; padding-right:4px; } }
 

@@ -241,7 +241,9 @@ export interface SessionEvents {
   'voice-kicked': { channel_id: string };
   /** Level of the processed microphone, about 25 times a second during a call. */
   'mic-level': { db: number; speaking: boolean };
-  'mic-test': { phase: 'recording' | 'playing' | 'done'; seconds?: number };
+  /** A system-wide mute or deafen key was pressed. */
+  hotkey: 'toggle_mute' | 'toggle_deafen';
+  'mic-test': { phase: 'recording' | 'playing' | 'done'; seconds?: number; error?: string };
   'voice-quality': { peer_id: number; quality: 'good' | 'fair' | 'poor'; loss: number }[];
   'connection-lost': string;
   reconnecting: null;
