@@ -12,6 +12,7 @@ import {
 import { Button, Field, Icon, Toggle } from '../ui';
 import { passwordStrength } from '../ui/passwordStrength';
 import { t } from '../i18n';
+import { describeError } from '../i18n/errors';
 
 type ErrorLook = { icon: 'warn' | 'ban'; tone: 'red' | 'amber'; title: string; hint?: string; retry: boolean; localized: boolean };
 
@@ -28,7 +29,7 @@ export function describeAuthError(raw: string): ErrorLook {
   if (lower.includes('cannot reach') || lower.includes('connection refused') || lower.includes('timed out')) {
     return { icon: 'warn', tone: 'amber', title: 'Cannot reach the server', hint: 'Check the address, your network and that the server is running.', retry: true, localized: true };
   }
-  return { icon: 'warn', tone: 'red', title: text, retry: false, localized: false };
+  return { icon: 'warn', tone: 'red', title: describeError(text), retry: false, localized: false };
 }
 
 export function AuthModal() {

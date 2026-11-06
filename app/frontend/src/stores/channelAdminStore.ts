@@ -2,6 +2,7 @@ import { api } from '../services/api';
 import type { Channel } from '../types';
 import { channels } from './chatStore';
 import { setAppError } from './notificationStore';
+import { describeError } from '../i18n/errors';
 
 export async function renameChannel(channel: Channel, name: string) {
   const trimmed = name.trim();
@@ -9,7 +10,7 @@ export async function renameChannel(channel: Channel, name: string) {
   try {
     await api.updateChannel(channel.id, trimmed);
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -17,7 +18,7 @@ export async function removeChannel(channel: Channel) {
   try {
     await api.deleteChannel(channel.id);
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -34,6 +35,6 @@ export async function moveChannel(channel: Channel, direction: -1 | 1) {
   try {
     await api.reorderChannels(order);
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }

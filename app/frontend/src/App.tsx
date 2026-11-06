@@ -22,6 +22,7 @@ import { SettingsModal } from './components/settings/SettingsModal';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { startUpdateChecks } from './stores/updateStore';
 import { t } from './i18n';
+import { describeError } from './i18n/errors';
 
 export function App() {
   let unlisten: UnlistenFn | undefined;
@@ -49,7 +50,7 @@ export function App() {
       }
       setEventsReady(true);
     } catch (e) {
-      if (!disposed) setAppError(String(e));
+      if (!disposed) setAppError(describeError(e));
     } finally {
       if (!disposed && unlisten) setEventsReady(true);
     }

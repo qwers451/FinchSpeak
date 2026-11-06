@@ -5,6 +5,7 @@ import { t } from '../i18n';
 import { endedShare, isSharing, resetScreenState, setEndedShare, setIsSharing, setScreenSources, setSharingInfo, setWatching, sharingInfo, watching } from './screenState';
 import { allVoiceParticipants, setVoiceParticipants } from './voiceStore';
 import { endReasonFromServer } from '../components/screen/viewerState';
+import { describeError } from '../i18n/errors';
 
 export { endedShare, isSharing, screenSources, sharingInfo, watching } from './screenState';
 
@@ -14,7 +15,7 @@ export async function loadScreenSources() {
   try {
     setScreenSources(await api.listScreenSources());
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -36,7 +37,7 @@ export async function stopSharing() {
   try {
     await api.stopScreenShare();
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -49,7 +50,7 @@ export async function watchShare(userId: string, peerId: number) {
     await api.subscribeScreenShare(userId, peerId);
     setWatching({ user_id: userId, peer_id: peerId });
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -60,7 +61,7 @@ export async function stopWatching() {
   try {
     await api.unsubscribeScreenShare(current.user_id);
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 

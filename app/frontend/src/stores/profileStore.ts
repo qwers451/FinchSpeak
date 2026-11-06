@@ -4,6 +4,7 @@ import { currentUser, setCurrentUser } from './authStore';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
 import type { UserStatus } from '../types';
+import { describeError } from '../i18n/errors';
 
 export const [profileOpen, setProfileOpen] = createSignal(false);
 export const [profileMessage, setProfileMessage] = createSignal<string | null>(null);
@@ -14,7 +15,7 @@ export async function saveDisplayName(name: string): Promise<boolean> {
     setProfileMessage('Name changed.');
     return true;
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
     return false;
   }
 }
@@ -29,7 +30,7 @@ export async function savePassword(current: string, next: string, again: string)
     setProfileMessage('Password changed. Other devices are signed out.');
     return true;
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
     return false;
   }
 }
@@ -44,7 +45,7 @@ export async function saveStatus(status: UserStatus, text: string): Promise<bool
     await api.setStatus(status, text.trim().slice(0, STATUS_TEXT_MAX) || null);
     return true;
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
     return false;
   }
 }
@@ -68,7 +69,7 @@ export async function deleteAvatar(): Promise<boolean> {
     if (me) setCurrentUser({ ...me, avatar_url: null });
     return true;
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
     return false;
   }
 }

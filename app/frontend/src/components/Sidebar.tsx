@@ -24,6 +24,7 @@ import { api } from '../services/api';
 import { moveChannel, removeChannel, renameChannel } from '../stores/channelAdminStore';
 import { Avatar, Button, ConfirmDialog, Field, Icon, Modal } from '../ui';
 import { t } from '../i18n';
+import { describeError } from '../i18n/errors';
 
 type ChannelDialog =
   | { kind: 'create'; type: 'text' | 'voice' }
@@ -71,7 +72,7 @@ function ChannelNameDialog(props: { dialog: Extract<ChannelDialog, { kind: 'crea
       }
       props.onClose();
     } catch (error) {
-      setAppError(String(error));
+      setAppError(describeError(error));
     } finally {
       setBusy(false);
     }

@@ -178,6 +178,15 @@ export const ru: Readonly<Record<string, string>> = {
   'The microphone test needs a working microphone and speakers': 'Для проверки нужны работающие микрофон и динамики',
   'An audio device was disconnected during the microphone test': 'Во время проверки отключилось аудиоустройство',  'The old certificate was forgotten. Sign in again and compare the new fingerprint.': 'Старый сертификат удалён из доверенных. Войдите ещё раз и сравните новый отпечаток.',
   'a channel': 'канале', '{name} mentioned you in #{channel}': '{name} упомянул вас в канале #{channel}', '{name} in #{channel}': '{name} в канале #{channel}', 'your voice room': 'вашей голосовой комнате', '{name} joined {room}': '{name} присоединился к комнате {room}',
+  'Cannot reach the server: {reason}': 'Сервер недоступен: {reason}',
+  'Signed in, but the voice connection failed. Check that UDP port 4433 is open.': 'Вход выполнен, но голосовое соединение не установилось. Проверьте, открыт ли UDP-порт 4433.',
+  'Registered, but the voice connection failed. Check that UDP port 4433 is open.': 'Регистрация прошла, но голосовое соединение не установилось. Проверьте, открыт ли UDP-порт 4433.',
+  'Registration failed: {reason}': 'Не удалось зарегистрироваться: {reason}',
+  'Sign-in failed: {reason}': 'Не удалось войти: {reason}',
+  'Confirm the server certificate, then sign in.': 'Подтвердите сертификат сервера, затем войдите.',
+  'The server certificate has changed. Do not sign in until the admin confirms the change.': 'Сертификат сервера изменился. Не входите, пока администратор не подтвердит замену.',
+  'Signed out on this computer. The server could not be reached to end the session.': 'Вы вышли на этом компьютере. Сервер недоступен, поэтому сессия на нём не завершена.',
+  'The server address is not valid': 'Неверный адрес сервера',
 };
 
 /** Russian plural forms, keyed by the English `other` form that `plural()` is called with. */

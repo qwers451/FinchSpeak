@@ -5,6 +5,7 @@ import { api } from '../services/api';
 import { setAppError } from './notificationStore';
 import { pushToast } from '../ui/toastStore';
 import { resetScreenState } from './screenState';
+import { describeError } from '../i18n/errors';
 
 export const [activeVoiceChannel, setActiveVoiceChannel] = createSignal<Channel | null>(null);
 export const [isMuted, setIsMuted] = createSignal<boolean>(false);
@@ -101,7 +102,7 @@ export async function loadAudioDevices() {
     setAvailableDevices({ inputs: devices.inputs, outputs: devices.outputs });
     setSelectedDevices({ input: devices.selected_input, output: devices.selected_output });
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -111,7 +112,7 @@ export async function chooseAudioDevice(kind: keyof DeviceSelection, name: strin
   try {
     await api.setAudioDevices(next.input, next.output);
   } catch (err) {
-    setAppError(t('Could not switch audio device: {error}', { error: String(err) }));
+    setAppError(t('Could not switch audio device: {error}', { error: describeError(err) }));
     return;
   }
   setSelectedDevices(next);
@@ -126,7 +127,7 @@ export async function restoreAudioDevices() {
     await api.setAudioDevices(saved.input, saved.output);
     setSelectedDevices(saved);
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -206,7 +207,7 @@ export function changeVoiceSettings(change: Partial<VoiceSettings>) {
     try {
       await api.setVoiceSettings(next);
     } catch (err) {
-      setAppError(String(err));
+      setAppError(describeError(err));
       return;
     }
     setVoiceSettings(next);
@@ -224,7 +225,7 @@ export function hotkeyErrorText(err: unknown): string {
   match = /^"(.*)" is already used by another action$/.exec(message);
   if (match) return t('"{key}" is already used by another action', { key: match[1] });
   if (message === 'Keys are unavailable') return t('Keys are unavailable');
-  return message;
+  return describeError(message);
 }
 
 const sendHotkey = (action: HotkeyAction, key: string | null) =>
@@ -257,7 +258,7 @@ export async function handleHotkey(action: string) {
     if (action === 'toggle_mute') await toggleMute();
     else if (action === 'toggle_deafen') await toggleDeafen();
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -307,7 +308,7 @@ export function restoreVoiceSettings() {
       await api.setVoiceSettings({ ...settings, push_to_talk: settings.push_to_talk && pushToTalkWorks });
       setVoiceSettings(settings);
     } catch (err) {
-      setAppError(String(err));
+      setAppError(describeError(err));
     }
   });
 }
@@ -320,7 +321,7 @@ export async function joinVoice(channel: Channel) {
     setActiveVoiceChannel(channel);
   } catch (err) {
     console.error('Failed to join voice channel:', err);
-    setAppError(t('Could not join voice: {error}', { error: String(err).replace(/^Error:\s*/, '') }));
+    setAppError(t('Could not join voice: {error}', { error: describeError(err) }));
   }
 }
 

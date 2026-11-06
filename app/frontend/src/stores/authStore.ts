@@ -7,6 +7,7 @@ import { setActiveVoiceChannel } from './voiceStore';
 import { setAppError } from './notificationStore';
 import { setSessionEnded } from './sessionEnd';
 import { pendingMismatch, pendingTofu, setPendingMismatch, setPendingTofu } from './tofuStore';
+import { describeError } from '../i18n/errors';
 
 export const [currentUser, setCurrentUser] = createSignal<User | null>(null);
 const REMEMBER_KEY = 'finchspeak.login';
@@ -132,5 +133,5 @@ export async function logoutUser() {
   setPendingMismatch(null);
   setSessionEnded(null);
   setCurrentUser(null);
-  if (failure) setAppError(String(failure));
+  if (failure) setAppError(describeError(failure));
 }

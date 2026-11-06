@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import type { AttachmentInfo } from '../types';
 import { setAppError } from './notificationStore';
 import { formatBytes, t } from '../i18n';
+import { describeError } from '../i18n/errors';
 
 /** Files go over the IPC channel as a byte array; keep them small enough for that. */
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
@@ -45,7 +46,7 @@ async function upload(key: string, file: File) {
     const info = await api.uploadFile(file.name, file.type || 'application/octet-stream', bytes);
     patch(key, { status: 'ready', info, file: undefined });
   } catch (err) {
-    patch(key, { status: 'failed', error: String(err).replace(/^Error:\s*/, '') });
+    patch(key, { status: 'failed', error: describeError(err) });
   }
 }
 
@@ -134,7 +135,7 @@ export async function downloadAttachment(attachment: AttachmentInfo) {
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
   } catch (err) {
-    setAppError(t('Download failed: {error}', { error: String(err) }));
+    setAppError(t('Download failed: {error}', { error: describeError(err) }));
   }
 }
 

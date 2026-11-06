@@ -3,6 +3,7 @@ import { t } from '../i18n';
 import { api } from '../services/api';
 import type { AdminUser, AuditEntry, Invite, ServerOverview } from '../types';
 import { setAppError } from './notificationStore';
+import { describeError } from '../i18n/errors';
 
 export const [adminOpen, setAdminOpen] = createSignal(false);
 export const [invites, setInvites] = createSignal<Invite[]>([]);
@@ -12,7 +13,7 @@ export async function loadInvites() {
   try {
     setInvites(await api.listInvites());
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -23,7 +24,7 @@ export async function createInvite(maxUses: number, expiresHours: number): Promi
     await loadInvites();
     return invite.code;
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
     return null;
   }
 }
@@ -33,7 +34,7 @@ export async function revokeInvite(code: string) {
     await api.revokeInvite(code);
     await loadInvites();
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -41,7 +42,7 @@ export async function loadMembers() {
   try {
     setMembers(await api.adminUsers());
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -55,7 +56,7 @@ export async function moderate(userId: string, action: MemberAction, durationSec
     else if (action === 'unban') await api.unbanUser(userId);
     else await api.setUserRole(userId, action === 'make-admin' ? 'admin' : action === 'make-moderator' ? 'moderator' : 'member');
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
   await loadMembers();
 }
@@ -73,7 +74,7 @@ export async function loadAudit() {
     setAuditEntries(page);
     setAuditHasMore(page.length === AUDIT_PAGE);
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -87,7 +88,7 @@ export async function loadMoreAudit() {
     setAuditEntries([...auditEntries(), ...page.filter((entry) => !known.has(entry.id))]);
     setAuditHasMore(page.length === AUDIT_PAGE);
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -125,7 +126,7 @@ export async function loadOverview() {
   try {
     setOverview(await api.serverOverview());
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -133,7 +134,7 @@ export async function changeRegistration(mode: 'open' | 'invite') {
   try {
     await api.setRegistration(mode);
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
   await loadOverview();
 }
@@ -144,7 +145,7 @@ export async function makeBackup(): Promise<boolean> {
     await loadOverview();
     return true;
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
     return false;
   }
 }
@@ -154,6 +155,6 @@ export async function moderateVoice(userId: string, action: 'kick' | 'mute' | 'u
   try {
     await api.moderateVoice(userId, action);
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
