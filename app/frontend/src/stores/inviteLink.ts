@@ -60,6 +60,16 @@ export function parseInviteLink(url: string): InviteLink | null {
   return { server: origin, code, fp };
 }
 
+/** True when a request for `hostname` at `address` is the very server the link names: same host and same port. */
+export function linkCoversServer(link: InviteLink, hostname: string, address: string): boolean {
+  try {
+    const target = new URL(address.trim());
+    return target.origin === link.server && target.hostname === hostname;
+  } catch {
+    return false;
+  }
+}
+
 /** True when a typed server address points at another host than the link, so the link's invite no longer applies. */
 export function linkServerDiffers(link: InviteLink | null, server: string): boolean {
   if (!link) return false;

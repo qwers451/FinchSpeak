@@ -236,6 +236,8 @@ it('a matching invite link trusts the server through the same confirm path, with
     }
     return null;
   });
+  const { setServerUrl: setAddress } = await import('../stores/authStore');
+  setAddress('https://h:8443');
   setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: FP.toLowerCase().replace(/:/g, '') });
   mount(() => <TofuModal />);
   expect(await loginUser('alice', 'hunter2hunter2', false)).toBe(false);
@@ -260,10 +262,62 @@ it('changing the server to another host forgets the invite link', async () => {
 it('a matching invite link does not show the trust dialog while it trusts the server', async () => {
   const { setPendingInvite } = await import('../stores/inviteLink');
   transport.invoke.mockImplementation(async (cmd: string) => (cmd === 'trust_fingerprint' ? new Promise(() => {}) : null));
+  const { setServerUrl: setAddress } = await import('../stores/authStore');
+  setAddress('https://h:8443');
   setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: FP });
   setPendingTofu({ hostname: 'h', fingerprint: FP });
   const host = mount(() => <TofuModal />);
   await vi.waitFor(() => expect(transport.invoke).toHaveBeenCalledWith('trust_fingerprint', { hostname: 'h', fingerprint: FP }));
   expect(host.querySelector('[role="dialog"]')).toBeNull();
   setPendingInvite(null);
+});
+
+
+it('forgetting the link by changing the host clears its invite code, and a code typed afterwards is kept', async () => {
+  const { setPendingInvite } = await import('../stores/inviteLink');
+  const { setServerUrl, serverUrl } = await import('../stores/authStore');
+  const before = serverUrl();
+  setPendingInvite({ server: 'https://chat.finch.example:8443', code: 'K7M2QX9TPW4B', fp: INVITE_FP });
+  const host = mount(() => <AuthModal />);
+  const [address, code] = Array.from(host.querySelectorAll('input')) as HTMLInputElement[];
+  expect(code.value).toBe('K7M2QX9TPW4B');
+  address.value = 'https://other.example:8443';
+  address.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  expect(code.value).toBe('');
+  code.value = 'OWNCODE12345';
+  code.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  address.value = 'https://another.example:8443';
+  address.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  expect(code.value).toBe('OWNCODE12345');
+  setServerUrl(before);
+});
+
+it('a matching fingerprint for another host opens the normal dialog and trusts nothing', async () => {
+  const { setPendingInvite } = await import('../stores/inviteLink');
+  const { setServerUrl, serverUrl } = await import('../stores/authStore');
+  const before = serverUrl();
+  setServerUrl('https://evil.example:8443');
+  setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: FP });
+  setPendingTofu({ hostname: 'evil.example', fingerprint: FP });
+  const host = mount(() => <TofuModal />);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'trust_fingerprint')).toHaveLength(0);
+  setPendingInvite(null);
+  setServerUrl(before);
+});
+
+it('a matching fingerprint on the same host but another port opens the normal dialog', async () => {
+  const { setPendingInvite } = await import('../stores/inviteLink');
+  const { setServerUrl, serverUrl } = await import('../stores/authStore');
+  const before = serverUrl();
+  setServerUrl('https://h:9443');
+  setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: FP });
+  setPendingTofu({ hostname: 'h', fingerprint: FP });
+  const host = mount(() => <TofuModal />);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'trust_fingerprint')).toHaveLength(0);
+  setPendingInvite(null);
+  setServerUrl(before);
 });

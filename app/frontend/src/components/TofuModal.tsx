@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js';
-import { pendingMismatch, discardPendingSignIn, pendingTofu, retryPendingSignIn, setAuthError, setPendingMismatch, setPendingTofu } from '../stores/authStore';
+import { pendingMismatch, discardPendingSignIn, pendingTofu, retryPendingSignIn, serverUrl, setAuthError, setPendingMismatch, setPendingTofu } from '../stores/authStore';
 import { api } from '../services/api';
-import { fingerprintsMatch, pendingInvite } from '../stores/inviteLink';
+import { fingerprintsMatch, linkCoversServer, pendingInvite } from '../stores/inviteLink';
 import { Button, Field, Icon, Modal } from '../ui';
 import { t } from '../i18n';
 
@@ -42,7 +42,7 @@ export function TofuModal() {
     const data = pendingTofu();
     const link = pendingInvite();
     if (!data || !link || autoTrusted === data) return;
-    if (fingerprintsMatch(link.fp, data.fingerprint)) {
+    if (fingerprintsMatch(link.fp, data.fingerprint) && linkCoversServer(link, data.hostname, serverUrl())) {
       autoTrusted = data;
       setAutoTrusting(data);
       untrack(() => void confirm().catch(() => setAutoTrusting(null)));

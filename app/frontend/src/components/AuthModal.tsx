@@ -117,7 +117,12 @@ export function AuthModal() {
               onInput={(value) => {
                 setServerUrl(value);
                 setServerError(undefined);
-                if (linkServerDiffers(pendingInvite(), value)) setPendingInvite(null);
+                const link = pendingInvite();
+                if (linkServerDiffers(link, value)) {
+                  // The code belongs to the old server: it must not be sent to this one.
+                  if (link && inviteCode() === link.code) setInviteCode('');
+                  setPendingInvite(null);
+                }
               }} />
             <Show when={isRegister()}>
               <Field label={t('Invite code')} icon="ticket" value={inviteCode()} onInput={setInviteCode} placeholder="K7M2QX9TPW4B" error={inviteError()}
