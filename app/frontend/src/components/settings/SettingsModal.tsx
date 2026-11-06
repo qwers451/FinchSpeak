@@ -9,7 +9,8 @@ import { presence, statusTexts } from '../../stores/sessionStore';
 import {
   isChannelMuted, muteChannel, prefs, unmuteChannel, updateAppearance, updateNotifications,
 } from '../../stores/settingsStore';
-import { choosePushToTalkKey, pushToTalkKey, shortcutFromEvent } from '../../stores/voiceStore';
+import { availableUpdate, setAvailableUpdate } from '../../stores/updateStore';
+import { activeVoiceChannel, choosePushToTalkKey, pushToTalkKey, shortcutFromEvent } from '../../stores/voiceStore';
 import type { UserStatus } from '../../types';
 import { Avatar, Button, Field, Icon, type IconName, Modal, pushToast, Slider, Toggle } from '../../ui';
 import { passwordStrength } from '../../ui/passwordStrength';
@@ -183,7 +184,7 @@ function AppearancePage() {
       await api.setAutostart(on);
       setAutostart(on);
     } catch (err) {
-      pushToast({ kind: 'error', title: t('Could not change the startup setting'), text: String(err).replace(/^Error:s*/, '') });
+      pushToast({ kind: 'error', title: t('Could not change the startup setting'), text: String(err).replace(/^Error:\s*/, '') });
     }
   };
   const seg = <T extends string>(label: string, value: T, options: [T, string][], set: (v: T) => void) => (
@@ -209,7 +210,7 @@ function KeysPage() {
   const [capturing, setCapturing] = createSignal(false);
   const [info, setInfo] = createSignal<{ server_url: string | null; hostname: string | null; fingerprint: string | null }>({ server_url: null, hostname: null, fingerprint: null });
   const [version, setVersion] = createSignal(APP_VERSION);
-  const [update, setUpdate] = createSignal<{ version: string; notes: string } | null>(null);
+  const update = availableUpdate;
   const [checking, setChecking] = createSignal(false);
   const [upToDate, setUpToDate] = createSignal(false);
   onMount(async () => {
@@ -221,7 +222,7 @@ function KeysPage() {
     setUpToDate(false);
     try {
       const found = await api.checkUpdate();
-      setUpdate(found);
+      setAvailableUpdate(found);
       setUpToDate(!found);
     } catch (err) {
       pushToast({ kind: 'error', title: t('Could not check for updates'), text: String(err).replace(/^Error:\s*/, '') });
@@ -272,9 +273,10 @@ function KeysPage() {
         <div class="row g12 between">
           <span class="t2">{t('Updates')}</span>
           <Show when={update()} fallback={<Button size="sm" variant="secondary" icon="refresh" loading={checking()} onClick={() => void checkForUpdate()}>{upToDate() ? t('You have the newest version') : t('Check for updates')}</Button>}>
-            {(found) => <Button size="sm" variant="primary" icon="dl" onClick={() => void install()}>{t('Install {version}', { version: found().version })}</Button>}
+            {(found) => <Button size="sm" variant="primary" icon="dl" disabled={!!activeVoiceChannel()} onClick={() => void install()}>{t('Install {version}', { version: found().version })}</Button>}
           </Show>
         </div>
+        <Show when={update() && activeVoiceChannel()}><span class="t3 fs12">{t('Leave the voice room to install.')}</span></Show>
         <Show when={update()?.notes}><span class="t3 fs12">{update()!.notes}</span></Show>
         <div class="row g12 between"><span class="t2">{t('Server')}</span><strong class="trunc">{info().server_url ?? t('unknown')}</strong></div>
         <div class="col g4">

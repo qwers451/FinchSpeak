@@ -1,4 +1,4 @@
-import { createSignal, onMount, onCleanup, Show } from 'solid-js';
+import { createEffect, createSignal, onMount, onCleanup, Show } from 'solid-js';
 import { currentUser, setCurrentUser, resumeLastSession, resuming } from './stores/authStore';
 import { activeChannel, loadChannels } from './stores/chatStore';
 import { setAppError } from './stores/sessionStore';
@@ -19,6 +19,7 @@ import { IconSprite, Titlebar, ToastHost } from './ui';
 import { AdminModal } from './components/admin/AdminModal';
 import { SettingsModal } from './components/settings/SettingsModal';
 import type { UnlistenFn } from '@tauri-apps/api/event';
+import { startUpdateChecks } from './stores/updateStore';
 import { t } from './i18n';
 
 export function App() {
