@@ -94,3 +94,67 @@ it('a session that the server ended forgets the pending invite', async () => {
   expect(pendingInvite()).toBeNull();
   sessionHandlers['connection-lost']('');
 });
+
+it('an unreachable server during the automatic resume is retried with backoff', async () => {
+  vi.useFakeTimers();
+  const { resumeLastSession, setRememberedUsername, resumeFailed } = await import('./authStore');
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  const user = { id: 'u', username: 'alice', display_name: 'Alice', role: 'member' as const };
+  const spy = vi.spyOn(api, 'resumeSession')
+    .mockRejectedValueOnce('Cannot reach the server: connection refused')
+    .mockRejectedValueOnce('Cannot reach the server: connection refused')
+    .mockResolvedValue(user);
+  await expect(resumeLastSession()).resolves.toBe(false);
+  expect(resumeFailed()).toBe(true);
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(spy).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(spy).toHaveBeenCalledTimes(3);
+  expect(currentUser()).toEqual(user);
+  expect(resumeFailed()).toBe(false);
+  setCurrentUser(null);
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+it('the automatic resume gives up after four retries', async () => {
+  vi.useFakeTimers();
+  const { resumeLastSession, setRememberedUsername } = await import('./authStore');
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  const spy = vi.spyOn(api, 'resumeSession').mockRejectedValue('Cannot reach the server: timeout');
+  await resumeLastSession();
+  await vi.advanceTimersByTimeAsync(2_000 + 5_000 + 15_000 + 30_000 + 120_000);
+  expect(spy).toHaveBeenCalledTimes(5);
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+it('a rejected resume is not retried', async () => {
+  vi.useFakeTimers();
+  const { resumeLastSession, setRememberedUsername } = await import('./authStore');
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  const spy = vi.spyOn(api, 'resumeSession').mockRejectedValue('Session revoked');
+  await resumeLastSession();
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect(spy).toHaveBeenCalledTimes(1);
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+it('typing a sign-in stops the automatic resume retries', async () => {
+  vi.useFakeTimers();
+  const { resumeLastSession, loginUser, setRememberedUsername } = await import('./authStore');
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  const resume = vi.spyOn(api, 'resumeSession').mockRejectedValue('Cannot reach the server: timeout');
+  vi.spyOn(api, 'login').mockRejectedValue('Invalid username or password');
+  await resumeLastSession();
+  await loginUser('alice', 'wrong-password');
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect(resume).toHaveBeenCalledTimes(1);
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});

@@ -49,9 +49,8 @@ export function App() {
         setCurrentUser(user);
         await loadChannels();
         await subscriptions.refresh();
-      } else if (await resumeLastSession()) {
-        if (disposed) return;
-        await subscriptions.refresh();
+      } else {
+        await resumeLastSession(() => subscriptions.refresh());
       }
       setEventsReady(true);
     } catch (e) {

@@ -321,3 +321,22 @@ it('a matching fingerprint on the same host but another port opens the normal di
   setPendingInvite(null);
   setServerUrl(before);
 });
+
+it('Retry after a failed automatic resume resumes the session, not an empty-password sign-in', async () => {
+  const { api } = await import('../services/api');
+  const { resumeLastSession, setRememberedUsername } = await import('../stores/authStore');
+  const user = { id: 'u', username: 'alice', display_name: 'Alice', role: 'member' as const };
+  setRememberedUsername('alice');
+  const resume = vi.spyOn(api, 'resumeSession')
+    .mockRejectedValueOnce('Cannot reach the server: timeout')
+    .mockResolvedValue(user);
+  const login = vi.spyOn(api, 'login');
+  await resumeLastSession();
+  const host = mount(() => <AuthModal />);
+  expect(host.textContent).toContain('Cannot reach the server');
+  const retry = Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.includes('Retry'))!;
+  retry.click();
+  await vi.waitFor(() => expect(resume).toHaveBeenCalledTimes(2));
+  expect(login).not.toHaveBeenCalled();
+  vi.restoreAllMocks();
+});

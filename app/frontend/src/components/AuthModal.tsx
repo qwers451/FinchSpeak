@@ -5,6 +5,9 @@ import {
   rememberedUsername,
   loginUser,
   registerUser,
+  resumeLastSession,
+  resumeFailed,
+  cancelResumeRetry,
   authLoading,
   authError,
   setAuthError,
@@ -44,6 +47,11 @@ export function AuthModal() {
   const [inviteCode, setInviteCode] = createSignal(fromLink?.code ?? '');
   const [stay, setStay] = createSignal(true);
   const [serverError, setServerError] = createSignal<string | undefined>(undefined);
+  // Typing a value means the user signs in by hand: scheduled automatic resumes stop, Retry uses the form.
+  const typed = (set: (value: string) => void) => (value: string) => {
+    cancelResumeRetry();
+    set(value);
+  };
 
   createEffect(on(pendingInvite, (link) => {
     if (!link) return;
@@ -106,7 +114,10 @@ export function AuthModal() {
                   <Show when={look().hint}><span class="t2 fs12">{t(look().hint!)}</span></Show>
                 </div>
                 <Show when={look().retry}>
-                  <Button size="sm" variant="secondary" onClick={() => void (isRegister() ? undefined : loginUser(username().trim(), password(), stay()))}>{t('Retry')}</Button>
+                  <Button size="sm" variant="secondary" onClick={() => {
+                    if (isRegister()) return;
+                    void (resumeFailed() ? resumeLastSession() : loginUser(username().trim(), password(), stay()));
+                  }}>{t('Retry')}</Button>
                 </Show>
               </div>
             )}
@@ -115,6 +126,7 @@ export function AuthModal() {
           <div class="col g16">
             <Field label={t('Server address')} icon="db" value={serverUrl()} error={serverError()} placeholder="https://your-server:8443"
               onInput={(value) => {
+                cancelResumeRetry();
                 setServerUrl(value);
                 setServerError(undefined);
                 const link = pendingInvite();
@@ -129,7 +141,7 @@ export function AuthModal() {
                 help={t('Ask the server admin for a code. It works a limited number of times and expires.')} />
             </Show>
             <Show when={isRegister()} fallback={
-              <Field label={t('Username')} icon="user" value={username()} onInput={setUsername} placeholder="alice" autocomplete="username" autofocus={!rememberedUsername()} />
+              <Field label={t('Username')} icon="user" value={username()} onInput={typed(setUsername)} placeholder="alice" autocomplete="username" autofocus={!rememberedUsername()} />
             }>
               <div class="row g12">
                 <div class="grow"><Field label={t('Username')} value={username()} onInput={setUsername} placeholder="carol" autocomplete="username" error={usernameError()} /></div>
@@ -137,7 +149,7 @@ export function AuthModal() {
               </div>
             </Show>
             <div class="col g8">
-              <Field label={t('Password')} icon="lock" type="password" value={password()} onInput={setPassword}
+              <Field label={t('Password')} icon="lock" type="password" value={password()} onInput={typed(setPassword)}
                 autocomplete={isRegister() ? 'new-password' : 'current-password'} autofocus={!!rememberedUsername() && !isRegister()} />
               <Show when={isRegister() && password()}>
                 <div class="row g8" aria-label={t('Password strength: {strength}', { strength: t(strength().label) })}>

@@ -63,6 +63,7 @@ export async function retryPendingSignIn(): Promise<boolean> {
 }
 
 export async function loginUser(username: string, password: string, stay = true) {
+  cancelResumeRetry();
   lastAttempt = { kind: 'login', username, password, stay };
   setAuthLoading(true);
   setAuthError(null);
@@ -85,6 +86,7 @@ export async function loginUser(username: string, password: string, stay = true)
 }
 
 export async function registerUser(username: string, displayName: string, password: string, inviteCode?: string, stay = true) {
+  cancelResumeRetry();
   lastAttempt = { kind: 'register', username, displayName, password, inviteCode, stay };
   setAuthLoading(true);
   setAuthError(null);
@@ -106,20 +108,70 @@ export async function registerUser(username: string, displayName: string, passwo
   }
 }
 
-/** Signs in with the session saved on this device for the last server; false means show the form. */
-export async function resumeLastSession(): Promise<boolean> {
+// The last automatic resume failed (the Retry button resumes again instead of signing in with an empty password).
+export const [resumeFailed, setResumeFailed] = createSignal<boolean>(false);
+// While the server is unreachable (e.g. the network is not up yet at Windows start) the resume is tried again
+// after these waits; the user typing or signing in stops it.
+const RESUME_RETRY_WAITS_MS = [2_000, 5_000, 15_000, 30_000];
+let resumeRetryTimer: ReturnType<typeof setTimeout> | undefined;
+let resumeRetriesDone = 0;
+// Runs after a resumed session (the App refreshes the live session state there).
+let afterResume: (() => Promise<void>) | undefined;
+
+/**
+ * Stops the scheduled automatic resume retries and forgets the failed resume, so the Retry button
+ * signs in with what the user typed. Called when the user types or signs in.
+ */
+export function cancelResumeRetry() {
+  if (resumeRetryTimer !== undefined) clearTimeout(resumeRetryTimer);
+  resumeRetryTimer = undefined;
+  resumeRetriesDone = 0;
+  setResumeFailed(false);
+}
+
+function isServerUnreachable(err: unknown): boolean {
+  const lower = String(err).toLowerCase();
+  return lower.includes('cannot reach') || lower.includes('connection refused') || lower.includes('timed out');
+}
+
+async function attemptResume(): Promise<boolean> {
   const username = rememberedUsername();
   if (!username) return false;
-  setResuming(true);
+  let user: User | null;
   try {
-    const user = await api.resumeSession(serverUrl(), username);
-    if (!user) return false;
-    setCurrentUser(user);
-    await loadChannels();
-    return true;
+    user = await api.resumeSession(serverUrl(), username);
   } catch (err: any) {
     setAuthError(String(err));
+    setResumeFailed(true);
+    if (isServerUnreachable(err) && resumeRetriesDone < RESUME_RETRY_WAITS_MS.length) {
+      const wait = RESUME_RETRY_WAITS_MS[resumeRetriesDone++];
+      resumeRetryTimer = setTimeout(() => {
+        resumeRetryTimer = undefined;
+        attemptResume().catch((error) => setAppError(describeError(error)));
+      }, wait);
+    }
     return false;
+  }
+  cancelResumeRetry();
+  if (!user) return false;
+  setAuthError(null);
+  setCurrentUser(user);
+  await loadChannels();
+  await afterResume?.();
+  return true;
+}
+
+/**
+ * Signs in with the session saved on this device for the last server; false means show the form.
+ * `onSignedIn` runs after a session is resumed, including one resumed by a scheduled retry.
+ */
+export async function resumeLastSession(onSignedIn?: () => Promise<void>): Promise<boolean> {
+  if (!rememberedUsername()) return false;
+  cancelResumeRetry();
+  if (onSignedIn) afterResume = onSignedIn;
+  setResuming(true);
+  try {
+    return await attemptResume();
   } finally {
     setResuming(false);
   }
@@ -127,6 +179,7 @@ export async function resumeLastSession(): Promise<boolean> {
 
 export async function logoutUser() {
   lastAttempt = null;
+  cancelResumeRetry();
   let failure: unknown;
   try { await api.logout(); } catch (error) { failure = error; }
   resetSessionState();
