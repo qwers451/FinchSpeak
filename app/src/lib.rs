@@ -9,6 +9,7 @@ pub mod commands;
 mod tray;
 pub mod connection;
 pub mod state;
+pub mod credentials;
 
 use state::AppState;
 use tauri::Manager;

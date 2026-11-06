@@ -437,6 +437,11 @@ impl ApiClient {
         parse_json(self.send(req).await?).await
     }
 
+    pub async fn refresh(&self) -> Result<AuthResponse, ClientError> {
+        let req = self.authorized(self.http.post(self.url("/api/auth/refresh")));
+        parse_json(self.send(req).await?).await
+    }
+
     pub async fn logout(&self) -> Result<(), ClientError> {
         let req = self.authorized(self.http.post(self.url("/api/auth/logout")));
         let response = self.send(req).await?;

@@ -19,6 +19,7 @@ tauri-plugin-notification = "2"
 minisign-verify = "0.2"
 url = "2"
 base64 = "0.22"
+keyring = { version = "3", features = ["windows-native"] }
 
 # Async & QUIC
 tokio = { workspace = true }
