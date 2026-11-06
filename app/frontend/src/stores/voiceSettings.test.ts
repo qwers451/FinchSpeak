@@ -242,5 +242,10 @@ it('a failed push-to-talk key is pushed as off but the preference stays stored',
   expect(toasts()).toHaveLength(1);
   expect(pushToTalkKey()).toBe('F8');
   await changeVoiceSettings({ monitor: true });
+  expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ push_to_talk: false, monitor: true }));
   expect(JSON.parse(localStorage.getItem('finchspeak.voiceSettings')!)).toMatchObject({ key: 'F8', settings: { push_to_talk: true } });
+  // a successful rebind brings push-to-talk back on the backend
+  vi.spyOn(api, 'setPushToTalkKey').mockResolvedValue();
+  await choosePushToTalkKey('F7');
+  expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ push_to_talk: true }));
 });

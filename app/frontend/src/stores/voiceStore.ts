@@ -196,6 +196,10 @@ function queueSettingsWrite(action: () => Promise<void>): Promise<void> {
   return pending;
 }
 
+/** False after the push-to-talk key failed to register: the backend is then told push-to-talk is off. */
+let pushToTalkKeyRegistered = true;
+const forBackend = (settings: VoiceSettings): VoiceSettings => ({ ...settings, push_to_talk: settings.push_to_talk && pushToTalkKeyRegistered });
+
 /** Change microphone settings; publish/persist only after backend acknowledgement. */
 export function changeVoiceSettings(change: Partial<VoiceSettings>) {
   return queueSettingsWrite(async () => {
@@ -205,7 +209,7 @@ export function changeVoiceSettings(change: Partial<VoiceSettings>) {
       return;
     }
     try {
-      await api.setVoiceSettings(next);
+      await api.setVoiceSettings(forBackend(next));
     } catch (err) {
       setAppError(describeError(err));
       return;
@@ -245,7 +249,12 @@ export async function chooseHotkey(action: HotkeyAction, key: string | null) {
     return;
   }
   hotkeySignals[action][1](key);
-  if (action === 'push_to_talk' && !key && voiceSettings().push_to_talk) await changeVoiceSettings({ push_to_talk: false });
+  if (action === 'push_to_talk') {
+    const wasRegistered = pushToTalkKeyRegistered;
+    pushToTalkKeyRegistered = true;
+    if (!key && voiceSettings().push_to_talk) await changeVoiceSettings({ push_to_talk: false });
+    else if (key && !wasRegistered && voiceSettings().push_to_talk) await changeVoiceSettings({}); // the working key brings push-to-talk back
+  }
   saveVoice();
 }
 
@@ -282,12 +291,12 @@ export function restoreVoiceSettings() {
     };
     // Each key on its own: one that is taken must not cost the others or the microphone settings.
     // The signals keep the saved key either way, so saving later does not forget it.
-    let pushToTalkWorks = !!saved.key;
+    pushToTalkKeyRegistered = true;
     if (saved.key) {
       try {
         await api.setPushToTalkKey(saved.key);
       } catch {
-        pushToTalkWorks = false;
+        pushToTalkKeyRegistered = false;
         failed('push_to_talk', saved.key);
       }
     }
@@ -305,7 +314,7 @@ export function restoreVoiceSettings() {
     try {
       // The preference stays as saved; only the backend is told false while the key is not registered.
       const settings = { ...saved.settings, key_down: false, push_to_talk: saved.settings.push_to_talk && !!saved.key };
-      await api.setVoiceSettings({ ...settings, push_to_talk: settings.push_to_talk && pushToTalkWorks });
+      await api.setVoiceSettings(forBackend(settings));
       setVoiceSettings(settings);
     } catch (err) {
       setAppError(describeError(err));
