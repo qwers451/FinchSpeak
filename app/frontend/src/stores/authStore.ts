@@ -40,6 +40,11 @@ type Attempt =
   | { kind: 'register'; username: string; displayName: string; password: string; inviteCode?: string; stay: boolean };
 let lastAttempt: Attempt | null = null;
 
+/** Forgets the saved attempt (and its password), e.g. when the certificate prompt is dismissed. */
+export function discardPendingSignIn() {
+  lastAttempt = null;
+}
+
 /** Replays the attempt that stopped on the certificate prompt; false if there was none or it failed again. */
 export async function retryPendingSignIn(): Promise<boolean> {
   const attempt = lastAttempt;
@@ -64,6 +69,7 @@ export async function loginUser(username: string, password: string, stay = true,
     return true;
   } catch (err: any) {
     setAuthError(String(err));
+    if (!pendingTofu()) lastAttempt = null; // keep the password only while the certificate prompt can replay it
     return false;
   } finally {
     setAuthLoading(false);
@@ -84,6 +90,7 @@ export async function registerUser(username: string, displayName: string, passwo
     return true;
   } catch (err: any) {
     setAuthError(String(err));
+    if (!pendingTofu()) lastAttempt = null; // keep the password only while the certificate prompt can replay it
     return false;
   } finally {
     setAuthLoading(false);

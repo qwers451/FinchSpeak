@@ -129,3 +129,17 @@ it('AUD-019 restores the running Rust session after a frontend reload', async ()
   expect(document.querySelector('[title="Unmute"]')).not.toBeNull();
   expect(document.body.textContent).not.toContain('Connection lost');
 });
+
+it('checks for updates 15 seconds after sign-in', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+  try {
+    mount();
+    setCurrentUser({ id: 'me', username: 'me', display_name: 'Me', role: 'member' });
+    await vi.advanceTimersByTimeAsync(14_000);
+    expect(transport.invoke).not.toHaveBeenCalledWith('check_update');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(transport.invoke).toHaveBeenCalledWith('check_update');
+  } finally {
+    vi.useRealTimers();
+  }
+});

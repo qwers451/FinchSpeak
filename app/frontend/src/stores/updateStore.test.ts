@@ -4,7 +4,6 @@ const checkUpdate = vi.hoisted(() => vi.fn());
 const toast = vi.hoisted(() => vi.fn());
 vi.mock('../services/api', () => ({ api: { checkUpdate } }));
 vi.mock('../ui', () => ({ pushToast: toast }));
-vi.mock('./voiceStore', () => ({}));
 
 import { availableUpdate, setAvailableUpdate, startUpdateChecks } from './updateStore';
 

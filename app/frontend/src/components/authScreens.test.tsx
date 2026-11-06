@@ -7,7 +7,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) })
 
 import { AuthModal, describeAuthError } from './AuthModal';
 import { CertChangedModal, TofuModal, diffBytes, fingerprintGroups } from './TofuModal';
-import { loginUser, setPendingMismatch, setPendingTofu } from '../stores/authStore';
+import { loginUser, retryPendingSignIn, setPendingMismatch, setPendingTofu } from '../stores/authStore';
 import { passwordStrength } from '../ui/passwordStrength';
 
 let dispose: (() => void) | undefined;
@@ -137,4 +137,29 @@ it('trusting the server retries the sign-in once', async () => {
   await vi.waitFor(() => expect(logins).toBe(2));
   const calls = transport.invoke.mock.calls.filter(([cmd]) => cmd === 'login');
   expect(calls[1][1]).toMatchObject({ username: 'alice', password: 'hunter2hunter2', remember: false });
+});
+
+it('a failed sign-in other than the certificate prompt forgets the password', async () => {
+  transport.invoke.mockImplementation(async (cmd: string) => {
+    if (cmd === 'login') throw 'Login failed: invalid username or password';
+    return null;
+  });
+  expect(await loginUser('alice', 'wrong-password')).toBe(false);
+  expect(await retryPendingSignIn()).toBe(false);
+  expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'login')).toHaveLength(1);
+});
+
+it('dismissing the certificate prompt forgets the password', async () => {
+  transport.invoke.mockImplementation(async (cmd: string) => {
+    if (cmd === 'login') {
+      setPendingTofu({ hostname: 'h', fingerprint: FP });
+      throw 'Server certificate of h is not trusted yet';
+    }
+    return null;
+  });
+  await loginUser('alice', 'hunter2hunter2');
+  const host = mount(() => <TofuModal />);
+  Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.includes('Cancel'))!.click();
+  expect(await retryPendingSignIn()).toBe(false);
+  expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'login')).toHaveLength(1);
 });

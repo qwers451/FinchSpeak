@@ -27,7 +27,7 @@ async function check() {
 }
 
 /** Looks for a new version 15 s after the start and then once a day; returns a function that stops it. */
-export function startUpdateChecks(_now: () => number = Date.now): () => void {
+export function startUpdateChecks(): () => void {
   let interval: ReturnType<typeof setInterval> | undefined;
   const first = setTimeout(() => {
     void check();

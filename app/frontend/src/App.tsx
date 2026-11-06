@@ -51,6 +51,12 @@ export function App() {
     }
   });
 
+  // Background update checks run only while somebody is signed in.
+  createEffect(() => {
+    if (!currentUser()) return;
+    onCleanup(startUpdateChecks());
+  });
+
   onCleanup(() => {
     disposed = true;
     unlisten?.();

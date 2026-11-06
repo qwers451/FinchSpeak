@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, Show } from 'solid-js';
-import { pendingMismatch, pendingTofu, retryPendingSignIn, setAuthError, setPendingMismatch, setPendingTofu } from '../stores/authStore';
+import { pendingMismatch, discardPendingSignIn, pendingTofu, retryPendingSignIn, setAuthError, setPendingMismatch, setPendingTofu } from '../stores/authStore';
 import { api } from '../services/api';
 import { Button, Field, Icon, Modal } from '../ui';
 import { t } from '../i18n';
@@ -18,6 +18,8 @@ export function diffBytes(expected: string, actual: string): { text: string; dif
   return actual.split(':').map((byte, i) => ({ text: byte, differs: a[i] !== byte }));
 }
 
+const dismiss = () => { discardPendingSignIn(); setPendingTofu(null); };
+
 const hostOf = (hostname: string) => hostname;
 
 /** First connection to a server (A3): the user compares the fingerprint, no default button. */
@@ -32,7 +34,7 @@ export function TofuModal() {
   };
 
   return (
-    <Modal open={!!pendingTofu()} onClose={() => setPendingTofu(null)} title={t('Trust this server?')} width="560px">
+    <Modal open={!!pendingTofu()} onClose={dismiss} title={t('Trust this server?')} width="560px">
       <Show when={pendingTofu()}>
         {(data) => (
           <div class="col g20">
@@ -51,7 +53,7 @@ export function TofuModal() {
               <span class="fs13">{t('Compare these characters with the fingerprint the server admin sees in the Server page. If they match, nobody is listening in. FinchSpeak will warn you if this ever changes.')}</span>
             </div>
             <div class="row g12" style={{ 'justify-content': 'flex-end' }}>
-              <Button variant="secondary" onClick={() => setPendingTofu(null)}>{t('Cancel')}</Button>
+              <Button variant="secondary" onClick={dismiss}>{t('Cancel')}</Button>
               <Button variant="violet" icon="check" onClick={() => void confirm()}>{t('They match — trust server')}</Button>
             </div>
           </div>
