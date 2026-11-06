@@ -142,7 +142,7 @@ pub fn issue_jwt_for_session(
         .unwrap_or_default()
         .as_secs();
 
-    let exp = now + (expiration_hours as u64 * 3600);
+    let exp = (now as i64).saturating_add(expiration_hours.saturating_mul(3600)).max(0) as u64;
 
     let claims = Claims {
         sub: user_id.to_string(),
@@ -172,19 +172,60 @@ pub fn verify_jwt(token: &str, secret: &str) -> Result<Claims, ServerError> {
     Ok(token_data.claims)
 }
 
+/// Why a token cannot be used any more.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenProblem {
+    /// The token or its server-side session ran out of time.
+    Expired,
+    /// The signature is fine but the session is gone (logout, admin, password change).
+    Revoked,
+    /// Not a token this server signed.
+    Invalid,
+}
+
+impl TokenProblem {
+    /// The reason text sent to clients; the app tells the cases apart by it.
+    pub fn message(self) -> &'static str {
+        match self {
+            TokenProblem::Expired => "Session expired",
+            TokenProblem::Revoked => "Session revoked",
+            TokenProblem::Invalid => "Invalid token",
+        }
+    }
+}
+
 /// A signed JWT is usable only while its server-side session and account still exist.
-pub async fn verify_active_jwt(token: &str, secret: &str, pool: &SqlitePool) -> Result<Claims, ServerError> {
-    let mut claims = verify_jwt(token, secret)?;
+pub async fn check_active_jwt(token: &str, secret: &str, pool: &SqlitePool) -> Result<Claims, TokenProblem> {
+    let mut claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &Validation::default(),
+    ) {
+        Ok(data) => data.claims,
+        Err(e) if matches!(e.kind(), jsonwebtoken::errors::ErrorKind::ExpiredSignature) => {
+            return Err(TokenProblem::Expired)
+        }
+        Err(_) => return Err(TokenProblem::Invalid),
+    };
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default().as_secs() as i64;
-    let account = sqlx::query_as::<_, (String, String)>(
-        "SELECT u.username, u.role FROM sessions s JOIN users u ON u.id = s.user_id
-         WHERE s.id = ? AND s.user_id = ? AND s.expires_at > ?",
-    ).bind(&claims.jti).bind(&claims.sub).bind(now).fetch_optional(pool).await?
-        .ok_or(ServerError::Unauthorized)?;
-    claims.username = account.0;
-    claims.role = account.1;
+    let row = sqlx::query_as::<_, (String, String, i64)>(
+        "SELECT u.username, u.role, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id
+         WHERE s.id = ? AND s.user_id = ?",
+    ).bind(&claims.jti).bind(&claims.sub).fetch_optional(pool).await
+        .map_err(|_| TokenProblem::Invalid)?
+        .ok_or(TokenProblem::Revoked)?;
+    if row.2 <= now {
+        return Err(TokenProblem::Expired);
+    }
+    claims.username = row.0;
+    claims.role = row.1;
     Ok(claims)
+}
+
+/// Like [`check_active_jwt`], for REST handlers: any problem is a plain 401.
+pub async fn verify_active_jwt(token: &str, secret: &str, pool: &SqlitePool) -> Result<Claims, ServerError> {
+    check_active_jwt(token, secret, pool).await.map_err(|_| ServerError::Unauthorized)
 }
 
 pub async fn logout_handler(auth: AuthUser, State(state): State<ArcSharedState>) -> Result<StatusCode, ServerError> {

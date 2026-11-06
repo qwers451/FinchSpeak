@@ -359,3 +359,25 @@ async fn refreshed_token_survives_logout_of_other_device() -> anyhow::Result<()>
     assert_eq!(app.oneshot(request).await?.status(), StatusCode::OK);
     Ok(())
 }
+
+#[tokio::test]
+async fn expired_and_revoked_tokens_are_told_apart() -> anyhow::Result<()> {
+    use finch_server::api::auth::{check_active_jwt, issue_jwt_for_session, TokenProblem};
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool.clone(), open_registration(), finch_server::session::SessionManager::new());
+    let token = register_alice(&app).await?;
+    let secret = open_registration().auth.jwt_secret;
+    let claims = check_active_jwt(&token, &secret, &pool).await.map_err(|_| anyhow::anyhow!("fresh token rejected"))?;
+    let user_id = uuid::Uuid::parse_str(&claims.sub)?;
+
+    let stale = issue_jwt_for_session(&user_id, "alice", "admin", &secret, -1, &claims.jti)?;
+    assert!(matches!(check_active_jwt(&stale, &secret, &pool).await, Err(TokenProblem::Expired)));
+
+    sqlx::query("UPDATE sessions SET expires_at = 0").execute(&pool).await?;
+    assert!(matches!(check_active_jwt(&token, &secret, &pool).await, Err(TokenProblem::Expired)));
+
+    sqlx::query("DELETE FROM sessions").execute(&pool).await?;
+    assert!(matches!(check_active_jwt(&token, &secret, &pool).await, Err(TokenProblem::Revoked)));
+    assert!(matches!(check_active_jwt("garbage", &secret, &pool).await, Err(TokenProblem::Invalid)));
+    Ok(())
+}

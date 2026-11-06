@@ -169,6 +169,10 @@ it('reads why the server sent us away, and a plain network problem is not an end
   expect(classifyEnd('closed by peer: kicked')).toBe('kicked');
   expect(classifyEnd('closed by peer: token revoked')).toBe('signed-out');
   expect(classifyEnd('Authentication rejected (401): Invalid or missing token')).toBe('signed-out');
+  expect(classifyEnd('Authentication rejected (401): Session expired')).toBe('expired');
+  expect(classifyEnd('Authentication rejected (401): Session revoked')).toBe('signed-out');
+  expect(classifyEnd('Authentication rejected (401): Invalid token')).toBe('signed-out');
+  expect(classifyEnd('password changed')).toBe('password-changed');
   expect(classifyEnd('timed out')).toBeNull();
   expect(classifyEnd(undefined)).toBeNull();
 });
