@@ -3,13 +3,16 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../../services/api';
 import { avatarSrc, clearAvatarCache, userIdOf } from '../../stores/avatarCache';
 import { setCurrentUser, currentUser } from '../../stores/authStore';
-import { profileOpen, setProfileMessage, setProfileOpen } from '../../stores/profileStore';
+import { logoutUser } from '../../stores/authStore';
+import { endSession, loadSessions, profileOpen, setProfileMessage, setProfileOpen } from '../../stores/profileStore';
 import { resetSessionState, sessionHandlers, setKnownUsers } from '../../stores/sessionStore';
 import { DEFAULT_PREFS, prefs, setPrefs } from '../../stores/settingsStore';
 import { setChannels } from '../../stores/chatStore';
 import { clearToasts } from '../../ui';
 import { checkAvatarFile, CROP_SIDE, placement } from './AvatarCropDialog';
 import { SettingsModal } from './SettingsModal';
+
+vi.mock('../../stores/authStore', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../stores/authStore')>()), logoutUser: vi.fn().mockResolvedValue(undefined) }));
 
 let dispose: (() => void) | undefined;
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -225,4 +228,51 @@ it('voice and audio opens as a page inside the settings window, not as a second 
   expect(document.querySelector('[aria-label="Microphone"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="Mute microphone key"]')).not.toBeNull();
   expect(button('Voice and audio').getAttribute('aria-current')).toBe('page');
+});
+
+const sessions = [
+  { id: 's1', device_name: 'DESKTOP-HOME', created_at: 1_700_000_000, last_seen_at: 1_700_000_500, current: true },
+  { id: 's2', device_name: null, created_at: 1_700_000_000, last_seen_at: 1_700_000_100, current: false },
+  { id: 's3', device_name: 'LAPTOP', created_at: 1_700_000_000, last_seen_at: 1_700_000_100, current: false },
+];
+
+it('lists the signed-in devices and marks this computer', async () => {
+  vi.spyOn(api, 'listSessions').mockResolvedValue(sessions);
+  dispose?.();
+  document.body.innerHTML = '';
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  dispose = render(() => <SettingsModal />, host);
+  await flush();
+  const text = document.body.textContent ?? '';
+  expect(text).toContain('Devices');
+  expect(text).toContain('DESKTOP-HOME');
+  expect(text).toContain('This computer');
+  expect(text).toContain('Unknown device');
+  expect(text).toContain('LAPTOP');
+});
+
+it('ending_the_current_session_logs_out', async () => {
+  vi.spyOn(api, 'listSessions').mockResolvedValue(sessions);
+  const end = vi.spyOn(api, 'endSession').mockResolvedValue();
+  await loadSessions();
+  await endSession('s1');
+  expect(logoutUser).toHaveBeenCalled();
+  expect(end).not.toHaveBeenCalled();
+  await endSession('s3');
+  expect(end).toHaveBeenCalledWith('s3');
+});
+
+it('signs out everywhere else', async () => {
+  vi.spyOn(api, 'listSessions').mockResolvedValue(sessions);
+  const others = vi.spyOn(api, 'endOtherSessions').mockResolvedValue();
+  dispose?.();
+  document.body.innerHTML = '';
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  dispose = render(() => <SettingsModal />, host);
+  await flush();
+  button('Sign out everywhere else').click();
+  await flush();
+  expect(others).toHaveBeenCalled();
 });

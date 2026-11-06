@@ -1,5 +1,8 @@
 export type Role = 'admin' | 'moderator' | 'member';
 
+/** One signed-in device of the current user. */
+export type DeviceSession = { id: string; device_name: string | null; created_at: number; last_seen_at: number; current: boolean };
+
 export interface User {
   id: string;
   username: string;

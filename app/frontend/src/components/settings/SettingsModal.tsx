@@ -3,7 +3,7 @@ import { api } from '../../services/api';
 import { currentUser, logoutUser } from '../../stores/authStore';
 import { channels } from '../../stores/chatStore';
 import {
-  deleteAvatar, profileMessage, profileOpen, saveDisplayName, savePassword, saveStatus, setProfileMessage, setProfileOpen, STATUS_TEXT_MAX,
+  deleteAvatar, endOtherSessions, endSession, loadSessions, profileMessage, profileOpen, saveDisplayName, savePassword, saveStatus, setProfileMessage, setProfileOpen, sessions, STATUS_TEXT_MAX,
 } from '../../stores/profileStore';
 import { presence, statusTexts } from '../../stores/sessionStore';
 import {
@@ -13,6 +13,7 @@ import { availableUpdate, setAvailableUpdate } from '../../stores/updateStore';
 import { activeVoiceChannel } from '../../stores/voiceStore';
 import type { UserStatus } from '../../types';
 import { Avatar, Button, Field, Icon, type IconName, Modal, pushToast, Slider, Toggle } from '../../ui';
+import { clock, dayLabel } from '../chat/chatFormat';
 import { passwordStrength } from '../../ui/passwordStrength';
 import { AvatarCropDialog, checkAvatarFile } from './AvatarCropDialog';
 import { t } from '../../i18n';
@@ -56,6 +57,7 @@ function ProfilePage() {
   const [again, setAgain] = createSignal('');
   const [text, setText] = createSignal(me()?.id ? statusTexts()[me()!.id] ?? '' : '');
   let picker: HTMLInputElement | undefined;
+  onMount(() => void loadSessions());
 
   const myStatus = (): UserStatus => {
     const id = me()?.id;
@@ -131,6 +133,24 @@ function ProfilePage() {
         <span class="t3 fs12">{t('Changing the password signs you out on your other devices.')}</span>
         <div class="row" style={{ 'justify-content': 'flex-end' }}><Button type="submit" variant="secondary" disabled={!current() || !next() || next() !== again()}>{t('Change password')}</Button></div>
       </form>
+
+      <div class="col g12">
+        <span class="field-label">{t('Devices')}</span>
+        <For each={sessions()}>
+          {(device) => (
+            <div class="setrow">
+              <div class="col grow">
+                <strong class="fs13">{device.device_name ?? t('Unknown device')}<Show when={device.current}> · {t('This computer')}</Show></strong>
+                <span class="t3 fs12">{t('Last active {when}', { when: `${dayLabel(device.last_seen_at)}, ${clock(device.last_seen_at)}` })}</span>
+              </div>
+              <Button size="sm" variant="secondary" onClick={() => void endSession(device.id)}>{t('End')}</Button>
+            </div>
+          )}
+        </For>
+        <Show when={sessions().some((device) => !device.current)}>
+          <div class="row" style={{ 'justify-content': 'flex-end' }}><Button variant="secondary" onClick={() => void endOtherSessions()}>{t('Sign out everywhere else')}</Button></div>
+        </Show>
+      </div>
 
       <div class="row g12 between">
         <span class="t3 fs12">{t('Signed in as')} <strong class="t2">{me()?.username}</strong></span>

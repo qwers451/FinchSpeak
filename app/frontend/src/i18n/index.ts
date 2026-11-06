@@ -19,6 +19,8 @@ export const ru: Readonly<Record<string, string>> = {
   'Online': 'В сети', 'Idle': 'Неактивен', 'Do not disturb': 'Не беспокоить', 'Status text': 'Текст статуса', 'In a meeting, back at 5': 'На встрече, вернусь в 17:00',
   'Set': 'Установить', 'Change password': 'Изменить пароль', 'Current password': 'Текущий пароль', 'New password': 'Новый пароль', 'Repeat the new password': 'Повторите новый пароль',
   'The passwords do not match': 'Пароли не совпадают', 'Changing the password signs you out on your other devices.': 'После смены пароля на других устройствах потребуется войти снова.',
+  'Devices': 'Устройства', 'This computer': 'Этот компьютер', 'Unknown device': 'Неизвестное устройство', 'Last active {when}': 'Был активен {when}',
+  'End': 'Завершить', 'Sign out everywhere else': 'Выйти на всех остальных устройствах',
   'Signed in as': 'Вы вошли как', 'Log out': 'Выйти', 'Mentions': 'Упоминания', 'A notification when someone mentions you, even if the window is in the background.': 'Уведомлять, когда вас упоминают, даже если окно свёрнуто.',
   'Every message': 'Каждое сообщение', 'Also for channels you are not looking at.': 'В том числе в каналах, которые сейчас не открыты.',
   'Someone joins my voice room': 'Кто-то вошёл в мою голосовую комнату', 'Sounds': 'Звуки', 'A short tone for mentions and for people joining.': 'Короткий сигнал при упоминании и входе участников.',

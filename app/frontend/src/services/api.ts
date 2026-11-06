@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { AuditEntry, Role, SearchHit, ServerOverview, UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
+import type { AuditEntry, DeviceSession, Role, SearchHit, ServerOverview, UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -263,6 +263,25 @@ export const api = {
       return invoke('change_password', { currentPassword, newPassword });
     }
     throw new Error('Password changes need the desktop app');
+  },
+
+  listSessions: async (): Promise<DeviceSession[]> => {
+    if (isTauri()) {
+      return invoke('list_sessions');
+    }
+    return [];
+  },
+
+  endSession: async (sessionId: string): Promise<void> => {
+    if (isTauri()) {
+      return invoke('end_session', { sessionId });
+    }
+  },
+
+  endOtherSessions: async (): Promise<void> => {
+    if (isTauri()) {
+      return invoke('end_other_sessions');
+    }
   },
 
   // Voice

@@ -1,9 +1,9 @@
 import { createSignal } from 'solid-js';
 import { api } from '../services/api';
-import { currentUser, setCurrentUser } from './authStore';
+import { currentUser, logoutUser, setCurrentUser } from './authStore';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
-import type { UserStatus } from '../types';
+import type { DeviceSession, UserStatus } from '../types';
 import { describeError } from '../i18n/errors';
 
 export const [profileOpen, setProfileOpen] = createSignal(false);
@@ -33,6 +33,43 @@ export async function savePassword(current: string, next: string, again: string)
     setAppError(describeError(err));
     return false;
   }
+}
+
+export const [sessions, setSessions] = createSignal<DeviceSession[]>([]);
+
+/** Fetch the signed-in devices of this account. */
+export async function loadSessions(): Promise<DeviceSession[]> {
+  try {
+    const list = await api.listSessions();
+    setSessions(list);
+    return list;
+  } catch (err) {
+    setAppError(describeError(err));
+    return sessions();
+  }
+}
+
+/** Sign one device out; for this computer that is a normal log out. */
+export async function endSession(id: string): Promise<void> {
+  if (sessions().find((s) => s.id === id)?.current) {
+    await logoutUser();
+    return;
+  }
+  try {
+    await api.endSession(id);
+  } catch (err) {
+    setAppError(describeError(err));
+  }
+  await loadSessions();
+}
+
+export async function endOtherSessions(): Promise<void> {
+  try {
+    await api.endOtherSessions();
+  } catch (err) {
+    setAppError(describeError(err));
+  }
+  await loadSessions();
 }
 
 export const STATUS_TEXT_MAX = 80;

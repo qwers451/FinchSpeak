@@ -1,6 +1,6 @@
 //! Authentication and session management commands.
 
-use finch_client_core::api::{resolve_quic_addr_with_port, ApiClient, AuthResponse};
+use finch_client_core::api::{resolve_quic_addr_with_port, ApiClient, AuthResponse, SessionDto};
 use finch_client_core::error::ClientError;
 use tauri::{AppHandle, Emitter, State};
 use std::sync::atomic::Ordering;
@@ -72,8 +72,9 @@ async fn trusted_api(
 }
 
 async fn trusted_api_with(server_url: &str, state: &AppState, emit: Emit<'_>) -> Result<ApiClient, String> {
-    let api = ApiClient::with_tofu(server_url, state.saved_fingerprints.clone())
+    let mut api = ApiClient::with_tofu(server_url, state.saved_fingerprints.clone())
         .map_err(|e| format!("Invalid server address: {e}"))?;
+    api.set_device_name(std::env::var("COMPUTERNAME").ok());
     match api.verify_trust().await {
         Ok(()) => Ok(api),
         Err(ClientError::UntrustedServer { hostname, fingerprint }) => {
@@ -236,6 +237,25 @@ pub async fn resume_session(
         return Ok(None);
     };
     finish_sign_in(api, auth, &server_url, &state, app_handle).await.map(Some)
+}
+
+async fn signed_in_api(state: &AppState) -> Result<ApiClient, String> {
+    state.api.read().await.clone().ok_or_else(|| "Not authenticated".to_string())
+}
+
+#[tauri::command]
+pub async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionDto>, String> {
+    signed_in_api(&state).await?.list_sessions().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn end_session(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    signed_in_api(&state).await?.end_session(&session_id).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn end_other_sessions(state: State<'_, AppState>) -> Result<(), String> {
+    signed_in_api(&state).await?.end_other_sessions().await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
