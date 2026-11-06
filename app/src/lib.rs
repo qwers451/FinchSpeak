@@ -98,9 +98,19 @@ fn on_run_event(app: &AppHandle, event: RunEvent) {
     }
     let state = app.state::<AppState>().inner().clone();
     let app = app.clone();
+    // Last resort: a blocking step that never reaches an await point must not keep the app alive.
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        std::process::exit(0);
+    });
     tauri::async_runtime::spawn(async move {
         connection::shutdown_session(&state).await;
         QUIT_CLEANUP_DONE.store(true, Ordering::SeqCst);
+        if let Some(installer) = updater::take_installer() {
+            if let Err(e) = std::process::Command::new(&installer).spawn() {
+                tracing::error!("Could not start the installer: {e}");
+            }
+        }
         app.exit(0);
     });
 }
@@ -183,7 +193,6 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                use std::sync::atomic::Ordering;
                 // The close button always keeps FinchSpeak running in the tray; only the tray's Quit really closes.
                 let state = window.app_handle().state::<AppState>();
                 if !state.quitting.load(Ordering::SeqCst) {

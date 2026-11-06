@@ -92,6 +92,22 @@ pub fn offer(current: &str, manifest: &Manifest) -> Option<(UpdateInfo, Platform
     Some((UpdateInfo { version: manifest.version.trim_start_matches('v').to_string(), notes: manifest.notes.clone() }, entry))
 }
 
+/// The installer to start once FinchSpeak has shut down. An installer may close a running app,
+/// so it must not start while the shutdown is still leaving the voice room.
+static PENDING_INSTALLER: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+/// Remember the installer that the exit path starts.
+pub fn queue_installer(path: std::path::PathBuf) {
+    if let Ok(mut slot) = PENDING_INSTALLER.lock() {
+        *slot = Some(path);
+    }
+}
+
+/// The queued installer, handed over once.
+pub fn take_installer() -> Option<std::path::PathBuf> {
+    PENDING_INSTALLER.lock().ok().and_then(|mut slot| slot.take())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +194,17 @@ mod tests {
         let json = r#"{"version":"1.0.1","notes":"n","pub_date":"2026-01-01T00:00:00Z","platforms":{"windows-x86_64":{"signature":"abc","url":"https://github.com/a/b/c.exe"}}}"#;
         let parsed: Manifest = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.platforms[PLATFORM].url, "https://github.com/a/b/c.exe");
+    }
+}
+
+#[cfg(test)]
+mod installer_queue_tests {
+    use super::*;
+
+    #[test]
+    fn a_queued_installer_is_taken_once() {
+        queue_installer(std::path::PathBuf::from("setup.exe"));
+        assert_eq!(take_installer(), Some(std::path::PathBuf::from("setup.exe")));
+        assert_eq!(take_installer(), None);
     }
 }

@@ -34,6 +34,10 @@ const QUIT_CLOSE_FLUSH: Duration = Duration::from_millis(250);
 /// and bounded by `QUIT_BOUND`, whatever the network or a stuck voice transition does.
 pub async fn shutdown_session(state: &AppState) {
     let routine = async {
+        // Stop any reconnect first: the close below must not bring the session back. Lock-free on
+        // purpose, so a stuck voice transition cannot hold this up.
+        state.session_generation.fetch_add(1, Ordering::SeqCst);
+        *state.last_connect.write().await = None;
         if state.current_voice_channel.read().await.is_some() {
             if tokio::time::timeout(QUIT_LEAVE_BOUND, crate::commands::voice::leave_room(state)).await.is_err() {
                 warn!("Leaving the voice room timed out while quitting");
@@ -800,10 +804,18 @@ mod tests {
         let (_, alice_short) = alice.join_voice().await?;
         bob.join_voice().await?;
         let alice_peer = alice.session.session_peer_id;
+        let alice_user = alice.session.user_id;
         let state = AppState::new();
         *state.control_tx.write().await = Some(alice.session.control_tx.clone());
         *state.quic_connection.write().await = Some(alice.session.connection.clone());
         *state.current_voice_channel.write().await = Some(alice_short);
+        *state.last_connect.write().await = Some(ConnectParams {
+            quic_addr: server.quic_addr,
+            hostname: "localhost".to_string(),
+            token: String::new(),
+            require_known_fingerprint: false,
+        });
+        let generation = state.session_generation.load(Ordering::SeqCst);
 
         let started = Instant::now();
         shutdown_session(&state).await;
@@ -814,6 +826,12 @@ mod tests {
         .await?;
         assert!(started.elapsed() < Duration::from_secs(1), "quit must not wait for the 15 s idle timeout");
         assert!(state.quic_connection.read().await.is_none());
+        assert_ne!(state.session_generation.load(Ordering::SeqCst), generation, "quit must stop the reconnect loop");
+        assert!(state.last_connect.read().await.is_none(), "quit must forget the session to reconnect to");
+        bob.expect_no_control(Duration::from_secs(1), |m| {
+            matches!(m, ServerMessage::PresenceUpdate { user_id, status: finch_protocol::models::UserStatus::Online, .. } if *user_id == alice_user)
+        })
+        .await?;
         Ok(())
     }
 
