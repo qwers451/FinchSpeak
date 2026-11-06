@@ -40,7 +40,14 @@ export function myStatus(): UserStatus {
 /** Signed-in devices of the current account; cleared with the rest of the session on sign-out. */
 export const [sessions, setSessions] = createSignal<DeviceSession[]>([]);
 
+// Bumped on every sign-out: a request started before it must not fill the state of the next session.
+let sessionGeneration = 0;
+export function currentSessionGeneration(): number {
+  return sessionGeneration;
+}
+
 export function resetSessionState() {
+  sessionGeneration++;
   resetMicPreview();
   setSessions([]);
   setConnectionStatus('disconnected');

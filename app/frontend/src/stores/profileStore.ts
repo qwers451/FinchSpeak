@@ -1,7 +1,7 @@
 import { createSignal } from 'solid-js';
 import { api } from '../services/api';
 import { currentUser, logoutUser, setCurrentUser } from './authStore';
-import { sessions, setSessions } from './sessionStore';
+import { currentSessionGeneration, sessions, setSessions } from './sessionStore';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
 import type { DeviceSession, UserStatus } from '../types';
@@ -40,8 +40,13 @@ export { sessions };
 
 /** Fetch the signed-in devices of this account. */
 export async function loadSessions(): Promise<DeviceSession[]> {
+  const owner = currentUser()?.id ?? null;
+  const generation = currentSessionGeneration();
+  // A reply that arrives after a sign-out or for another account is not this account's device list.
+  const stillOwner = () => owner !== null && currentUser()?.id === owner && currentSessionGeneration() === generation;
   try {
     const list = await api.listSessions();
+    if (!stillOwner()) return sessions();
     setSessions(list);
     return list;
   } catch (err) {
