@@ -1,14 +1,13 @@
-import { createSignal } from 'solid-js';
 import { api } from '../services/api';
 import { currentUser, logoutUser, setCurrentUser } from './authStore';
 import { currentSessionGeneration, sessions, setSessions } from './sessionStore';
+import { setProfileMessage, setProfileOpen } from './profileState';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
 import type { DeviceSession, UserStatus } from '../types';
 import { describeError } from '../i18n/errors';
 
-export const [profileOpen, setProfileOpen] = createSignal(false);
-export const [profileMessage, setProfileMessage] = createSignal<string | null>(null);
+export { profileOpen, setProfileOpen, profileMessage, setProfileMessage } from './profileState';
 
 export async function saveDisplayName(name: string): Promise<boolean> {
   try {
@@ -58,6 +57,8 @@ export async function loadSessions(): Promise<DeviceSession[]> {
 /** Sign one device out; for this computer that is a normal log out. */
 export async function endSession(id: string): Promise<void> {
   if (sessions().find((s) => s.id === id)?.current) {
+    setProfileOpen(false);
+    setProfileMessage(null);
     await logoutUser();
     return;
   }

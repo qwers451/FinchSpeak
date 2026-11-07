@@ -9,6 +9,7 @@ import { setSessionEnded } from './sessionEnd';
 import { pendingMismatch, pendingTofu, setPendingMismatch, setPendingTofu } from './tofuStore';
 import { describeError } from '../i18n/errors';
 import { setPendingInvite } from './inviteLink';
+import { setProfileMessage, setProfileOpen } from './profileState';
 
 export const [currentUser, setCurrentUser] = createSignal<User | null>(null);
 const REMEMBER_KEY = 'finchspeak.login';
@@ -224,6 +225,8 @@ export async function logoutUser() {
   setPendingMismatch(null);
   setSessionEnded(null);
   setPendingInvite(null);
+  setProfileOpen(false);
+  setProfileMessage(null);
   setCurrentUser(null);
   // A token the server already revoked (401) is signed out all the same: nothing is left to end.
   if (failure && !/\bHTTP 401\b/.test(String(failure))) setAppError(describeError(failure));

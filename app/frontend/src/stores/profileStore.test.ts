@@ -1,8 +1,8 @@
 import { expect, it, vi } from 'vitest';
 import { api } from '../services/api';
 import { currentUser, logoutUser, setCurrentUser } from './authStore';
-import { loadSessions } from './profileStore';
-import { sessions } from './sessionStore';
+import { endSession, loadSessions } from './profileStore';
+import { sessions, setSessions } from './sessionStore';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -48,5 +48,29 @@ it('a late device list does not refill the list after sign-out', async () => {
   lateA.resolve([deviceA]);
   await pendingA;
   expect(sessions()).toEqual([]);
+  vi.restoreAllMocks();
+});
+
+it('ending this computer from the device list closes the profile and its old message', async () => {
+  const { endSession, profileOpen, setProfileOpen, profileMessage, setProfileMessage } = await import('./profileStore');
+  setCurrentUser(alice);
+  setSessions([deviceB]);
+  setProfileOpen(true);
+  setProfileMessage('Password changed. Other devices are signed out.');
+  vi.spyOn(api, 'logout').mockResolvedValue();
+  await endSession(deviceB.id);
+  expect(currentUser()).toBeNull();
+  expect(profileOpen()).toBe(false);
+  expect(profileMessage()).toBeNull();
+  vi.restoreAllMocks();
+});
+
+it('a sign-out clears the profile message', async () => {
+  const { profileMessage, setProfileMessage } = await import('./profileStore');
+  setCurrentUser(alice);
+  setProfileMessage('Name changed.');
+  vi.spyOn(api, 'logout').mockResolvedValue();
+  await logoutUser();
+  expect(profileMessage()).toBeNull();
   vi.restoreAllMocks();
 });
