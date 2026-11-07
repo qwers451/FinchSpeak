@@ -1,7 +1,7 @@
 import { createEffect, createSignal, For, onCleanup, Show, untrack } from 'solid-js';
 import { appError, setAppError } from '../stores/notificationStore';
 import { Icon, type IconName } from './Icon';
-import { dismissToast, pauseToast, resumeToast, pushToast, toasts, type Toast, type ToastKind } from './toastStore';
+import { dismissToast, pauseToast, resumeToast, pushToast, toastRevision, toasts, type Toast, type ToastKind } from './toastStore';
 import { t } from '../i18n';
 
 const ICON: Record<ToastKind, IconName> = { info: 'info', success: 'check', warn: 'warn', error: 'warn' };
@@ -72,8 +72,10 @@ export function ToastHost() {
                     disabled={!active(toast.id)}
                     onClick={() => {
                       if (!active(toast.id)) return;
+                      const revision = toastRevision(toast.id);
                       action().run();
-                      dismissToast(toast.id);
+                      // An identical re-push maps to this same id: keep the toast when the action raised it again.
+                      if (toastRevision(toast.id) === revision) dismissToast(toast.id);
                     }}
                   >
                     {t(action().label)}

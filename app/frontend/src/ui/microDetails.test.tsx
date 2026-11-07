@@ -51,12 +51,21 @@ it('keeps the exit visual under the test runner: motion is not switched by MODE'
  vi.advanceTimersByTime(139); expect(host.querySelector('.toast')).not.toBeNull();
  vi.advanceTimersByTime(1); expect(host.querySelector('.toast')).toBeNull();
 });
-it('runs the toast action before closing it, so a re-pushed identical toast dedupes',()=>{
+it('runs the toast action before closing it',()=>{
  vi.useFakeTimers(); const host=mount(()=> <ToastHost/>);
- let seen=-1, again=-1;
- const id=pushToast({title:'Saved', action:{label:'Retry', run:()=>{ seen=toasts().length; again=pushToast({title:'Saved'}); }}});
+ let seen=-1;
+ pushToast({title:'Saved', action:{label:'Retry', run:()=>{ seen=toasts().length; }}});
  (host.querySelector('.link-btn') as HTMLButtonElement).click();
- expect(seen).toBe(1); expect(again).toBe(id); expect(toasts()).toHaveLength(0);
+ expect(seen).toBe(1); expect(toasts()).toHaveLength(0);
+});
+it('an action that re-pushes the same message keeps that toast visible',()=>{
+ vi.useFakeTimers(); const host=mount(()=> <ToastHost/>);
+ let again=-1;
+ const id=pushToast({title:'Saved', action:{label:'Retry', run:()=>{ again=pushToast({title:'Saved'}); }}});
+ (host.querySelector('.link-btn') as HTMLButtonElement).click();
+ expect(again).toBe(id); expect(toasts()).toHaveLength(1);
+ expect(host.querySelector('.toast')?.hasAttribute('data-exiting')).toBe(false);
+ expect(host.querySelector('.toast')).not.toBeNull();
 });
 it('a new identical toast survives the previous visual exit timer',()=>{
  vi.stubEnv('MODE','development'); vi.useFakeTimers(); const host=mount(()=> <ToastHost/>);

@@ -11,6 +11,8 @@ export interface Toast {
   action?: { label: string; run: () => void };
   /** Milliseconds until it closes by itself; errors stay until dismissed. */
   ttl: number | null;
+  /** Bumped every time the same message is pushed again while this toast is shown. */
+  revision: number;
 }
 
 /** At most this many are visible; the oldest give way. */
@@ -41,6 +43,11 @@ export function resumeToast(id: number, reason: 'pointer' | 'focus') {
   scheduleToast(id, timer);
 }
 
+/** Current revision of a shown toast, or undefined once it is gone. */
+export function toastRevision(id: number): number | undefined {
+  return toasts().find((toast) => toast.id === id)?.revision;
+}
+
 export function dismissToast(id: number) {
   clearTimeout(timers.get(id)?.handle);
   timers.delete(id);
@@ -58,9 +65,12 @@ export function pushToast(input: {
   const ttl = input.sticky || kind === 'error' ? null : DEFAULT_TTL_MS;
   // The same message twice in a row is one toast, not two.
   const duplicate = toasts().find((toast) => toast.kind === kind && toast.title === input.title && toast.text === input.text);
-  if (duplicate) return duplicate.id;
+  if (duplicate) {
+    setToasts((list) => list.map((toast) => (toast.id === duplicate.id ? { ...toast, revision: toast.revision + 1 } : toast)));
+    return duplicate.id;
+  }
 
-  const toast: Toast = { id: nextId++, kind, title: input.title, text: input.text, action: input.action, ttl };
+  const toast: Toast = { id: nextId++, kind, title: input.title, text: input.text, action: input.action, ttl, revision: 0 };
   const next = [...toasts(), toast];
   for (const dropped of next.slice(0, Math.max(0, next.length - MAX_TOASTS))) {
     clearTimeout(timers.get(dropped.id)?.handle);
