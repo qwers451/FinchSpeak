@@ -28,6 +28,9 @@ export function ViewerPanel() {
 }
 
 function Viewer(props: { peerId: number; userId: string }) {
+  // The share this panel subscribed to; it unsubscribes only while that is still what we watch.
+  const ownUserId = props.userId;
+  const ownPeerId = props.peerId;
   let canvas: HTMLCanvasElement | undefined;
   let frame: HTMLDivElement | undefined;
   let decoder: VideoDecoder | null = null;
@@ -147,6 +150,9 @@ function Viewer(props: { peerId: number; userId: string }) {
     clearTimeout(hudTimer);
     if (decoder && decoder.state !== 'closed') decoder.close();
     if (document.fullscreenElement === frame) void document.exitFullscreen();
+    // Closing the panel must not leave the sharer's sound and picture subscribed.
+    const current = watching();
+    if (current && current.user_id === ownUserId && current.peer_id === ownPeerId) void stopWatching();
   });
 
   const toggleFullscreen = async () => {

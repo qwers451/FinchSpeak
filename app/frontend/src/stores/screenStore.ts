@@ -74,12 +74,19 @@ export function closeEndedShare() {
   setEndedShare(null);
 }
 
+/** The share we watch is over: say so, and tell the server to stop forwarding it to us. */
+function endWatching(watched: { user_id: string; peer_id: number }, reason: string | undefined) {
+  const name = allVoiceParticipants().find((participant) => participant.peer_id === watched.peer_id)?.username ?? t('The sharer');
+  setEndedShare({ user_id: watched.user_id, peer_id: watched.peer_id, name, reason: endReasonFromServer(reason) });
+  setWatching(null);
+  // Best effort: the backend has already stopped watching; this only stops the server's forwarding.
+  api.unsubscribeScreenShare(watched.user_id).catch(() => undefined);
+}
+
 function noteEnded(peerId: number, reason: string | undefined) {
   const watched = watching();
   if (!watched || watched.peer_id !== peerId) return;
-  const name = allVoiceParticipants().find((participant) => participant.peer_id === peerId)?.username ?? t('The sharer');
-  setEndedShare({ user_id: watched.user_id, peer_id: peerId, name, reason: endReasonFromServer(reason) });
-  setWatching(null);
+  endWatching(watched, reason);
 }
 
 const markSharing = (peerId: number, sharing: boolean) =>
@@ -90,8 +97,9 @@ export const screenHandlers: Pick<{ [K in keyof SessionEvents]: (payload: Sessio
   'screen-share-started' | 'screen-share-stopped' | 'screen-share-ended' | 'screen-audio-failed' | 'screen-audio-source'> = {
   'screen-share-started': (data) => {
     markSharing(data.peer_id, true);
-    // The share we watch restarted, perhaps under a new peer id: keep following it.
-    if (watching()?.user_id === data.user_id) setWatching({ user_id: data.user_id, peer_id: data.peer_id });
+    // The share we watch restarted under a new peer id: it is not followed, watching ends.
+    const watched = watching();
+    if (watched && watched.user_id === data.user_id && watched.peer_id !== data.peer_id) endWatching(watched, undefined);
   },
   'screen-share-stopped': (data) => {
     noteEnded(data.peer_id, data.reason);

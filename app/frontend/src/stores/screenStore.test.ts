@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { t } from '../i18n';
 import { api } from '../services/api';
 import { appError, setAppError } from './notificationStore';
-import { screenAudioSource, isSharing, loadScreenSources, screenAudioKey, screenSources, sharingInfo, startSharing, stopSharing, stopWatching, watchShare, watching } from './screenStore';
+import { endedShare, screenAudioSource, isSharing, loadScreenSources, screenAudioKey, screenSources, sharingInfo, startSharing, stopSharing, stopWatching, watchShare, watching } from './screenStore';
 import { sessionHandlers, resetSessionState } from './sessionStore';
 import { allVoiceParticipants, setVoiceParticipants } from './voiceStore';
 
@@ -106,19 +106,39 @@ it('AUD-018 after a reconnect the watched share continues if its sharer is still
   expect(watching()).toEqual({ user_id: 'alice', peer_id: 33 });
 });
 
-it('AUD-018 after a reconnect a share that ended meanwhile is closed', async () => {
+it('AUD-018 after a reconnect a share that ended meanwhile is closed, and the server stops forwarding it', async () => {
   vi.spyOn(api, 'subscribeScreenShare').mockResolvedValue();
+  const unsubscribe = vi.spyOn(api, 'unsubscribeScreenShare').mockResolvedValue();
   await watchShare('alice', 20);
   sessionHandlers['connection-lost']('network down');
   sessionHandlers.authenticated(snapshot([{ user_id: 'alice', peer_id: 20, sharing_screen: false }]));
   expect(watching()).toBeNull();
+  expect(unsubscribe).toHaveBeenCalledWith('alice');
 });
 
-it('AUD-018 a restarted share keeps being watched under its new peer id', async () => {
+it('AUD-018 watching ends on both sides when the share ends, and a restarted share is not followed', async () => {
+  const subscribe = vi.spyOn(api, 'subscribeScreenShare').mockResolvedValue();
+  const unsubscribe = vi.spyOn(api, 'unsubscribeScreenShare').mockResolvedValue();
+  sessionHandlers['screen-share-started']({ user_id: 'alice', peer_id: 20, width: 1280, height: 720, fps: 30 });
+  await watchShare('alice', 20);
+  sessionHandlers['screen-share-stopped']({ peer_id: 20 });
+  expect(watching()).toBeNull();
+  expect(endedShare()).toMatchObject({ user_id: 'alice', peer_id: 20 });
+  expect(unsubscribe).toHaveBeenCalledWith('alice');
+
+  sessionHandlers['screen-share-started']({ user_id: 'alice', peer_id: 44, width: 1280, height: 720, fps: 30 });
+  expect(watching()).toBeNull();
+  expect(subscribe).toHaveBeenCalledTimes(1);
+  expect(unsubscribe).toHaveBeenCalledTimes(1);
+});
+
+it('AUD-018 a share that restarts under a new peer id while watched ends the watch instead of following it', async () => {
   vi.spyOn(api, 'subscribeScreenShare').mockResolvedValue();
+  const unsubscribe = vi.spyOn(api, 'unsubscribeScreenShare').mockResolvedValue();
   await watchShare('alice', 20);
   sessionHandlers['screen-share-started']({ user_id: 'alice', peer_id: 44, width: 1280, height: 720, fps: 30 });
-  expect(watching()).toEqual({ user_id: 'alice', peer_id: 44 });
+  expect(watching()).toBeNull();
+  expect(unsubscribe).toHaveBeenCalledWith('alice');
 });
 
 it('AUD-018 the snapshot tells a late joiner who is already sharing', () => {

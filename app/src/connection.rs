@@ -215,14 +215,9 @@ async fn forward_events(
                     | ServerMessage::UserJoinedVoice { peer_id, .. } => {
                         state.mixer.lock().await.remove_speaker(*peer_id);
                     }
-                    ServerMessage::ScreenShareStopped { peer_id, .. } => {
-                        state.mixer.lock().await.retire_stream(finch_audio::screen_audio_key(*peer_id));
-                    }
                     _ => {}
                 }
-                if let ServerMessage::ScreenShareStarted { user_id, peer_id, .. } = &msg {
-                    follow_watched_share(state, *user_id, *peer_id).await;
-                }
+                track_watched_share(state, &msg).await;
                 emit_control(msg, app_handle)
             }
             SessionEvent::Datagram(bytes) => route_datagram(bytes, state, app_handle).await,
@@ -553,14 +548,24 @@ async fn route_datagram(bytes: Bytes, state: &AppState, app_handle: &tauri::AppH
     }
 }
 
-/// The share we watch (re)started, perhaps under a new peer id: follow it and subscribe again.
-async fn follow_watched_share(state: &AppState, user_id: uuid::Uuid, peer_id: u32) {
-    if *state.viewing_user.read().await != Some(user_id) {
-        return;
+/// Watching ends when the share we watch ends: the sharer stopping, or the same share starting
+/// again under a new peer id. Nothing follows a new share; the user has to press "Watch" again.
+async fn track_watched_share(state: &AppState, msg: &ServerMessage) {
+    match msg {
+        ServerMessage::ScreenShareStopped { peer_id, .. } => {
+            state.mixer.lock().await.retire_stream(finch_audio::screen_audio_key(*peer_id));
+            if state.viewing_peer.load(Ordering::SeqCst) == *peer_id {
+                state.stop_watching().await;
+            }
+        }
+        ServerMessage::ScreenShareStarted { user_id, peer_id, .. } => {
+            let watched = *state.viewing_user.read().await == Some(*user_id);
+            if watched && state.viewing_peer.load(Ordering::SeqCst) != *peer_id {
+                state.stop_watching().await;
+            }
+        }
+        _ => {}
     }
-    state.viewing_peer.store(peer_id, Ordering::SeqCst);
-    *state.screen_viewer.lock().await = ScreenViewer::new();
-    resubscribe(state).await;
 }
 
 /// Ask the server for the share we are watching again (after a reconnect or a restarted share).
@@ -642,6 +647,7 @@ pub fn spawn_sleep_watch(state: AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use finch_protocol::models::{ShareEndReason, VideoCodec};
     use finch_testbed::{client::TestClient, server::TestServer};
 
     #[test]
@@ -765,7 +771,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn aud018_viewer_follows_a_share_that_restarts_under_a_new_peer() {
+    async fn aud018_watching_ends_with_the_share_and_a_restarted_share_is_not_followed() {
         let state = AppState::new();
         let (tx, mut rx) = mpsc::channel(8);
         *state.control_tx.write().await = Some(tx);
@@ -774,17 +780,38 @@ mod tests {
         state.viewing_peer.store(5, Ordering::SeqCst);
 
         // Someone else's share is none of our business.
-        follow_watched_share(&state, uuid::Uuid::new_v4(), 99).await;
+        track_watched_share(&state, &ServerMessage::ScreenShareStarted {
+            user_id: uuid::Uuid::new_v4(), peer_id: 99, codec: VideoCodec::H264, width: 64, height: 64, fps: 30,
+        }).await;
         assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 5);
         assert!(rx.try_recv().is_err());
 
-        // Alice's share starts again, now as peer 7: follow it and subscribe again.
-        follow_watched_share(&state, alice, 7).await;
-        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 7);
-        assert!(matches!(
-            rx.try_recv(),
-            Ok(ClientMessage::SubscribeScreenShare { target_user_id }) if target_user_id == alice
-        ));
+        // Alice's share ends: watching ends here as it does in the UI.
+        track_watched_share(&state, &ServerMessage::ScreenShareStopped { peer_id: 5, reason: ShareEndReason::Stopped }).await;
+        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 0);
+        assert!(state.viewing_user.read().await.is_none());
+
+        // Alice starts sharing again as peer 7: nobody subscribes and no media of hers is accepted.
+        track_watched_share(&state, &ServerMessage::ScreenShareStarted {
+            user_id: alice, peer_id: 7, codec: VideoCodec::H264, width: 64, height: 64, fps: 30,
+        }).await;
+        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 0);
+        assert!(state.viewing_user.read().await.is_none());
+        assert!(!is_watching(&state, &MediaHeader::new_audio(1, 7, 0, 0, false, false)));
+        assert!(rx.try_recv().is_err(), "a new share is only watched after a click");
+    }
+
+    #[tokio::test]
+    async fn aud018_a_restarted_share_under_a_new_peer_ends_the_watch() {
+        let state = AppState::new();
+        let alice = uuid::Uuid::new_v4();
+        *state.viewing_user.write().await = Some(alice);
+        state.viewing_peer.store(5, Ordering::SeqCst);
+        track_watched_share(&state, &ServerMessage::ScreenShareStarted {
+            user_id: alice, peer_id: 7, codec: VideoCodec::H264, width: 64, height: 64, fps: 30,
+        }).await;
+        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 0);
+        assert!(state.viewing_user.read().await.is_none());
     }
 
     #[tokio::test]

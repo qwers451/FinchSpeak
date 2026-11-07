@@ -14,6 +14,7 @@ import { currentUser, setCurrentUser } from './authStore';
 import { resetScreenState, resetScreenStateOnDisconnect, setWatching, watching } from './screenState';
 import { screenHandlers } from './screenStore';
 import { applySavedVolume } from './volumeStore';
+import { api } from '../services/api';
 import { pushToast } from '../ui/toastStore';
 export { appError, setAppError } from './notificationStore';
 
@@ -87,7 +88,11 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     if (watched) {
       const sharer = data.initial_state.voice_states.find((state) => state.user_id === watched.user_id && state.sharing_screen);
       if (sharer) setWatching({ user_id: watched.user_id, peer_id: sharer.peer_id });
-      else setWatching(null);
+      else {
+        // The share ended while we were away: watching ends here too, so the server stops forwarding it.
+        setWatching(null);
+        api.unsubscribeScreenShare(watched.user_id).catch(() => undefined);
+      }
     }
   },
   'new-message': (incoming) => {
