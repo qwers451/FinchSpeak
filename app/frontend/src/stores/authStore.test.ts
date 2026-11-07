@@ -1,6 +1,7 @@
-import { expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../services/api';
-import { currentUser, logoutUser, setCurrentUser } from './authStore';
+import { __resetResumeForTests, currentUser, logoutUser, setCurrentUser } from './authStore';
+
 import { appError } from './notificationStore';
 import { sessions } from './profileStore';
 import { setSessions } from './sessionStore';
@@ -118,7 +119,19 @@ it('an unreachable server during the automatic resume is retried with backoff', 
   vi.useRealTimers();
 });
 
+it('a channel load still pending when a test ends does not block the next resume', async () => {
+  const { resumeLastSession, setRememberedUsername } = await import('./authStore');
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  vi.spyOn(api, 'resumeSession').mockResolvedValue(alice);
+  vi.spyOn(api, 'listChannels').mockReturnValue(new Promise(() => {}));
+  void resumeLastSession();
+  await settle();
+  vi.restoreAllMocks();
+});
+
 it('the automatic resume gives up after four retries', async () => {
+
   vi.useFakeTimers();
   const { resumeLastSession, setRememberedUsername } = await import('./authStore');
   setCurrentUser(null);
@@ -237,7 +250,19 @@ it('Retry while an automatic resume is in flight does not start a second resume'
   vi.restoreAllMocks();
 });
 
+// Every resume test here gets a channel list from the mock, never the real server; the reset hook
+// forgets a resume that a test left running, so the next test starts clean.
+beforeEach(() => {
+  vi.spyOn(api, 'listChannels').mockResolvedValue([]);
+});
+afterEach(() => {
+  __resetResumeForTests();
+  setCurrentUser(null);
+  vi.useRealTimers();
+});
+
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 const alice = { id: 'alice', username: 'alice', display_name: 'Alice', role: 'member' as const };
 const bob = { id: 'bob', username: 'bob', display_name: 'Bob', role: 'member' as const };
 
