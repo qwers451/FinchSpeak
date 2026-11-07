@@ -160,3 +160,19 @@ describe('toasts', () => {
     expect(host.querySelector('[role="alert"]')).not.toBeNull();
   });
 });
+
+describe('Button native hint', () => {
+  it('shows the label as a hint only for icon-only buttons without visible text', () => {
+    const host = mount(() => (
+      <>
+        <Button iconOnly label="Close" icon="x" />
+        <Button iconOnly label="Close">Visible</Button>
+        <Button label="Save">Save</Button>
+      </>
+    ));
+    const [icon, withText, plain] = Array.from(host.querySelectorAll('button'));
+    expect(icon.getAttribute('title')).toBe('Close');
+    expect(withText.hasAttribute('title')).toBe(false);
+    expect(plain.hasAttribute('title')).toBe(false);
+  });
+});

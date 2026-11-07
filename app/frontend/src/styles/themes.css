@@ -70,12 +70,12 @@ button:disabled { cursor:not-allowed; }
 .av.speaking { animation:none; box-shadow:var(--glow-speak); }
 .av .st { border-color:var(--bg-panel); }
 .btn { font-weight:550; border-width:1px; }
-.btn:hover { background:var(--bg-hover); }
-.btn.primary:hover { background:var(--yellow-2); }
-.btn.secondary:hover { border-color:var(--text-3); }
-.btn.violet:hover { background:var(--violet-2); }
+.btn:hover:not(:disabled) { background:var(--bg-hover); }
+.btn.primary:hover:not(:disabled) { background:var(--yellow-2); }
+.btn.secondary:hover:not(:disabled) { border-color:var(--text-3); }
+.btn.violet:hover:not(:disabled) { background:var(--violet-2); }
 .btn.danger { background:var(--red); color:#fff; }
-.btn.danger:hover { background:#c6534c; }
+.btn.danger:hover:not(:disabled) { background:#c6534c; }
 .btn.icon { border-radius:var(--r-sm); }
 .ctl { border-radius:var(--r-md); }
 .ctl:hover { background:var(--line); }
@@ -220,13 +220,13 @@ button:disabled { cursor:not-allowed; }
 }
 [data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker)::before { inset:0; background:var(--edge); }
 [data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker)::after { inset:var(--edge-width); background:var(--plate); --cut:7px; }
-[data-theme="custom"] :is(.btn,.ctl):hover { --plate:var(--bg-hover); --edge:var(--text-3); }
+[data-theme="custom"] :is(.btn,.ctl):hover:not(:disabled) { --plate:var(--bg-hover); --edge:var(--text-3); }
 [data-theme="custom"] .btn { height:36px; padding:0 16px; font-size:11px; }
 [data-theme="custom"] .btn.sm { height:28px; padding:0 10px; font-size:10px; }
 [data-theme="custom"] .btn.icon { width:36px; padding:0; }
 [data-theme="custom"] .btn.icon.sm { width:28px; }
 [data-theme="custom"] .btn.primary { --plate:var(--yellow); --edge:var(--yellow); color:var(--bg-deep); }
-[data-theme="custom"] .btn.primary:hover { --plate:var(--yellow-2); }
+[data-theme="custom"] .btn.primary:hover:not(:disabled) { --plate:var(--yellow-2); }
 [data-theme="custom"] .btn.secondary { --plate:var(--bg-panel); }
 [data-theme="custom"] .btn.ghost { --plate:var(--bg-panel); --edge:transparent; }
 [data-theme="custom"] .btn.danger { --plate:var(--red); --edge:var(--red); color:#fff; }
