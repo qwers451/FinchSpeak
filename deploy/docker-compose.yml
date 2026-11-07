@@ -20,6 +20,12 @@ services:
       - RUST_LOG=info,finch_server=info
     # The server needs about 50 MB; the limit keeps it from starving other programs.
     mem_limit: 512m
+    # Container output is capped at 30 MB; the server keeps its own rotated logs in the volume.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   finch-data:
