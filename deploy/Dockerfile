@@ -18,7 +18,7 @@ COPY app ./app
 
 # Build only the server in release mode
 # finch-server is isolated and does not depend on finch-audio or finch-screen
-RUN cargo build --release -p finch-server
+RUN cargo build --release --locked -p finch-server
 
 # ==============================================================================
 # Stage 2: Runtime stage
