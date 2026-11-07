@@ -63,6 +63,11 @@ export const api = {
     if (isTauri()) await invoke('reconnect_now');
   },
 
+  /** Ends the session this device holds without revoking it on the server; the stored token stays. */
+  discardSession: async (): Promise<void> => {
+    if (isTauri()) await invoke('discard_session');
+  },
+
   logout: async (): Promise<void> => {
     if (isTauri()) {
       return invoke('logout');

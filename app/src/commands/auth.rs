@@ -260,19 +260,50 @@ pub async fn end_other_sessions(state: State<'_, AppState>) -> Result<(), String
     signed_in_api(&state).await?.end_other_sessions().await.map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub async fn logout(state: State<'_, AppState>) -> Result<(), String> {
-    let _transition = state.voice_transition.lock().await;
-    // Stop any reconnect loop before the connection is closed.
-    state
-        .session_generation
-        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    forget_stored_token(&state).await;
+/// First half of ending a session on this device: bumps the session generation first, so the token
+/// refresher and any reconnect loop stop before anything else is torn down.
+async fn stop_session_activity(state: &AppState) {
+    state.session_generation.fetch_add(1, Ordering::SeqCst);
     *state.last_connect.write().await = None;
     state.audio_engine.lock().await.stop();
     *state.mixer.lock().await = finch_audio::AudioMixer::new();
     state.stop_screen_share();
     state.stop_watching().await;
+}
+
+/// Second half of ending a session on this device: closes QUIC with `reason` and clears the signed-in
+/// state. The server is not told and the stored token is not touched.
+async fn close_session_locally(state: &AppState, reason: &[u8]) {
+    if let Some(conn) = state.quic_connection.write().await.take() {
+        conn.close(0u32.into(), reason);
+    }
+    *state.control_tx.write().await = None;
+    *state.auth_token.write().await = None;
+    *state.api.write().await = None;
+    *state.current_user.write().await = None;
+    *state.current_voice_channel.write().await = None;
+}
+
+/// Ends the session on this device only (no server revoke, the stored token stays). Used for a
+/// successful automatic resume that lost the race to a manual sign-in, so no hidden session survives.
+pub async fn discard_local_session(state: &AppState) {
+    let _transition = state.voice_transition.lock().await;
+    stop_session_activity(state).await;
+    state.signed_in_key.write().await.take();
+    close_session_locally(state, b"discarded").await;
+}
+
+#[tauri::command]
+pub async fn discard_session(state: State<'_, AppState>) -> Result<(), String> {
+    discard_local_session(&state).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn logout(state: State<'_, AppState>) -> Result<(), String> {
+    let _transition = state.voice_transition.lock().await;
+    stop_session_activity(&state).await;
+    forget_stored_token(&state).await;
 
     let api = state.api.read().await.clone();
     let revoke_error = match api {
@@ -280,14 +311,7 @@ pub async fn logout(state: State<'_, AppState>) -> Result<(), String> {
         None => None,
     };
 
-    if let Some(conn) = state.quic_connection.write().await.take() {
-        conn.close(0u32.into(), b"logout");
-    }
-    *state.control_tx.write().await = None;
-    *state.auth_token.write().await = None;
-    *state.api.write().await = None;
-    *state.current_user.write().await = None;
-    *state.current_voice_channel.write().await = None;
+    close_session_locally(&state, b"logout").await;
 
     info!("Logged out successfully");
     match revoke_error {
@@ -480,6 +504,28 @@ mod tests {
         forget_stored_token(&state).await;
         assert_eq!(store.load(&key), None);
         assert!(state.signed_in_key.read().await.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn discarding_a_session_clears_the_local_state_and_keeps_the_stored_token() -> anyhow::Result<()> {
+        let server = TestServer::start().await?;
+        let store = Arc::new(MemoryStore::default());
+        let state = state_with(store.clone(), &server);
+        sign_in(&state, &server, "hank", true).await?;
+        let key = credential_key(&server.http_url, "hank");
+        let stored = store.load(&key);
+        assert!(stored.is_some());
+        let generation = state.session_generation.load(Ordering::SeqCst);
+
+        discard_local_session(&state).await;
+
+        assert!(state.api.read().await.is_none());
+        assert!(state.current_user.read().await.is_none());
+        assert!(state.auth_token.read().await.is_none());
+        assert!(state.signed_in_key.read().await.is_none());
+        assert_ne!(state.session_generation.load(Ordering::SeqCst), generation, "discard must stop the refresher");
+        assert_eq!(store.load(&key), stored, "discard must not delete the stored token");
         Ok(())
     }
 

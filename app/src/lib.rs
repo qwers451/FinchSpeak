@@ -213,6 +213,7 @@ pub fn run() {
             commands::auth::register,
             commands::auth::resume_session,
             commands::auth::logout,
+            commands::auth::discard_session,
             commands::auth::list_sessions,
             commands::auth::end_session,
             commands::auth::end_other_sessions,

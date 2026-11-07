@@ -67,11 +67,13 @@ export async function loginUser(username: string, password: string, stay = true)
   cancelResumeRetry();
   setAuthError(null);
   setAuthLoading(true);
+  manualActionsPending++;
   try {
     await settleResumeInFlight();
     lastAttempt = { kind: 'login', username, password, stay };
     const user = await api.login(serverUrl(), username, password, stay);
     lastAttempt = null;
+    staleResumeHeld = false;
     remember(serverUrl(), username);
     setRememberedUsername(username);
     setPendingInvite(null);
@@ -79,10 +81,12 @@ export async function loginUser(username: string, password: string, stay = true)
     await loadChannels();
     return true;
   } catch (err: any) {
+    await discardHeldStaleResume();
     setAuthError(String(err));
     if (!awaitsCertificateTrust(err)) lastAttempt = null; // keep the password only while the certificate prompt can replay it
     return false;
   } finally {
+    manualActionsPending--;
     setAuthLoading(false);
   }
 }
@@ -91,11 +95,13 @@ export async function registerUser(username: string, displayName: string, passwo
   cancelResumeRetry();
   setAuthError(null);
   setAuthLoading(true);
+  manualActionsPending++;
   try {
     await settleResumeInFlight();
     lastAttempt = { kind: 'register', username, displayName, password, inviteCode, stay };
     const user = await api.register(serverUrl(), username, displayName, password, inviteCode, stay);
     lastAttempt = null;
+    staleResumeHeld = false;
     setPendingInvite(null);
     remember(serverUrl(), username);
     setRememberedUsername(username);
@@ -103,10 +109,12 @@ export async function registerUser(username: string, displayName: string, passwo
     await loadChannels();
     return true;
   } catch (err: any) {
+    await discardHeldStaleResume();
     setAuthError(String(err));
     if (!awaitsCertificateTrust(err)) lastAttempt = null; // keep the password only while the certificate prompt can replay it
     return false;
   } finally {
+    manualActionsPending--;
     setAuthLoading(false);
   }
 }
@@ -124,6 +132,32 @@ let attemptGeneration = 0;
 let resumeInFlight: Promise<boolean> | null = null;
 // Runs after a resumed session (the App refreshes the live session state there).
 let afterResume: (() => Promise<void>) | undefined;
+// Manual sign-ins and sign-outs in progress. While one runs, a resume that succeeds too late is held
+// instead of discarded: the sign-in decides its fate (a failed sign-in discards it, a sign-out ends it).
+let manualActionsPending = 0;
+let staleResumeHeld = false;
+
+/** A successful resume the user has moved past still holds a backend session; end it unless a manual action decides. */
+async function endStaleResume() {
+  if (manualActionsPending > 0) staleResumeHeld = true;
+  else await discardBackendSession();
+}
+
+/** A manual sign-in failed while a stale resume holds a backend session: end that session before showing the error. */
+async function discardHeldStaleResume() {
+  if (!staleResumeHeld) return;
+  staleResumeHeld = false;
+  await discardBackendSession();
+}
+
+/** Ends the session this device holds without revoking it; the stored token stays for a later start. */
+async function discardBackendSession() {
+  try {
+    await api.discardSession();
+  } catch (error) {
+    setAppError(describeError(error));
+  }
+}
 
 /**
  * Stops the scheduled automatic resume retries and forgets the failed resume, so the Retry button
@@ -143,6 +177,8 @@ export function __resetResumeForTests() {
   resumeInFlight = null;
   resumeRetriesDone = 0;
   afterResume = undefined;
+  manualActionsPending = 0;
+  staleResumeHeld = false;
   setResuming(false);
 }
 
@@ -174,7 +210,10 @@ async function attemptResume(): Promise<boolean> {
     }
     return false;
   }
-  if (stale()) return false;
+  if (stale()) {
+    if (user) await endStaleResume();
+    return false;
+  }
   cancelResumeRetry();
   if (!user) return false;
   setAuthError(null);
@@ -224,7 +263,14 @@ export async function resumeLastSession(onSignedIn?: () => Promise<void>): Promi
 export async function logoutUser() {
   lastAttempt = null;
   cancelResumeRetry();
-  await settleResumeInFlight();
+  // The sign-out below ends the session a running resume opens, so that resume is held, not discarded.
+  manualActionsPending++;
+  try {
+    await settleResumeInFlight();
+  } finally {
+    manualActionsPending--;
+  }
+  staleResumeHeld = false;
   let failure: unknown;
   try { await api.logout(); } catch (error) { failure = error; }
   resetSessionState();

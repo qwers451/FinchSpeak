@@ -330,3 +330,58 @@ it('a sign-in shows progress at once while it waits for a running automatic sign
   setCurrentUser(null);
   vi.restoreAllMocks();
 });
+
+it('a successful automatic resume that lost to a manual sign-in which then fails is discarded, and the error is shown', async () => {
+  const { resumeLastSession, loginUser, authError } = await import('./authStore');
+  setCurrentUser(null);
+  const { setRememberedUsername } = await import('./authStore');
+  setRememberedUsername('alice');
+  const inFlight = deferred<typeof alice>();
+  vi.spyOn(api, 'resumeSession').mockReturnValue(inFlight.promise);
+  vi.spyOn(api, 'login').mockRejectedValue('Invalid username or password');
+  const discard = vi.spyOn(api, 'discardSession').mockResolvedValue();
+  const pending = resumeLastSession();
+  const signIn = loginUser('bob', 'wrong-password');
+  inFlight.resolve(alice);
+  await expect(signIn).resolves.toBe(false);
+  await expect(pending).resolves.toBe(false);
+  expect(discard).toHaveBeenCalledTimes(1);
+  expect(currentUser()).toBeNull();
+  expect(authError()).toContain('Invalid username or password');
+  vi.restoreAllMocks();
+});
+
+it('a successful automatic resume that lost to a manual sign-in which succeeds is not discarded', async () => {
+  const { resumeLastSession, loginUser, setRememberedUsername } = await import('./authStore');
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  const inFlight = deferred<typeof alice>();
+  vi.spyOn(api, 'resumeSession').mockReturnValue(inFlight.promise);
+  vi.spyOn(api, 'login').mockResolvedValue(bob);
+  const discard = vi.spyOn(api, 'discardSession').mockResolvedValue();
+  const pending = resumeLastSession();
+  const signIn = loginUser('bob', 'hunter2hunter2');
+  inFlight.resolve(alice);
+  await expect(signIn).resolves.toBe(true);
+  await pending;
+  expect(discard).not.toHaveBeenCalled();
+  expect(currentUser()).toEqual(bob);
+  setCurrentUser(null);
+  vi.restoreAllMocks();
+});
+
+it('a successful automatic resume that is cancelled by editing the form alone is discarded at once', async () => {
+  const { resumeLastSession, cancelResumeRetry, setRememberedUsername } = await import('./authStore');
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  const inFlight = deferred<typeof alice>();
+  vi.spyOn(api, 'resumeSession').mockReturnValue(inFlight.promise);
+  const discard = vi.spyOn(api, 'discardSession').mockResolvedValue();
+  const pending = resumeLastSession();
+  cancelResumeRetry();
+  inFlight.resolve(alice);
+  await expect(pending).resolves.toBe(false);
+  expect(discard).toHaveBeenCalledTimes(1);
+  expect(currentUser()).toBeNull();
+  vi.restoreAllMocks();
+});
