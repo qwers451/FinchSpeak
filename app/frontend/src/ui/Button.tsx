@@ -27,6 +27,7 @@ export function Button(props: ButtonProps) {
       class={classes()}
       disabled={own.disabled || own.loading}
       aria-label={own.label ?? (rest as { 'aria-label'?: string })['aria-label']}
+      title={rest.title ?? (own.iconOnly ? own.label : undefined)}
       aria-busy={own.loading ? 'true' : undefined}
     >
       <Show when={own.loading}><span class="spin" /></Show>
