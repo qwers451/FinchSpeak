@@ -147,7 +147,6 @@ export function __resetResumeForTests() {
 }
 
 function isServerUnreachable(err: unknown): boolean {
-
   const lower = String(err).toLowerCase();
   return lower.includes('cannot reach') || lower.includes('connection refused') || lower.includes('timed out');
 }

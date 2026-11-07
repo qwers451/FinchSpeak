@@ -60,3 +60,17 @@ it.each(['Session revoked', 'Invalid token'])('the connection error %s is shown 
   setConnectionError(null);
   setPrefs(DEFAULT_PREFS);
 });
+
+it('the generic "connection lost" is not repeated as a reason under the headline', async () => {
+  const { setConnectionError } = await import('../stores/sessionStore');
+  const { DEFAULT_PREFS, setPrefs } = await import('../stores/settingsStore');
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'ru' } });
+  setCurrentUser(user);
+  setConnectionError('connection lost');
+  setConnectionStatus('failed');
+  dispose = render(() => <ConnectionBanner />, document.body);
+  expect(document.body.textContent).toContain('Не удалось восстановить соединение');
+  expect(document.body.textContent).not.toContain('Связь потеряна');
+  setConnectionError(null);
+  setPrefs(DEFAULT_PREFS);
+});

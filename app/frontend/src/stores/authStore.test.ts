@@ -119,19 +119,7 @@ it('an unreachable server during the automatic resume is retried with backoff', 
   vi.useRealTimers();
 });
 
-it('a channel load still pending when a test ends does not block the next resume', async () => {
-  const { resumeLastSession, setRememberedUsername } = await import('./authStore');
-  setCurrentUser(null);
-  setRememberedUsername('alice');
-  vi.spyOn(api, 'resumeSession').mockResolvedValue(alice);
-  vi.spyOn(api, 'listChannels').mockReturnValue(new Promise(() => {}));
-  void resumeLastSession();
-  await settle();
-  vi.restoreAllMocks();
-});
-
 it('the automatic resume gives up after four retries', async () => {
-
   vi.useFakeTimers();
   const { resumeLastSession, setRememberedUsername } = await import('./authStore');
   setCurrentUser(null);

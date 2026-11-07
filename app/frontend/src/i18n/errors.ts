@@ -16,9 +16,9 @@ const RULES: readonly Rule[] = [
   { pattern: /^Invalid server address/i, key: 'The server address is not valid' },
   { pattern: /^Not authenticated$/i, key: 'Not authenticated' },
   { pattern: /^The password must be at least 8 characters$/i, key: 'The password must be at least 8 characters' },
-  // Session end reasons from the server (shown in the connection banner).
   // A QUIC connection closed without a reason from the server (quinn's own text).
   { pattern: /^connection lost$/i, key: 'connection lost' },
+  // Session end reasons from the server (shown in the connection banner).
   { pattern: /^Session revoked$/i, key: 'Session revoked' },
   { pattern: /^Invalid token$/i, key: 'Invalid token' },
 ];
