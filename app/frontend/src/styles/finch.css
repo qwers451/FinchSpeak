@@ -70,8 +70,9 @@ a{color:inherit;text-decoration:none}
 .btn.sm{height:32px;padding:0 14px;font-size:13px}.btn.lg{height:48px;padding:0 28px;font-size:15px}
 .btn.icon{width:40px;padding:0;border-radius:12px}.btn.icon.sm{width:32px;border-radius:10px}
 .btn.block{width:100%}
-.btn.is-disabled,.btn:disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
-.btn.is-loading{pointer-events:none}
+.btn.is-disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+/* Disabled and loading buttons stay hoverable so their cursor shows; the native disabled state blocks clicks. */
+.btn:disabled{opacity:.4;cursor:not-allowed}
 .spin{width:16px;height:16px;border-radius:50%;border:2.5px solid rgba(14,19,32,.25);border-top-color:currentColor;animation:spin 800ms linear infinite}
 .btn:not(.primary):not(.danger) .spin{border-color:rgba(242,244,250,.2);border-top-color:var(--text)}
 @keyframes spin{to{transform:rotate(360deg)}}

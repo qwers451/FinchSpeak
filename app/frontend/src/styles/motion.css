@@ -5,7 +5,7 @@
   transition:transform var(--motion-small) var(--ease-out),opacity var(--motion-small) var(--ease-out);
 }
 @media (hover:hover) and (pointer:fine) {
-  .btn:hover:not(:disabled):not(:focus-visible),.ctl:hover:not(:disabled):not(:focus-visible) { transform:translateY(-1px); }
+  .btn:hover:not(:disabled):not(:focus-visible):not(:active),.ctl:hover:not(:disabled):not(:focus-visible):not(:active) { transform:translateY(-1px); }
 }
 .btn:active:not(:disabled),.ctl:active:not(:disabled) { transform:translateY(1px) scale(.98); }
 .btn:focus-visible:active,.ctl:focus-visible:active { transform:none; }

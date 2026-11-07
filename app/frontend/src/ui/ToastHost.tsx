@@ -14,7 +14,7 @@ export function ToastHost() {
   createEffect(() => {
     const current = toasts();
     const previous = untrack(visible);
-    const instant = import.meta.env.MODE === 'test' || document.documentElement.dataset.reduceMotion === 'true' || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const instant = document.documentElement.dataset.reduceMotion === 'true' || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
     const leaving = instant ? [] : previous.filter(toast => !current.some(item => item.id === toast.id)).slice(-3);
     const keep = new Set([...current, ...leaving].map(toast => toast.id));
     for (const [id, timer] of exits) {
@@ -72,8 +72,8 @@ export function ToastHost() {
                     disabled={!active(toast.id)}
                     onClick={() => {
                       if (!active(toast.id)) return;
-                      dismissToast(toast.id);
                       action().run();
+                      dismissToast(toast.id);
                     }}
                   >
                     {t(action().label)}

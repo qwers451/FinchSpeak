@@ -38,12 +38,25 @@ it('disables leaving toast actions immediately, then removes the visual after 14
  vi.advanceTimersByTime(139); expect(host.querySelector('.toast')).not.toBeNull();
  vi.advanceTimersByTime(1); expect(host.querySelector('.toast')).toBeNull();
 });
-it.each(['preference','system','test'])('removes instantly for %s reduced/instant motion',kind=>{
- vi.stubEnv('MODE',kind==='test'?'test':'development');
+it.each(['preference','system'])('removes instantly for %s reduced motion',kind=>{
  if(kind==='preference') document.documentElement.dataset.reduceMotion='true';
  if(kind==='system') vi.stubGlobal('matchMedia',()=>({matches:true}));
  const host=mount(()=> <ToastHost/>); const id=pushToast({title:'Saved'}); dismissToast(id);
  expect(host.querySelector('.toast')).toBeNull();
+});
+it('keeps the exit visual under the test runner: motion is not switched by MODE',()=>{
+ vi.stubEnv('MODE','test'); vi.useFakeTimers(); const host=mount(()=> <ToastHost/>);
+ dismissToast(pushToast({title:'Saved'}));
+ expect(host.querySelector('.toast')?.getAttribute('data-exiting')).toBe('true');
+ vi.advanceTimersByTime(139); expect(host.querySelector('.toast')).not.toBeNull();
+ vi.advanceTimersByTime(1); expect(host.querySelector('.toast')).toBeNull();
+});
+it('runs the toast action before closing it, so a re-pushed identical toast dedupes',()=>{
+ vi.useFakeTimers(); const host=mount(()=> <ToastHost/>);
+ let seen=-1, again=-1;
+ const id=pushToast({title:'Saved', action:{label:'Retry', run:()=>{ seen=toasts().length; again=pushToast({title:'Saved'}); }}});
+ (host.querySelector('.link-btn') as HTMLButtonElement).click();
+ expect(seen).toBe(1); expect(again).toBe(id); expect(toasts()).toHaveLength(0);
 });
 it('a new identical toast survives the previous visual exit timer',()=>{
  vi.stubEnv('MODE','development'); vi.useFakeTimers(); const host=mount(()=> <ToastHost/>);
