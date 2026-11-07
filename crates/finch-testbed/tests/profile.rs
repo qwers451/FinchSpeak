@@ -51,12 +51,16 @@ async fn a_new_display_name_reaches_everyone_and_later_messages() -> anyhow::Res
 }
 
 #[tokio::test]
-async fn bad_display_names_are_refused() -> anyhow::Result<()> {
+async fn blank_display_names_reset_to_the_username_and_long_ones_are_refused() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
     let alice = TestClient::register(&server, "alice").await?;
-    for name in ["", "   ", &"x".repeat(33)] {
-        assert_eq!(status(&alice.api.update_profile(name).await.expect_err("bad name")), Some(400));
+    for name in ["", "   "] {
+        let me = alice.api.update_profile(name).await?;
+        assert_eq!(me.display_name, "alice");
+        assert_eq!(alice.api.me().await?.display_name, "alice");
     }
+    let long = "x".repeat(33);
+    assert_eq!(status(&alice.api.update_profile(&long).await.expect_err("too long")), Some(400));
     Ok(())
 }
 
