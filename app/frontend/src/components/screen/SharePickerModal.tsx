@@ -1,6 +1,6 @@
 import { createEffect, createSignal, For, on, onCleanup, Show } from 'solid-js';
 import { api } from '../../services/api';
-import { loadScreenSources, screenSources, startSharing } from '../../stores/screenStore';
+import { loadScreenSources, screenAudioSource, screenSources, startSharing } from '../../stores/screenStore';
 import type { MonitorSource, WindowSource } from '../../types';
 import { Button, Icon, Modal, Toggle } from '../../ui';
 import { t } from '../../i18n';
@@ -57,6 +57,9 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
   const [tab, setTab] = createSignal<'monitor' | 'window'>('monitor');
   const [picked, setPicked] = createSignal<Picked | null>(null);
   const [withAudio, setWithAudio] = createSignal(false);
+  const [loopbackSupported, setLoopbackSupported] = createSignal(false);
+  const excludesSelf = () => loopbackSupported() && screenAudioSource() !== 'device';
+  const [audioScope, setAudioScope] = createSignal<'system' | 'window'>('system');
   const [starting, setStarting] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
@@ -75,6 +78,9 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
     if (open) {
       setError(null);
       setPicked(null);
+      setAudioScope('system');
+      setLoopbackSupported(false);
+      void api.processLoopbackSupported().then(setLoopbackSupported).catch(() => setLoopbackSupported(false));
       void load();
     }
   }));
@@ -84,7 +90,7 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
     if (!choice || starting()) return;
     setStarting(true);
     setError(null);
-    const failure = await startSharing(choice.kind, choice.id, withAudio(), choice.label);
+    const failure = await startSharing(choice.kind, choice.id, withAudio(), choice.label, choice.kind === 'window' && excludesSelf() ? audioScope() : 'system');
     setStarting(false);
     if (failure) setError(failure);
     else props.onClose();
@@ -95,8 +101,8 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
   const empty = () => !loading() && (tab() === 'monitor' ? monitors().length === 0 : windows().length === 0);
   const isPicked = (kind: 'monitor' | 'window', id: number) => picked()?.kind === kind && picked()?.id === id;
 
-  const pickMonitor = (monitor: MonitorSource) => setPicked({ kind: 'monitor', id: monitor.id, label: monitorName(monitor.name) });
-  const pickWindow = (window: WindowSource) => setPicked({ kind: 'window', id: window.id, label: window.title });
+  const pickMonitor = (monitor: MonitorSource) => { setAudioScope('system'); setPicked({ kind: 'monitor', id: monitor.id, label: monitorName(monitor.name) }); };
+  const pickWindow = (window: WindowSource) => { setAudioScope('system'); setPicked({ kind: 'window', id: window.id, label: window.title }); };
 
   return (
     <Modal open={props.open} onClose={props.onClose} title={t('Share your screen')} width="860px">
@@ -162,14 +168,23 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
         <div class="setrow">
           <div class="col grow">
             <strong class="fs13">{t('Share system sound too')}</strong>
-            <span class="t3 fs12">{t('Everything your speakers play goes out with the picture.')}</span>
+            <span class="t3 fs12">{withAudio() && picked()?.kind === 'window' && excludesSelf() && audioScope() === 'window' ? t('Only this window') : excludesSelf() ? t('Everything your computer plays goes out with the picture, except voices from FinchSpeak.') : t('Everything your speakers play goes out with the picture.')}</span>
           </div>
           <Toggle label={t('Share system sound too')} checked={withAudio()} onChange={setWithAudio} />
         </div>
-        <Show when={withAudio()}>
+        <Show when={withAudio() && picked()?.kind === 'window' && excludesSelf()}>
+          <div class="setrow">
+            <strong class="fs13">{t('Sound')}</strong>
+            <div class="tabs" role="group" aria-label={t('Sound')}>
+              <button type="button" class={`tab${audioScope() === 'system' ? ' on' : ''}`} aria-pressed={audioScope() === 'system'} onClick={() => setAudioScope('system')}>{t('Whole computer')}</button>
+              <button type="button" class={`tab${audioScope() === 'window' ? ' on' : ''}`} aria-pressed={audioScope() === 'window'} onClick={() => setAudioScope('window')}>{t('Only this window')}</button>
+            </div>
+          </div>
+        </Show>
+        <Show when={withAudio() && !excludesSelf()}>
           <div class="auth-banner amber" role="note">
             <Icon name="warn" />
-            <span class="fs13">{t("Other people's voices are part of that sound: they will hear themselves with a small delay. Use headphones.")}</span>
+            <span class="fs13">{t("This version of Windows cannot leave FinchSpeak out of the sound: people in the room will hear themselves with a delay. Update to Windows 10 2004 or newer.")}</span>
           </div>
         </Show>
         <span class="t3 fs12">{t('30 frames per second; pictures larger than 4K are scaled down before they are sent.')}</span>

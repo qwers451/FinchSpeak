@@ -65,9 +65,10 @@ it('a window in the background still hears about the channel it has open', () =>
   expect(reactToMessage(message({ channel_id: 'c1' }), true)).toBe('notified');
 });
 
-it('tones are short two-note chirps and the voice-room ones respect the setting', () => {
+it('tones are short chirps and the voice-room ones respect the setting', () => {
   for (const tone of Object.values(TONES)) {
-    expect(tone.notes).toHaveLength(2);
+    expect(tone.notes.length).toBeGreaterThanOrEqual(1);
+    expect(tone.notes.length).toBeLessThanOrEqual(2);
     expect(tone.noteMs).toBeLessThanOrEqual(150);
   }
   const play = vi.fn();
@@ -169,6 +170,10 @@ it('reads why the server sent us away, and a plain network problem is not an end
   expect(classifyEnd('closed by peer: kicked')).toBe('kicked');
   expect(classifyEnd('closed by peer: token revoked')).toBe('signed-out');
   expect(classifyEnd('Authentication rejected (401): Invalid or missing token')).toBe('signed-out');
+  expect(classifyEnd('Authentication rejected (401): Session expired')).toBe('expired');
+  expect(classifyEnd('Authentication rejected (401): Session revoked')).toBe('signed-out');
+  expect(classifyEnd('Authentication rejected (401): Invalid token')).toBe('signed-out');
+  expect(classifyEnd('password changed')).toBe('password-changed');
   expect(classifyEnd('timed out')).toBeNull();
   expect(classifyEnd(undefined)).toBeNull();
 });

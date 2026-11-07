@@ -1,8 +1,11 @@
 import { Show } from 'solid-js';
-import { currentUser } from '../stores/authStore';
+import { currentUser, logoutUser } from '../stores/authStore';
+import { sessionEnded } from '../stores/sessionEnd';
+import { api } from '../services/api';
 import { connectionError, connectionStatus, reconnectInfo } from '../stores/sessionStore';
-import { Icon } from '../ui';
+import { Button, Icon } from '../ui';
 import { t } from '../i18n';
+import { describeError } from '../i18n/errors';
 
 /** Splash shown while the interface subscribes to the backend (A5). */
 export function Splash() {
@@ -18,6 +21,8 @@ export function Splash() {
 /** Connection state under the title bar (A5): reconnecting with the next try, lost, failed. */
 export function ConnectionBanner() {
   const visible = () => !!currentUser() && connectionStatus() !== 'connected';
+  // The generic QUIC text is already the headline ("Connection lost"); repeating it as a reason adds nothing.
+  const reasonShown = () => !!connectionError() && connectionError()!.trim().toLowerCase() !== 'connection lost';
   return (
     <Show when={visible()}>
       <div class={`banner ${connectionStatus() === 'reconnecting' ? 'warn' : 'error'}`} role="status">
@@ -33,7 +38,13 @@ export function ConnectionBanner() {
               ? t('Could not reconnect')
               : t('Connection lost')}
         </span>
-        <Show when={connectionError()}><span class="t3 fs12">{connectionError()}</span></Show>
+        <Show when={reasonShown()}><span class="t3 fs12">{describeError(connectionError())}</span></Show>
+        <Show when={connectionStatus() === 'reconnecting'}>
+          <Button size="sm" onClick={() => { void api.reconnectNow(); }}>{t('Retry now')}</Button>
+        </Show>
+        <Show when={connectionStatus() === 'failed' && !sessionEnded()}>
+          <Button size="sm" onClick={() => { void logoutUser(); }}>{t('Back to sign in')}</Button>
+        </Show>
       </div>
     </Show>
   );

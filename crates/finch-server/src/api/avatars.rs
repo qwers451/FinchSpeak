@@ -55,7 +55,7 @@ fn avatar_file(state: &ArcSharedState, user_id: &str) -> PathBuf {
 }
 
 async fn user_dto(state: &ArcSharedState, user_id: Uuid) -> Result<UserDto, ServerError> {
-    let row = sqlx::query_as::<_, (String, String, String, Option<i64>)>("SELECT username, display_name, role, avatar_version FROM users WHERE id = ?")
+    let row = sqlx::query_as::<_, (String, String, String, Option<i64>)>("SELECT username, COALESCE(NULLIF(TRIM(display_name), ''), username), role, avatar_version FROM users WHERE id = ?")
         .bind(user_id.to_string())
         .fetch_optional(&state.pool)
         .await?

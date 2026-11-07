@@ -1,7 +1,13 @@
 import { createSignal } from 'solid-js';
-import type { ScreenSources, WatchedShare } from '../types';
+import type { SessionEvents, ScreenSources, WatchedShare } from '../types';
 
 // Signals only, no imports from other stores: voiceStore and screenStore both need them.
+
+export const [screenAudioSource, setScreenAudioSource] = createSignal<SessionEvents['screen-audio-source']['source'] | null>(null);
+
+/** Local backend generation; end events from another share do not affect this one. */
+export const [screenShareGeneration, setScreenShareGeneration] = createSignal<number | null>(null);
+export const [lastEndedScreenShareGeneration, setLastEndedScreenShareGeneration] = createSignal(0);
 
 /** We are sharing our screen. */
 export const [isSharing, setIsSharing] = createSignal<boolean>(false);
@@ -13,15 +19,24 @@ export const [watching, setWatching] = createSignal<WatchedShare | null>(null);
 export const [endedShare, setEndedShare] = createSignal<{ user_id: string; peer_id: number; name: string; reason: 'stopped' | 'left' | 'disconnected' | 'room-closed' } | null>(null);
 export const [screenSources, setScreenSources] = createSignal<ScreenSources>({ monitors: [], windows: [] });
 
-/** Our own share ends with the connection; what we watch is resumed after a reconnect. */
-export function resetScreenStateOnDisconnect() {
+/** Invalidates pending starts when a stop, disconnect or natural end wins the race. */
+export const [screenShareEpoch, setScreenShareEpoch] = createSignal(0);
+export function endLocalScreenShare() {
+  setScreenShareEpoch((epoch) => epoch + 1);
   setIsSharing(false);
+  setScreenShareGeneration(null);
+  setScreenAudioSource(null);
   setSharingInfo(null);
 }
 
+/** Our own share ends with the connection; what we watch is resumed after a reconnect. */
+export function resetScreenStateOnDisconnect() {
+  endLocalScreenShare();
+}
+
 export function resetScreenState() {
-  setIsSharing(false);
-  setSharingInfo(null);
+  endLocalScreenShare();
+  setLastEndedScreenShareGeneration(0);
   setWatching(null);
   setEndedShare(null);
 }

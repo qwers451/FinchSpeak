@@ -34,6 +34,7 @@ export function Avatar(props: AvatarProps) {
       <span class="av-art" style={picture() ? { 'background-image': `url(${picture()})`, 'background-size': 'cover', 'background-position': 'center' } : undefined}>
         <Show when={!picture()}>{props.ghost ? '?' : initialOf(props.name)}</Show>
       </span>
+      <span class="av-speaking-ring" aria-hidden="true" />
       <Show when={props.status && size() >= 24}><span class={`st ${props.status === 'off' ? '' : props.status}`} /></Show>
     </span>
   );

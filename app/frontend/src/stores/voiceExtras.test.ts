@@ -52,9 +52,16 @@ it('keeps the live level, the test phase and link quality from backend events', 
 });
 
 it('a refused microphone test is explained, not thrown', async () => {
-  vi.spyOn(api, 'testMicrophone').mockRejectedValue(new Error('Join a voice channel first'));
+  vi.spyOn(api, 'testMicrophone').mockRejectedValue(new Error('Unmute yourself first'));
   await startMicTest();
-  expect(appError()).toBe('Join a voice channel first');
+  expect(appError()).toBe('Unmute yourself first');
+});
+
+it('a microphone test that could not run ends and says why', () => {
+  sessionHandlers['mic-test']({ phase: 'recording' });
+  sessionHandlers['mic-test']({ phase: 'done', error: 'The microphone test needs a working microphone and speakers' });
+  expect(micTestPhase()).toBe('idle');
+  expect(appError()).toBe('The microphone test needs a working microphone and speakers');
 });
 
 it('a watched share that stops leaves an explanation behind instead of vanishing', async () => {

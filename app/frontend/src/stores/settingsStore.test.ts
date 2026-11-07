@@ -76,3 +76,10 @@ it('translates reactive source strings and interpolates dynamic values', () => {
   setPrefs((current) => ({ ...current, appearance: { ...current.appearance, language: 'en' } }));
   expect(t('Settings')).toBe('Settings');
 });
+
+it('ignores the close-to-tray value an older version saved', () => {
+  const plain = parsePrefs(JSON.stringify({ appearance: { density: 'compact' } }));
+  const old = parsePrefs(JSON.stringify({ appearance: { density: 'compact', closeToTray: false } }));
+  expect(old).toEqual(plain);
+  expect('closeToTray' in old.appearance).toBe(false);
+});

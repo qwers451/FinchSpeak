@@ -27,11 +27,14 @@ export function Button(props: ButtonProps) {
       class={classes()}
       disabled={own.disabled || own.loading}
       aria-label={own.label ?? (rest as { 'aria-label'?: string })['aria-label']}
+      title={rest.title ?? (own.iconOnly && !own.children ? own.label : undefined)}
       aria-busy={own.loading ? 'true' : undefined}
     >
-      <Show when={own.loading}><span class="spin" /></Show>
-      <Show when={own.icon && !own.loading}><Icon name={own.icon!} size={own.size === 'sm' || own.iconOnly ? 'sm' : undefined} /></Show>
-      {own.children}
+      <span class="btn-content">
+        <Show when={own.icon}><Icon name={own.icon!} size={own.size === 'sm' || own.iconOnly ? 'sm' : undefined} /></Show>
+        {own.children}
+      </span>
+      <Show when={own.loading}><span class="btn-spinner" aria-hidden="true"><span class="spin" /></span></Show>
     </button>
   );
 }

@@ -20,6 +20,41 @@ use tracing::{info, warn};
 
 use crate::state::{AppState, VideoChunkPayload};
 
+/// How long a quit may take in total; the app exits after this whatever the network does.
+const QUIT_BOUND: Duration = Duration::from_millis(1500);
+/// How long leaving the voice room may take before the connection is closed anyway.
+const QUIT_LEAVE_BOUND: Duration = Duration::from_millis(1000);
+/// Gives the queued LeaveVoice time to reach the wire before the connection closes.
+const QUIT_LEAVE_FLUSH: Duration = Duration::from_millis(100);
+/// Gives the connection close time to leave the endpoint before the process exits.
+const QUIT_CLOSE_FLUSH: Duration = Duration::from_millis(250);
+
+/// Quit path (tray Quit, Windows log-off, updater restart): leaves the voice room and closes the
+/// QUIC session, so the server drops us at once instead of after its 15 s idle timeout. Best effort
+/// and bounded by `QUIT_BOUND`, whatever the network or a stuck voice transition does.
+pub async fn shutdown_session(state: &AppState) {
+    let routine = async {
+        // Stop any reconnect first: the close below must not bring the session back. Lock-free on
+        // purpose, so a stuck voice transition cannot hold this up.
+        state.session_generation.fetch_add(1, Ordering::SeqCst);
+        *state.last_connect.write().await = None;
+        if state.current_voice_channel.read().await.is_some() {
+            if tokio::time::timeout(QUIT_LEAVE_BOUND, crate::commands::voice::leave_room(state)).await.is_err() {
+                warn!("Leaving the voice room timed out while quitting");
+            }
+            tokio::time::sleep(QUIT_LEAVE_FLUSH).await;
+        }
+        let connection = state.quic_connection.write().await.take();
+        if let Some(connection) = connection {
+            connection.close(0u32.into(), b"quit");
+            tokio::time::sleep(QUIT_CLOSE_FLUSH).await;
+        }
+    };
+    if tokio::time::timeout(QUIT_BOUND, routine).await.is_err() {
+        warn!("Quitting timed out before the session was closed");
+    }
+}
+
 async fn supersede_session(state: &AppState) -> u64 {
     let _transition = state.voice_transition.lock().await;
     let generation = state.session_generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -77,6 +112,36 @@ pub async fn start_quic_session(
     Ok(connection)
 }
 
+/// How often the session token is renewed while signed in.
+const TOKEN_REFRESH_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// Renew the session token every 6 h while `generation` is current. Failures are retried next tick.
+pub fn spawn_token_refresher(state: AppState, generation: u64) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(TOKEN_REFRESH_INTERVAL).await;
+            if state.session_generation.load(Ordering::SeqCst) != generation { return; }
+            if let Err(e) = refresh_token_once(&state, generation).await {
+                warn!("Token refresh failed, retrying later: {e}");
+            }
+        }
+    });
+}
+
+/// One refresh: new token into the REST client, `auth_token`, reconnect params and the store.
+pub async fn refresh_token_once(state: &AppState, generation: u64) -> Result<(), String> {
+    let api = state.api.read().await.clone().ok_or("not signed in")?;
+    let auth = api.refresh().await.map_err(|e| e.to_string())?;
+    if state.session_generation.load(Ordering::SeqCst) != generation { return Ok(()); }
+    if let Some(api) = state.api.write().await.as_mut() { api.set_token(auth.token.clone()); }
+    *state.auth_token.write().await = Some(auth.token.clone());
+    if let Some(params) = state.last_connect.write().await.as_mut() { params.token = auth.token.clone(); }
+    if let Some(key) = state.signed_in_key.read().await.clone() {
+        state.token_store.save(&key, &auth.token)?;
+    }
+    Ok(())
+}
+
 /// Make `session` the active one in the app state and tell the UI.
 async fn activate_session(session: &Session, state: &AppState, app_handle: &tauri::AppHandle) {
     // Peer ids and packet sequences belong to this session, not the previous server.
@@ -97,6 +162,14 @@ async fn activate_session(session: &Session, state: &AppState, app_handle: &taur
     );
 }
 
+/// Disconnect cancels pending first-frame capture as well as installed workers.
+async fn stop_share_on_connection_loss(state: &AppState, generation: u64) -> bool {
+    let _transition = state.voice_transition.lock().await;
+    if state.session_generation.load(Ordering::SeqCst) != generation { return false; }
+    state.stop_screen_share();
+    true
+}
+
 /// Forward session events; after a drop, reconnect and continue with the new session.
 async fn run_session(
     mut events: mpsc::Receiver<SessionEvent>,
@@ -108,7 +181,7 @@ async fn run_session(
         let Some(reason) = forward_events(&mut events, &state, &app_handle, generation).await else {
             return;
         };
-        if state.session_generation.load(Ordering::SeqCst) != generation { return; }
+        if !stop_share_on_connection_loss(&state, generation).await { return; }
         *state.mixer.lock().await = finch_audio::AudioMixer::new();
         let _ = app_handle.emit("connection-lost", reason);
         match reconnect(&state, &app_handle, generation).await {
@@ -136,22 +209,7 @@ async fn forward_events(
                     }
                 }
             }
-            SessionEvent::Control(msg) => {
-                match &msg {
-                    ServerMessage::UserLeftVoice { peer_id, .. }
-                    | ServerMessage::UserJoinedVoice { peer_id, .. } => {
-                        state.mixer.lock().await.remove_speaker(*peer_id);
-                    }
-                    ServerMessage::ScreenShareStopped { peer_id, .. } => {
-                        state.mixer.lock().await.retire_stream(finch_audio::screen_audio_key(*peer_id));
-                    }
-                    _ => {}
-                }
-                if let ServerMessage::ScreenShareStarted { user_id, peer_id, .. } = &msg {
-                    follow_watched_share(state, *user_id, *peer_id).await;
-                }
-                emit_control(msg, app_handle)
-            }
+            SessionEvent::Control(msg) => handle_control(state, msg, |msg| emit_control(msg, app_handle)).await,
             SessionEvent::Datagram(bytes) => route_datagram(bytes, state, app_handle).await,
             SessionEvent::UniStreamStarted { header } => {
                 if header.media_type == MediaType::VideoKey && is_watching(state, &header) {
@@ -187,7 +245,7 @@ async fn reconnect(
         }
     };
     let result = tokio::select! {
-        r = reconnect_with_progress(params, state.saved_fingerprints.clone(), Backoff::default(), |attempt, wait| {
+        r = reconnect_with_progress(params, state.saved_fingerprints.clone(), Backoff::default(), state.reconnect_wake.clone(), |attempt, wait| {
             let _ = app_handle.emit("reconnect-attempt", serde_json::json!({ "attempt": attempt, "retry_in_secs": wait.as_secs() }));
         }) => r,
         _ = superseded => {
@@ -480,14 +538,36 @@ async fn route_datagram(bytes: Bytes, state: &AppState, app_handle: &tauri::AppH
     }
 }
 
-/// The share we watch (re)started, perhaps under a new peer id: follow it and subscribe again.
-async fn follow_watched_share(state: &AppState, user_id: uuid::Uuid, peer_id: u32) {
-    if *state.viewing_user.read().await != Some(user_id) {
-        return;
+/// Bookkeeping for a control message (mixer and watched share), then the event goes to the UI.
+async fn handle_control(state: &AppState, msg: ServerMessage, emit: impl FnOnce(ServerMessage)) {
+    match &msg {
+        ServerMessage::UserLeftVoice { peer_id, .. } | ServerMessage::UserJoinedVoice { peer_id, .. } => {
+            state.mixer.lock().await.remove_speaker(*peer_id);
+        }
+        _ => {}
     }
-    state.viewing_peer.store(peer_id, Ordering::SeqCst);
-    *state.screen_viewer.lock().await = ScreenViewer::new();
-    resubscribe(state).await;
+    track_watched_share(state, &msg).await;
+    emit(msg);
+}
+
+/// Watching ends when the share we watch ends: the sharer stopping, or the same share starting
+/// again under a new peer id. Nothing follows a new share; the user has to press "Watch" again.
+async fn track_watched_share(state: &AppState, msg: &ServerMessage) {
+    match msg {
+        ServerMessage::ScreenShareStopped { peer_id, .. } => {
+            state.mixer.lock().await.retire_stream(finch_audio::screen_audio_key(*peer_id));
+            if state.viewing_peer.load(Ordering::SeqCst) == *peer_id {
+                state.stop_watching().await;
+            }
+        }
+        ServerMessage::ScreenShareStarted { user_id, peer_id, .. } => {
+            let watched = *state.viewing_user.read().await == Some(*user_id);
+            if watched && state.viewing_peer.load(Ordering::SeqCst) != *peer_id {
+                state.stop_watching().await;
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Ask the server for the share we are watching again (after a reconnect or a restarted share).
@@ -539,10 +619,57 @@ async fn screen_viewer_ticker(state: AppState, generation: u64) {
     }
 }
 
+/// Wall-clock gap beyond which the PC is taken to have slept.
+const SLEEP_GAP: Duration = Duration::from_secs(30);
+
+/// True iff `wall` exceeds the `expected` tick by more than the sleep gap.
+fn slept(expected: Duration, wall: Duration) -> bool {
+    wall > expected + SLEEP_GAP
+}
+
+/// Notice a PC that went to sleep (the wall clock jumps while the timer was paused) and
+/// make a pending reconnect try again at once instead of finishing its backoff wait.
+pub fn spawn_sleep_watch(state: AppState) {
+    tauri::async_runtime::spawn(async move {
+        let tick = Duration::from_secs(5);
+        let mut last = SystemTime::now();
+        loop {
+            tokio::time::sleep(tick).await;
+            let now = SystemTime::now();
+            let wall = now.duration_since(last).unwrap_or_default();
+            last = now;
+            if slept(tick, wall) {
+                info!("The PC woke up after {wall:?}; reconnecting at once");
+                state.reconnect_wake.notify_one();
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use finch_protocol::models::{ShareEndReason, VideoCodec};
     use finch_testbed::{client::TestClient, server::TestServer};
+
+    #[test]
+    fn slept_detects_large_gap() {
+        let tick = Duration::from_secs(5);
+        assert!(!slept(tick, Duration::from_secs(5)));
+        assert!(slept(tick, Duration::from_secs(60)));
+    }
+
+    #[tokio::test]
+    async fn connection_loss_cancels_pending_screen_preflight_without_touching_a_new_session() {
+        let state = AppState::new();
+        let reservation = state.reserve_screen_share().unwrap();
+        assert!(stop_share_on_connection_loss(&state, 0).await);
+        assert!(state.with_screen_share(reservation.generation(), || Ok(())).is_err());
+        let current = state.reserve_screen_share().unwrap();
+        state.session_generation.store(1, Ordering::SeqCst);
+        assert!(!stop_share_on_connection_loss(&state, 0).await);
+        assert!(state.with_screen_share(current.generation(), || Ok(())).is_ok());
+    }
 
     #[tokio::test]
     async fn replacing_session_waits_for_voice_transition() {
@@ -646,26 +773,56 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn aud018_viewer_follows_a_share_that_restarts_under_a_new_peer() {
+    async fn aud018_watching_ends_with_the_share_and_a_restarted_share_is_not_followed() {
         let state = AppState::new();
         let (tx, mut rx) = mpsc::channel(8);
         *state.control_tx.write().await = Some(tx);
         let alice = uuid::Uuid::new_v4();
         *state.viewing_user.write().await = Some(alice);
         state.viewing_peer.store(5, Ordering::SeqCst);
+        let alice_sound = MediaHeader::new_audio(1, 5, 0, 0, false, false);
+        assert!(is_watching(&state, &alice_sound), "alice's sound is accepted while watched");
 
-        // Someone else's share is none of our business.
-        follow_watched_share(&state, uuid::Uuid::new_v4(), 99).await;
-        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 5);
-        assert!(rx.try_recv().is_err());
+        let mut emitted = Vec::new();
+        handle_control(&state, ServerMessage::ScreenShareStopped { peer_id: 5, reason: ShareEndReason::Stopped }, |m| emitted.push(m)).await;
+        assert_eq!(emitted.len(), 1, "the UI still learns that the share stopped");
+        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 0);
+        assert!(state.viewing_user.read().await.is_none());
+        assert!(!is_watching(&state, &alice_sound), "no sound of the stopped share is accepted");
 
-        // Alice's share starts again, now as peer 7: follow it and subscribe again.
-        follow_watched_share(&state, alice, 7).await;
-        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 7);
-        assert!(matches!(
-            rx.try_recv(),
-            Ok(ClientMessage::SubscribeScreenShare { target_user_id }) if target_user_id == alice
-        ));
+        // Alice starts sharing again as peer 7: nobody subscribes, the watch stays off.
+        handle_control(&state, ServerMessage::ScreenShareStarted {
+            user_id: alice, peer_id: 7, codec: VideoCodec::H264, width: 64, height: 64, fps: 30,
+        }, |m| emitted.push(m)).await;
+        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 0);
+        assert!(state.viewing_user.read().await.is_none());
+        assert!(!is_watching(&state, &MediaHeader::new_audio(1, 7, 0, 0, false, false)));
+        assert!(rx.try_recv().is_err(), "a new share is only watched after a click");
+    }
+
+    #[tokio::test]
+    async fn aud018_another_sharers_stop_leaves_the_watch_alone() {
+        let state = AppState::new();
+        let carol = uuid::Uuid::new_v4();
+        *state.viewing_user.write().await = Some(carol);
+        state.viewing_peer.store(9, Ordering::SeqCst);
+        handle_control(&state, ServerMessage::ScreenShareStopped { peer_id: 5, reason: ShareEndReason::Stopped }, |_| {}).await;
+        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 9);
+        assert_eq!(*state.viewing_user.read().await, Some(carol));
+        assert!(is_watching(&state, &MediaHeader::new_audio(1, 9, 0, 0, false, false)));
+    }
+
+    #[tokio::test]
+    async fn aud018_a_restarted_share_under_a_new_peer_ends_the_watch() {
+        let state = AppState::new();
+        let alice = uuid::Uuid::new_v4();
+        *state.viewing_user.write().await = Some(alice);
+        state.viewing_peer.store(5, Ordering::SeqCst);
+        handle_control(&state, ServerMessage::ScreenShareStarted {
+            user_id: alice, peer_id: 7, codec: VideoCodec::H264, width: 64, height: 64, fps: 30,
+        }, |_| {}).await;
+        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 0);
+        assert!(state.viewing_user.read().await.is_none());
     }
 
     #[tokio::test]
@@ -675,5 +832,72 @@ mod tests {
         *state.control_tx.write().await = Some(tx);
         resubscribe(&state).await;
         assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quitting_tells_the_room_at_once_instead_of_after_the_idle_timeout() -> anyhow::Result<()> {
+        let server = TestServer::start().await?;
+        let mut alice = TestClient::register(&server, "quitalice").await?;
+        let mut bob = TestClient::register(&server, "quitbob").await?;
+        let (_, alice_short) = alice.join_voice().await?;
+        bob.join_voice().await?;
+        let alice_peer = alice.session.session_peer_id;
+        let alice_user = alice.session.user_id;
+        let state = AppState::new();
+        *state.control_tx.write().await = Some(alice.session.control_tx.clone());
+        *state.quic_connection.write().await = Some(alice.session.connection.clone());
+        *state.current_voice_channel.write().await = Some(alice_short);
+        *state.last_connect.write().await = Some(ConnectParams {
+            quic_addr: server.quic_addr,
+            hostname: "localhost".to_string(),
+            token: String::new(),
+            require_known_fingerprint: false,
+        });
+        let generation = state.session_generation.load(Ordering::SeqCst);
+
+        let started = Instant::now();
+        shutdown_session(&state).await;
+        bob.expect_control(Duration::from_secs(1), |m| match m {
+            ServerMessage::UserLeftVoice { peer_id, .. } if *peer_id == alice_peer => Some(()),
+            _ => None,
+        })
+        .await?;
+        assert!(started.elapsed() < Duration::from_secs(1), "quit must not wait for the 15 s idle timeout");
+        assert!(state.quic_connection.read().await.is_none());
+        assert_ne!(state.session_generation.load(Ordering::SeqCst), generation, "quit must stop the reconnect loop");
+        assert!(state.last_connect.read().await.is_none(), "quit must forget the session to reconnect to");
+        bob.expect_no_control(Duration::from_secs(1), |m| {
+            matches!(m, ServerMessage::PresenceUpdate { user_id, status: finch_protocol::models::UserStatus::Online, .. } if *user_id == alice_user)
+        })
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn quitting_without_a_connection_returns_within_the_bound() {
+        let state = AppState::new();
+        let started = Instant::now();
+        shutdown_session(&state).await;
+        assert!(started.elapsed() < QUIT_BOUND, "no connection must not block quitting");
+    }
+
+    #[tokio::test]
+    async fn quitting_still_closes_the_connection_when_a_voice_transition_is_stuck() -> anyhow::Result<()> {
+        let server = TestServer::start().await?;
+        let client = TestClient::register(&server, "quitstuck").await?;
+        let state = AppState::new();
+        *state.quic_connection.write().await = Some(client.session.connection.clone());
+        *state.control_tx.write().await = Some(client.session.control_tx.clone());
+        *state.current_voice_channel.write().await = Some(1);
+        let stuck = state.voice_transition.lock().await;
+
+        let started = Instant::now();
+        shutdown_session(&state).await;
+        assert!(started.elapsed() < QUIT_BOUND, "a stuck transition must not hold quitting");
+        drop(stuck);
+        tokio::time::timeout(Duration::from_millis(500), client.session.connection.closed())
+            .await
+            .expect("quit must close the QUIC connection even when the leave cannot finish");
+        Ok(())
     }
 }

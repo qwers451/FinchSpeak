@@ -5,6 +5,7 @@ import { currentUser } from './authStore';
 import { setAppError } from './notificationStore';
 import { outboxForChannel, removeFromOutbox, saveToOutbox, type OutboxEntry } from './outbox';
 import { t } from '../i18n';
+import { describeError } from '../i18n/errors';
 
 export const [channels, setChannels] = createSignal<Channel[]>([]);
 export const [activeChannel, setActiveChannel] = createSignal<Channel | null>(null);
@@ -52,7 +53,7 @@ export async function loadChannels() {
       selectChannel(firstText);
     }
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
     console.error('Failed to load channels:', err);
   }
 }
@@ -127,7 +128,7 @@ export async function selectChannel(channel: Channel) {
       });
     } catch (err) {
       if (!isCurrent()) return;
-      setAppError(String(err));
+      setAppError(describeError(err));
       console.error('Failed to load messages for channel:', err);
     } finally {
       if (isCurrent()) setChatLoading(false);
@@ -155,7 +156,7 @@ export async function loadOlder() {
       return chronological([...older.filter((message) => !known.has(message.id)), ...previous]);
     });
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   } finally {
     setLoadingOlder(false);
   }
@@ -175,7 +176,7 @@ async function deliver(pending: Message, attachmentIds: string[], replyToId: str
     await api.sendTextMessage(pending.channel_id, pending.content, attachmentIds, clientMsgId, replyToId);
   } catch (err) {
     markFailed(pending.id, String(err));
-    setAppError(t('Message not sent: {error}', { error: String(err) }));
+    setAppError(t('Message not sent: {error}', { error: describeError(err) }));
     console.error('Failed to send text message:', err);
   }
 }
@@ -299,7 +300,7 @@ export async function editMessage(id: string, content: string) {
   try {
     await api.editMessage(id, text);
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -307,7 +308,7 @@ export async function deleteMessage(id: string) {
   try {
     await api.deleteMessage(id);
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -319,7 +320,7 @@ export async function toggleReaction(message: Message, emoji: string) {
   try {
     await api.setReaction(message.id, emoji, !mine);
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 

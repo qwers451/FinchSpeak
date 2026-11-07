@@ -52,26 +52,27 @@ a{color:inherit;text-decoration:none}
 
 /* buttons */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 20px;border-radius:var(--r-pill);border:1.5px solid transparent;background:var(--bg-hover);color:var(--text);font:700 14px/1 var(--font-ui);cursor:pointer;transition:background var(--t-fast),border-color var(--t-fast),transform var(--t-fast);white-space:nowrap}
-.btn:hover,.btn.is-hover{background:#2D3858}
-.btn:active,.btn.is-active{transform:translateY(1px)}
+.btn:hover:not(:disabled),.btn.is-hover:not(:disabled){background:#2D3858}
+.btn:active:not(:disabled),.btn.is-active:not(:disabled){transform:translateY(1px)}
 .btn:focus-visible,.btn.is-focus{outline:none;box-shadow:var(--glow-focus)}
 .btn.primary{background:var(--yellow);color:var(--bg-app)}
-.btn.primary:hover,.btn.primary.is-hover{background:var(--yellow-2)}
-.btn.primary:active,.btn.primary.is-active{background:var(--amber)}
+.btn.primary:hover:not(:disabled),.btn.primary.is-hover:not(:disabled){background:var(--yellow-2)}
+.btn.primary:active:not(:disabled),.btn.primary.is-active:not(:disabled){background:var(--amber)}
 .btn.secondary{background:transparent;border-color:var(--line);color:var(--text)}
-.btn.secondary:hover,.btn.secondary.is-hover{background:var(--bg-hover);border-color:#3A4770}
+.btn.secondary:hover:not(:disabled),.btn.secondary.is-hover:not(:disabled){background:var(--bg-hover);border-color:#3A4770}
 .btn.ghost{background:transparent;color:var(--text-2)}
-.btn.ghost:hover,.btn.ghost.is-hover{background:var(--bg-hover);color:var(--text)}
+.btn.ghost:hover:not(:disabled),.btn.ghost.is-hover:not(:disabled){background:var(--bg-hover);color:var(--text)}
 .btn.violet{background:var(--violet);color:#fff}
-.btn.violet:hover,.btn.violet.is-hover{background:#5446FF}
+.btn.violet:hover:not(:disabled),.btn.violet.is-hover:not(:disabled){background:#5446FF}
 .btn.danger{background:var(--red);color:var(--bg-app)}
-.btn.danger:hover,.btn.danger.is-hover{background:#FF5A33}
+.btn.danger:hover:not(:disabled),.btn.danger.is-hover:not(:disabled){background:#FF5A33}
 .btn.danger-ghost{background:transparent;color:var(--red-text);border-color:rgba(255,51,0,.5)}
 .btn.sm{height:32px;padding:0 14px;font-size:13px}.btn.lg{height:48px;padding:0 28px;font-size:15px}
 .btn.icon{width:40px;padding:0;border-radius:12px}.btn.icon.sm{width:32px;border-radius:10px}
 .btn.block{width:100%}
-.btn.is-disabled,.btn:disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
-.btn.is-loading{pointer-events:none}
+.btn.is-disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+/* Disabled and loading buttons stay hoverable so their cursor shows; the native disabled state blocks clicks. */
+.btn:disabled{opacity:.4;cursor:not-allowed}
 .spin{width:16px;height:16px;border-radius:50%;border:2.5px solid rgba(14,19,32,.25);border-top-color:currentColor;animation:spin 800ms linear infinite}
 .btn:not(.primary):not(.danger) .spin{border-color:rgba(242,244,250,.2);border-top-color:var(--text)}
 @keyframes spin{to{transform:rotate(360deg)}}

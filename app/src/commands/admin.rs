@@ -85,6 +85,12 @@ pub async fn unban_user(user_id: String, state: State<'_, AppState>) -> Result<(
     api(&state).await?.unban_user(parse_user(&user_id)?).await.map_err(|e| e.to_string())
 }
 
+/// A new temporary password for a member, shown to the admin once.
+#[tauri::command]
+pub async fn reset_user_password(user_id: String, state: State<'_, AppState>) -> Result<String, String> {
+    api(&state).await?.reset_password(parse_user(&user_id)?).await.map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn update_channel(
     channel_id: String,

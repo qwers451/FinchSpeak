@@ -14,6 +14,7 @@ type SliderProps = {
 export function Slider(props: SliderProps) {
   const percent = () => ((props.value - props.min) / (props.max - props.min || 1)) * 100;
   return (
+    <span class="range-control" data-disabled={props.disabled ? 'true' : undefined}>
     <input
       type="range"
       class={`range${props.cool ? ' cool' : ''}`}
@@ -26,5 +27,7 @@ export function Slider(props: SliderProps) {
       style={{ '--fill': `${percent()}%` }}
       onInput={(event) => props.onChange(parseFloat(event.currentTarget.value))}
     />
+    <span class="range-value" aria-hidden="true" style={{ left: `clamp(24px, ${Math.max(0, Math.min(100, percent()))}%, calc(100% - 24px))` }}>{props.value}</span>
+    </span>
   );
 }

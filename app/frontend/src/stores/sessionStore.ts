@@ -1,8 +1,9 @@
 import { createSignal } from 'solid-js';
-import type { SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
+import type { DeviceSession, SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
 import { setPendingMismatch, setPendingTofu } from './tofuStore';
+import { receiveInviteLink, setPendingInvite } from './inviteLink';
 import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
-import { activeVoiceChannel, toggleMute, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
+import { activeVoiceChannel, allVoiceParticipants, handlePushToTalk, toggleMute, handleHotkey, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
 import { classifyEnd, sessionEnded, setSessionEnded } from './sessionEnd';
@@ -11,7 +12,7 @@ import { clearTyping, isMentioned, noteIncoming, noteTyping, resetActivity, setU
 import { handleMessageDeleted, handleMessageEdited, handleReactionChanged, renameAuthor } from './chatStore';
 import { currentUser, setCurrentUser } from './authStore';
 import { resetScreenState, resetScreenStateOnDisconnect, setWatching, watching } from './screenState';
-import { screenHandlers } from './screenStore';
+import { endWatching, screenHandlers } from './screenStore';
 import { applySavedVolume } from './volumeStore';
 import { pushToast } from '../ui/toastStore';
 export { appError, setAppError } from './notificationStore';
@@ -27,9 +28,28 @@ export const [presence, setPresence] = createSignal<Record<string, UserStatus>>(
 /** What people wrote next to their status. */
 export const [statusTexts, setStatusTexts] = createSignal<Record<string, string>>({});
 export const onlineUsers = () => knownUsers().filter((user) => (presence()[user.id] ?? user.status) !== 'offline');
+/**
+ * My own status. The presence map wins: the server's self presence-update can arrive before the
+ * user record is set, and the user record has no status field from the server at sign-in.
+ */
+export function myStatus(): UserStatus {
+  const me = currentUser();
+  if (!me) return 'online';
+  return presence()[me.id] ?? me.status ?? 'online';
+}
+/** Signed-in devices of the current account; cleared with the rest of the session on sign-out. */
+export const [sessions, setSessions] = createSignal<DeviceSession[]>([]);
+
+// Bumped on every sign-out: a request started before it must not fill the state of the next session.
+let sessionGeneration = 0;
+export function currentSessionGeneration(): number {
+  return sessionGeneration;
+}
 
 export function resetSessionState() {
+  sessionGeneration++;
   resetMicPreview();
+  setSessions([]);
   setConnectionStatus('disconnected');
   setConnectionError(null);
   setReconnectInfo(null);
@@ -66,8 +86,8 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     const watched = watching();
     if (watched) {
       const sharer = data.initial_state.voice_states.find((state) => state.user_id === watched.user_id && state.sharing_screen);
-      if (sharer) setWatching({ user_id: watched.user_id, peer_id: sharer.peer_id });
-      else setWatching(null);
+      // The share ended, or came back under another peer id, while we were away: watching ends, as it does live.
+      if (!sharer || sharer.peer_id !== watched.peer_id) endWatching(watched, undefined);
     }
   },
   'new-message': (incoming) => {
@@ -93,9 +113,11 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'ping-rtt': (data) => setPingRtt(data.rtt_ms),
   'mic-level': handleMicLevel,
   'mic-test': handleMicTest,
+  hotkey: (action) => void handleHotkey(action),
   'voice-quality': handleVoiceQuality,
   'tofu-required': setPendingTofu,
   'tofu-mismatch': setPendingMismatch,
+  'invite-link': (url) => { receiveInviteLink(url); },
   'reconnect-attempt': ({ attempt, retry_in_secs }) => setReconnectInfo({ attempt, retryInSecs: retry_in_secs }),
   'channel-created': ({ channel }) => handleChannelCreated(channel),
   'channel-updated': ({ channel }) => handleChannelUpdated(channel),
@@ -111,10 +133,14 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     if (activeVoiceChannel()?.id === data.channel_id) reactToVoiceMovement('join', data.username, data.user_id);
   },
   'user-left-voice': (data) => {
+    // Decide from the event's room and read the name before the participant is removed.
+    const inMyRoom = activeVoiceChannel()?.id === data.channel_id;
+    const name = allVoiceParticipants().find((participant) => participant.peer_id === data.peer_id)?.username ?? '';
     // Say why the watched share ended while the sharer's name is still known.
     if (watching()?.peer_id === data.peer_id) screenHandlers['screen-share-stopped']({ peer_id: data.peer_id, reason: 'Left' });
     setVoiceParticipants((previous) => previous.filter((participant) => participant.peer_id !== data.peer_id || participant.channel_id !== data.channel_id));
     handleUserSpeaking(data.peer_id, false);
+    if (inMyRoom) reactToVoiceMovement('leave', name, data.user_id);
   },
   'user-voice-state-changed': (data) => setVoiceParticipants((previous) => previous.map((participant) =>
     participant.peer_id === data.peer_id ? { ...participant, is_muted: data.muted, is_deafened: data.deafened } : participant)),
@@ -129,6 +155,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     if (me && me.id === data.user_id) setCurrentUser({ ...me, status: data.status, status_text: data.status_text ?? null });
   },
   'tray-toggle-mute': () => { void toggleMute(); },
+  'push-to-talk': ({ pressed }) => handlePushToTalk(pressed),
   'server-mute-changed': ({ peer_id, server_muted }) => setVoiceParticipants((previous) => previous.map((participant) =>
     participant.peer_id === peer_id ? { ...participant, server_muted } : participant)),
   'voice-kicked': () => {
@@ -143,7 +170,10 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'connection-lost': (reason) => {
     resetMicPreview();
     const ended = classifyEnd(reason);
-    if (ended) setSessionEnded(ended);
+    if (ended) {
+      setSessionEnded(ended);
+      setPendingInvite(null);
+    }
     setConnectionStatus('disconnected');
     setConnectionError(reason);
     setVoiceParticipants([]);

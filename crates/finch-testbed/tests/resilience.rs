@@ -171,3 +171,49 @@ async fn reconnect_stops_on_rejected_token() -> anyhow::Result<()> {
     assert!(matches!(result, Err(ClientError::AuthRejected { .. })), "got {:?}", result.map(|_| ()));
     Ok(())
 }
+
+/// A wake signal (the PC just woke up, or "Retry now") skips the backoff wait.
+#[tokio::test]
+async fn wake_skips_the_backoff_wait() -> anyhow::Result<()> {
+    use finch_client_core::session::{reconnect_with_progress, Backoff, ConnectParams};
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    let mut server = TestServer::start().await?;
+    let a = TestClient::register(&server, "alice").await?;
+    let token = a.api.token().unwrap_or_default().to_string();
+    let quic_addr = server.quic_addr;
+    server.stop().await;
+
+    let params = ConnectParams {
+        quic_addr,
+        hostname: "localhost".to_string(),
+        token,
+        require_known_fingerprint: false,
+    };
+    let backoff = Backoff { initial: Duration::from_secs(10), max: Duration::from_secs(10) };
+    let attempts = Arc::new(AtomicU32::new(0));
+    let wake = Arc::new(tokio::sync::Notify::new());
+    let counter = attempts.clone();
+    let started = std::time::Instant::now();
+    let task = tokio::spawn(reconnect_with_progress(params, Arc::new(DashMap::new()), backoff, wake.clone(), move |attempt, _| {
+        counter.store(attempt, Ordering::SeqCst);
+    }));
+
+    // Wait for the first failed try; the client is now in its 10 s pause.
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while attempts.load(Ordering::SeqCst) < 1 { tokio::time::sleep(Duration::from_millis(20)).await; }
+    })
+    .await?;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    wake.notify_one();
+    // The wake starts the second try at once; reporting it takes one more failed connect
+    // (about as long as the first), far less than the 10 s pause it replaces.
+    let first_try = started.elapsed();
+    tokio::time::timeout(first_try + Duration::from_secs(4), async {
+        while attempts.load(Ordering::SeqCst) < 2 { tokio::time::sleep(Duration::from_millis(20)).await; }
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("the wake did not cut the backoff wait short"))?;
+    task.abort();
+    Ok(())
+}

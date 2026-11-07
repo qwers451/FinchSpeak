@@ -152,6 +152,12 @@ pub struct AudioEngineHandle {
     pub is_deafened: Arc<AtomicBool>,
 }
 
+#[derive(Default)]
+struct ScreenShareLifecycle {
+    generation: u64,
+    active: bool,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     /// REST client for the current server (set on login/register).
@@ -180,12 +186,15 @@ pub struct AppState {
     pub screen_sharer: Arc<std::sync::Mutex<Option<ScreenSharer>>>,
     /// The sound of our shared screen, when we chose to share it.
     pub screen_audio: Arc<std::sync::Mutex<Option<ScreenAudioForwarder>>>,
+    screen_share_lifecycle: Arc<std::sync::Mutex<ScreenShareLifecycle>>,
     /// TOFU verified fingerprints: hostname -> SHA-256 hex string
     pub saved_fingerprints: Arc<DashMap<String, String>>,
     /// Parameters of the current QUIC session, reused to reconnect after a drop.
     pub last_connect: Arc<RwLock<Option<ConnectParams>>>,
     /// Bumped on every login and logout; a reconnect loop stops when it changes.
     pub session_generation: Arc<AtomicU64>,
+    /// Cuts the reconnect backoff pause short (PC woke from sleep, "Retry now").
+    pub reconnect_wake: Arc<tokio::sync::Notify>,
     /// File with pinned server fingerprints (set at startup from the app data dir).
     pub known_servers_path: Arc<RwLock<Option<PathBuf>>>,
     /// Pending TOFU fingerprint to be accepted: (hostname, fingerprint)
@@ -199,11 +208,32 @@ pub struct AppState {
     /// Seconds of microphone test requested by the UI (0 = none); the audio worker takes it.
     /// An update found by `check_update`, waiting for the person to accept it.
     pub pending_update: Arc<tokio::sync::Mutex<Option<(crate::updater::UpdateInfo, crate::updater::PlatformEntry)>>>,
-    /// Closing the window hides it to the tray instead of quitting.
-    pub close_to_tray: Arc<std::sync::atomic::AtomicBool>,
     /// The user chose Quit: really close.
     pub quitting: Arc<std::sync::atomic::AtomicBool>,
     pub mic_test_request: Arc<std::sync::atomic::AtomicU32>,
+    /// Where session tokens are kept between launches.
+    pub token_store: Arc<dyn crate::credentials::TokenStore>,
+    /// Credential key of the current session (used by logout and refresh).
+    pub signed_in_key: Arc<RwLock<Option<String>>>,
+    /// System-wide keys for push to talk, mute and deafen.
+    pub hotkeys: Arc<crate::hotkeys::Hotkeys>,
+}
+
+/// Cancels preflight on an error or a dropped command future; committed workers
+/// are owned by AppState and are stopped through the normal lifecycle.
+pub(crate) struct ScreenShareReservation {
+    state: AppState,
+    generation: u64,
+    committed: bool,
+}
+impl ScreenShareReservation {
+    pub(crate) fn generation(&self) -> u64 { self.generation }
+    pub(crate) fn commit(mut self) -> u64 { self.committed = true; self.generation }
+}
+impl Drop for ScreenShareReservation {
+    fn drop(&mut self) {
+        if !self.committed { self.state.stop_screen_share_generation(self.generation); }
+    }
 }
 
 impl Default for AppState {
@@ -213,20 +243,59 @@ impl Default for AppState {
 }
 
 impl AppState {
+    pub(crate) fn reserve_screen_share(&self) -> Result<ScreenShareReservation, String> {
+        let generation = self.begin_screen_share()?;
+        Ok(ScreenShareReservation { state: self.clone(), generation, committed: false })
+    }
+
+    pub(crate) fn screen_share_generation(&self) -> Result<u64, String> {
+        self.screen_share_lifecycle.lock().map(|lifecycle| lifecycle.generation)
+            .map_err(|_| "screen share state poisoned".to_string())
+    }
+
+    /// Reserve one share identity before starting video or audio workers.
+    pub(crate) fn begin_screen_share(&self) -> Result<u64, String> {
+        let mut lifecycle = self.screen_share_lifecycle.lock().map_err(|_| "screen share state poisoned".to_string())?;
+        if lifecycle.active || self.screen_sharer.lock().map_err(|_| "screen share state poisoned".to_string())?.is_some() {
+            return Err("You are already sharing your screen".into());
+        }
+        lifecycle.generation = lifecycle.generation.wrapping_add(1);
+        lifecycle.active = true;
+        Ok(lifecycle.generation)
+    }
+
+    /// Validate and install resources under the same lock that stop uses. Never wait
+    /// for worker startup or join a worker inside this short critical section.
+    pub(crate) fn with_screen_share<R>(&self, generation: u64, action: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
+        let lifecycle = self.screen_share_lifecycle.lock().map_err(|_| "screen share state poisoned".to_string())?;
+        if !lifecycle.active || lifecycle.generation != generation {
+            return Err("screen-share-ended-before-start".into());
+        }
+        action()
+    }
+
+    pub(crate) fn stop_screen_share_generation(&self, generation: u64) -> bool {
+        self.stop_screen_share_inner(Some(generation))
+    }
+
     /// Stop our screen share if one is running. Returns whether there was one.
-    pub fn stop_screen_share(&self) -> bool {
-        let audio = self.screen_audio.lock().ok().and_then(|mut slot| slot.take());
-        if let Some(mut audio) = audio {
-            audio.stop();
-        }
-        let sharer = self.screen_sharer.lock().ok().and_then(|mut slot| slot.take());
-        match sharer {
-            Some(mut sharer) => {
-                sharer.stop();
-                true
-            }
-            None => false,
-        }
+    pub fn stop_screen_share(&self) -> bool { self.stop_screen_share_inner(None) }
+
+    fn stop_screen_share_inner(&self, generation: Option<u64>) -> bool {
+        let (audio, sharer, was_active) = {
+            let Ok(mut lifecycle) = self.screen_share_lifecycle.lock() else { return false; };
+            if generation.is_some_and(|wanted| wanted != lifecycle.generation || !lifecycle.active) { return false; }
+            let was_active = lifecycle.active;
+            lifecycle.active = false;
+            lifecycle.generation = lifecycle.generation.wrapping_add(1);
+            let audio = self.screen_audio.lock().ok().and_then(|mut slot| slot.take());
+            let sharer = self.screen_sharer.lock().ok().and_then(|mut slot| slot.take());
+            (audio, sharer, was_active)
+        };
+        if let Some(mut audio) = audio { audio.stop(); }
+        let had_sharer = sharer.is_some();
+        if let Some(mut sharer) = sharer { sharer.stop(); }
+        was_active || had_sharer
     }
 
     /// Forget the screen share we were watching.
@@ -260,19 +329,23 @@ impl AppState {
             viewing_user: Arc::new(RwLock::new(None)),
             screen_sharer: Arc::new(std::sync::Mutex::new(None)),
             screen_audio: Arc::new(std::sync::Mutex::new(None)),
+            screen_share_lifecycle: Arc::new(std::sync::Mutex::new(ScreenShareLifecycle::default())),
             saved_fingerprints: Arc::new(DashMap::new()),
             known_servers_path: Arc::new(RwLock::new(None)),
             last_connect: Arc::new(RwLock::new(None)),
             session_generation: Arc::new(AtomicU64::new(0)),
+            reconnect_wake: Arc::new(tokio::sync::Notify::new()),
             pending_fingerprint: Arc::new(RwLock::new(None)),
             video_channel: Arc::new(RwLock::new(None)),
             audio_engine: Arc::new(Mutex::new(crate::audio_engine::AudioEngine::new())),
             audio_devices: Arc::new(std::sync::RwLock::new(AudioDeviceSelection::default())),
             voice_settings: Arc::new(VoiceSettings::default()),
             pending_update: Arc::new(tokio::sync::Mutex::new(None)),
-            close_to_tray: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             quitting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             mic_test_request: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            token_store: Arc::new(crate::credentials::KeyringStore),
+            signed_in_key: Arc::new(RwLock::new(None)),
+            hotkeys: Arc::new(crate::hotkeys::Hotkeys::default()),
         }
     }
 }
@@ -325,6 +398,31 @@ mod voice_settings_tests {
         let mut out = [0.0; FRAME_SIZE_48K];
         mixer.mix_frame(&mut out, std::time::Instant::now());
         assert!(out.iter().all(|sample| *sample == 0.0), "watching again preserves the saved screen mute");
+    }
+
+    #[test]
+    fn screen_audio_finishing_after_stop_cannot_be_installed() {
+        let state = AppState::new();
+        let generation = state.begin_screen_share().unwrap();
+        let worker_state = state.clone();
+        let installed = Arc::new(AtomicBool::new(false));
+        let worker_installed = installed.clone();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            resume_rx.recv().unwrap();
+            worker_state.with_screen_share(generation, || { worker_installed.store(true, Ordering::SeqCst); Ok(()) })
+        });
+        ready_rx.recv().unwrap();
+        assert!(state.stop_screen_share());
+        resume_tx.send(()).unwrap();
+        assert!(worker.join().unwrap().is_err());
+        assert!(!installed.load(Ordering::SeqCst));
+        let current = state.begin_screen_share().unwrap();
+        assert!(!state.stop_screen_share_generation(generation), "a late end callback cannot stop a newer share");
+        assert!(state.with_screen_share(current, || Ok(())).is_ok());
+        state.stop_screen_share();
     }
 
     fn dto(gain: f32, threshold: f32, ptt: bool) -> VoiceSettingsDto {

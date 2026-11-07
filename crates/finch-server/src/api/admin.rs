@@ -2,11 +2,12 @@
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use argon2::password_hash::rand_core::{OsRng, RngCore};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::api::auth::{ArcSharedState, AuthUser};
+use crate::api::auth::{hash_password, ArcSharedState, AuthUser};
 use crate::api::invites::now_secs;
 use crate::audit;
 use crate::config::RegistrationMode;
@@ -78,7 +79,7 @@ pub async fn list_users_handler(
 ) -> Result<Json<Vec<AdminUserDto>>, ServerError> {
     require(&auth, Permission::ViewMembers)?;
     let rows = sqlx::query_as::<_, (String, String, String, String, Option<i64>, Option<i64>, Option<i64>)>(
-        "SELECT id, username, display_name, role, banned_at, banned_until, last_seen FROM users ORDER BY username",
+        "SELECT id, username, COALESCE(NULLIF(TRIM(display_name), ''), username), role, banned_at, banned_until, last_seen FROM users ORDER BY username",
     )
     .fetch_all(&state.pool)
     .await?;
@@ -127,6 +128,52 @@ pub async fn set_role_handler(
     sqlx::query("UPDATE users SET role = ? WHERE id = ?").bind(&request.role).bind(id.to_string()).execute(&state.pool).await?;
     audit::record(&state.pool, &auth, "role_changed", Some(&name_of(&state, &id.to_string()).await), Some(&format!("{current} -> {}", request.role))).await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Characters a temporary password may use: no look-alikes (0/O, 1/I/L).
+const TEMPORARY_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const TEMPORARY_LENGTH: usize = 12;
+
+/// A random temporary password from a cryptographic RNG.
+fn generate_temporary_password() -> String {
+    // Bytes from the top partial block would favour some characters, so they are redrawn.
+    let limit = 256 - 256 % TEMPORARY_ALPHABET.len();
+    let mut out = String::with_capacity(TEMPORARY_LENGTH);
+    let mut byte = [0u8; 1];
+    while out.len() < TEMPORARY_LENGTH {
+        OsRng.fill_bytes(&mut byte);
+        let value = usize::from(byte[0]);
+        if value < limit {
+            out.push(char::from(TEMPORARY_ALPHABET[value % TEMPORARY_ALPHABET.len()]));
+        }
+    }
+    out
+}
+
+#[derive(Debug, Serialize)]
+pub struct TemporaryPasswordDto {
+    /// Shown to the admin once; only its hash is stored.
+    pub temporary_password: String,
+}
+
+/// POST /api/admin/users/{id}/password-reset: a new temporary password; the member is signed out everywhere.
+pub async fn reset_password_handler(
+    auth: AuthUser,
+    State(state): State<ArcSharedState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<TemporaryPasswordDto>, ServerError> {
+    require(&auth, Permission::ManageMembers)?;
+    let (role, _) = target_account(&state, &id.to_string()).await?;
+    // An admin's password is theirs to change; no admin resets another (or themselves here).
+    if role == ROLE_ADMIN {
+        return Err(ServerError::Forbidden);
+    }
+    let temporary = generate_temporary_password();
+    let hash = hash_password(&temporary)?;
+    sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?").bind(hash).bind(id.to_string()).execute(&state.pool).await?;
+    disconnect_user(&state, id, b"password changed").await?;
+    audit::record(&state.pool, &auth, "password_reset", Some(&name_of(&state, &id.to_string()).await), None).await;
+    Ok(Json(TemporaryPasswordDto { temporary_password: temporary }))
 }
 
 /// POST /api/admin/users/{id}/kick: disconnect and make them log in again.

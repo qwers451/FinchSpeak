@@ -1,12 +1,14 @@
-import { createSignal, onMount, onCleanup, Show } from 'solid-js';
-import { currentUser, setCurrentUser } from './stores/authStore';
+import { createEffect, createMemo, createSignal, onMount, onCleanup, Show } from 'solid-js';
+import { currentUser, setCurrentUser, resumeLastSession, resuming } from './stores/authStore';
 import { activeChannel, loadChannels } from './stores/chatStore';
 import { setAppError } from './stores/sessionStore';
 import { subscribeSessionEvents } from './services/sessionEvents';
+import { receiveInviteLink } from './stores/inviteLink';
 import { api } from './services/api';
 import { Sidebar } from './components/Sidebar';
 import { prefs } from './stores/settingsStore';
 import { startDesktopSync } from './stores/desktop';
+import { restoreAudioDevices, restoreVoiceSettings } from './stores/voiceStore';
 import { MembersPanel } from './components/MembersPanel';
 import { ChatArea } from './components/ChatArea';
 import { VoicePanel } from './components/VoicePanel';
@@ -19,7 +21,10 @@ import { IconSprite, Titlebar, ToastHost } from './ui';
 import { AdminModal } from './components/admin/AdminModal';
 import { SettingsModal } from './components/settings/SettingsModal';
 import type { UnlistenFn } from '@tauri-apps/api/event';
+import { startUpdateChecks } from './stores/updateStore';
+import { startAutoIdle } from './stores/idleStore';
 import { t } from './i18n';
+import { describeError } from './i18n/errors';
 
 export function App() {
   let unlisten: UnlistenFn | undefined;
@@ -32,19 +37,35 @@ export function App() {
       const subscriptions = await subscribeSessionEvents();
       if (disposed) { subscriptions.dispose(); return; }
       unlisten = subscriptions.dispose;
+      // A finchspeak:// link that started the app arrived before this window listened: take it now.
+      const waitingLink = await api.takeInviteLink();
+      if (waitingLink) receiveInviteLink(waitingLink);
+      // Keys work system-wide, so register them at start, not only on joining a room.
+      void restoreAudioDevices(); // the Voice settings page and the out-of-call mic test use the saved devices
+      void restoreVoiceSettings();
       const user = await api.getCurrentUser();
       if (disposed) return;
       if (user) {
         setCurrentUser(user);
         await loadChannels();
         await subscriptions.refresh();
+      } else {
+        await resumeLastSession(() => subscriptions.refresh());
       }
       setEventsReady(true);
     } catch (e) {
-      if (!disposed) setAppError(String(e));
+      if (!disposed) setAppError(describeError(e));
     } finally {
       if (!disposed && unlisten) setEventsReady(true);
     }
+  });
+
+  // Background update checks and automatic idle run only while somebody is signed in.
+  const signedIn = createMemo(() => !!currentUser());
+  createEffect(() => {
+    if (!signedIn()) return;
+    onCleanup(startUpdateChecks());
+    onCleanup(startAutoIdle());
   });
 
   onCleanup(() => {
@@ -57,7 +78,7 @@ export function App() {
       <IconSprite />
       <Titlebar />
       <ConnectionBanner />
-      <Show when={eventsReady()} fallback={<Splash />}>
+      <Show when={eventsReady() && !resuming()} fallback={<Splash />}>
         <Show when={!sessionEnded()} fallback={<SessionEndedScreen />}>
         <Show when={currentUser()} fallback={<AuthModal />}>
           <div class="app-layout">

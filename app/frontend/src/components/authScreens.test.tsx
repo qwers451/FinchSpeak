@@ -7,7 +7,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) })
 
 import { AuthModal, describeAuthError } from './AuthModal';
 import { CertChangedModal, TofuModal, diffBytes, fingerprintGroups } from './TofuModal';
-import { setPendingMismatch, setPendingTofu } from '../stores/authStore';
+import { loginUser, retryPendingSignIn, setCurrentUser, setPendingMismatch, setPendingTofu } from '../stores/authStore';
 import { passwordStrength } from '../ui/passwordStrength';
 
 let dispose: (() => void) | undefined;
@@ -97,4 +97,279 @@ it('sign-in form remembers address and login but never the password', async () =
   expect(stored).toContain('alice');
   expect(stored).toContain('x.example');
   expect(stored).not.toContain('hunter2');
+});
+
+it('stay signed in is on by default and is passed to login', async () => {
+  const { api } = await import('../services/api');
+  const spy = vi.spyOn(api, 'login').mockResolvedValue({ id: 'u', username: 'alice', display_name: 'Alice', role: 'member' });
+  const host = mount(() => <AuthModal />);
+  const [, user, pass] = Array.from(host.querySelectorAll('input'));
+  for (const [el, value] of [[user, 'alice'], [pass, 'hunter2hunter2']] as const) {
+    el.value = value;
+    el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  }
+  const toggle = host.querySelector('[role="switch"]')!;
+  expect(toggle.getAttribute('aria-checked')).toBe('true');
+  host.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+  expect(spy.mock.calls[0][3]).toBe(true);
+  spy.mockRestore();
+});
+
+it('trusting the server retries the sign-in once', async () => {
+  const user = { id: 'u', username: 'alice', display_name: 'Alice', role: 'member' };
+  let logins = 0;
+  transport.invoke.mockImplementation(async (cmd: string) => {
+    if (cmd === 'login') {
+      logins += 1;
+      if (logins === 1) {
+        setPendingTofu({ hostname: 'h', fingerprint: FP });
+        throw 'Server certificate of h is not trusted yet';
+      }
+      return user;
+    }
+    return null;
+  });
+  expect(await loginUser('alice', 'hunter2hunter2', false)).toBe(false);
+  const host = mount(() => <TofuModal />);
+  const trust = Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.includes('trust server'))!;
+  trust.click();
+  await vi.waitFor(() => expect(logins).toBe(2));
+  const calls = transport.invoke.mock.calls.filter(([cmd]) => cmd === 'login');
+  expect(calls[1][1]).toMatchObject({ username: 'alice', password: 'hunter2hunter2', remember: false });
+});
+
+it('a failed sign-in other than the certificate prompt forgets the password', async () => {
+  transport.invoke.mockImplementation(async (cmd: string) => {
+    if (cmd === 'login') throw 'Login failed: invalid username or password';
+    return null;
+  });
+  expect(await loginUser('alice', 'wrong-password')).toBe(false);
+  expect(await retryPendingSignIn()).toBe(false);
+  expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'login')).toHaveLength(1);
+});
+
+it('dismissing the certificate prompt forgets the password', async () => {
+  transport.invoke.mockImplementation(async (cmd: string) => {
+    if (cmd === 'login') {
+      setPendingTofu({ hostname: 'h', fingerprint: FP });
+      throw 'Server certificate of h is not trusted yet';
+    }
+    return null;
+  });
+  await loginUser('alice', 'hunter2hunter2');
+  const host = mount(() => <TofuModal />);
+  Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.includes('Cancel'))!.click();
+  expect(await retryPendingSignIn()).toBe(false);
+  expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'login')).toHaveLength(1);
+});
+
+it('keeps the attempt when the certificate event arrives after the rejection', async () => {
+  let logins = 0;
+  transport.invoke.mockImplementation(async (cmd: string) => {
+    if (cmd !== 'login') return null;
+    logins += 1;
+    if (logins === 1) throw 'Server certificate of h is not trusted yet';
+    return { id: 'u', username: 'alice', display_name: 'Alice', role: 'member' };
+  });
+  await loginUser('alice', 'hunter2hunter2');
+  setPendingTofu({ hostname: 'h', fingerprint: FP });
+  const host = mount(() => <TofuModal />);
+  Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.includes('trust server'))!.click();
+  await vi.waitFor(() => expect(logins).toBe(2));
+});
+
+// ---- invite links: the link only prefills the form and pins its fingerprint; trust still goes through the dialog's confirm
+
+const INVITE_FP = FP;
+
+it('a matching invite link prefills server and code and opens register mode', async () => {
+  const { setPendingInvite } = await import('../stores/inviteLink');
+  const { setServerUrl, serverUrl } = await import('../stores/authStore');
+  const before = serverUrl();
+  setPendingInvite({ server: 'https://chat.finch.example:8443', code: 'K7M2QX9TPW4B', fp: INVITE_FP });
+  const host = mount(() => <AuthModal />);
+  expect(host.textContent).toContain('Join the flock');
+  const inputs = Array.from(host.querySelectorAll('input')) as HTMLInputElement[];
+  expect(inputs[0].value).toBe('https://chat.finch.example:8443');
+  expect(inputs.some((el) => el.value === 'K7M2QX9TPW4B')).toBe(true);
+  expect(transport.invoke).not.toHaveBeenCalled();
+  setPendingInvite(null);
+  setServerUrl(before);
+});
+
+it('submitting with an empty server address shows the plain error and does not sign in', async () => {
+  const { setServerUrl, serverUrl } = await import('../stores/authStore');
+  const before = serverUrl();
+  setServerUrl('');
+  const host = mount(() => <AuthModal />);
+  host.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  expect(host.textContent).toContain('Enter the server address');
+  expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'login' || cmd === 'register')).toHaveLength(0);
+  setServerUrl(before);
+});
+
+it('mismatched_link_fingerprint_is_not_trusted', async () => {
+  const { setPendingInvite } = await import('../stores/inviteLink');
+  setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: FP.replace('00', 'FF') });
+  setPendingTofu({ hostname: 'h', fingerprint: FP });
+  const host = mount(() => <TofuModal />);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'trust_fingerprint')).toHaveLength(0);
+  expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(host.textContent).toContain('The fingerprint in the invite link does not match this server.');
+  setPendingInvite(null);
+});
+
+it('a matching invite link trusts the server through the same confirm path, without the dialog', async () => {
+  const { setPendingInvite } = await import('../stores/inviteLink');
+  const user = { id: 'u', username: 'alice', display_name: 'Alice', role: 'member' };
+  let logins = 0;
+  transport.invoke.mockImplementation(async (cmd: string) => {
+    if (cmd === 'login') {
+      logins += 1;
+      if (logins === 1) {
+        setPendingTofu({ hostname: 'h', fingerprint: FP });
+        throw 'Server certificate of h is not trusted yet';
+      }
+      return user;
+    }
+    return null;
+  });
+  const { setServerUrl: setAddress } = await import('../stores/authStore');
+  setAddress('https://h:8443');
+  setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: FP.toLowerCase().replace(/:/g, '') });
+  mount(() => <TofuModal />);
+  expect(await loginUser('alice', 'hunter2hunter2', false)).toBe(false);
+  await vi.waitFor(() => expect(logins).toBe(2));
+  expect(transport.invoke).toHaveBeenCalledWith('trust_fingerprint', { hostname: 'h', fingerprint: FP });
+  setPendingInvite(null);
+});
+
+it('changing the server to another host forgets the invite link', async () => {
+  const { setPendingInvite, pendingInvite } = await import('../stores/inviteLink');
+  const { setServerUrl, serverUrl } = await import('../stores/authStore');
+  const before = serverUrl();
+  setPendingInvite({ server: 'https://chat.finch.example:8443', code: 'K7M2QX9TPW4B', fp: INVITE_FP });
+  const host = mount(() => <AuthModal />);
+  const address = host.querySelector('input') as HTMLInputElement;
+  address.value = 'https://other.example:8443';
+  address.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  expect(pendingInvite()).toBeNull();
+  setServerUrl(before);
+});
+
+it('a matching invite link does not show the trust dialog while it trusts the server', async () => {
+  const { setPendingInvite } = await import('../stores/inviteLink');
+  transport.invoke.mockImplementation(async (cmd: string) => (cmd === 'trust_fingerprint' ? new Promise(() => {}) : null));
+  const { setServerUrl: setAddress } = await import('../stores/authStore');
+  setAddress('https://h:8443');
+  setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: FP });
+  setPendingTofu({ hostname: 'h', fingerprint: FP });
+  const host = mount(() => <TofuModal />);
+  await vi.waitFor(() => expect(transport.invoke).toHaveBeenCalledWith('trust_fingerprint', { hostname: 'h', fingerprint: FP }));
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
+  setPendingInvite(null);
+});
+
+
+it('forgetting the link by changing the host clears its invite code, and a code typed afterwards is kept', async () => {
+  const { setPendingInvite } = await import('../stores/inviteLink');
+  const { setServerUrl, serverUrl } = await import('../stores/authStore');
+  const before = serverUrl();
+  setPendingInvite({ server: 'https://chat.finch.example:8443', code: 'K7M2QX9TPW4B', fp: INVITE_FP });
+  const host = mount(() => <AuthModal />);
+  const [address, code] = Array.from(host.querySelectorAll('input')) as HTMLInputElement[];
+  expect(code.value).toBe('K7M2QX9TPW4B');
+  address.value = 'https://other.example:8443';
+  address.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  expect(code.value).toBe('');
+  code.value = 'OWNCODE12345';
+  code.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  address.value = 'https://another.example:8443';
+  address.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  expect(code.value).toBe('OWNCODE12345');
+  setServerUrl(before);
+});
+
+it('a matching fingerprint for another host opens the normal dialog and trusts nothing', async () => {
+  const { setPendingInvite } = await import('../stores/inviteLink');
+  const { setServerUrl, serverUrl } = await import('../stores/authStore');
+  const before = serverUrl();
+  setServerUrl('https://evil.example:8443');
+  setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: FP });
+  setPendingTofu({ hostname: 'evil.example', fingerprint: FP });
+  const host = mount(() => <TofuModal />);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'trust_fingerprint')).toHaveLength(0);
+  setPendingInvite(null);
+  setServerUrl(before);
+});
+
+it('a matching fingerprint on the same host but another port opens the normal dialog', async () => {
+  const { setPendingInvite } = await import('../stores/inviteLink');
+  const { setServerUrl, serverUrl } = await import('../stores/authStore');
+  const before = serverUrl();
+  setServerUrl('https://h:9443');
+  setPendingInvite({ server: 'https://h:8443', code: 'K7M2QX9TPW4B', fp: FP });
+  setPendingTofu({ hostname: 'h', fingerprint: FP });
+  const host = mount(() => <TofuModal />);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'trust_fingerprint')).toHaveLength(0);
+  setPendingInvite(null);
+  setServerUrl(before);
+});
+
+it('Retry after a failed automatic resume resumes the session, not an empty-password sign-in', async () => {
+  const { api } = await import('../services/api');
+  const { resumeLastSession, setRememberedUsername } = await import('../stores/authStore');
+  const user = { id: 'u', username: 'alice', display_name: 'Alice', role: 'member' as const };
+  setCurrentUser(null);
+  setRememberedUsername('alice');
+  const resume = vi.spyOn(api, 'resumeSession')
+    .mockRejectedValueOnce('Cannot reach the server: timeout')
+    .mockResolvedValue(user);
+  const login = vi.spyOn(api, 'login');
+  await resumeLastSession();
+  const host = mount(() => <AuthModal />);
+  expect(host.textContent).toContain('Cannot reach the server');
+  const retry = Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.includes('Retry'))!;
+  retry.click();
+  await vi.waitFor(() => expect(resume).toHaveBeenCalledTimes(2));
+  expect(login).not.toHaveBeenCalled();
+  vi.restoreAllMocks();
+});
+
+it('a second submit while the sign-in waits for an automatic sign-in does not log in twice', async () => {
+  const { api } = await import('../services/api');
+  const { resumeLastSession, setRememberedUsername, setServerUrl, serverUrl, setCurrentUser: resetUser } = await import('../stores/authStore');
+  const before = serverUrl();
+  resetUser(null);
+  setServerUrl('https://x.example:8443');
+  setRememberedUsername('alice');
+  let finishResume!: (value: null) => void;
+  vi.spyOn(api, 'resumeSession').mockReturnValue(new Promise<null>((resolve) => { finishResume = resolve; }));
+  transport.invoke.mockImplementation(async (cmd: string) => (cmd === 'login'
+    ? { id: 'u', username: 'alice', display_name: 'Alice', role: 'member' }
+    : null));
+  const pending = resumeLastSession();
+  const host = mount(() => <AuthModal />);
+  const [, user, pass] = Array.from(host.querySelectorAll('input'));
+  for (const [el, value] of [[user, 'alice'], [pass, 'hunter2hunter2']] as const) {
+    el.value = value;
+    el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  }
+  const form = host.querySelector('form')!;
+  form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  finishResume(null);
+  await pending;
+  await vi.waitFor(() => expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'login')).toHaveLength(1));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'login')).toHaveLength(1);
+  vi.restoreAllMocks();
+  setServerUrl(before);
 });

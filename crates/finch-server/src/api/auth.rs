@@ -94,6 +94,9 @@ impl FromRef<ArcSharedState> for ArcSharedState {
     }
 }
 
+/// Shortest password accepted when registering or choosing a new one (older, shorter ones still log in).
+pub const MIN_PASSWORD_LEN: usize = 8;
+
 /// Hash a password using Argon2id.
 pub fn hash_password(password: &str) -> Result<String, ServerError> {
     let salt = SaltString::generate(&mut OsRng);
@@ -123,30 +126,41 @@ pub fn issue_jwt(
     secret: &str,
     expiration_hours: i64,
 ) -> Result<(String, String), ServerError> {
+    let jti = Uuid::new_v4().to_string();
+    let token = issue_jwt_for_session(user_id, username, role, secret, expiration_hours, &jti)?;
+    Ok((token, jti))
+}
+
+/// Issue a JWT for an existing session id (used to refresh a session in place).
+pub fn issue_jwt_for_session(
+    user_id: &Uuid,
+    username: &str,
+    role: &str,
+    secret: &str,
+    expiration_hours: i64,
+    jti: &str,
+) -> Result<String, ServerError> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
 
-    let exp = now + (expiration_hours as u64 * 3600);
-    let jti = Uuid::new_v4().to_string();
+    let exp = (now as i64).saturating_add(expiration_hours.saturating_mul(3600)).max(0) as u64;
 
     let claims = Claims {
         sub: user_id.to_string(),
         username: username.to_string(),
         role: role.to_string(),
         exp: exp as usize,
-        jti: jti.clone(),
+        jti: jti.to_string(),
     };
 
-    let token = encode(
+    encode(
         &Header::default(),
         &claims,
         &EncodingKey::from_secret(secret.as_bytes()),
     )
-    .map_err(|e| ServerError::Internal(format!("Failed to issue JWT: {e}")))?;
-
-    Ok((token, jti))
+    .map_err(|e| ServerError::Internal(format!("Failed to issue JWT: {e}")))
 }
 
 /// Verify and decode a JWT token.
@@ -161,19 +175,69 @@ pub fn verify_jwt(token: &str, secret: &str) -> Result<Claims, ServerError> {
     Ok(token_data.claims)
 }
 
+/// Why a token cannot be used any more.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenProblem {
+    /// The token or its server-side session ran out of time.
+    Expired,
+    /// The signature is fine but the session is gone (logout, admin, password change).
+    Revoked,
+    /// Not a token this server signed.
+    Invalid,
+    /// The check itself failed (database trouble); says nothing about the token.
+    Internal,
+}
+
+impl TokenProblem {
+    /// The reason text sent to clients; the app tells the cases apart by it.
+    pub fn message(self) -> &'static str {
+        match self {
+            TokenProblem::Expired => "Session expired",
+            TokenProblem::Revoked => "Session revoked",
+            TokenProblem::Invalid => "Invalid token",
+            TokenProblem::Internal => "Server error, try again",
+        }
+    }
+}
+
 /// A signed JWT is usable only while its server-side session and account still exist.
-pub async fn verify_active_jwt(token: &str, secret: &str, pool: &SqlitePool) -> Result<Claims, ServerError> {
-    let mut claims = verify_jwt(token, secret)?;
+pub async fn check_active_jwt(token: &str, secret: &str, pool: &SqlitePool) -> Result<Claims, TokenProblem> {
+    let mut claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &Validation::default(),
+    ) {
+        Ok(data) => data.claims,
+        Err(e) if matches!(e.kind(), jsonwebtoken::errors::ErrorKind::ExpiredSignature) => {
+            return Err(TokenProblem::Expired)
+        }
+        Err(_) => return Err(TokenProblem::Invalid),
+    };
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default().as_secs() as i64;
-    let account = sqlx::query_as::<_, (String, String)>(
-        "SELECT u.username, u.role FROM sessions s JOIN users u ON u.id = s.user_id
-         WHERE s.id = ? AND s.user_id = ? AND s.expires_at > ?",
-    ).bind(&claims.jti).bind(&claims.sub).bind(now).fetch_optional(pool).await?
-        .ok_or(ServerError::Unauthorized)?;
-    claims.username = account.0;
-    claims.role = account.1;
+    let row = sqlx::query_as::<_, (String, String, i64)>(
+        "SELECT u.username, u.role, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id
+         WHERE s.id = ? AND s.user_id = ?",
+    ).bind(&claims.jti).bind(&claims.sub).fetch_optional(pool).await
+        .map_err(|e| {
+            tracing::error!("Session lookup failed: {e}");
+            TokenProblem::Internal
+        })?
+        .ok_or(TokenProblem::Revoked)?;
+    if row.2 <= now {
+        return Err(TokenProblem::Expired);
+    }
+    claims.username = row.0;
+    claims.role = row.1;
     Ok(claims)
+}
+
+/// Like [`check_active_jwt`], for REST handlers: any problem is a plain 401.
+pub async fn verify_active_jwt(token: &str, secret: &str, pool: &SqlitePool) -> Result<Claims, ServerError> {
+    check_active_jwt(token, secret, pool).await.map_err(|problem| match problem {
+        TokenProblem::Internal => ServerError::Internal("Session lookup failed".to_string()),
+        _ => ServerError::Unauthorized,
+    })
 }
 
 pub async fn logout_handler(auth: AuthUser, State(state): State<ArcSharedState>) -> Result<StatusCode, ServerError> {
@@ -186,6 +250,57 @@ pub async fn logout_handler(auth: AuthUser, State(state): State<ArcSharedState>)
     Ok(StatusCode::NO_CONTENT)
 }
 
+fn close_session_connections(state: &ArcSharedState, token_ids: &[String]) {
+    let connections: Vec<_> = state.sessions.sessions.iter()
+        .filter(|session| token_ids.contains(&session.token_id))
+        .map(|session| session.connection.clone()).collect();
+    for connection in connections { connection.close(0u32.into(), b"token revoked"); }
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionDto {
+    pub id: String,
+    pub device_name: Option<String>,
+    pub created_at: i64,
+    pub last_seen_at: i64,
+    pub current: bool,
+}
+
+/// GET /api/auth/sessions: the caller's signed-in devices, most recently seen first.
+pub async fn list_sessions_handler(auth: AuthUser, State(state): State<ArcSharedState>) -> Result<Json<Vec<SessionDto>>, ServerError> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+    let rows = sqlx::query_as::<_, (String, Option<String>, i64, i64)>(
+        "SELECT id, device_name, created_at, COALESCE(last_seen_at, created_at) AS seen FROM sessions
+         WHERE user_id = ? AND expires_at > ? ORDER BY seen DESC, created_at DESC",
+    ).bind(auth.user_id.to_string()).bind(now).fetch_all(&state.pool).await?;
+    Ok(Json(rows.into_iter().map(|(id, device_name, created_at, last_seen_at)| SessionDto {
+        current: id == auth.session_id, id, device_name, created_at, last_seen_at,
+    }).collect()))
+}
+
+/// DELETE /api/auth/sessions/{id}: ends one of the caller's own sessions.
+pub async fn end_session_handler(
+    auth: AuthUser,
+    State(state): State<ArcSharedState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<StatusCode, ServerError> {
+    let deleted = sqlx::query("DELETE FROM sessions WHERE id = ? AND user_id = ?")
+        .bind(&id).bind(auth.user_id.to_string()).execute(&state.pool).await?;
+    if deleted.rows_affected() == 0 {
+        return Err(ServerError::NotFound("Session not found".to_string()));
+    }
+    close_session_connections(&state, &[id]);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// POST /api/auth/sessions/revoke-others: ends every session of the caller except this one.
+pub async fn revoke_other_sessions_handler(auth: AuthUser, State(state): State<ArcSharedState>) -> Result<StatusCode, ServerError> {
+    let ids: Vec<String> = sqlx::query_scalar("DELETE FROM sessions WHERE user_id = ? AND id != ? RETURNING id")
+        .bind(auth.user_id.to_string()).bind(&auth.session_id).fetch_all(&state.pool).await?;
+    close_session_connections(&state, &ids);
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // ─── API DTOs & Handlers ────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -195,12 +310,22 @@ pub struct RegisterRequest {
     pub display_name: Option<String>,
     /// Required when the server only registers people with an invitation.
     pub invite_code: Option<String>,
+    /// Shown in the list of signed-in devices.
+    pub device_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
+    /// Shown in the list of signed-in devices.
+    pub device_name: Option<String>,
+}
+
+/// Trimmed device label, at most 64 characters; empty means none.
+fn clean_device_name(name: Option<&str>) -> Option<String> {
+    let name = name?.trim();
+    if name.is_empty() { None } else { Some(name.chars().take(64).collect()) }
 }
 
 #[derive(Debug, Serialize)]
@@ -238,14 +363,17 @@ pub async fn register_handler(
             "Username must be between 3 and 32 characters".to_string(),
         ));
     }
-    if payload.password.len() < 6 {
+    if payload.password.chars().count() < MIN_PASSWORD_LEN {
         return Err(ServerError::BadRequest(
-            "Password must be at least 6 characters".to_string(),
+            "The password must be at least 8 characters".to_string(),
         ));
     }
 
+    // A blank name (missing, empty or only spaces) is shown as the username.
     let display_name = payload
         .display_name
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
         .unwrap_or_else(|| username.clone());
 
     let password_hash = hash_password(&payload.password)?;
@@ -301,10 +429,12 @@ pub async fn register_handler(
 
             // Store session
             let exp = now + (state.config.auth.jwt_expiration_hours * 3600);
-            sqlx::query("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
+            sqlx::query("INSERT INTO sessions (id, user_id, expires_at, created_at, device_name, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)")
                 .bind(jti)
                 .bind(user_id.to_string())
                 .bind(exp)
+                .bind(now)
+                .bind(clean_device_name(payload.device_name.as_deref()))
                 .bind(now)
                 .execute(&state.pool)
                 .await?;
@@ -353,7 +483,7 @@ pub async fn login_handler(
     state.login_guard.check(&guard_key, std::time::Instant::now()).map_err(ServerError::TooManyRequests)?;
 
     let row = sqlx::query_as::<_, (String, String, String, String, Option<i64>, Option<i64>)>(
-        "SELECT id, password_hash, display_name, role, avatar_version, banned_at FROM users WHERE username = ?"
+        "SELECT id, password_hash, COALESCE(NULLIF(TRIM(display_name), ''), username), role, avatar_version, banned_at FROM users WHERE username = ?"
     )
     .bind(&username)
     .fetch_optional(&state.pool)
@@ -402,10 +532,12 @@ pub async fn login_handler(
         .as_secs() as i64;
     let exp = now + (state.config.auth.jwt_expiration_hours * 3600);
 
-    sqlx::query("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
+    sqlx::query("INSERT INTO sessions (id, user_id, expires_at, created_at, device_name, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)")
         .bind(jti)
         .bind(&user_id_str)
         .bind(exp)
+        .bind(now)
+        .bind(clean_device_name(payload.device_name.as_deref()))
         .bind(now)
         .execute(&state.pool)
         .await?;
@@ -425,13 +557,65 @@ pub async fn login_handler(
     Ok(Json(response))
 }
 
+/// Handler for POST /api/auth/refresh: slides the session forward and returns a fresh token.
+pub async fn refresh_handler(
+    auth: AuthUser,
+    State(state): State<ArcSharedState>,
+) -> Result<Json<AuthResponse>, ServerError> {
+    let user_id_str = auth.user_id.to_string();
+    let (username, display_name, role, avatar_version) = sqlx::query_as::<_, (String, String, String, Option<i64>)>(
+        "SELECT username, COALESCE(NULLIF(TRIM(display_name), ''), username), role, avatar_version FROM users WHERE id = ?"
+    )
+    .bind(&user_id_str)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(ServerError::Unauthorized)?;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let exp = now + (state.config.auth.jwt_expiration_hours * 3600);
+    let updated = sqlx::query("UPDATE sessions SET expires_at = ?, last_seen_at = ? WHERE id = ? AND user_id = ?")
+        .bind(exp)
+        .bind(now)
+        .bind(&auth.session_id)
+        .bind(&user_id_str)
+        .execute(&state.pool)
+        .await?;
+    if updated.rows_affected() != 1 {
+        return Err(ServerError::Unauthorized);
+    }
+
+    let token = issue_jwt_for_session(
+        &auth.user_id,
+        &username,
+        &role,
+        &state.config.auth.jwt_secret,
+        state.config.auth.jwt_expiration_hours,
+        &auth.session_id,
+    )?;
+
+    Ok(Json(AuthResponse {
+        quic_port: state.config.server.quic_port,
+        token,
+        user: UserDto {
+            avatar_url: crate::api::avatars::avatar_url(&user_id_str, avatar_version),
+            id: user_id_str,
+            username,
+            display_name,
+            role,
+        },
+    }))
+}
+
 /// Handler for GET /api/auth/me
 pub async fn me_handler(
     auth: AuthUser,
     State(state): State<ArcSharedState>,
 ) -> Result<impl IntoResponse, ServerError> {
     let row = sqlx::query_as::<_, (String, String, String, String, Option<i64>)>(
-        "SELECT id, username, display_name, role, avatar_version FROM users WHERE id = ?"
+        "SELECT id, username, COALESCE(NULLIF(TRIM(display_name), ''), username), role, avatar_version FROM users WHERE id = ?"
     )
     .bind(auth.user_id.to_string())
     .fetch_optional(&state.pool)
@@ -471,13 +655,18 @@ pub async fn update_profile_handler(
     Json(request): Json<UpdateProfileRequest>,
 ) -> Result<impl IntoResponse, ServerError> {
     let name = request.display_name.trim().to_string();
-    if name.is_empty() || name.chars().count() > 32 {
-        return Err(ServerError::BadRequest("Display name must be between 1 and 32 characters".into()));
+    if name.chars().count() > 32 {
+        return Err(ServerError::BadRequest("Display name must be at most 32 characters".into()));
     }
-    sqlx::query("UPDATE users SET display_name = ? WHERE id = ?")
+    // A blank name is stored as the username, the same as at registration.
+    sqlx::query("UPDATE users SET display_name = COALESCE(NULLIF(?, ''), username) WHERE id = ?")
         .bind(&name)
         .bind(auth.user_id.to_string())
         .execute(&state.pool)
+        .await?;
+    let name: String = sqlx::query_scalar("SELECT display_name FROM users WHERE id = ?")
+        .bind(auth.user_id.to_string())
+        .fetch_one(&state.pool)
         .await?;
     // Live sessions show the new name at once.
     for mut session in state.sessions.sessions.iter_mut() {
@@ -501,8 +690,8 @@ pub async fn change_password_handler(
     State(state): State<ArcSharedState>,
     Json(request): Json<ChangePasswordRequest>,
 ) -> Result<StatusCode, ServerError> {
-    if request.new_password.len() < 6 {
-        return Err(ServerError::BadRequest("Password must be at least 6 characters".into()));
+    if request.new_password.chars().count() < MIN_PASSWORD_LEN {
+        return Err(ServerError::BadRequest("The password must be at least 8 characters".into()));
     }
     let hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")
         .bind(auth.user_id.to_string())

@@ -64,7 +64,8 @@ pub async fn install_update(state: State<'_, AppState>, app: AppHandle) -> Resul
 
     let path = std::env::temp_dir().join(format!("FinchSpeak-update-{}.exe", info.version));
     std::fs::write(&path, &bytes).map_err(|e| format!("Could not save the installer: {e}"))?;
-    std::process::Command::new(&path).spawn().map_err(|e| format!("Could not start the installer: {e}"))?;
+    // The exit handler starts the installer after the shutdown, so it cannot cut the leave short.
+    updater::queue_installer(path);
     state.quitting.store(true, Ordering::SeqCst);
     app.exit(0);
     Ok(())

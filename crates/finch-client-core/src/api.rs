@@ -111,6 +111,16 @@ pub struct InviteDto {
     pub uses: i64,
 }
 
+/// One signed-in device as listed by the server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionDto {
+    pub id: String,
+    pub device_name: Option<String>,
+    pub created_at: i64,
+    pub last_seen_at: i64,
+    pub current: bool,
+}
+
 /// HTTP client bound to one FinchSpeak server.
 #[derive(Debug, Clone)]
 pub struct ApiClient {
@@ -119,6 +129,7 @@ pub struct ApiClient {
     token: Option<String>,
     trust_issue: TofuIssueSlot,
     hostname: String,
+    device_name: Option<String>,
 }
 
 impl ApiClient {
@@ -157,6 +168,7 @@ impl ApiClient {
             token: None,
             trust_issue,
             hostname,
+            device_name: None,
         })
     }
 
@@ -186,6 +198,11 @@ impl ApiClient {
 
     pub fn token(&self) -> Option<&str> {
         self.token.as_deref()
+    }
+
+    /// Name this computer shows under in the "Devices" list; sent with login and registration.
+    pub fn set_device_name(&mut self, name: Option<String>) {
+        self.device_name = name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
     }
 
     pub async fn register(
@@ -222,7 +239,8 @@ impl ApiClient {
                 "username": username,
                 "display_name": display_name,
                 "password": password,
-                "invite_code": invite_code
+                "invite_code": invite_code,
+                "device_name": self.device_name
             }));
         parse_json(self.send(req).await?).await
     }
@@ -394,6 +412,17 @@ impl ApiClient {
         self.admin_action(user_id, "unban").await
     }
 
+    /// Admin: give a member a new temporary password (returned once); they are signed out everywhere.
+    pub async fn reset_password(&self, user_id: Uuid) -> Result<String, ClientError> {
+        #[derive(Deserialize)]
+        struct TemporaryPasswordReply {
+            temporary_password: String,
+        }
+        let req = self.authorized(self.http.post(self.url(&format!("/api/admin/users/{user_id}/password-reset"))));
+        let reply: TemporaryPasswordReply = parse_json(self.send(req).await?).await?;
+        Ok(reply.temporary_password)
+    }
+
     async fn admin_action(&self, user_id: Uuid, action: &str) -> Result<(), ClientError> {
         let req = self.authorized(self.http.post(self.url(&format!("/api/admin/users/{user_id}/{action}"))));
         check_status(self.send(req).await?).await?;
@@ -427,13 +456,39 @@ impl ApiClient {
             .post(self.url("/api/auth/login"))
             .json(&serde_json::json!({
                 "username": username,
-                "password": password
+                "password": password,
+                "device_name": self.device_name
             }));
         parse_json(self.send(req).await?).await
     }
 
+    /// Your signed-in devices.
+    pub async fn list_sessions(&self) -> Result<Vec<SessionDto>, ClientError> {
+        let req = self.authorized(self.http.get(self.url("/api/auth/sessions")));
+        parse_json(self.send(req).await?).await
+    }
+
+    /// Sign one device out.
+    pub async fn end_session(&self, session_id: &str) -> Result<(), ClientError> {
+        let req = self.authorized(self.http.delete(self.url(&format!("/api/auth/sessions/{session_id}"))));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
+    /// Sign out every device but this one.
+    pub async fn end_other_sessions(&self) -> Result<(), ClientError> {
+        let req = self.authorized(self.http.post(self.url("/api/auth/sessions/revoke-others")));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
     pub async fn me(&self) -> Result<UserDto, ClientError> {
         let req = self.authorized(self.http.get(self.url("/api/auth/me")));
+        parse_json(self.send(req).await?).await
+    }
+
+    pub async fn refresh(&self) -> Result<AuthResponse, ClientError> {
+        let req = self.authorized(self.http.post(self.url("/api/auth/refresh")));
         parse_json(self.send(req).await?).await
     }
 

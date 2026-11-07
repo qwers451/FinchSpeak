@@ -8,7 +8,7 @@ import { auditEntries, describeAudit, overview, setAdminOpen, setAuditEntries, s
 import { setCurrentUser } from '../../stores/authStore';
 import { resetSessionState, sessionHandlers, setKnownUsers, setLocalPeerId } from '../../stores/sessionStore';
 import { setActiveVoiceChannel, setSpeakingPeers, setVoiceParticipants } from '../../stores/voiceStore';
-import { clearToasts } from '../../ui';
+import { clearToasts, toasts } from '../../ui';
 import { DEFAULT_PREFS, setPrefs } from '../../stores/settingsStore';
 import { VoicePanel } from '../VoicePanel';
 import { AdminModal } from './AdminModal';
@@ -243,4 +243,77 @@ it('an admin may moderate everybody; a server-muted person shows the badge and c
 it('members get no moderation controls', () => {
   const host = room({ id: 'carl', username: 'carl', display_name: 'Carl', role: 'member' } as never);
   expect(host.querySelector('.mod-actions')).toBeNull();
+});
+
+it('an admin resets a member password: it is shown once, and Copy puts it on the clipboard', async () => {
+  const reset = vi.spyOn(api, 'resetPassword').mockResolvedValue('K7M2QX9TPW4B');
+  const writeText = vi.fn(async () => undefined);
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  open(boss);
+  await flush();
+  const alice = Array.from(document.querySelectorAll('tbody tr')).find((r) => r.textContent?.includes('ALICE'))!;
+  button('Reset password', alice).click();
+  await flush();
+  expect(reset).not.toHaveBeenCalled();
+  button('Reset password', dialog()).click();
+  await flush();
+  await flush();
+  expect(reset).toHaveBeenCalledWith('alice');
+  expect(dialog().textContent).toContain('New temporary password');
+  expect(dialog().textContent).toContain('Give it to ALICE privately');
+  expect(dialog().querySelector('.invite-code')?.textContent).toBe('K7M2QX9TPW4B');
+  button('Copy', dialog()).click();
+  await flush();
+  expect(writeText).toHaveBeenCalledWith('K7M2QX9TPW4B');
+  button('Done', dialog()).click();
+  await flush();
+  expect(document.body.textContent).not.toContain('K7M2QX9TPW4B');
+});
+
+it('a moderator and the rows of admins get no reset button', () => {
+  open(mod);
+  const rows = Array.from(document.querySelectorAll('tbody tr'));
+  expect(button('Reset password', rows.find((r) => r.textContent?.includes('ALICE'))!)).toBeFalsy();
+});
+
+it('a failed copy of the temporary password says so, and does not claim success', async () => {
+  vi.spyOn(api, 'resetPassword').mockResolvedValue('K7M2QX9TPW4B');
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn(async () => { throw new Error('denied'); }) }, configurable: true });
+  open(boss);
+  await flush();
+  const alice = Array.from(document.querySelectorAll('tbody tr')).find((r) => r.textContent?.includes('ALICE'))!;
+  button('Reset password', alice).click();
+  await flush();
+  button('Reset password', dialog()).click();
+  await flush();
+  await flush();
+  button('Copy', dialog()).click();
+  await flush();
+  await flush();
+  expect(toasts().map((toast) => [toast.kind, toast.title])).toEqual([['error', 'Could not copy the password']]);
+});
+
+it('a member with a blank display name is named by the username in the reset and ban dialogs', async () => {
+  const carol = person('carol', 'member', { display_name: '' });
+  vi.spyOn(api, 'adminUsers').mockImplementation(async () => [person('boss', 'admin'), carol]);
+  open(boss);
+  await flush();
+  const row = Array.from(document.querySelectorAll('tbody tr')).find((r) => r.textContent?.includes('carol'))!;
+  button('Reset password', row).click();
+  await flush();
+  expect(dialog().textContent).toContain('Reset password for carol?');
+  expect(dialog().textContent).toContain('carol is signed out everywhere');
+  expect(dialog().textContent).not.toContain('Reset password for ?');
+  button('Cancel', dialog())?.click();
+  await flush();
+  button('Ban…', row).click();
+  await flush();
+  expect(dialog().querySelector('h2, .modal-title, [class*="title"]')?.textContent ?? dialog().textContent).toContain('Ban carol');
+});
+
+it('the log names a password reset in Russian', async () => {
+  const { describeAudit: describe } = await import('../../stores/adminStore');
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'ru' } });
+  expect(describe({ id: 1, at: 1, actor_name: 'a', action: 'password_reset', target: 'alice', details: null })).toBe('Сброс пароля: alice');
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'en' } });
 });

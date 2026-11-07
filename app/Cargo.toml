@@ -15,10 +15,14 @@ finch-client-core = { workspace = true }
 tauri = { version = "2.0", features = ["tray-icon", "image-png"] }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-autostart = "2"
 tauri-plugin-notification = "2"
 minisign-verify = "0.2"
 url = "2"
 base64 = "0.22"
+keyring = { version = "3", features = ["windows-native"] }
 
 # Async & QUIC
 tokio = { workspace = true }
@@ -50,6 +54,9 @@ tracing-subscriber = { workspace = true }
 # Error handling
 anyhow = { workspace = true }
 thiserror = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation"] }
 
 [features]
 # Serve the bundled frontend instead of the dev server (set by `tauri build`).

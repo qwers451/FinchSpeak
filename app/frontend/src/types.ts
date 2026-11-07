@@ -1,5 +1,8 @@
 export type Role = 'admin' | 'moderator' | 'member';
 
+/** One signed-in device of the current user. */
+export type DeviceSession = { id: string; device_name: string | null; created_at: number; last_seen_at: number; current: boolean };
+
 export interface User {
   id: string;
   username: string;
@@ -215,6 +218,7 @@ export interface SessionEvents {
   'ping-rtt': { rtt_ms: number };
   'tofu-required': { hostname: string; fingerprint: string };
   'tofu-mismatch': { hostname: string; expected: string; actual: string };
+  'invite-link': string;
   'reconnect-attempt': { attempt: number; retry_in_secs: number };
   'channel-created': { channel: Channel };
   'user-joined-voice': VoiceParticipant;
@@ -230,9 +234,10 @@ export interface SessionEvents {
   'screen-share-started': { user_id: string; peer_id: number; width: number; height: number; fps: number };
   'screen-share-stopped': { peer_id: number; reason?: string };
   /** Our own share ended by itself (capture failed, window closed). */
-  'screen-share-ended': string;
+  'screen-share-ended': string | { generation: number; reason: string };
   /** The sound of the shared screen could not be captured; the picture still goes out. */
   'screen-audio-failed': string;
+  'screen-audio-source': { source: 'all-except-self' | 'only-process' | 'device' };
   'presence-update': { user_id: string; status: UserStatus; status_text?: string | null };
   'avatar-changed': { user_id: string; avatar_url: string | null };
   /** The tray menu asked to mute or unmute. */
@@ -241,7 +246,11 @@ export interface SessionEvents {
   'voice-kicked': { channel_id: string };
   /** Level of the processed microphone, about 25 times a second during a call. */
   'mic-level': { db: number; speaking: boolean };
-  'mic-test': { phase: 'recording' | 'playing' | 'done'; seconds?: number };
+  /** A system-wide mute or deafen key was pressed. */
+  hotkey: 'toggle_mute' | 'toggle_deafen';
+  /** The push-to-talk key went down (`pressed`) or up; sent only when its state changes. */
+  'push-to-talk': { pressed: boolean };
+  'mic-test': { phase: 'recording' | 'playing' | 'done'; seconds?: number; error?: string };
   'voice-quality': { peer_id: number; quality: 'good' | 'fair' | 'poor'; loss: number }[];
   'connection-lost': string;
   reconnecting: null;

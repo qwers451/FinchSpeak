@@ -3,6 +3,7 @@ import type { SessionEvents } from '../types';
 import { api } from './api';
 import { knownUsers, restoreSessionSnapshot, sessionHandlers, sessionUserId, setAppError } from '../stores/sessionStore';
 import { currentUser } from '../stores/authStore';
+import { describeError } from '../i18n/errors';
 
 export async function subscribeSessionEvents(): Promise<{ dispose: UnlistenFn; refresh: () => Promise<void> }> {
   let disposed = false;
@@ -38,7 +39,7 @@ export async function subscribeSessionEvents(): Promise<{ dispose: UnlistenFn; r
     if (event === 'presence-update') {
       const update = payload as SessionEvents['presence-update'];
       if (update.status !== 'offline' && !knownUsers().some((user) => user.id === update.user_id)) {
-        void refresh().catch((error) => { if (!disposed) setAppError(String(error)); });
+        void refresh().catch((error) => { if (!disposed) setAppError(describeError(error)); });
       }
     }
   };

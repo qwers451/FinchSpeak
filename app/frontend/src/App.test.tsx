@@ -34,6 +34,13 @@ afterEach(() => { dispose?.(); dispose = undefined; vi.restoreAllMocks(); vi.uns
 const mount = () => { dispose = render(() => <App />, document.getElementById('root')!); };
 const emit = (event: string, payload: unknown) => transport.callbacks.get(event)!({ payload });
 
+it('puts the saved audio devices on the backend at start', async () => {
+  localStorage.setItem('finchspeak.audioDevices', JSON.stringify({ input: 'Mic A', output: 'Spk B' }));
+  mount();
+  await vi.waitFor(() => expect(transport.invoke).toHaveBeenCalledWith('set_audio_devices', { input: 'Mic A', output: 'Spk B' }));
+  localStorage.clear();
+});
+
 it('waits for session listeners before showing sign-in', async () => {
   let finish!: (dispose: () => void) => void;
   transport.listen.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
@@ -128,4 +135,33 @@ it('AUD-019 restores the running Rust session after a frontend reload', async ()
   expect(document.querySelector('.voice-banner')?.textContent).toContain('Voice connected');
   expect(document.querySelector('[title="Unmute"]')).not.toBeNull();
   expect(document.body.textContent).not.toContain('Connection lost');
+});
+
+it('checks for updates 15 seconds after sign-in', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+  try {
+    mount();
+    setCurrentUser({ id: 'me', username: 'me', display_name: 'Me', role: 'member' });
+    await vi.advanceTimersByTimeAsync(14_000);
+    expect(transport.invoke).not.toHaveBeenCalledWith('check_update');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(transport.invoke).toHaveBeenCalledWith('check_update');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('a profile update does not restart the update timer', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+  try {
+    mount();
+    const me = { id: 'me', username: 'me', display_name: 'Me', role: 'member' as const };
+    setCurrentUser(me);
+    await vi.advanceTimersByTimeAsync(10_000);
+    setCurrentUser({ ...me, display_name: 'Renamed' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(transport.invoke.mock.calls.filter(([cmd]) => cmd === 'check_update')).toHaveLength(1);
+  } finally {
+    vi.useRealTimers();
+  }
 });

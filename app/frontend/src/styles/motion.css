@@ -1,29 +1,90 @@
-/* Emil: fast utility feedback. Jakub: quiet, interruptible arrival/departure. */
-:root { --motion-enter:220ms; --motion-exit:140ms; --motion-small:120ms; }
-[data-theme="custom"] { --motion-enter:180ms; --motion-small:90ms; }
-.btn,.ctl,.ch,.mem,.si,.react,.tab,.input,.source .thumb { transition:background-color var(--motion-small) var(--ease-out),border-color var(--motion-small) var(--ease-out),color var(--motion-small) var(--ease-out),transform 100ms var(--ease-out); }
-.btn:active:not(:disabled),.ctl:active { transform:translateY(1px) scale(.98); }
-.btn:focus-visible:active,.ctl:focus-visible:active { transform:none; }
-.overlay { transition:background-color var(--motion-exit) var(--ease-out); }
-.modal { opacity:1; transform:none; transition:opacity var(--motion-enter) var(--ease-out),transform var(--motion-enter) var(--ease-out); transform-origin:50% 45%; }
-.overlay[data-exiting="true"] { pointer-events:none; background:transparent; }
-.overlay[data-exiting="true"] .modal { opacity:0; transform:translateY(3px) scale(.995); transition-duration:var(--motion-exit); }
-/* State transitions can reverse during a quick reopen without replaying a keyframe. */
-@starting-style {
-  [data-theme] .overlay { background:transparent; }
-  .modal { opacity:0; transform:translateY(8px) scale(.99); }
+/* Shared timing for both themes. Keep exit aligned with Modal's 140 ms timeout. */
+:root { --motion-enter:220ms; --motion-exit:140ms; --motion-small:120ms; --motion-panel:160ms; }
+[data-theme="custom"] { --motion-enter:220ms; --motion-small:120ms; }
+.btn,.ctl,.ch,.mem,.si,.react,.tab,.input,.source .thumb {
+  transition:transform var(--motion-small) var(--ease-out),opacity var(--motion-small) var(--ease-out);
 }
-.toast { animation:toast-in 220ms var(--ease-out) both; }
-.emoji-picker,.search-results,.mention-menu { animation:popover-in 140ms var(--ease-out) both; transform-origin:top right; }
+@media (hover:hover) and (pointer:fine) {
+  .btn:hover:not(:disabled):not(:focus-visible):not(:active),.ctl:hover:not(:disabled):not(:focus-visible):not(:active) { transform:translateY(-1px); }
+}
+.btn:active:not(:disabled),.ctl:active:not(:disabled) { transform:translateY(1px) scale(.98); }
+.btn:focus-visible:active,.ctl:focus-visible:active { transform:none; }
+/* Fade the backdrop instead of repainting its background on every frame. */
+.overlay { opacity:1; transition:opacity var(--motion-enter) var(--ease-out); }
+.modal { opacity:1; transform:none; transition:opacity var(--motion-enter) var(--ease-out),transform var(--motion-enter) var(--ease-out); transform-origin:50% 50%; }
+.overlay[data-exiting="true"] { pointer-events:none; opacity:0; transition:opacity var(--motion-exit) var(--ease-in); }
+.overlay[data-exiting="true"] .modal { opacity:0; transform:translateY(6px) scale(.98); transition-duration:var(--motion-exit); transition-timing-function:var(--ease-in); }
+/* Transitions can reverse without replaying keyframes. */
+.toast { animation:none; opacity:1; transform:none; transition:opacity var(--motion-enter) var(--ease-out),transform var(--motion-enter) var(--ease-out); }
+.emoji-picker,.search-results,.mention-menu {
+  animation:none; opacity:1; transform:none; transform-origin:top right;
+  transition:opacity var(--motion-panel) var(--ease-out),transform var(--motion-panel) var(--ease-out);
+}
 .composer-picker .emoji-picker,.picker-anchor.up .emoji-picker { transform-origin:bottom right; }
-.vc { transition:border-color 120ms var(--ease-out),box-shadow 120ms var(--ease-out); }
-.toggle::after { transition:transform 150ms var(--ease-out),background-color 120ms var(--ease-out); }
-.toggle { transition:background-color 120ms var(--ease-out),border-color 120ms var(--ease-out); }
+.mention-menu { transform-origin:bottom left; }
+@starting-style {
+  .overlay { opacity:0; }
+  .modal { opacity:0; transform:translateY(6px) scale(.98); }
+  .toast { opacity:0; transform:translateX(12px); }
+  .emoji-picker,.search-results { opacity:0; transform:translateY(-4px) scale(.98); }
+  .composer-picker .emoji-picker,.picker-anchor.up .emoji-picker,.mention-menu { opacity:0; transform:translateY(4px) scale(.98); }
+}
+.vc,.toggle { transition:none; }
+.toggle::after { transition:transform var(--motion-panel) var(--ease-out); }
 .av.speaking,.typing i { animation:none; }
-.btn::after,.ctl::after { transition:background-color var(--motion-small) var(--ease-out); }
-@keyframes toast-in { from { opacity:0; transform:translateX(12px); } to { opacity:1; transform:none; } }
-@keyframes popover-in { from { opacity:0; transform:translateY(4px) scale(.985); } to { opacity:1; transform:none; } }
+.btn::after,.ctl::after { transition:none; }
+/* Persistent, non-interactive layer: reversible speech feedback without a loop. */
+.av .av-speaking-ring {
+  position:absolute; inset:-3px; border-radius:inherit; pointer-events:none;
+  box-shadow:0 0 0 2px var(--cyan),0 0 10px var(--cyan);
+  opacity:0; transform:scale(.96);
+  transition:opacity var(--motion-panel) var(--ease-out),transform var(--motion-panel) var(--ease-out);
+}
+.av.speaking .av-speaking-ring { opacity:1; transform:scale(1); }
+[data-theme] .av.speaking:has(> .av-speaking-ring) { box-shadow:none; outline:none; }
+/* Small controls give feedback without moving the surrounding row. */
+.icon-close,.link-btn,.cat-add,.ch .acts button,.msg .hover-tools button {
+  transition:transform var(--motion-small) var(--ease-out),opacity var(--motion-small) var(--ease-out);
+}
+:is(.icon-close,.link-btn,.cat-add,.react,.ch .acts button,.msg .hover-tools button):active:not(:disabled):not(:focus-visible) { transform:scale(.94); }
+:is(.icon-close,.link-btn,.cat-add):focus-visible { outline:2px solid var(--yellow); outline-offset:3px; }
+button:disabled,input.range:disabled { cursor:not-allowed; }
+.btn.is-loading { cursor:progress; }
+.ch .acts,.msg .hover-tools,.react-tip { opacity:1; transition:opacity var(--motion-small) var(--ease-out); }
+@starting-style {
+  .ch:hover .acts,.msg:hover .hover-tools,.react:hover .react-tip { opacity:0; }
+}
+/* Keyboard access is immediate, including actions revealed by focus. */
+.ch:focus-within .acts,.msg:focus-within .hover-tools,.react:focus-visible .react-tip { transition:none; }
+input.range::-webkit-slider-thumb { transition:transform var(--motion-small) var(--ease-out); }
+input.range::-moz-range-thumb { transition:transform var(--motion-small) var(--ease-out); }
+input.range:active:not(:disabled)::-webkit-slider-thumb { transform:scale(1.15); }
+input.range:active:not(:disabled)::-moz-range-thumb { transform:scale(1.15); }
 @media (prefers-reduced-motion:reduce) {
   *,*::before,*::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; }
+  .btn:hover,.ctl:hover,.btn:active,.ctl:active { transform:none!important; }
 }
 [data-reduce-motion="true"] *,[data-reduce-motion="true"] *::before,[data-reduce-motion="true"] *::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; }
+[data-reduce-motion="true"] :is(.btn,.ctl):is(:hover,:active) { transform:none!important; }
+
+@media (prefers-reduced-motion:reduce) {
+  :is(.icon-close,.link-btn,.cat-add,.react,.ch .acts button,.msg .hover-tools button):active { transform:none!important; }
+  input.range:active::-webkit-slider-thumb { transform:none!important; }
+  input.range:active::-moz-range-thumb { transform:none!important; }
+}
+[data-reduce-motion="true"] :is(.icon-close,.link-btn,.cat-add,.react,.ch .acts button,.msg .hover-tools button):active { transform:none!important; }
+[data-reduce-motion="true"] input.range:active::-webkit-slider-thumb { transform:none!important; }
+[data-reduce-motion="true"] input.range:active::-moz-range-thumb { transform:none!important; }
+
+/* Keep the ordinary content in flow while the spinner occupies its own layer. */
+.btn { position:relative; }
+.btn-content { display:inline-flex; align-items:center; justify-content:center; gap:inherit; }
+.btn.is-loading .btn-content { opacity:0; }
+.btn-spinner { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+.range-control { display:inline-flex; position:relative; width:100%; min-width:0; flex:1; align-items:center; }
+.range-value { position:absolute; bottom:calc(100% + 6px); transform:translateX(-50%) translateY(3px); opacity:0; pointer-events:none; padding:3px 7px; border:1px solid var(--line); border-radius:var(--r-sm); background:var(--bg-card); color:var(--text); font-size:12px; line-height:18px; font-variant-numeric:tabular-nums; z-index:6; transition:opacity var(--motion-small) var(--ease-out),transform var(--motion-small) var(--ease-out); }
+.range-control:focus-within:not([data-disabled]) .range-value { opacity:1; transform:translateX(-50%); transition:none; }
+@media (hover:hover) and (pointer:fine) {
+  .range-control:hover:not([data-disabled]) .range-value { opacity:1; transform:translateX(-50%); }
+}
+.toast[data-exiting="true"] { opacity:0; transform:translateX(12px); pointer-events:none; transition-duration:var(--motion-exit); transition-timing-function:var(--ease-in); }

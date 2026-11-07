@@ -73,7 +73,7 @@ pub async fn resolve_mentions(pool: &SqlitePool, content: &str) -> Vec<Uuid> {
 /// The quote shown above a reply to `reference`; `deleted` once the original is gone.
 pub async fn reply_ref(pool: &SqlitePool, reference: Uuid) -> ReplyRef {
     let row = sqlx::query_as::<_, (String, String)>(
-        "SELECT u.display_name, m.content FROM messages m JOIN users u ON u.id = m.author_id WHERE m.id = ?",
+        "SELECT COALESCE(NULLIF(TRIM(u.display_name), ''), u.username), m.content FROM messages m JOIN users u ON u.id = m.author_id WHERE m.id = ?",
     )
     .bind(reference.to_string())
     .fetch_optional(pool)

@@ -1,12 +1,14 @@
 import { createEffect, createSignal, For, on, Show } from 'solid-js';
 import {
   adminOpen, auditEntries, auditHasMore, changeRegistration, createInvite, describeAudit, invites, loadAudit, loadInvites, loadMembers, loadMoreAudit,
-  loadOverview, makeBackup, members, moderate, overview, revokeInvite, setAdminOpen, type MemberAction,
+  loadOverview, makeBackup, members, moderate, overview, resetPassword, revokeInvite, setAdminOpen, type MemberAction,
 } from '../../stores/adminStore';
 import { currentUser } from '../../stores/authStore';
 import { channels } from '../../stores/chatStore';
 import { moveChannel, removeChannel, renameChannel } from '../../stores/channelAdminStore';
 import type { AdminUser, Channel } from '../../types';
+import { api } from '../../services/api';
+import { buildInviteLink } from '../../stores/inviteLink';
 import { Avatar, Button, ConfirmDialog, Field, Icon, type IconName, Modal, pushToast, Toggle } from '../../ui';
 import { formatBytes, formatDuration, locale, t } from '../../i18n';
 
@@ -31,6 +33,13 @@ type Pending = { member: AdminUser; action: MemberAction; seconds?: number; labe
 function MembersTab(props: { isAdmin: boolean }) {
   const [pending, setPending] = createSignal<Pending>(null);
   const [banFor, setBanFor] = createSignal<AdminUser | null>(null);
+  const [resetFor, setResetFor] = createSignal<AdminUser | null>(null);
+  // The new password is kept only while its dialog is open: shown once, never stored.
+  const [issued, setIssued] = createSignal<{ name: string; password: string } | null>(null);
+  const resetMemberPassword = async (member: AdminUser) => {
+    const password = await resetPassword(member.id);
+    if (password) setIssued({ name: member.display_name, password });
+  };
   const me = () => currentUser()?.id;
   const may = (member: AdminUser) => member.id !== me() && (props.isAdmin || member.role === 'member');
   const consequence = (p: NonNullable<Pending>) => {
@@ -91,6 +100,7 @@ function MembersTab(props: { isAdmin: boolean }) {
                           <Show when={member.banned} fallback={<Button size="sm" variant="danger-ghost" onClick={() => setBanFor(member)}>{t('Ban…')}</Button>}>
                             <Button size="sm" variant="secondary" onClick={() => setPending({ member, action: 'unban', label: 'Unban' })}>{t('Unban')}</Button>
                           </Show>
+                          <Show when={member.role !== 'admin'}><Button size="sm" variant="secondary" onClick={() => setResetFor(member)}>{t('Reset password')}</Button></Show>
                         </Show>
                       </div>
                     </Show>
@@ -102,7 +112,7 @@ function MembersTab(props: { isAdmin: boolean }) {
         </table>
       </div>
 
-      <Modal open={!!banFor()} onClose={() => setBanFor(null)} title={t('Ban {name}', { name: banFor()?.display_name ?? '' })} width="420px">
+      <Modal open={!!banFor()} onClose={() => setBanFor(null)} title={t('Ban {name}', { name: banFor()?.display_name || banFor()?.username || '' })} width="420px">
         <div class="col g12">
           <span class="t2 fs13">{t('For how long? Admins cannot be banned: make them a member first.')}</span>
           <div class="col g8">
@@ -117,6 +127,34 @@ function MembersTab(props: { isAdmin: boolean }) {
       </Modal>
 
       <ConfirmDialog
+        open={!!resetFor()}
+        danger
+        title={resetFor() ? t('Reset password for {name}?', { name: (resetFor()!.display_name || resetFor()!.username) }) : ''}
+        message={resetFor() ? t('{name} is signed out everywhere. Their current password stops working at once.', { name: (resetFor()!.display_name || resetFor()!.username) }) : ''}
+        confirmLabel={t('Reset password')}
+        onCancel={() => setResetFor(null)}
+        onConfirm={() => { const member = resetFor()!; setResetFor(null); void resetMemberPassword(member); }}
+      />
+      <Modal open={!!issued()} onClose={() => setIssued(null)} title={t('New temporary password')} width="420px">
+        <Show when={issued()}>
+          {(result) => (
+            <div class="col g12">
+              <span class="t2 fs13">{t('Give it to {name} privately. They should change it in Settings → Profile after signing in.', { name: result().name })}</span>
+              <strong class="invite-code">{result().password}</strong>
+              <Button variant="secondary" icon="copy" onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(result().password);
+                  pushToast({ kind: 'success', title: t('Password copied') });
+                } catch (err) {
+                  pushToast({ kind: 'error', title: t('Could not copy the password'), text: String(err).replace(/^Error:\s*/, '') });
+                }
+              }}>{t('Copy')}</Button>
+              <Button variant="primary" onClick={() => setIssued(null)}>{t('Done')}</Button>
+            </div>
+          )}
+        </Show>
+      </Modal>
+      <ConfirmDialog
         open={!!pending()}
         danger={pending()?.action === 'ban' || pending()?.action === 'kick' || pending()?.action === 'make-member'}
         title={pending() ? t('{action}: {name}?', { action: t(pending()!.label || 'Change role'), name: pending()!.member.display_name }) : ''}
@@ -127,6 +165,18 @@ function MembersTab(props: { isAdmin: boolean }) {
       />
     </>
   );
+}
+
+/** Copies a link that opens the register form on this server with the fingerprint the server admin sees. */
+async function copyInviteLink(code: string) {
+  try {
+    const info = await api.serverInfo();
+    if (!info.server_url?.startsWith('https://') || !info.fingerprint) throw new Error(t('The server address or certificate is not known yet.'));
+    await navigator.clipboard.writeText(buildInviteLink(info.server_url, code, info.fingerprint));
+    pushToast({ kind: 'success', title: t('Invite link copied') });
+  } catch (err) {
+    pushToast({ kind: 'error', title: t('Could not copy the invite link'), text: String(err).replace(/^Error:\s*/, '') });
+  }
 }
 
 function InvitesTab() {
@@ -149,6 +199,7 @@ function InvitesTab() {
             <span class="t2 fs12">{t('New code')}</span>
             <strong class="invite-code">{code()}</strong>
             <Button size="sm" variant="secondary" icon="copy" onClick={() => { void navigator.clipboard?.writeText(code()); pushToast({ kind: 'success', title: t('Code copied') }); }}>{t('Copy')}</Button>
+            <Button size="sm" variant="secondary" icon="copy" onClick={() => void copyInviteLink(code())}>{t('Copy invite link')}</Button>
           </div>
         )}
       </Show>

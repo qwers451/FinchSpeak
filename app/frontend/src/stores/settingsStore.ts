@@ -1,4 +1,5 @@
 import { createEffect, createRoot, createSignal } from 'solid-js';
+import { DEFAULT_THEME_COLORS, isLightTheme, parseThemeColors, THEME_VARIABLE_NAMES, themeVariables, type ThemeColors } from './themeColors';
 
 // Settings that live on this computer only: notifications, looks.
 
@@ -10,6 +11,8 @@ export interface NotificationPrefs {
   /** Tell me when someone joins the voice room I am in. */
   voiceJoin: boolean;
   sounds: boolean;
+  /** Feedback tones for my own voice actions: joining and leaving, mute and deafen, push-to-talk. */
+  voiceSounds: boolean;
   /** 0..1 */
   soundVolume: number;
   /** Flash the taskbar button while the window is in the background. */
@@ -17,14 +20,14 @@ export interface NotificationPrefs {
 }
 
 export interface AppearancePrefs {
-  theme: 'claude' | 'custom';
+  /** `user` paints the interface with `customColors`. */
+  theme: 'claude' | 'custom' | 'user';
+  customColors: ThemeColors;
   language: 'ru' | 'en';
   density: 'comfortable' | 'compact';
   textSize: 'small' | 'medium' | 'large';
   reduceMotion: boolean;
   showMembers: boolean;
-  /** The window's close button hides it to the tray instead of quitting. */
-  closeToTray: boolean;
 }
 
 export interface Prefs {
@@ -35,8 +38,8 @@ export interface Prefs {
 }
 
 export const DEFAULT_PREFS: Prefs = {
-  notifications: { mentions: true, allMessages: false, voiceJoin: true, sounds: true, soundVolume: 0.6, flash: true },
-  appearance: { theme: 'claude', language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, showMembers: true, closeToTray: true },
+  notifications: { mentions: true, allMessages: false, voiceJoin: true, sounds: true, voiceSounds: true, soundVolume: 0.6, flash: true },
+  appearance: { theme: 'claude', customColors: DEFAULT_THEME_COLORS, language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, showMembers: true },
   mutedChannels: {},
 };
 
@@ -69,17 +72,18 @@ export function parsePrefs(raw: string | null): Prefs {
       allMessages: bool(n.allMessages, d.notifications.allMessages),
       voiceJoin: bool(n.voiceJoin, d.notifications.voiceJoin),
       sounds: bool(n.sounds, d.notifications.sounds),
+      voiceSounds: bool(n.voiceSounds, d.notifications.voiceSounds),
       soundVolume: volume,
       flash: bool(n.flash, d.notifications.flash),
     },
     appearance: {
-      theme: pick(a.theme, ['claude', 'custom'] as const, d.appearance.theme),
+      theme: pick(a.theme, ['claude', 'custom', 'user'] as const, d.appearance.theme),
+      customColors: parseThemeColors(a.customColors),
       language: pick(a.language, ['ru', 'en'] as const, d.appearance.language),
       density: pick(a.density, ['comfortable', 'compact'] as const, d.appearance.density),
       textSize: pick(a.textSize, ['small', 'medium', 'large'] as const, d.appearance.textSize),
       reduceMotion: bool(a.reduceMotion, d.appearance.reduceMotion),
       showMembers: bool(a.showMembers, d.appearance.showMembers),
-      closeToTray: bool(a.closeToTray, d.appearance.closeToTray),
     },
     mutedChannels: muted,
   };
@@ -122,8 +126,34 @@ export function isChannelMuted(channelId: string, now = Date.now()): boolean {
   return until === null || until > now;
 }
 
+/** How long colors take to blend into a newly chosen theme. */
+export const THEME_BLEND_MS = 420;
+let blendTimer: ReturnType<typeof setTimeout> | undefined;
+let paintedColors: string | null = null;
+
+/** Let every color blend into the new theme for a moment instead of jumping. */
+function blendColors(root: HTMLElement, appearance: AppearancePrefs) {
+  const reduced = appearance.reduceMotion || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  if (reduced) return;
+  root.dataset.themeBlend = 'true';
+  clearTimeout(blendTimer);
+  blendTimer = setTimeout(() => { delete root.dataset.themeBlend; }, THEME_BLEND_MS);
+}
+
 /** Put the looks on the page (called when they change). */
 export function applyAppearance(appearance: AppearancePrefs, root: HTMLElement = document.documentElement) {
+  const colors = appearance.theme === 'user' ? JSON.stringify(appearance.customColors) : null;
+  const firstPaint = !root.dataset.theme;
+  const changed = root.dataset.theme !== appearance.theme || colors !== paintedColors;
+  if (changed && !firstPaint) blendColors(root, appearance);
+  paintedColors = colors;
+  if (appearance.theme === 'user') {
+    for (const [name, value] of Object.entries(themeVariables(appearance.customColors))) root.style.setProperty(name, value);
+    root.style.colorScheme = isLightTheme(appearance.customColors) ? 'light' : 'dark';
+  } else {
+    for (const name of THEME_VARIABLE_NAMES) root.style.removeProperty(name);
+    root.style.removeProperty('color-scheme');
+  }
   root.dataset.theme = appearance.theme;
   root.lang = appearance.language;
   root.dataset.density = appearance.density;

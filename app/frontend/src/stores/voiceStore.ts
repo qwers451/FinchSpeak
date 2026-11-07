@@ -3,7 +3,11 @@ import { t } from '../i18n';
 import type { AudioDevice, Channel, VoiceParticipant, VoiceSettings } from '../types';
 import { api } from '../services/api';
 import { setAppError } from './notificationStore';
-import { resetScreenState } from './screenState';
+import { pushToast } from '../ui/toastStore';
+import { describeError } from '../i18n/errors';
+import { resetScreenState, setEndedShare, setWatching } from './screenState';
+import { playTone, type Tone } from './tones';
+import { prefs } from './settingsStore';
 
 export const [activeVoiceChannel, setActiveVoiceChannel] = createSignal<Channel | null>(null);
 export const [isMuted, setIsMuted] = createSignal<boolean>(false);
@@ -45,8 +49,9 @@ export function resetMicPreview() {
   setMicTestPhase('idle');
 }
 
-export function handleMicTest(test: { phase: 'recording' | 'playing' | 'done' }) {
+export function handleMicTest(test: { phase: 'recording' | 'playing' | 'done'; error?: string }) {
   setMicTestPhase(test.phase === 'done' ? 'idle' : test.phase);
+  if (test.error) setAppError(t(test.error));
 }
 
 export function handleVoiceQuality(report: { peer_id: number; quality: LinkQuality; loss: number }[]) {
@@ -99,7 +104,7 @@ export async function loadAudioDevices() {
     setAvailableDevices({ inputs: devices.inputs, outputs: devices.outputs });
     setSelectedDevices({ input: devices.selected_input, output: devices.selected_output });
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -109,7 +114,7 @@ export async function chooseAudioDevice(kind: keyof DeviceSelection, name: strin
   try {
     await api.setAudioDevices(next.input, next.output);
   } catch (err) {
-    setAppError(t('Could not switch audio device: {error}', { error: String(err) }));
+    setAppError(t('Could not switch audio device: {error}', { error: describeError(err) }));
     return;
   }
   setSelectedDevices(next);
@@ -117,14 +122,14 @@ export async function chooseAudioDevice(kind: keyof DeviceSelection, name: strin
 }
 
 /** Push the remembered devices to the backend (it forgets them when the app restarts). */
-async function restoreAudioDevices() {
+export async function restoreAudioDevices() {
   const saved = readSavedDevices();
   if (!saved) return;
   try {
     await api.setAudioDevices(saved.input, saved.output);
     setSelectedDevices(saved);
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
   }
 }
 
@@ -134,10 +139,23 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = { input_gain: 1, vad_thresh
 export const [voiceSettings, setVoiceSettings] = createSignal<VoiceSettings>(DEFAULT_VOICE_SETTINGS);
 /** The push-to-talk key, e.g. "F8". */
 export const [pushToTalkKey, setPushToTalkKey] = createSignal<string | null>(null);
+/** System-wide key that mutes or unmutes the microphone. */
+export const [muteKey, setMuteKey] = createSignal<string | null>(null);
+/** System-wide key that turns all sound off or back on. */
+export const [deafenKey, setDeafenKey] = createSignal<string | null>(null);
+
+export type HotkeyAction = 'push_to_talk' | 'toggle_mute' | 'toggle_deafen';
+const HOTKEY_LABELS: Record<HotkeyAction, string> = { push_to_talk: 'Push to talk', toggle_mute: 'Mute microphone', toggle_deafen: 'Turn sound off' };
+const hotkeySignals: Record<HotkeyAction, [() => string | null, (key: string | null) => void]> = {
+  push_to_talk: [pushToTalkKey, setPushToTalkKey],
+  toggle_mute: [muteKey, setMuteKey],
+  toggle_deafen: [deafenKey, setDeafenKey],
+};
+export const hotkeyFor = (action: HotkeyAction) => hotkeySignals[action][0]();
 
 const VOICE_SETTINGS_KEY = 'finchspeak.voiceSettings';
 
-type SavedVoice = { settings: Omit<VoiceSettings, 'key_down'>; key: string | null };
+type SavedVoice = { settings: Omit<VoiceSettings, 'key_down'>; key: string | null; muteKey: string | null; deafenKey: string | null };
 
 function readSavedVoice(): SavedVoice | null {
   try {
@@ -155,6 +173,8 @@ function readSavedVoice(): SavedVoice | null {
         voice_enhancement: typeof s.voice_enhancement === 'boolean' ? s.voice_enhancement : true,
       },
       key: typeof saved.key === 'string' && saved.key ? saved.key : null,
+      muteKey: typeof saved.muteKey === 'string' && saved.muteKey ? saved.muteKey : null,
+      deafenKey: typeof saved.deafenKey === 'string' && saved.deafenKey ? saved.deafenKey : null,
     };
   } catch {
     return null;
@@ -164,7 +184,7 @@ function readSavedVoice(): SavedVoice | null {
 function saveVoice() {
   try {
     const { key_down: _down, ...settings } = voiceSettings();
-    localStorage.setItem(VOICE_SETTINGS_KEY, JSON.stringify({ settings, key: pushToTalkKey() }));
+    localStorage.setItem(VOICE_SETTINGS_KEY, JSON.stringify({ settings, key: pushToTalkKey(), muteKey: muteKey(), deafenKey: deafenKey() }));
   } catch {
     /* not remembered */
   }
@@ -178,6 +198,10 @@ function queueSettingsWrite(action: () => Promise<void>): Promise<void> {
   return pending;
 }
 
+/** False after the push-to-talk key failed to register: the backend is then told push-to-talk is off. */
+let pushToTalkKeyRegistered = true;
+const forBackend = (settings: VoiceSettings): VoiceSettings => ({ ...settings, push_to_talk: settings.push_to_talk && pushToTalkKeyRegistered });
+
 /** Change microphone settings; publish/persist only after backend acknowledgement. */
 export function changeVoiceSettings(change: Partial<VoiceSettings>) {
   return queueSettingsWrite(async () => {
@@ -187,9 +211,9 @@ export function changeVoiceSettings(change: Partial<VoiceSettings>) {
       return;
     }
     try {
-      await api.setVoiceSettings(next);
+      await api.setVoiceSettings(forBackend(next));
     } catch (err) {
-      setAppError(String(err));
+      setAppError(describeError(err));
       return;
     }
     setVoiceSettings(next);
@@ -197,16 +221,56 @@ export function changeVoiceSettings(change: Partial<VoiceSettings>) {
   });
 }
 
-export async function choosePushToTalkKey(key: string | null) {
-  try {
-    await api.setPushToTalkKey(key);
-  } catch (err) {
-    setAppError(String(err));
+/** Backend key errors are English text; show them translated. */
+export function hotkeyErrorText(err: unknown): string {
+  const message = String(err).replace(/^Error:\s*/, '');
+  let match = /^"(.*)" cannot be used as a key: ([\s\S]*)$/.exec(message);
+  if (match) return t('"{key}" cannot be used as a key: {detail}', { key: match[1], detail: match[2] });
+  match = /^Could not use "(.*)" as a key: ([\s\S]*)$/.exec(message);
+  if (match) return t('Could not use "{key}" as a key: {detail}', { key: match[1], detail: match[2] });
+  match = /^"(.*)" is already used by another action$/.exec(message);
+  if (match) return t('"{key}" is already used by another action', { key: match[1] });
+  if (message === 'Keys are unavailable') return t('Keys are unavailable');
+  return describeError(message);
+}
+
+const sendHotkey = (action: HotkeyAction, key: string | null) =>
+  action === 'push_to_talk' ? api.setPushToTalkKey(key) : api.setHotkey(action, key);
+
+/** Choose the system-wide key for an action; null removes it. One key serves one action. */
+export async function chooseHotkey(action: HotkeyAction, key: string | null) {
+  const taken = key && (Object.keys(hotkeySignals) as HotkeyAction[]).find((other) => other !== action && hotkeyFor(other) === key);
+  if (taken) {
+    setAppError(t('"{key}" is already used for "{action}"', { key, action: t(HOTKEY_LABELS[taken]) }));
     return;
   }
-  setPushToTalkKey(key);
-  if (!key && voiceSettings().push_to_talk) await changeVoiceSettings({ push_to_talk: false });
+  try {
+    await sendHotkey(action, key);
+  } catch (err) {
+    setAppError(hotkeyErrorText(err));
+    return;
+  }
+  hotkeySignals[action][1](key);
+  if (action === 'push_to_talk') {
+    const wasRegistered = pushToTalkKeyRegistered;
+    pushToTalkKeyRegistered = true;
+    if (!key && voiceSettings().push_to_talk) await changeVoiceSettings({ push_to_talk: false });
+    else if (key && !wasRegistered && voiceSettings().push_to_talk) await changeVoiceSettings({}); // the working key brings push-to-talk back
+  }
   saveVoice();
+}
+
+export const choosePushToTalkKey = (key: string | null) => chooseHotkey('push_to_talk', key);
+
+/** A mute or deafen key was pressed somewhere in the system. */
+export async function handleHotkey(action: string) {
+  if (!activeVoiceChannel()) return; // outside a room there is nothing to mute
+  try {
+    if (action === 'toggle_mute') await toggleMute();
+    else if (action === 'toggle_deafen') await toggleDeafen();
+  } catch (err) {
+    setAppError(describeError(err));
+  }
 }
 
 /** Turn a key press into the shortcut text the backend understands ("Control+Shift+K"); null for a bare modifier. */
@@ -224,31 +288,75 @@ export function restoreVoiceSettings() {
   return queueSettingsWrite(async () => {
     const saved = readSavedVoice();
     if (!saved) return;
+    const failed = (action: HotkeyAction, key: string) => {
+      pushToast({ kind: 'warn', title: t('Could not use {key} for "{action}": another program may be using it.', { key, action: t(HOTKEY_LABELS[action]) }) });
+    };
+    // Each key on its own: one that is taken must not cost the others or the microphone settings.
+    // The signals keep the saved key either way, so saving later does not forget it.
+    pushToTalkKeyRegistered = true;
+    if (saved.key) {
+      try {
+        await api.setPushToTalkKey(saved.key);
+      } catch {
+        pushToTalkKeyRegistered = false;
+        failed('push_to_talk', saved.key);
+      }
+    }
+    setPushToTalkKey(saved.key);
+    for (const [action, key] of [['toggle_mute', saved.muteKey], ['toggle_deafen', saved.deafenKey]] as const) {
+      if (key) {
+        try {
+          await api.setHotkey(action, key);
+        } catch {
+          failed(action, key);
+        }
+      }
+      hotkeySignals[action][1](key);
+    }
     try {
-      if (saved.key) await api.setPushToTalkKey(saved.key);
-      setPushToTalkKey(saved.key);
+      // The preference stays as saved; only the backend is told false while the key is not registered.
       const settings = { ...saved.settings, key_down: false, push_to_talk: saved.settings.push_to_talk && !!saved.key };
-      await api.setVoiceSettings(settings);
+      await api.setVoiceSettings(forBackend(settings));
       setVoiceSettings(settings);
     } catch (err) {
-      setAppError(String(err));
+      setAppError(describeError(err));
     }
   });
+}
+
+/** A tone for something I did. Silent when the voice-actions sounds are off; the master sounds switch and volume are in playTone. */
+function feedback(tone: Tone) {
+  if (prefs().notifications.voiceSounds) playTone(tone);
+}
+
+/** Push-to-talk went down or up: a tone, but only in a room and with push-to-talk on. */
+export function handlePushToTalk(pressed: boolean) {
+  if (!activeVoiceChannel() || !voiceSettings().push_to_talk) return;
+  feedback(pressed ? 'ptt-on' : 'ptt-off');
 }
 
 export async function joinVoice(channel: Channel) {
   await restoreAudioDevices();
   await restoreVoiceSettings();
   try {
+    const previous = activeVoiceChannel();
     await api.joinVoiceChannel(channel.id, channel.short_id);
+    // The backend ends our share (announced by screen-share-ended) and stops the one we watched;
+    // only the watched share is cleared here.
+    if (previous && previous.id !== channel.id) {
+      setWatching(null);
+      setEndedShare(null);
+    }
     setActiveVoiceChannel(channel);
+    feedback('join');
   } catch (err) {
     console.error('Failed to join voice channel:', err);
-    setAppError(t('Could not join voice: {error}', { error: String(err).replace(/^Error:\s*/, '') }));
+    setAppError(t('Could not join voice: {error}', { error: describeError(err) }));
   }
 }
 
 export async function leaveVoice() {
+  const wasInRoom = activeVoiceChannel() !== null;
   try {
     await api.leaveVoiceChannel();
     resetScreenState();
@@ -256,16 +364,25 @@ export async function leaveVoice() {
     setSpeakingPeers(new Set<number>());
     resetMicPreview();
     setVoiceQuality({});
+    if (wasInRoom) feedback('leave');
   } catch (err) {
     console.error('Failed to leave voice channel:', err);
   }
 }
 
 export async function toggleMute() {
+  if (isDeafened()) {
+    // Unmuting while deafened also turns the sound back on (Discord behaviour).
+    await api.setVoiceState(false, false);
+    setIsDeafened(false);
+    setIsMuted(false);
+    feedback('undeafen');
+    return;
+  }
   const next = !isMuted();
-  if (isDeafened()) return;
   await api.setVoiceState(next, isDeafened());
   setIsMuted(next);
+  feedback(next ? 'mute' : 'unmute');
 }
 
 export async function toggleDeafen() {
@@ -276,6 +393,7 @@ export async function toggleDeafen() {
   if (next) mutedBeforeDeafen = previousMute;
   setIsDeafened(next);
   setIsMuted(muted);
+  feedback(next ? 'deafen' : 'undeafen');
 }
 
 export function handleUserSpeaking(peerId: number, speaking: boolean) {

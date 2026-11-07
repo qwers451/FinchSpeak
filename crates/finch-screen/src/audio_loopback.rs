@@ -15,20 +15,20 @@
 //! - **Packet Packaging**: Prepends a strict 20-byte [`MediaHeader`] with [`MediaType::ScreenAudio`] (0x04)
 //!   and passes [`MediaPacket`] datagrams to the receiver.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, RecvError};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, RecvError, channel};
 use std::time::Duration;
 
 use audiopus::coder::Encoder;
 use audiopus::{Application, Bitrate, Channels, SampleRate};
 use bytes::Bytes;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::HeapRb;
+use ringbuf::traits::{Consumer, Producer, Split};
 
 use finch_protocol::media::{MediaPacket, MediaType};
-use finch_protocol::{MediaHeader, MAX_DATAGRAM_PAYLOAD};
+use finch_protocol::{MAX_DATAGRAM_PAYLOAD, MediaHeader};
 
 /// Standard sample rate for FinchSpeak audio pipeline (48,000 Hz).
 pub const SAMPLE_RATE: u32 = 48_000;
@@ -57,6 +57,8 @@ pub const RINGBUF_CAPACITY: usize = 192_000;
 /// Errors that can occur during system audio capture and Opus loopback encoding.
 #[derive(Debug, thiserror::Error)]
 pub enum LoopbackAudioError {
+    #[error("WASAPI error: {0}")]
+    Wasapi(String),
     #[error("Invalid frame size: expected {expected} samples, got {actual}")]
     InvalidFrameSize { expected: usize, actual: usize },
 
@@ -126,7 +128,9 @@ impl ScreenAudioEncoder {
         &mut self,
         samples: &[f32; STEREO_FRAME_SAMPLES],
     ) -> Result<Bytes, LoopbackAudioError> {
-        let len = self.encoder.encode_float(&samples[..], &mut self.output_buf)?;
+        let len = self
+            .encoder
+            .encode_float(&samples[..], &mut self.output_buf)?;
         Ok(Bytes::copy_from_slice(&self.output_buf[..len]))
     }
 
@@ -291,9 +295,21 @@ fn extract_stereo(channels: &[f32], count: usize) -> (f32, f32) {
     }
 }
 
+/// Where screen audio comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AudioSourceKind {
+    /// Everything the computer plays except this process (Windows 10 2004+).
+    AllExceptSelf,
+    /// Only this process tree (sharing one window).
+    OnlyProcess(u32),
+    /// The whole output device (fallback).
+    Device,
+}
+
 /// Configuration settings for the screen audio loopback capturer.
 #[derive(Debug, Clone)]
 pub struct ScreenAudioConfig {
+    pub source: AudioSourceKind,
     /// Target voice/media channel ID (u32 session id).
     pub channel_id: u32,
     /// Local sender peer ID (u32 session id).
@@ -309,6 +325,7 @@ pub struct ScreenAudioConfig {
 impl Default for ScreenAudioConfig {
     fn default() -> Self {
         Self {
+            source: AudioSourceKind::AllExceptSelf,
             channel_id: 0,
             sender_peer_id: 0,
             bitrate_kbps: 96,
@@ -351,6 +368,14 @@ fn find_device_by_name(host: &cpal::Host, target_name: &str) -> Option<cpal::Dev
     None
 }
 
+fn resolve_source(wanted: &AudioSourceKind, supported: bool) -> AudioSourceKind {
+    if supported {
+        wanted.clone()
+    } else {
+        AudioSourceKind::Device
+    }
+}
+
 /// System audio loopback capturer and Opus encoder.
 ///
 /// Captures output audio via CPAL (WASAPI loopback on Windows), converts it to
@@ -358,8 +383,11 @@ fn find_device_by_name(host: &cpal::Host, target_name: &str) -> Option<cpal::Dev
 /// [`MediaPacket`] datagrams with [`MediaType::ScreenAudio`] and a 20-byte [`MediaHeader`].
 pub struct ScreenAudioCapturer {
     config: ScreenAudioConfig,
+    source: AudioSourceKind,
     running: Arc<AtomicBool>,
     _stream: Option<cpal::Stream>,
+    #[cfg(windows)]
+    process: Option<crate::process_loopback::ProcessLoopback>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
     receiver: Receiver<MediaPacket>,
 }
@@ -370,10 +398,96 @@ pub type AudioLoopback = ScreenAudioCapturer;
 impl ScreenAudioCapturer {
     /// Start loopback capture and Opus encoding with the specified configuration.
     pub fn start(config: ScreenAudioConfig) -> Result<Self, LoopbackAudioError> {
+        #[cfg(windows)]
+        let supported = crate::process_loopback::process_loopback_supported();
+        #[cfg(not(windows))]
+        let supported = false;
+        #[cfg(windows)]
+        {
+            Self::start_with_sources(
+                config,
+                supported,
+                Self::start_process_capture,
+                Self::start_device_capture,
+            )
+        }
+        #[cfg(not(windows))]
+        Self::start_with_sources(
+            config,
+            supported,
+            |_, _| Err(LoopbackAudioError::UnsupportedSampleFormat),
+            Self::start_device_capture,
+        )
+    }
+
+    fn start_with_sources(
+        config: ScreenAudioConfig,
+        supported: bool,
+        start_process: impl FnOnce(
+            ScreenAudioConfig,
+            AudioSourceKind,
+        ) -> Result<Self, LoopbackAudioError>,
+        start_device: impl FnOnce(ScreenAudioConfig) -> Result<Self, LoopbackAudioError>,
+    ) -> Result<Self, LoopbackAudioError> {
+        // A window restriction is never widened, even on an unsupported OS.
+        let restricted = matches!(config.source, AudioSourceKind::OnlyProcess(_));
+        if restricted && !supported {
+            return Err(LoopbackAudioError::Wasapi(
+                "HRESULT 0x80004001: window audio capture is unavailable".into(),
+            ));
+        }
+        let source = resolve_source(&config.source, supported);
+        if source != AudioSourceKind::Device {
+            match start_process(config.clone(), source) {
+                Ok(capture) => return Ok(capture),
+                Err(error) if restricted => return Err(error),
+                Err(error) => {
+                    tracing::warn!("Process loopback unavailable; using device loopback: {error}")
+                }
+            }
+        }
+        start_device(config)
+    }
+
+    #[cfg(windows)]
+    fn start_process_capture(
+        config: ScreenAudioConfig,
+        source: AudioSourceKind,
+    ) -> Result<Self, LoopbackAudioError> {
+        let (mut prod, cons) = HeapRb::<f32>::new(RINGBUF_CAPACITY).split();
+        let (pid, include) = match source {
+            AudioSourceKind::OnlyProcess(pid) => (pid, true),
+            _ => (std::process::id(), false),
+        };
+        let process =
+            crate::process_loopback::ProcessLoopback::start(pid, include, move |samples| {
+                let _ = prod.push_slice(samples);
+            })?;
+        let running = Arc::new(AtomicBool::new(true));
+        let (thread_handle, receiver) = spawn_encoder_thread(
+            config.clone(),
+            SAMPLE_RATE,
+            CHANNELS,
+            cons,
+            Arc::clone(&running),
+        )?;
+        Ok(Self {
+            config,
+            source,
+            running,
+            _stream: None,
+            process: Some(process),
+            thread_handle: Some(thread_handle),
+            receiver,
+        })
+    }
+
+    fn start_device_capture(config: ScreenAudioConfig) -> Result<Self, LoopbackAudioError> {
         let host = cpal::default_host();
         let device = match &config.device_name {
-            Some(name) => find_device_by_name(&host, name)
-                .ok_or(LoopbackAudioError::NoDeviceAvailable)?,
+            Some(name) => {
+                find_device_by_name(&host, name).ok_or(LoopbackAudioError::NoDeviceAvailable)?
+            }
             None => host
                 .default_output_device()
                 .or_else(|| host.default_input_device())
@@ -393,7 +507,7 @@ impl ScreenAudioCapturer {
 
         // Lock-free ring buffer for real-time CPAL callback to dedicated thread communication
         let rb = HeapRb::<f32>::new(RINGBUF_CAPACITY);
-        let (mut prod, mut cons) = rb.split();
+        let (mut prod, cons) = rb.split();
 
         let err_fn = move |err: cpal::StreamError| {
             tracing::error!("CPAL audio loopback stream error: {err}");
@@ -435,80 +549,40 @@ impl ScreenAudioCapturer {
 
         stream.play()?;
 
-        let (tx, rx) = channel();
         let running = Arc::new(AtomicBool::new(true));
-        let running_thread = Arc::clone(&running);
-        let thread_config = config.clone();
-
-        let thread_handle = std::thread::Builder::new()
-            .name("finch-audio-loopback".to_string())
-            .spawn(move || {
-                let mut encoder = match ScreenAudioEncoder::new(thread_config.bitrate_kbps) {
-                    Ok(enc) => enc,
-                    Err(e) => {
-                        tracing::error!("Failed to create ScreenAudioEncoder: {e}");
-                        return;
-                    }
-                };
-
-                let mut resampler = ResamplerConverter::new(source_rate, source_channels);
-                let mut sequence: u16 = 0;
-                let mut timestamp: u32 = 0;
-                let mut temp_chunk = [0.0f32; 2048];
-
-                while running_thread.load(Ordering::Relaxed) {
-                    let read = cons.pop_slice(&mut temp_chunk);
-                    if read > 0 {
-                        resampler.push_raw_samples(&temp_chunk[..read]);
-
-                        while resampler.has_frame() {
-                            if let Some(stereo_frame) = resampler.pop_frame() {
-                                match encoder.packetize(
-                                    thread_config.channel_id,
-                                    thread_config.sender_peer_id,
-                                    sequence,
-                                    timestamp,
-                                    thread_config.is_e2ee,
-                                    &stereo_frame,
-                                ) {
-                                    Ok(packet) => {
-                                        sequence = sequence.wrapping_add(1);
-                                        timestamp =
-                                            timestamp.wrapping_add(SAMPLES_PER_CHANNEL as u32);
-                                        if tx.send(packet).is_err() {
-                                            // Receiver was dropped, exit processing thread
-                                            return;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            "Failed to packetize loopback audio frame: {e}"
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        // Sleep briefly to avoid busy-spinning when no audio is playing
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                }
-            })
-            .map_err(LoopbackAudioError::ThreadSpawnError)?;
+        let (thread_handle, rx) = spawn_encoder_thread(
+            config.clone(),
+            source_rate,
+            source_channels,
+            cons,
+            Arc::clone(&running),
+        )?;
 
         Ok(Self {
             config,
+            source: AudioSourceKind::Device,
             running,
             _stream: Some(stream),
+            #[cfg(windows)]
+            process: None,
             thread_handle: Some(thread_handle),
             receiver: rx,
         })
+    }
+
+    /// The capture source actually in use, after fallback.
+    pub fn source(&self) -> &AudioSourceKind {
+        &self.source
     }
 
     /// Stop loopback capture and shutdown background processing thread.
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
         self._stream = None;
+        #[cfg(windows)]
+        {
+            self.process = None;
+        }
         if let Some(handle) = self.thread_handle.take() {
             let _ = handle.join();
         }
@@ -538,6 +612,73 @@ impl ScreenAudioCapturer {
     pub fn config(&self) -> &ScreenAudioConfig {
         &self.config
     }
+}
+
+fn spawn_encoder_thread(
+    config: ScreenAudioConfig,
+    source_rate: u32,
+    source_channels: usize,
+    mut cons: ringbuf::HeapCons<f32>,
+    running: Arc<AtomicBool>,
+) -> Result<(std::thread::JoinHandle<()>, Receiver<MediaPacket>), LoopbackAudioError> {
+    let (tx, rx) = channel();
+    let running_thread = Arc::clone(&running);
+    let thread_config = config;
+
+    let thread_handle = std::thread::Builder::new()
+        .name("finch-audio-loopback".to_string())
+        .spawn(move || {
+            let mut encoder = match ScreenAudioEncoder::new(thread_config.bitrate_kbps) {
+                Ok(enc) => enc,
+                Err(e) => {
+                    tracing::error!("Failed to create ScreenAudioEncoder: {e}");
+                    return;
+                }
+            };
+
+            let mut resampler = ResamplerConverter::new(source_rate, source_channels);
+            let mut sequence: u16 = 0;
+            let mut timestamp: u32 = 0;
+            let mut temp_chunk = [0.0f32; 2048];
+
+            while running_thread.load(Ordering::Relaxed) {
+                let read = cons.pop_slice(&mut temp_chunk);
+                if read > 0 {
+                    resampler.push_raw_samples(&temp_chunk[..read]);
+
+                    while resampler.has_frame() {
+                        if let Some(stereo_frame) = resampler.pop_frame() {
+                            match encoder.packetize(
+                                thread_config.channel_id,
+                                thread_config.sender_peer_id,
+                                sequence,
+                                timestamp,
+                                thread_config.is_e2ee,
+                                &stereo_frame,
+                            ) {
+                                Ok(packet) => {
+                                    sequence = sequence.wrapping_add(1);
+                                    timestamp = timestamp.wrapping_add(SAMPLES_PER_CHANNEL as u32);
+                                    if tx.send(packet).is_err() {
+                                        // Receiver was dropped, exit processing thread
+                                        return;
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Failed to packetize loopback audio frame: {e}");
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Sleep briefly to avoid busy-spinning when no audio is playing
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        })
+        .map_err(LoopbackAudioError::ThreadSpawnError)?;
+
+    Ok((thread_handle, rx))
 }
 
 impl Drop for ScreenAudioCapturer {
@@ -673,5 +814,103 @@ mod tests {
     fn test_device_enumeration() {
         // Enumerate loopback devices without panic
         let _ = list_loopback_devices();
+    }
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn activation_timeout_still_reaches_device_fallback_before_forwarder_deadline() {
+        let (_sender, completed) = std::sync::mpsc::channel();
+        let started = std::time::Instant::now();
+        let result = ScreenAudioCapturer::start_with_sources(
+            ScreenAudioConfig::default(),
+            true,
+            |_, _| {
+                crate::process_loopback::wait_for_activation(&completed)?;
+                Err(LoopbackAudioError::UnsupportedSampleFormat)
+            },
+            |_| Err(LoopbackAudioError::NoDeviceAvailable),
+        );
+        assert!(
+            matches!(result, Err(LoopbackAudioError::NoDeviceAvailable)),
+            "device fallback must be attempted"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "fallback must leave time inside the forwarder's five-second deadline"
+        );
+    }
+    #[test]
+    fn only_process_activation_failure_does_not_capture_other_apps() {
+        let device_called = std::cell::Cell::new(false);
+        let result = ScreenAudioCapturer::start_with_sources(
+            ScreenAudioConfig {
+                source: AudioSourceKind::OnlyProcess(7),
+                ..Default::default()
+            },
+            true,
+            |_, _| {
+                Err(LoopbackAudioError::Wasapi(
+                    "HRESULT 0x80004005: activation failed".into(),
+                ))
+            },
+            |_| {
+                device_called.set(true);
+                Err(LoopbackAudioError::NoDeviceAvailable)
+            },
+        );
+        assert!(matches!(result, Err(LoopbackAudioError::Wasapi(_))));
+        assert!(
+            !device_called.get(),
+            "window scope must never expand to the device"
+        );
+    }
+    #[test]
+    fn unsupported_only_process_does_not_capture_other_apps() {
+        let device_called = std::cell::Cell::new(false);
+        let result = ScreenAudioCapturer::start_with_sources(
+            ScreenAudioConfig {
+                source: AudioSourceKind::OnlyProcess(7),
+                ..Default::default()
+            },
+            false,
+            |_, _| panic!("unsupported process capture must not start"),
+            |_| {
+                device_called.set(true);
+                Err(LoopbackAudioError::NoDeviceAvailable)
+            },
+        );
+        assert!(result.is_err());
+        assert!(!device_called.get());
+    }
+    #[test]
+    fn old_windows_falls_back_to_device_loopback() {
+        assert_eq!(
+            resolve_source(&AudioSourceKind::AllExceptSelf, false),
+            AudioSourceKind::Device
+        );
+    }
+    #[test]
+    fn new_windows_keeps_the_wanted_source() {
+        assert_eq!(
+            resolve_source(&AudioSourceKind::OnlyProcess(7), true),
+            AudioSourceKind::OnlyProcess(7)
+        );
+    }
+    #[cfg(windows)]
+    #[test]
+    fn capturer_reports_all_except_self() {
+        let capture = ScreenAudioCapturer::start(ScreenAudioConfig::default()).unwrap();
+        assert_eq!(capture.source(), &AudioSourceKind::AllExceptSelf);
+    }
+    #[test]
+    fn default_config_asks_for_all_except_self() {
+        assert_eq!(
+            ScreenAudioConfig::default().source,
+            AudioSourceKind::AllExceptSelf
+        );
     }
 }

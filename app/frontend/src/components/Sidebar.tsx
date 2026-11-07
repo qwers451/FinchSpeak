@@ -16,7 +16,7 @@ import {
   participantsForChannel,
   speakingPeers,
 } from '../stores/voiceStore';
-import { connectionStatus, knownUsers, presence, statusTexts } from '../stores/sessionStore';
+import { connectionStatus, knownUsers, myStatus as ownStatus, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
 import { currentUser } from '../stores/authStore';
 import type { Channel } from '../types';
@@ -24,6 +24,7 @@ import { api } from '../services/api';
 import { moveChannel, removeChannel, renameChannel } from '../stores/channelAdminStore';
 import { Avatar, Button, ConfirmDialog, Field, Icon, Modal } from '../ui';
 import { t } from '../i18n';
+import { describeError } from '../i18n/errors';
 
 type ChannelDialog =
   | { kind: 'create'; type: 'text' | 'voice' }
@@ -71,7 +72,7 @@ function ChannelNameDialog(props: { dialog: Extract<ChannelDialog, { kind: 'crea
       }
       props.onClose();
     } catch (error) {
-      setAppError(String(error));
+      setAppError(describeError(error));
     } finally {
       setBusy(false);
     }
@@ -96,8 +97,7 @@ export function Sidebar() {
   const textChannels = () => channels().filter((c) => c.channel_type === 'text');
   const voiceChannels = () => channels().filter((c) => c.channel_type === 'voice');
   const myStatus = () => {
-    const user = currentUser();
-    const status = user ? presence()[user.id] ?? user.status ?? 'online' : 'online';
+    const status = ownStatus();
     return status === 'donotdisturb' ? 'dnd' : status === 'idle' ? 'idle' : 'on';
   };
   const statusLabel = () => t(({ on: 'Online', idle: 'Idle', dnd: 'Do not disturb' })[myStatus()]);
@@ -205,7 +205,7 @@ export function Sidebar() {
 
       <div class="upanel user-panel">
         <button type="button" class="row g12 grow profile-open" style={{ gap: '10px', 'min-width': 0 }} aria-label={t('Open profile')} title={currentUser()?.display_name || currentUser()?.username} onClick={() => setProfileOpen(true)}>
-          <Avatar name={currentUser()?.display_name ?? currentUser()?.username} id={currentUser()?.id} size={40} status={myStatus()} speaking={isLocalSpeaking()} src={currentUser()?.avatar_url} />
+          <Avatar name={currentUser()?.display_name || currentUser()?.username} id={currentUser()?.id} size={40} status={myStatus()} speaking={isLocalSpeaking()} src={currentUser()?.avatar_url} />
           <div class="col grow" style={{ 'min-width': 0, 'text-align': 'left' }}>
             <span class="b trunc fs13">{currentUser()?.display_name || currentUser()?.username}</span>
             <span class="t3 fs12 trunc">{(currentUser() && statusTexts()[currentUser()!.id]) || statusLabel()}</span>

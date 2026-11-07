@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
+import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { AuditEntry, Role, SearchHit, ServerOverview, UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
+import type { AuditEntry, DeviceSession, Role, SearchHit, ServerOverview, UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -10,9 +11,9 @@ let browserUser: User | null = null;
 
 export const api = {
   // Auth
-  login: async (serverUrl: string, username: string, password: string): Promise<User> => {
+  login: async (serverUrl: string, username: string, password: string, remember = false): Promise<User> => {
     if (isTauri()) {
-      return invoke('login', { serverUrl, username, password });
+      return invoke('login', { serverUrl, username, password, remember });
     }
     const cleanUrl = serverUrl.replace(/\/+$/, '');
     const resp = await fetch(`${cleanUrl}/api/auth/login`, {
@@ -31,9 +32,9 @@ export const api = {
     return data.user;
   },
 
-  register: async (serverUrl: string, username: string, displayName: string, password: string, inviteCode?: string): Promise<User> => {
+  register: async (serverUrl: string, username: string, displayName: string, password: string, inviteCode?: string, remember = false): Promise<User> => {
     if (isTauri()) {
-      return invoke('register', { serverUrl, username, displayName, password, inviteCode: inviteCode || null });
+      return invoke('register', { serverUrl, username, displayName, password, inviteCode: inviteCode || null, remember });
     }
     const cleanUrl = serverUrl.replace(/\/+$/, '');
     const resp = await fetch(`${cleanUrl}/api/auth/register`, {
@@ -50,6 +51,21 @@ export const api = {
     browserServerUrl = cleanUrl;
     browserUser = data.user;
     return data.user;
+  },
+
+  resumeSession: async (serverUrl: string, username: string): Promise<User | null> => {
+    if (isTauri()) return invoke('resume_session', { serverUrl, username });
+    return null;
+  },
+
+  /** Stop waiting out the reconnect pause and try again now. */
+  reconnectNow: async (): Promise<void> => {
+    if (isTauri()) await invoke('reconnect_now');
+  },
+
+  /** Ends the session this device holds without revoking it on the server; the stored token stays. */
+  discardSession: async (): Promise<void> => {
+    if (isTauri()) await invoke('discard_session');
   },
 
   logout: async (): Promise<void> => {
@@ -163,6 +179,23 @@ export const api = {
     return { server_url: null, hostname: null, fingerprint: null };
   },
 
+  /** The invite link that started the app, handed over once; null when there is none. */
+  takeInviteLink: async (): Promise<string | null> => {
+    if (isTauri()) return invoke('take_invite_link');
+    return null;
+  },
+
+  autostartEnabled: async (): Promise<boolean> => {
+    if (isTauri()) return isEnabled();
+    return false;
+  },
+
+  setAutostart: async (on: boolean): Promise<void> => {
+    if (isTauri()) {
+      if (on) await enable(); else await disable();
+    }
+  },
+
   uploadAvatar: async (data: number[], contentType: string): Promise<User> => {
     if (isTauri()) return invoke('upload_avatar', { data, contentType });
     throw new Error('Pictures need the desktop app');
@@ -179,6 +212,12 @@ export const api = {
 
   setStatus: async (status: UserStatus, text: string | null): Promise<void> => {
     if (isTauri()) return invoke('set_status', { status, text });
+  },
+
+  /** Seconds since the last keyboard or mouse input on this computer. */
+  systemIdleSeconds: async (): Promise<number> => {
+    if (isTauri()) return invoke('system_idle_seconds');
+    return 0;
   },
 
   markChannelRead: async (channelId: string, messageId: string): Promise<void> => {
@@ -241,6 +280,25 @@ export const api = {
       return invoke('change_password', { currentPassword, newPassword });
     }
     throw new Error('Password changes need the desktop app');
+  },
+
+  listSessions: async (): Promise<DeviceSession[]> => {
+    if (isTauri()) {
+      return invoke('list_sessions');
+    }
+    return [];
+  },
+
+  endSession: async (sessionId: string): Promise<void> => {
+    if (isTauri()) {
+      return invoke('end_session', { sessionId });
+    }
+  },
+
+  endOtherSessions: async (): Promise<void> => {
+    if (isTauri()) {
+      return invoke('end_other_sessions');
+    }
   },
 
   // Voice
@@ -370,6 +428,12 @@ export const api = {
     }
   },
 
+  /** A new temporary password for a member, returned once. */
+  resetPassword: async (userId: string): Promise<string> => {
+    if (isTauri()) return invoke<string>('reset_user_password', { userId });
+    return '';
+  },
+
   updateChannel: async (channelId: string, name?: string, topic?: string): Promise<void> => {
     if (isTauri()) {
       return invoke('update_channel', { channelId, name: name ?? null, topic: topic ?? null });
@@ -388,6 +452,11 @@ export const api = {
     }
   },
 
+  processLoopbackSupported: async (): Promise<boolean> => {
+    if (isTauri()) return invoke('process_loopback_supported');
+    return false;
+  },
+
   // Screen sharing
   listScreenSources: async (): Promise<ScreenSources> => {
     if (isTauri()) {
@@ -396,9 +465,9 @@ export const api = {
     return { monitors: [], windows: [] };
   },
 
-  startScreenShare: async (kind: 'monitor' | 'window', id: number, withAudio = false): Promise<void> => {
+  startScreenShare: async (kind: 'monitor' | 'window', id: number, withAudio = false, audioScope: 'system' | 'window' = 'system'): Promise<number | void> => {
     if (isTauri()) {
-      return invoke('start_screen_share', { kind, id, withAudio });
+      return invoke('start_screen_share', { kind, id, withAudio, audioScope });
     }
   },
 
@@ -426,12 +495,26 @@ export const api = {
     }
   },
 
+  /** Spatial audio on (each voice from its own side) or off (plain mono). */
+  setSpatialAudio: async (enabled: boolean): Promise<void> => {
+    if (isTauri()) {
+      return invoke('set_spatial_audio', { enabled });
+    }
+  },
+
+  /** Where a voice sits: -1 left, 0 centre, 1 right. */
+  setSpeakerPan: async (peerId: number, pan: number): Promise<void> => {
+    if (isTauri()) {
+      return invoke('set_speaker_pan', { peerId, pan });
+    }
+  },
+
   setTrayState: async (state: 'idle' | 'voice' | 'muted' | 'live', language: 'ru' | 'en' = 'ru'): Promise<void> => {
     if (isTauri()) return invoke('set_tray_state', { state, language });
   },
 
-  setCloseToTray: async (enabled: boolean): Promise<void> => {
-    if (isTauri()) return invoke('set_close_to_tray', { enabled });
+  setAttention: async (mentions: number, language: 'ru' | 'en' = 'ru'): Promise<void> => {
+    if (isTauri()) return invoke('set_attention', { mentions, language });
   },
 
   appVersion: async (): Promise<string> => {
@@ -477,7 +560,14 @@ export const api = {
   /** Push-to-talk key such as "F8" or "Control+Space"; null removes it. Works in the background. */
   setPushToTalkKey: async (key: string | null): Promise<void> => {
     if (isTauri()) {
-      return invoke('set_push_to_talk_key', { key });
+      return invoke('set_hotkey', { action: 'push_to_talk', key });
+    }
+  },
+
+  /** System-wide key that toggles the microphone or all sound; null removes it. */
+  setHotkey: async (action: 'toggle_mute' | 'toggle_deafen', key: string | null): Promise<void> => {
+    if (isTauri()) {
+      return invoke('set_hotkey', { action, key });
     }
   },
 

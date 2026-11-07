@@ -1,6 +1,7 @@
-import { createMemo, createSignal, For, Show } from 'solid-js';
-import { pendingMismatch, pendingTofu, setAuthError, setPendingMismatch, setPendingTofu } from '../stores/authStore';
+import { createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js';
+import { pendingMismatch, discardPendingSignIn, pendingTofu, retryPendingSignIn, serverUrl, setAuthError, setPendingMismatch, setPendingTofu } from '../stores/authStore';
 import { api } from '../services/api';
+import { fingerprintsMatch, linkCoversServer, pendingInvite } from '../stores/inviteLink';
 import { Button, Field, Icon, Modal } from '../ui';
 import { t } from '../i18n';
 
@@ -18,6 +19,8 @@ export function diffBytes(expected: string, actual: string): { text: string; dif
   return actual.split(':').map((byte, i) => ({ text: byte, differs: a[i] !== byte }));
 }
 
+const dismiss = () => { discardPendingSignIn(); setPendingTofu(null); };
+
 const hostOf = (hostname: string) => hostname;
 
 /** First connection to a server (A3): the user compares the fingerprint, no default button. */
@@ -28,10 +31,32 @@ export function TofuModal() {
     await api.trustFingerprint(data.hostname, data.fingerprint);
     setPendingTofu(null);
     setAuthError(null);
+    await retryPendingSignIn();
+  };
+
+  // An invite link that pins this very fingerprint confirms itself through the same confirm() as the button.
+  // While the link's own trust runs, the dialog stays closed; if trusting fails, it opens again.
+  const [autoTrusting, setAutoTrusting] = createSignal<unknown>(null);
+  let autoTrusted: unknown = null;
+  createEffect(() => {
+    const data = pendingTofu();
+    const link = pendingInvite();
+    if (!data || !link || autoTrusted === data) return;
+    if (fingerprintsMatch(link.fp, data.fingerprint) && linkCoversServer(link, data.hostname, serverUrl())) {
+      autoTrusted = data;
+      setAutoTrusting(data);
+      untrack(() => void confirm().catch(() => setAutoTrusting(null)));
+    }
+  });
+
+  // The link names a fingerprint, but the server presents another one: the dialog shows, with a warning.
+  const linkMismatch = (fingerprint: string) => {
+    const link = pendingInvite();
+    return !!link && !!link.fp && !fingerprintsMatch(link.fp, fingerprint);
   };
 
   return (
-    <Modal open={!!pendingTofu()} onClose={() => setPendingTofu(null)} title={t('Trust this server?')} width="560px">
+    <Modal open={!!pendingTofu() && autoTrusting() !== pendingTofu()} onClose={dismiss} title={t('Trust this server?')} width="560px">
       <Show when={pendingTofu()}>
         {(data) => (
           <div class="col g20">
@@ -39,6 +64,12 @@ export function TofuModal() {
               <div class="av s56 c3"><Icon name="shield" size="lg" /></div>
               <span class="t2">{t('This is the first time you connect to {host}.', { host: hostOf(data().hostname) })}</span>
             </div>
+            <Show when={linkMismatch(data().fingerprint)}>
+              <div class="auth-banner red" role="alert">
+                <Icon name="warn" class="tr" />
+                <span class="fs13">{t('The fingerprint in the invite link does not match this server.')}</span>
+              </div>
+            </Show>
             <div class="col g8">
               <span class="sec-label">{t('Certificate fingerprint · SHA-256')}</span>
               <div class="fp-grid" data-testid="fingerprint">
@@ -50,7 +81,7 @@ export function TofuModal() {
               <span class="fs13">{t('Compare these characters with the fingerprint the server admin sees in the Server page. If they match, nobody is listening in. FinchSpeak will warn you if this ever changes.')}</span>
             </div>
             <div class="row g12" style={{ 'justify-content': 'flex-end' }}>
-              <Button variant="secondary" onClick={() => setPendingTofu(null)}>{t('Cancel')}</Button>
+              <Button variant="secondary" onClick={dismiss}>{t('Cancel')}</Button>
               <Button variant="violet" icon="check" onClick={() => void confirm()}>{t('They match — trust server')}</Button>
             </div>
           </div>

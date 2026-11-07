@@ -1,12 +1,13 @@
-import { createSignal } from 'solid-js';
 import { api } from '../services/api';
-import { currentUser, setCurrentUser } from './authStore';
+import { currentUser, logoutUser, setCurrentUser } from './authStore';
+import { currentSessionGeneration, sessions, setSessions } from './sessionStore';
+import { setProfileMessage, setProfileOpen } from './profileState';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
-import type { UserStatus } from '../types';
+import type { DeviceSession, UserStatus } from '../types';
+import { describeError } from '../i18n/errors';
 
-export const [profileOpen, setProfileOpen] = createSignal(false);
-export const [profileMessage, setProfileMessage] = createSignal<string | null>(null);
+export { profileOpen, setProfileOpen, profileMessage, setProfileMessage } from './profileState';
 
 export async function saveDisplayName(name: string): Promise<boolean> {
   try {
@@ -14,7 +15,7 @@ export async function saveDisplayName(name: string): Promise<boolean> {
     setProfileMessage('Name changed.');
     return true;
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
     return false;
   }
 }
@@ -29,9 +30,53 @@ export async function savePassword(current: string, next: string, again: string)
     setProfileMessage('Password changed. Other devices are signed out.');
     return true;
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
     return false;
   }
+}
+
+export { sessions };
+
+/** Fetch the signed-in devices of this account. */
+export async function loadSessions(): Promise<DeviceSession[]> {
+  const owner = currentUser()?.id ?? null;
+  const generation = currentSessionGeneration();
+  // A reply that arrives after a sign-out or for another account is not this account's device list.
+  const stillOwner = () => owner !== null && currentUser()?.id === owner && currentSessionGeneration() === generation;
+  try {
+    const list = await api.listSessions();
+    if (!stillOwner()) return sessions();
+    setSessions(list);
+    return list;
+  } catch (err) {
+    setAppError(describeError(err));
+    return sessions();
+  }
+}
+
+/** Sign one device out; for this computer that is a normal log out. */
+export async function endSession(id: string): Promise<void> {
+  if (sessions().find((s) => s.id === id)?.current) {
+    setProfileOpen(false);
+    setProfileMessage(null);
+    await logoutUser();
+    return;
+  }
+  try {
+    await api.endSession(id);
+  } catch (err) {
+    setAppError(describeError(err));
+  }
+  await loadSessions();
+}
+
+export async function endOtherSessions(): Promise<void> {
+  try {
+    await api.endOtherSessions();
+  } catch (err) {
+    setAppError(describeError(err));
+  }
+  await loadSessions();
 }
 
 export const STATUS_TEXT_MAX = 80;
@@ -44,7 +89,7 @@ export async function saveStatus(status: UserStatus, text: string): Promise<bool
     await api.setStatus(status, text.trim().slice(0, STATUS_TEXT_MAX) || null);
     return true;
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
     return false;
   }
 }
@@ -68,7 +113,7 @@ export async function deleteAvatar(): Promise<boolean> {
     if (me) setCurrentUser({ ...me, avatar_url: null });
     return true;
   } catch (err) {
-    setAppError(String(err));
+    setAppError(describeError(err));
     return false;
   }
 }

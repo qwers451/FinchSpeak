@@ -4,11 +4,25 @@ use std::sync::atomic::Ordering;
 
 use finch_audio::{list_input_devices, list_output_devices};
 use finch_protocol::messages::ClientMessage;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tracing::info;
 use uuid::Uuid;
 
 use crate::state::{AppState, AudioDeviceSelection, VoiceSettingsDto};
+
+/// Ends our screen share for a room switch. Returns the generation that was ended, or `None`
+/// when we were not sharing (then nothing is sent).
+async fn end_share_for_room_change(
+    state: &AppState,
+    tx: &tokio::sync::mpsc::Sender<ClientMessage>,
+) -> Option<u64> {
+    let generation = state.screen_share_generation().ok()?;
+    if !state.stop_screen_share() {
+        return None;
+    }
+    let _ = tx.send(ClientMessage::StopScreenShare).await;
+    Some(generation)
+}
 
 #[derive(serde::Serialize)]
 pub struct AudioDeviceDto {
@@ -39,12 +53,25 @@ pub async fn join_voice_channel(
     let tx_opt = state.control_tx.read().await.clone();
     let tx = tx_opt.ok_or_else(|| "Not connected via QUIC".to_string())?;
 
+    let switching = *state.current_voice_channel.read().await != Some(short_id);
+    // Nothing is stopped until the join is sent, so a failed send leaves our share running.
     tx.send(ClientMessage::JoinVoice { channel_id: ch_uuid })
         .await
         .map_err(|e| format!("Failed to send JoinVoice: {}", e))?;
 
     *state.current_voice_channel.write().await = Some(short_id);
     state.mixer.lock().await.clear_playout();
+
+    if switching {
+        // Switching rooms ends our share and the share we watched there, as leaving does. The UI learns the ended generation from the event, even if the engine start below fails.
+        if let Some(generation) = end_share_for_room_change(&state, &tx).await {
+            let _ = app_handle.emit(
+                "screen-share-ended",
+                serde_json::json!({ "generation": generation, "reason": "room-changed" }),
+            );
+        }
+        state.stop_watching().await;
+    }
 
     // Start audio engine capture and playback
     let mut engine = state.audio_engine.lock().await;
@@ -56,8 +83,9 @@ pub async fn join_voice_channel(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn leave_voice_channel(state: State<'_, AppState>) -> Result<(), String> {
+/// Leaves the voice room: tells the server and stops our audio, share and viewing. Used by the
+/// Leave command and when the app quits.
+pub(crate) async fn leave_room(state: &AppState) {
     let _transition = state.voice_transition.lock().await;
     let tx_opt = state.control_tx.read().await.clone();
     if let Some(tx) = tx_opt {
@@ -72,6 +100,11 @@ pub async fn leave_voice_channel(state: State<'_, AppState>) -> Result<(), Strin
     state.mixer.lock().await.clear_playout();
 
     info!("Left voice channel");
+}
+
+#[tauri::command]
+pub async fn leave_voice_channel(state: State<'_, AppState>) -> Result<(), String> {
+    leave_room(state.inner()).await;
     Ok(())
 }
 
@@ -159,6 +192,20 @@ pub async fn set_audio_devices(
     Ok(())
 }
 
+/// Spatial audio on or off: on, each voice is placed by its pan; off, plain mono.
+#[tauri::command]
+pub async fn set_spatial_audio(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state.mixer.lock().await.set_spatial(enabled);
+    Ok(())
+}
+
+/// Place a voice between left (-1) and right (1).
+#[tauri::command]
+pub async fn set_speaker_pan(peer_id: u32, pan: f32, state: State<'_, AppState>) -> Result<(), String> {
+    state.mixer.lock().await.set_speaker_pan(peer_id, pan);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn set_speaker_volume(
     peer_id: u32,
@@ -182,31 +229,46 @@ pub async fn set_voice_settings(settings: VoiceSettingsDto, state: State<'_, App
     Ok(())
 }
 
-/// Choose the push-to-talk key (e.g. "F8", "Control+Space"); works while the app is in the
-/// background. Passing `None` removes the key.
+/// Choose the key (e.g. "F8", "Control+Space") for `action`: `push_to_talk`, `toggle_mute` or
+/// `toggle_deafen`. The keys work while the app is in the background. `None` removes the key.
 #[tauri::command]
-pub async fn set_push_to_talk_key(key: Option<String>, app_handle: AppHandle) -> Result<(), String> {
-    use tauri_plugin_global_shortcut::GlobalShortcutExt;
-    let shortcuts = app_handle.global_shortcut();
-    shortcuts.unregister_all().map_err(|e| format!("Could not clear the old key: {e}"))?;
-    if let Some(key) = key.filter(|k| !k.trim().is_empty()) {
-        shortcuts.register(key.as_str()).map_err(|e| format!("Could not use \"{key}\" as the push-to-talk key: {e}"))?;
-    }
-    Ok(())
+pub async fn set_hotkey(
+    action: String,
+    key: Option<String>,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let action = crate::hotkeys::HotkeyAction::parse(&action)
+        .ok_or_else(|| format!("Unknown key action: {action}"))?;
+    crate::hotkeys::set(&app_handle, &state, action, key.as_deref())
 }
 
 /// Record a few seconds of the processed microphone and play them back (nothing is sent to the
 /// others meanwhile). Progress comes as `mic-test` events: `recording`, `playing`, `done`.
+/// Outside a call the devices are opened just for the test and closed again afterwards.
 #[tauri::command]
-pub async fn test_microphone(seconds: Option<u32>, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn test_microphone(
+    seconds: Option<u32>,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
     use std::sync::atomic::Ordering;
-    if !state.audio_engine.lock().await.is_running() {
-        return Err("Join a voice channel first: the microphone is only open during a call".to_string());
-    }
+    // Serialised with join/leave, so a local test never replaces a call that just started.
+    let _transition = state.voice_transition.lock().await;
     if state.is_muted.load(Ordering::SeqCst) {
         return Err("Unmute yourself first".to_string());
     }
+    let in_call = state.current_voice_channel.read().await.is_some();
+    let mut engine = state.audio_engine.lock().await;
+    if in_call && !engine.is_running() {
+        return Err("Voice audio is not running. Rejoin the voice channel to retry.".to_string());
+    }
     state.mic_test_request.store(seconds.unwrap_or(3).clamp(1, 10), Ordering::SeqCst);
+    if !in_call {
+        engine
+            .start_local_mic_test((*state).clone(), app_handle)
+            .map_err(|e| format!("Failed to open the audio devices: {}", e))?;
+    }
     Ok(())
 }
 
@@ -223,4 +285,20 @@ pub fn stop_audio_diagnostics(state: State<'_, AppState>) {
 #[tauri::command]
 pub fn get_audio_diagnostics(state: State<'_, AppState>) -> Result<String, String> {
     state.audio_diagnostics.report().map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod room_change_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn room_change_ends_our_share_once_and_reports_its_generation() {
+        let state = AppState::new();
+        let generation = state.begin_screen_share().unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        assert_eq!(end_share_for_room_change(&state, &tx).await, Some(generation));
+        assert!(matches!(rx.recv().await, Some(ClientMessage::StopScreenShare)));
+        assert_eq!(end_share_for_room_change(&state, &tx).await, None);
+        assert!(rx.try_recv().is_err(), "no second StopScreenShare when nothing was shared");
+    }
 }
