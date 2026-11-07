@@ -36,7 +36,7 @@ pub async fn server_state(pool: &SqlitePool, sessions: &SessionManager, for_user
     let mut online_users = Vec::with_capacity(online_ids.len());
     if !online_ids.is_empty() {
         let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-            "SELECT id, username, display_name, avatar_version, role, status_pref, status_text FROM users WHERE id IN (",
+            "SELECT id, username, COALESCE(NULLIF(TRIM(display_name), ''), username), avatar_version, role, status_pref, status_text FROM users WHERE id IN (",
         );
         let mut ids = query.separated(", ");
         for id in &online_ids { ids.push_bind(id.to_string()); }

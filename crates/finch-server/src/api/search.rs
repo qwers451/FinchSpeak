@@ -68,7 +68,7 @@ pub async fn search_handler(
     let limit = i64::from(query.limit.unwrap_or(30).clamp(1, 100));
     let offset = i64::from(query.offset.unwrap_or(0).min(10_000));
     let rows = sqlx::query_as::<_, (String, String, String, String, String, String, i64)>(
-        "SELECT m.id, m.channel_id, c.name, m.author_id, u.display_name, m.content, m.created_at
+        "SELECT m.id, m.channel_id, c.name, m.author_id, COALESCE(NULLIF(TRIM(u.display_name), ''), u.username), m.content, m.created_at
          FROM messages_fts f
          JOIN messages m ON m.rowid = f.rowid
          JOIN channels c ON c.id = m.channel_id

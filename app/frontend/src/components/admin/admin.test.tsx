@@ -292,3 +292,21 @@ it('a failed copy of the temporary password says so, and does not claim success'
   await flush();
   expect(toasts().map((toast) => [toast.kind, toast.title])).toEqual([['error', 'Could not copy the password']]);
 });
+
+it('a member with a blank display name is named by the username in the reset and ban dialogs', async () => {
+  const carol = person('carol', 'member', { display_name: '' });
+  vi.spyOn(api, 'adminUsers').mockImplementation(async () => [person('boss', 'admin'), carol]);
+  open(boss);
+  await flush();
+  const row = Array.from(document.querySelectorAll('tbody tr')).find((r) => r.textContent?.includes('carol'))!;
+  button('Reset password', row).click();
+  await flush();
+  expect(dialog().textContent).toContain('Reset password for carol?');
+  expect(dialog().textContent).toContain('carol is signed out everywhere');
+  expect(dialog().textContent).not.toContain('Reset password for ?');
+  button('Cancel', dialog())?.click();
+  await flush();
+  button('Ban…', row).click();
+  await flush();
+  expect(dialog().querySelector('h2, .modal-title, [class*="title"]')?.textContent ?? dialog().textContent).toContain('Ban carol');
+});

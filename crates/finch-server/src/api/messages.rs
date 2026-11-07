@@ -47,7 +47,7 @@ pub async fn channel_messages_handler(
 
     // Fetch messages with author display_name
     let mut rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, Option<i64>, i64, Option<String>)>(
-        "SELECT m.id, m.author_id, u.display_name, m.content, m.reply_ref, m.edited_at, m.created_at, m.client_msg_id
+        "SELECT m.id, m.author_id, COALESCE(NULLIF(TRIM(u.display_name), ''), u.username), m.content, m.reply_ref, m.edited_at, m.created_at, m.client_msg_id
          FROM messages m
          JOIN users u ON m.author_id = u.id
          WHERE m.channel_id = ? AND m.created_at < ?

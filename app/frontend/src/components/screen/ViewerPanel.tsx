@@ -42,7 +42,7 @@ function Viewer(props: { peerId: number; userId: string }) {
 
   const name = createMemo(() => {
     const person = allVoiceParticipants().find((participant) => participant.peer_id === props.peerId);
-    return knownUsers().find((user) => user.id === props.userId)?.display_name ?? person?.username ?? t('Someone');
+    return knownUsers().find((user) => user.id === props.userId)?.display_name || person?.username || t('Someone');
   });
   const volumeKey = () => `screen:${props.userId}`;
   const pipSupported = () => typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled;

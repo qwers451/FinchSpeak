@@ -635,3 +635,36 @@ async fn change_password_counts_characters_not_bytes() -> anyhow::Result<()> {
     assert_eq!(app.clone().oneshot(change("абвгдежз")?).await?.status(), StatusCode::NO_CONTENT);
     Ok(())
 }
+
+#[tokio::test]
+async fn blank_display_name_falls_back_to_the_username() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool.clone(), open_registration(), finch_server::session::SessionManager::new());
+    let (admin, _) = register_named(&app, "admin", "admin_pass_1").await?;
+    let blank = auth_json(&app, "/api/auth/register", json!({"username": "dana", "password": "dana_pass_1", "display_name": ""})).await?;
+    assert_eq!(blank["user"]["display_name"], "dana");
+    let spaces = auth_json(&app, "/api/auth/register", json!({"username": "erik", "password": "erik_pass_1", "display_name": "   "})).await?;
+    assert_eq!(spaces["user"]["display_name"], "erik");
+    let erik_token = spaces["token"].as_str().unwrap().to_string();
+
+    // A row stored with a blank name before this fix still reads back as the username.
+    sqlx::query("UPDATE users SET display_name = '' WHERE username = 'dana'").execute(&pool).await?;
+    let channel: String = sqlx::query_scalar("SELECT id FROM channels WHERE name = 'general'").fetch_one(&pool).await?;
+    sqlx::query("INSERT INTO messages (id, channel_id, author_id, content, created_at) SELECT 'm-blank', ?, id, 'hi', 1 FROM users WHERE username = 'dana'")
+        .bind(&channel).execute(&pool).await?;
+    let (status, history) = call(&app, "GET", &format!("/api/channels/{channel}/messages"), &admin).await?;
+    assert_eq!(status, StatusCode::OK);
+    let message = history["messages"].as_array().unwrap().iter().find(|m| m["content"] == "hi").unwrap();
+    assert_eq!(message["author_name"], "dana");
+
+    // The profile change treats a blank name the same way.
+    let request = Request::builder().method("PATCH").uri("/api/auth/me")
+        .header(header::AUTHORIZATION, format!("Bearer {erik_token}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({"display_name": "  "}).to_string()))?;
+    let response = app.clone().oneshot(request).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(&response.into_body().collect().await?.to_bytes())?;
+    assert_eq!(body["display_name"], "erik");
+    Ok(())
+}

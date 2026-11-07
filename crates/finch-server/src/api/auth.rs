@@ -369,8 +369,11 @@ pub async fn register_handler(
         ));
     }
 
+    // A blank name (missing, empty or only spaces) is shown as the username.
     let display_name = payload
         .display_name
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
         .unwrap_or_else(|| username.clone());
 
     let password_hash = hash_password(&payload.password)?;
@@ -480,7 +483,7 @@ pub async fn login_handler(
     state.login_guard.check(&guard_key, std::time::Instant::now()).map_err(ServerError::TooManyRequests)?;
 
     let row = sqlx::query_as::<_, (String, String, String, String, Option<i64>, Option<i64>)>(
-        "SELECT id, password_hash, display_name, role, avatar_version, banned_at FROM users WHERE username = ?"
+        "SELECT id, password_hash, COALESCE(NULLIF(TRIM(display_name), ''), username), role, avatar_version, banned_at FROM users WHERE username = ?"
     )
     .bind(&username)
     .fetch_optional(&state.pool)
@@ -561,7 +564,7 @@ pub async fn refresh_handler(
 ) -> Result<Json<AuthResponse>, ServerError> {
     let user_id_str = auth.user_id.to_string();
     let (username, display_name, role, avatar_version) = sqlx::query_as::<_, (String, String, String, Option<i64>)>(
-        "SELECT username, display_name, role, avatar_version FROM users WHERE id = ?"
+        "SELECT username, COALESCE(NULLIF(TRIM(display_name), ''), username), role, avatar_version FROM users WHERE id = ?"
     )
     .bind(&user_id_str)
     .fetch_optional(&state.pool)
@@ -612,7 +615,7 @@ pub async fn me_handler(
     State(state): State<ArcSharedState>,
 ) -> Result<impl IntoResponse, ServerError> {
     let row = sqlx::query_as::<_, (String, String, String, String, Option<i64>)>(
-        "SELECT id, username, display_name, role, avatar_version FROM users WHERE id = ?"
+        "SELECT id, username, COALESCE(NULLIF(TRIM(display_name), ''), username), role, avatar_version FROM users WHERE id = ?"
     )
     .bind(auth.user_id.to_string())
     .fetch_optional(&state.pool)
@@ -652,13 +655,18 @@ pub async fn update_profile_handler(
     Json(request): Json<UpdateProfileRequest>,
 ) -> Result<impl IntoResponse, ServerError> {
     let name = request.display_name.trim().to_string();
-    if name.is_empty() || name.chars().count() > 32 {
-        return Err(ServerError::BadRequest("Display name must be between 1 and 32 characters".into()));
+    if name.chars().count() > 32 {
+        return Err(ServerError::BadRequest("Display name must be at most 32 characters".into()));
     }
-    sqlx::query("UPDATE users SET display_name = ? WHERE id = ?")
+    // A blank name is stored as the username, the same as at registration.
+    sqlx::query("UPDATE users SET display_name = COALESCE(NULLIF(?, ''), username) WHERE id = ?")
         .bind(&name)
         .bind(auth.user_id.to_string())
         .execute(&state.pool)
+        .await?;
+    let name: String = sqlx::query_scalar("SELECT display_name FROM users WHERE id = ?")
+        .bind(auth.user_id.to_string())
+        .fetch_one(&state.pool)
         .await?;
     // Live sessions show the new name at once.
     for mut session in state.sessions.sessions.iter_mut() {

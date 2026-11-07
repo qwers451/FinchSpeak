@@ -112,7 +112,7 @@ function MembersTab(props: { isAdmin: boolean }) {
         </table>
       </div>
 
-      <Modal open={!!banFor()} onClose={() => setBanFor(null)} title={t('Ban {name}', { name: banFor()?.display_name ?? '' })} width="420px">
+      <Modal open={!!banFor()} onClose={() => setBanFor(null)} title={t('Ban {name}', { name: banFor()?.display_name || banFor()?.username || '' })} width="420px">
         <div class="col g12">
           <span class="t2 fs13">{t('For how long? Admins cannot be banned: make them a member first.')}</span>
           <div class="col g8">
@@ -129,8 +129,8 @@ function MembersTab(props: { isAdmin: boolean }) {
       <ConfirmDialog
         open={!!resetFor()}
         danger
-        title={resetFor() ? t('Reset password for {name}?', { name: resetFor()!.display_name }) : ''}
-        message={resetFor() ? t('{name} is signed out everywhere. Their current password stops working at once.', { name: resetFor()!.display_name }) : ''}
+        title={resetFor() ? t('Reset password for {name}?', { name: (resetFor()!.display_name || resetFor()!.username) }) : ''}
+        message={resetFor() ? t('{name} is signed out everywhere. Their current password stops working at once.', { name: (resetFor()!.display_name || resetFor()!.username) }) : ''}
         confirmLabel={t('Reset password')}
         onCancel={() => setResetFor(null)}
         onConfirm={() => { const member = resetFor()!; setResetFor(null); void resetMemberPassword(member); }}

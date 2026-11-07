@@ -79,7 +79,7 @@ pub async fn list_users_handler(
 ) -> Result<Json<Vec<AdminUserDto>>, ServerError> {
     require(&auth, Permission::ViewMembers)?;
     let rows = sqlx::query_as::<_, (String, String, String, String, Option<i64>, Option<i64>, Option<i64>)>(
-        "SELECT id, username, display_name, role, banned_at, banned_until, last_seen FROM users ORDER BY username",
+        "SELECT id, username, COALESCE(NULLIF(TRIM(display_name), ''), username), role, banned_at, banned_until, last_seen FROM users ORDER BY username",
     )
     .fetch_all(&state.pool)
     .await?;
