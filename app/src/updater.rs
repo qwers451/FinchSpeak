@@ -108,6 +108,18 @@ pub fn take_installer() -> Option<std::path::PathBuf> {
     PENDING_INSTALLER.lock().ok().and_then(|mut slot| slot.take())
 }
 
+/// Start the queued installer, at most once across every exit path (normal, hard exit fallback,
+/// or an exit that comes after the cleanup). Returns whether this call started one.
+pub fn start_queued_installer() -> bool {
+    let Some(path) = take_installer() else {
+        return false;
+    };
+    if let Err(e) = std::process::Command::new(&path).spawn() {
+        tracing::error!("Could not start the installer: {e}");
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,5 +218,12 @@ mod installer_queue_tests {
         queue_installer(std::path::PathBuf::from("setup.exe"));
         assert_eq!(take_installer(), Some(std::path::PathBuf::from("setup.exe")));
         assert_eq!(take_installer(), None);
+    }
+
+    #[test]
+    fn the_queued_installer_starts_once_whichever_exit_path_asks_first() {
+        queue_installer(std::path::PathBuf::from("no-such-installer-for-test.exe"));
+        assert!(start_queued_installer());
+        assert!(!start_queued_installer());
     }
 }

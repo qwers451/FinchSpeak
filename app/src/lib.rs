@@ -90,6 +90,8 @@ static QUIT_CLEANUP_DONE: AtomicBool = AtomicBool::new(false);
 fn on_run_event(app: &AppHandle, event: RunEvent) {
     let RunEvent::ExitRequested { api, .. } = event else { return };
     if QUIT_CLEANUP_DONE.load(Ordering::SeqCst) {
+        // The cleanup already ran; an update queued since then still starts before this exit.
+        updater::start_queued_installer();
         return;
     }
     api.prevent_exit();
@@ -101,16 +103,13 @@ fn on_run_event(app: &AppHandle, event: RunEvent) {
     // Last resort: a blocking step that never reaches an await point must not keep the app alive.
     std::thread::spawn(|| {
         std::thread::sleep(std::time::Duration::from_secs(3));
+        updater::start_queued_installer();
         std::process::exit(0);
     });
     tauri::async_runtime::spawn(async move {
         connection::shutdown_session(&state).await;
         QUIT_CLEANUP_DONE.store(true, Ordering::SeqCst);
-        if let Some(installer) = updater::take_installer() {
-            if let Err(e) = std::process::Command::new(&installer).spawn() {
-                tracing::error!("Could not start the installer: {e}");
-            }
-        }
+        updater::start_queued_installer();
         app.exit(0);
     });
 }
