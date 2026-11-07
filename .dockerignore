@@ -1,0 +1,9 @@
+# The server image only needs the Cargo workspace sources.
+target/
+**/node_modules/
+app/frontend/dist/
+.git/
+.superpowers/
+docs/
+dist/
+*.log
