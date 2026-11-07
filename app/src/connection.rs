@@ -209,17 +209,7 @@ async fn forward_events(
                     }
                 }
             }
-            SessionEvent::Control(msg) => {
-                match &msg {
-                    ServerMessage::UserLeftVoice { peer_id, .. }
-                    | ServerMessage::UserJoinedVoice { peer_id, .. } => {
-                        state.mixer.lock().await.remove_speaker(*peer_id);
-                    }
-                    _ => {}
-                }
-                track_watched_share(state, &msg).await;
-                emit_control(msg, app_handle)
-            }
+            SessionEvent::Control(msg) => handle_control(state, msg, |msg| emit_control(msg, app_handle)).await,
             SessionEvent::Datagram(bytes) => route_datagram(bytes, state, app_handle).await,
             SessionEvent::UniStreamStarted { header } => {
                 if header.media_type == MediaType::VideoKey && is_watching(state, &header) {
@@ -548,6 +538,18 @@ async fn route_datagram(bytes: Bytes, state: &AppState, app_handle: &tauri::AppH
     }
 }
 
+/// Bookkeeping for a control message (mixer and watched share), then the event goes to the UI.
+async fn handle_control(state: &AppState, msg: ServerMessage, emit: impl FnOnce(ServerMessage)) {
+    match &msg {
+        ServerMessage::UserLeftVoice { peer_id, .. } | ServerMessage::UserJoinedVoice { peer_id, .. } => {
+            state.mixer.lock().await.remove_speaker(*peer_id);
+        }
+        _ => {}
+    }
+    track_watched_share(state, &msg).await;
+    emit(msg);
+}
+
 /// Watching ends when the share we watch ends: the sharer stopping, or the same share starting
 /// again under a new peer id. Nothing follows a new share; the user has to press "Watch" again.
 async fn track_watched_share(state: &AppState, msg: &ServerMessage) {
@@ -778,27 +780,36 @@ mod tests {
         let alice = uuid::Uuid::new_v4();
         *state.viewing_user.write().await = Some(alice);
         state.viewing_peer.store(5, Ordering::SeqCst);
+        let alice_sound = MediaHeader::new_audio(1, 5, 0, 0, false, false);
+        assert!(is_watching(&state, &alice_sound), "alice's sound is accepted while watched");
 
-        // Someone else's share is none of our business.
-        track_watched_share(&state, &ServerMessage::ScreenShareStarted {
-            user_id: uuid::Uuid::new_v4(), peer_id: 99, codec: VideoCodec::H264, width: 64, height: 64, fps: 30,
-        }).await;
-        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 5);
-        assert!(rx.try_recv().is_err());
-
-        // Alice's share ends: watching ends here as it does in the UI.
-        track_watched_share(&state, &ServerMessage::ScreenShareStopped { peer_id: 5, reason: ShareEndReason::Stopped }).await;
+        let mut emitted = Vec::new();
+        handle_control(&state, ServerMessage::ScreenShareStopped { peer_id: 5, reason: ShareEndReason::Stopped }, |m| emitted.push(m)).await;
+        assert_eq!(emitted.len(), 1, "the UI still learns that the share stopped");
         assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 0);
         assert!(state.viewing_user.read().await.is_none());
+        assert!(!is_watching(&state, &alice_sound), "no sound of the stopped share is accepted");
 
-        // Alice starts sharing again as peer 7: nobody subscribes and no media of hers is accepted.
-        track_watched_share(&state, &ServerMessage::ScreenShareStarted {
+        // Alice starts sharing again as peer 7: nobody subscribes, the watch stays off.
+        handle_control(&state, ServerMessage::ScreenShareStarted {
             user_id: alice, peer_id: 7, codec: VideoCodec::H264, width: 64, height: 64, fps: 30,
-        }).await;
+        }, |m| emitted.push(m)).await;
         assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 0);
         assert!(state.viewing_user.read().await.is_none());
         assert!(!is_watching(&state, &MediaHeader::new_audio(1, 7, 0, 0, false, false)));
         assert!(rx.try_recv().is_err(), "a new share is only watched after a click");
+    }
+
+    #[tokio::test]
+    async fn aud018_another_sharers_stop_leaves_the_watch_alone() {
+        let state = AppState::new();
+        let carol = uuid::Uuid::new_v4();
+        *state.viewing_user.write().await = Some(carol);
+        state.viewing_peer.store(9, Ordering::SeqCst);
+        handle_control(&state, ServerMessage::ScreenShareStopped { peer_id: 5, reason: ShareEndReason::Stopped }, |_| {}).await;
+        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 9);
+        assert_eq!(*state.viewing_user.read().await, Some(carol));
+        assert!(is_watching(&state, &MediaHeader::new_audio(1, 9, 0, 0, false, false)));
     }
 
     #[tokio::test]
@@ -807,9 +818,9 @@ mod tests {
         let alice = uuid::Uuid::new_v4();
         *state.viewing_user.write().await = Some(alice);
         state.viewing_peer.store(5, Ordering::SeqCst);
-        track_watched_share(&state, &ServerMessage::ScreenShareStarted {
+        handle_control(&state, ServerMessage::ScreenShareStarted {
             user_id: alice, peer_id: 7, codec: VideoCodec::H264, width: 64, height: 64, fps: 30,
-        }).await;
+        }, |_| {}).await;
         assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 0);
         assert!(state.viewing_user.read().await.is_none());
     }

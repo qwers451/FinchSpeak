@@ -75,7 +75,7 @@ export function closeEndedShare() {
 }
 
 /** The share we watch is over: say so, and tell the server to stop forwarding it to us. */
-function endWatching(watched: { user_id: string; peer_id: number }, reason: string | undefined) {
+export function endWatching(watched: { user_id: string; peer_id: number }, reason: string | undefined) {
   const name = allVoiceParticipants().find((participant) => participant.peer_id === watched.peer_id)?.username ?? t('The sharer');
   setEndedShare({ user_id: watched.user_id, peer_id: watched.peer_id, name, reason: endReasonFromServer(reason) });
   setWatching(null);

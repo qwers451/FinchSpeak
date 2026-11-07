@@ -98,12 +98,25 @@ const snapshot = (voice_states: { user_id: string; peer_id: number; sharing_scre
     voice_states: voice_states.map((state) => ({ ...state, username: state.user_id, channel_id: 'room', muted: false, deafened: false })) },
 });
 
-it('AUD-018 after a reconnect the watched share continues if its sharer is still sharing', async () => {
+it('AUD-018 after a reconnect the watched share continues if its sharer is still sharing under the same peer id', async () => {
   vi.spyOn(api, 'subscribeScreenShare').mockResolvedValue();
+  const unsubscribe = vi.spyOn(api, 'unsubscribeScreenShare').mockResolvedValue();
+  await watchShare('alice', 20);
+  sessionHandlers['connection-lost']('network down');
+  sessionHandlers.authenticated(snapshot([{ user_id: 'alice', peer_id: 20, sharing_screen: true }]));
+  expect(watching()).toEqual({ user_id: 'alice', peer_id: 20 });
+  expect(unsubscribe).not.toHaveBeenCalled();
+});
+
+it('AUD-018 after a reconnect a sharer who came back under a new peer id ends the watch instead of being re-pointed', async () => {
+  vi.spyOn(api, 'subscribeScreenShare').mockResolvedValue();
+  const unsubscribe = vi.spyOn(api, 'unsubscribeScreenShare').mockResolvedValue();
   await watchShare('alice', 20);
   sessionHandlers['connection-lost']('network down');
   sessionHandlers.authenticated(snapshot([{ user_id: 'alice', peer_id: 33, sharing_screen: true }]));
-  expect(watching()).toEqual({ user_id: 'alice', peer_id: 33 });
+  expect(watching()).toBeNull();
+  expect(endedShare()).toMatchObject({ user_id: 'alice', peer_id: 20 });
+  expect(unsubscribe).toHaveBeenCalledWith('alice');
 });
 
 it('AUD-018 after a reconnect a share that ended meanwhile is closed, and the server stops forwarding it', async () => {

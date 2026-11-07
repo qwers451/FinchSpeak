@@ -12,9 +12,8 @@ import { clearTyping, isMentioned, noteIncoming, noteTyping, resetActivity, setU
 import { handleMessageDeleted, handleMessageEdited, handleReactionChanged, renameAuthor } from './chatStore';
 import { currentUser, setCurrentUser } from './authStore';
 import { resetScreenState, resetScreenStateOnDisconnect, setWatching, watching } from './screenState';
-import { screenHandlers } from './screenStore';
+import { endWatching, screenHandlers } from './screenStore';
 import { applySavedVolume } from './volumeStore';
-import { api } from '../services/api';
 import { pushToast } from '../ui/toastStore';
 export { appError, setAppError } from './notificationStore';
 
@@ -87,12 +86,8 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     const watched = watching();
     if (watched) {
       const sharer = data.initial_state.voice_states.find((state) => state.user_id === watched.user_id && state.sharing_screen);
-      if (sharer) setWatching({ user_id: watched.user_id, peer_id: sharer.peer_id });
-      else {
-        // The share ended while we were away: watching ends here too, so the server stops forwarding it.
-        setWatching(null);
-        api.unsubscribeScreenShare(watched.user_id).catch(() => undefined);
-      }
+      // The share ended, or came back under another peer id, while we were away: watching ends, as it does live.
+      if (!sharer || sharer.peer_id !== watched.peer_id) endWatching(watched, undefined);
     }
   },
   'new-message': (incoming) => {

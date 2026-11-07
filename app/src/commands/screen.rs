@@ -289,11 +289,15 @@ pub async fn unsubscribe_screen_share(
 ) -> Result<(), String> {
     let target_uuid = Uuid::parse_str(&target_user_id)
         .map_err(|e| format!("Invalid UUID: {}", e))?;
+    unsubscribe_watched_share(&state, target_uuid).await
+}
 
-    let tx_opt = state.control_tx.read().await.clone();
-    let tx = tx_opt.ok_or_else(|| "Not connected via QUIC".to_string())?;
-
+/// Stop watching first, so a failure to reach the server never leaves a hidden watch behind.
+async fn unsubscribe_watched_share(state: &AppState, target_uuid: Uuid) -> Result<(), String> {
     state.stop_watching().await;
+
+    // Offline there is nobody to tell: the watch is already gone here.
+    let Some(tx) = state.control_tx.read().await.clone() else { return Ok(()) };
 
     tx.send(ClientMessage::UnsubscribeScreenShare {
         target_user_id: target_uuid,
@@ -301,8 +305,24 @@ pub async fn unsubscribe_screen_share(
     .await
     .map_err(|e| format!("Failed to send unsubscribe request: {}", e))?;
 
-    info!("Unsubscribed from screen share of user {}", target_user_id);
+    info!("Unsubscribed from screen share of user {}", target_uuid);
     Ok(())
+}
+
+#[cfg(test)]
+mod unsubscribe_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn stopping_while_offline_still_clears_the_watch() {
+        let state = AppState::new();
+        let alice = Uuid::new_v4();
+        *state.viewing_user.write().await = Some(alice);
+        state.viewing_peer.store(5, Ordering::SeqCst);
+        assert!(unsubscribe_watched_share(&state, alice).await.is_ok());
+        assert_eq!(state.viewing_peer.load(Ordering::SeqCst), 0);
+        assert!(state.viewing_user.read().await.is_none());
+    }
 }
 
 #[tauri::command]
