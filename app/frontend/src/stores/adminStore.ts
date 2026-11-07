@@ -111,6 +111,7 @@ export function describeAudit(entry: AuditEntry): string {
       case 'kick': return t('kicked {target}', { target });
       case 'ban': return entry.details && entry.details !== 'permanent' ? t('banned {target} for a while', { target }) : t('banned {target}', { target });
       case 'unban': return t('lifted the ban of {target}', { target });
+      case 'password_reset': return t('password reset: {target}', { target });
       case 'role_changed': return t('changed the role of {target} ({details})', { target, details });
       case 'message_deleted': return t('deleted a message of someone else');
       case 'channel_created': return t('created the channel {target}', { target });

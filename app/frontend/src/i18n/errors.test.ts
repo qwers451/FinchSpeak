@@ -50,3 +50,7 @@ it.each([
 ])('the session end reason %s is translated', (raw, expected) => {
   expect(describeError(raw)).toBe(expected);
 });
+
+it('a lost QUIC connection reason is shown in Russian', () => {
+  expect(describeError('connection lost')).toBe('Связь потеряна');
+});

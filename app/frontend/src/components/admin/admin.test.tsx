@@ -310,3 +310,10 @@ it('a member with a blank display name is named by the username in the reset and
   await flush();
   expect(dialog().querySelector('h2, .modal-title, [class*="title"]')?.textContent ?? dialog().textContent).toContain('Ban carol');
 });
+
+it('the log names a password reset in Russian', async () => {
+  const { describeAudit: describe } = await import('../../stores/adminStore');
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'ru' } });
+  expect(describe({ id: 1, at: 1, actor_name: 'a', action: 'password_reset', target: 'alice', details: null })).toBe('Сброс пароля: alice');
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'en' } });
+});
