@@ -75,3 +75,16 @@ input.range:active:not(:disabled)::-moz-range-thumb { transform:scale(1.15); }
 [data-reduce-motion="true"] :is(.icon-close,.link-btn,.cat-add,.react,.ch .acts button,.msg .hover-tools button):active { transform:none!important; }
 [data-reduce-motion="true"] input.range:active::-webkit-slider-thumb { transform:none!important; }
 [data-reduce-motion="true"] input.range:active::-moz-range-thumb { transform:none!important; }
+
+/* Keep the ordinary content in flow while the spinner occupies its own layer. */
+.btn { position:relative; }
+.btn-content { display:inline-flex; align-items:center; justify-content:center; gap:inherit; }
+.btn.is-loading .btn-content { opacity:0; }
+.btn-spinner { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+.range-control { display:inline-flex; position:relative; width:100%; min-width:0; flex:1; align-items:center; }
+.range-value { position:absolute; bottom:calc(100% + 6px); transform:translateX(-50%) translateY(3px); opacity:0; pointer-events:none; padding:3px 7px; border:1px solid var(--line); border-radius:var(--r-sm); background:var(--bg-card); color:var(--text); font-size:12px; line-height:18px; font-variant-numeric:tabular-nums; z-index:6; transition:opacity var(--motion-small) var(--ease-out),transform var(--motion-small) var(--ease-out); }
+.range-control:focus-within:not([data-disabled]) .range-value { opacity:1; transform:translateX(-50%); transition:none; }
+@media (hover:hover) and (pointer:fine) {
+  .range-control:hover:not([data-disabled]) .range-value { opacity:1; transform:translateX(-50%); }
+}
+.toast[data-exiting="true"] { opacity:0; transform:translateX(12px); pointer-events:none; transition-duration:var(--motion-exit); transition-timing-function:var(--ease-in); }
