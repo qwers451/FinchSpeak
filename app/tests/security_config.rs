@@ -85,3 +85,16 @@ fn frontend_page_loads_nothing_from_the_network() {
         assert!(!html.contains(attribute), "index.html references an external resource ({attribute})");
     }
 }
+
+#[test]
+fn webview_keeps_running_when_minimized() {
+    let conf = tauri_conf();
+    let window = &conf["app"]["windows"][0];
+    assert_eq!(window["backgroundThrottling"], "disabled", "screen share must keep flowing while minimized");
+    let args = window["additionalBrowserArgs"].as_str().expect("additionalBrowserArgs");
+    // Setting this replaces wry's defaults, so they must be repeated.
+    assert!(args.contains("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"));
+    for flag in ["--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows"] {
+        assert!(args.contains(flag), "missing {flag}");
+    }
+}

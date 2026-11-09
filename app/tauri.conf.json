@@ -21,7 +21,9 @@
         "decorations": false,
         "dragDropEnabled": false,
         "transparent": false,
-        "visible": false
+        "visible": false,
+        "backgroundThrottling": "disabled",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows"
       }
     ],
     "security": {

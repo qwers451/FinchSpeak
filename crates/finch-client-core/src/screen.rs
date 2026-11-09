@@ -407,8 +407,9 @@ impl FrameSource for WindowSource {
     }
 }
 
-/// Consecutive capture failures (window closed, display off) before the share ends.
-const MAX_CAPTURE_FAILURES: u32 = 30;
+/// Consecutive capture failures (window closed, display off) before the share ends. A shared window that
+/// is minimized yields no frames, so this is about 30 seconds (at 33 ms per try): enough to restore it.
+const MAX_CAPTURE_FAILURES: u32 = 900;
 
 /// The newest captured frame, handed from the capture thread to the encoder thread.
 #[derive(Default)]

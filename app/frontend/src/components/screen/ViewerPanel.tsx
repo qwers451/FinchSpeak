@@ -18,6 +18,8 @@ interface VideoChunkPayload {
 const CODEC = 'avc1.42C033';
 /** The HUD fades out after this long without the mouse moving. */
 const HUD_HIDE_MS = 3000;
+/** More undecoded chunks than this queued means we fell behind (e.g. the page was suspended): resync on a key frame. */
+const MAX_DECODE_QUEUE = 30;
 
 const INITIAL: ViewerSnapshot = { status: 'connecting', endReason: null, fps: 0, bitrateKbps: 0, width: 0, height: 0, wantKeyFrame: false };
 
@@ -52,6 +54,18 @@ function Viewer(props: { peerId: number; userId: string }) {
   const fullscreenSupported = () => typeof document !== 'undefined' && document.fullscreenEnabled !== false;
 
   const askForKeyFrame = () => { invoke('request_idr_keyframe', { targetPeerId: props.peerId }).catch(console.error); };
+
+  // Minimized or fully covered: nothing is drawn, so decoding deltas is wasted work and a suspended page would pile them up.
+  const pageHidden = () => typeof document !== 'undefined' && document.hidden && !document.pictureInPictureElement;
+
+  /** Throw the decoder away and start clean: the next picture must be a key frame, which we ask for now. */
+  const resyncDecoder = () => {
+    if (closed) return;
+    if (decoder && decoder.state !== 'closed') { try { decoder.close(); } catch { /* already closed */ } }
+    waitingForKey = true;
+    createDecoder();
+    askForKeyFrame();
+  };
 
   const createDecoder = () => {
     const ctx = canvas?.getContext('2d');
@@ -101,6 +115,13 @@ function Viewer(props: { peerId: number; userId: string }) {
     document.addEventListener('fullscreenchange', onFullscreen);
     onCleanup(() => document.removeEventListener('fullscreenchange', onFullscreen));
 
+    const onVisibility = () => {
+      if (pageHidden()) { waitingForKey = true; return; }
+      if (decoder) resyncDecoder();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    onCleanup(() => document.removeEventListener('visibilitychange', onVisibility));
+
     if (typeof (window as unknown as { VideoDecoder?: unknown }).VideoDecoder === 'undefined') {
       machine.unsupported();
       setView(machine.tick(performance.now()));
@@ -114,6 +135,8 @@ function Viewer(props: { peerId: number; userId: string }) {
       onFrameChannel.onmessage = (payload: VideoChunkPayload) => {
         machine.chunk(payload.data.length);
         if (!decoder || decoder.state !== 'configured') return;
+        if (pageHidden()) { waitingForKey = true; return; }
+        if (decoder.decodeQueueSize > MAX_DECODE_QUEUE) { resyncDecoder(); return; }
         if (waitingForKey && !payload.is_key) return;
         try {
           decoder.decode(new EncodedVideoChunk({ type: payload.is_key ? 'key' : 'delta', timestamp: microTimestamp, data: new Uint8Array(payload.data) }));
