@@ -38,7 +38,7 @@ export function MessageItem(props: Props) {
   const msg = () => props.message;
   const mine = () => msg().author_id === me()?.id;
   const stored = () => !msg().state;
-  const canDelete = () => stored() && (mine() || me()?.role === 'admin');
+  const canDelete = () => stored() && (mine() || me()?.role === 'admin' || me()?.role === 'moderator');
   const mentioned = () => !mine() && isMentioned(msg());
   const author = createMemo(() => knownUsers().find((user) => user.id === msg().author_id));
   const lookupLogin = (login: string) => knownUsers().find((user) => user.username.toLowerCase() === login)?.id;

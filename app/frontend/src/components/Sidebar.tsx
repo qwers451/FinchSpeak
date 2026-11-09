@@ -16,7 +16,9 @@ import {
   participantsForChannel,
   speakingPeers,
 } from '../stores/voiceStore';
-import { connectionStatus, knownUsers, myStatus as ownStatus, statusTexts } from '../stores/sessionStore';
+import { isSharing } from '../stores/screenState';
+import { isMeParticipant } from './voice/ParticipantTile';
+import { connectionStatus, localPeerId, knownUsers, myStatus as ownStatus, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
 import { currentUser } from '../stores/authStore';
 import type { Channel } from '../types';
@@ -168,18 +170,21 @@ export function Sidebar() {
                   <Icon name="vol" size="sm" />
                   <span class="trunc" title={channel.name}>{channel.name}</span>
                   <ChannelActions channel={channel} onDialog={setDialog} />
+                  <Show when={participantsForChannel(channel.id).some((participant) => participant.is_sharing)}>
+                    <span class="tag live" style={{ 'margin-left': 'auto' }}>{t('LIVE')}</span>
+                  </Show>
                   <Show when={participantsForChannel(channel.id).length > 0}>
-                    <span class="tag violet" style={{ 'margin-left': 'auto' }}>{participantsForChannel(channel.id).length}</span>
+                    <span class="tag violet" style={{ 'margin-left': participantsForChannel(channel.id).some((participant) => participant.is_sharing) ? '0' : 'auto' }}>{participantsForChannel(channel.id).length}</span>
                   </Show>
                 </div>
                 <For each={participantsForChannel(channel.id)}>
                   {(participant) => (
                     <div class="vp">
-                      <Avatar name={participant.username} id={participant.user_id} size={24} src={knownUsers().find((user) => user.id === participant.user_id)?.avatar_url} speaking={speakingPeers().has(participant.peer_id)} />
+                      <Avatar name={participant.username} id={participant.user_id} size={24} src={knownUsers().find((user) => user.id === participant.user_id)?.avatar_url} speaking={speakingPeers().has(participant.peer_id) || (isMeParticipant(participant, localPeerId()) && !isMuted() && isLocalSpeaking())} />
                       <span class="grow trunc">{participant.username}</span>
                       <Show when={participant.is_muted}><Icon name="mic-off" title={t('Muted')} style={{ color: 'var(--red-text)' }} /></Show>
                       <Show when={participant.is_deafened}><Icon name="phones-off" title={t('Deafened')} style={{ color: 'var(--red-text)' }} /></Show>
-                      <Show when={participant.is_sharing}><Icon name="share" title={t('Sharing screen')} style={{ color: 'var(--cyan)' }} /></Show>
+                      <Show when={participant.is_sharing}><span class="tag live" title={t('Sharing screen')}><Icon name="share" size="sm" /> {t('LIVE')}</span></Show>
                     </div>
                   )}
                 </For>
@@ -197,6 +202,7 @@ export function Sidebar() {
                 <Icon name="bars" size="sm" />{connectionStatus() === 'connected' ? t('Voice connected') : t('Voice disconnected')}
               </span>
               <span class="t2 fs12 trunc">{channel().name}{pingRtt() !== null ? ` · ${pingRtt()} ms` : ''}</span>
+              <Show when={isSharing()}><span class="row g6 fs12" style={{ color: 'var(--red-text)' }}><Icon name="share" size="sm" />{t('You are sharing your screen')}</span></Show>
             </div>
             <Button iconOnly size="sm" variant="danger" icon="hangup" label={t('Disconnect from voice')} title={t('Disconnect')} onClick={() => void leaveVoice()} />
           </div>
