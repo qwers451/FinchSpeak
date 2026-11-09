@@ -31,7 +31,7 @@ export function placement(imageWidth: number, imageHeight: number, zoom: number,
 }
 
 /** F2: place the picture inside the circle (drag to move, slider to zoom), then upload. */
-export function AvatarCropDialog(props: { file: File; onClose: () => void; onDone: () => void }) {
+export function AvatarCropDialog(props: { file: File; onClose: () => void; onDone: (picture: Blob) => void }) {
   let canvas: HTMLCanvasElement | undefined;
   let image: ImageBitmap | undefined;
   const [zoom, setZoom] = createSignal(1);
@@ -96,7 +96,7 @@ export function AvatarCropDialog(props: { file: File; onClose: () => void; onDon
     setBusy(false);
     if (failure?.kind === 'local') setLocalError(failure.message);
     else if (failure) setError({ kind: 'external', text: failure.message });
-    else props.onDone();
+    else props.onDone(blob);
   };
 
   return (

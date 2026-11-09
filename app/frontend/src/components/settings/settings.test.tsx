@@ -282,3 +282,37 @@ it('has no close-to-tray toggle: the close button always keeps FinchSpeak in the
   await flush();
   expect(document.body.textContent).not.toContain('Close button hides to the tray');
 });
+
+it('offers a theme from the new picture; Apply sets the custom colors, Not now keeps the theme', async () => {
+  const colors = { background: '#101010', sidebar: '#202020', surface: '#303030', text: '#f0f0f0', accent: '#ff8800', signal: '#00ff88' };
+  const themes = await import('../../stores/themeColors');
+  vi.spyOn(themes, 'paletteFromImage').mockResolvedValue(colors);
+  vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 200, height: 200, close: () => undefined }));
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ clearRect: () => undefined, drawImage: () => undefined } as never);
+  vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((cb) => cb(new Blob(['x'], { type: 'image/png' })));
+  vi.spyOn(api, 'uploadAvatar').mockResolvedValue({ ...me, avatar_url: '/a?v=1' } as never);
+  const before = prefs().appearance.theme;
+  const upload = async () => {
+    setProfileOpen(true);
+    await flush();
+    const input = document.querySelector<HTMLInputElement>('input[type=file]')!;
+    Object.defineProperty(input, 'files', { value: [new File(['x'], 'a.png', { type: 'image/png' })], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await flush();
+    button('Use this picture').click();
+    await flush(); await flush();
+  };
+  await upload();
+  expect(document.body.textContent).toContain('Match the theme to your picture?');
+  expect(document.querySelectorAll('[data-testid=theme-offer-swatches] i').length).toBe(6);
+  button('Not now').click();
+  await flush();
+  expect(prefs().appearance.theme).toBe(before);
+  expect(document.body.textContent).not.toContain('Match the theme to your picture?');
+  await upload();
+  button('Apply theme').click();
+  await flush();
+  expect(prefs().appearance.theme).toBe('user');
+  expect(prefs().appearance.customColors).toEqual(colors);
+  vi.unstubAllGlobals();
+});

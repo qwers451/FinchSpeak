@@ -20,6 +20,7 @@ import { t } from '../../i18n';
 import { VoiceSettingsPage } from '../voice/VoiceSettingsModal';
 import { HotkeyButton } from '../voice/HotkeyButton';
 import { ThemeEditor } from './ThemeEditor';
+import { paletteFromImage, type ThemeColors } from '../../stores/themeColors';
 
 export const APP_VERSION = '0.1.0';
 
@@ -69,6 +70,7 @@ function ProfilePage() {
 
   const choose = (event: Event) => {
     const input = event.currentTarget as HTMLInputElement;
+  const [offered, setOffered] = createSignal<ThemeColors | null>(null);
     const picked = input.files?.[0];
     input.value = '';
     if (!picked) return;
@@ -91,7 +93,22 @@ function ProfilePage() {
           <Show when={fileError()}><span class="err"><Icon name="warn" size="sm" />{t(fileError()!)}</span></Show>
         </div>
       </div>
-      <Show when={file()}>{(picked) => <AvatarCropDialog file={picked()} onClose={() => setFile(null)} onDone={() => { setFile(null); setProfileMessage('Picture changed.'); }} />}</Show>
+      <Show when={file()}>{(picked) => <AvatarCropDialog file={picked()} onClose={() => setFile(null)} onDone={(picture) => { setFile(null); setProfileMessage('Picture changed.'); paletteFromImage(picture).then(setOffered, () => undefined); }} />}</Show>
+
+      <Show when={offered()}>
+        {(palette) => (
+          <div class="auth-banner info col g8" role="status" aria-label={t('Match the theme to your picture?')}>
+            <strong class="fs13">{t('Match the theme to your picture?')}</strong>
+            <div class="chips" aria-hidden="true" data-testid="theme-offer-swatches">
+              <For each={['background', 'sidebar', 'surface', 'text', 'accent', 'signal'] as const}>{(key) => <i style={{ 'background-color': palette()[key] }} />}</For>
+            </div>
+            <div class="row g8">
+              <Button size="sm" variant="primary" onClick={() => { updateAppearance({ theme: 'user', customColors: palette() }); setOffered(null); }}>{t('Apply theme')}</Button>
+              <Button size="sm" variant="ghost" onClick={() => setOffered(null)}>{t('Not now')}</Button>
+            </div>
+          </div>
+        )}
+      </Show>
 
       <Show when={profileMessage()}><div class="auth-banner info" role="status"><Icon name="check" class="tc" /><span class="fs13">{t(profileMessage()!)}</span></div></Show>
 

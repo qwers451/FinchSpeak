@@ -203,6 +203,9 @@ export const ru: Readonly<Record<string, string>> = {
   'Session revoked': 'Сеанс отозван',
   'Invalid token': 'Недействительный токен',
   'Something went wrong': 'Что-то пошло не так',
+  'Match the theme to your picture?': 'Подобрать тему под аватарку?',
+  'Apply theme': 'Применить тему',
+  'Not now': 'Не сейчас',
 };
 
 /** Russian plural forms, keyed by the English `other` form that `plural()` is called with. */
