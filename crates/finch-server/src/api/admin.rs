@@ -368,8 +368,11 @@ pub async fn backup_now_handler(auth: AuthUser, State(state): State<ArcSharedSta
 
 #[derive(Debug, Deserialize)]
 pub struct VoiceModerationRequest {
-    /// `kick`, `mute` or `unmute`.
+    /// `kick`, `mute`, `unmute` or `move`.
     pub action: String,
+    /// For `move`: the voice channel to send them to.
+    #[serde(default)]
+    pub channel_id: Option<Uuid>,
 }
 
 /// POST /api/admin/users/{id}/voice: send someone out of their voice room, or silence/un-silence them there.
@@ -381,8 +384,8 @@ pub async fn moderate_voice_handler(
 ) -> Result<StatusCode, ServerError> {
     use finch_protocol::messages::ServerMessage;
     require(&auth, Permission::ModerateVoice)?;
-    if !matches!(request.action.as_str(), "kick" | "mute" | "unmute") {
-        return Err(ServerError::BadRequest("action must be \"kick\", \"mute\" or \"unmute\"".into()));
+    if !matches!(request.action.as_str(), "kick" | "mute" | "unmute" | "move") {
+        return Err(ServerError::BadRequest("action must be \"kick\", \"mute\", \"unmute\" or \"move\"".into()));
     }
     if id == auth.user_id {
         return Err(ServerError::BadRequest("You cannot moderate yourself".into()));
@@ -402,7 +405,28 @@ pub async fn moderate_voice_handler(
         return Err(ServerError::BadRequest("They are not in a voice room".into()));
     };
     let channel_id = state.sessions.short_to_channel.get(&short_id).map(|c| *c);
+    let mut audit_detail: Option<String> = None;
     match request.action.as_str() {
+        "move" => {
+            let Some(target) = request.channel_id else {
+                return Err(ServerError::BadRequest("channel_id is required to move someone".into()));
+            };
+            let row: Option<(String, String)> = sqlx::query_as("SELECT name, channel_type FROM channels WHERE id = ?")
+                .bind(target.to_string())
+                .fetch_optional(&state.pool)
+                .await?;
+            let Some((channel_name, channel_type)) = row else {
+                return Err(ServerError::BadRequest("That channel does not exist".into()));
+            };
+            if channel_type != "voice" {
+                return Err(ServerError::BadRequest("That is not a voice channel".into()));
+            }
+            if channel_id == Some(target) {
+                return Err(ServerError::BadRequest("They are already there".into()));
+            }
+            let _ = control_tx.send(ServerMessage::VoiceMoved { channel_id: target }).await;
+            audit_detail = Some(channel_name);
+        }
         "kick" => {
             state.sessions.leave_voice(peer_id, short_id);
             if was_sharing && state.sessions.set_sharing(peer_id, false) {
@@ -421,6 +445,6 @@ pub async fn moderate_voice_handler(
             state.sessions.broadcast_all(ServerMessage::ServerMuteChanged { peer_id, server_muted: muted }).await;
         }
     }
-    audit::record(&state.pool, &auth, &format!("voice_{}", request.action), Some(&name_of(&state, &id.to_string()).await), None).await;
+    audit::record(&state.pool, &auth, &format!("voice_{}", request.action), Some(&name_of(&state, &id.to_string()).await), audit_detail.as_deref()).await;
     Ok(StatusCode::NO_CONTENT)
 }

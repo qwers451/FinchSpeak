@@ -1,10 +1,11 @@
-import { createMemo, Show } from 'solid-js';
+import { createMemo, For, Show } from 'solid-js';
 import { currentUser } from '../../stores/authStore';
 import { knownUsers } from '../../stores/sessionStore';
 import { setVolume, volumeFor } from '../../stores/volumeStore';
-import { isDeafened, isLocalSpeaking, isMuted, speakingPeers, voiceQuality } from '../../stores/voiceStore';
+import { activeVoiceChannel, isDeafened, isLocalSpeaking, isMuted, speakingPeers, voiceQuality } from '../../stores/voiceStore';
 import type { VoiceParticipant } from '../../types';
-import { moderateVoice } from '../../stores/adminStore';
+import { channels } from '../../stores/chatStore';
+import { moderateVoice, moveVoice } from '../../stores/adminStore';
 import { Avatar, Button, Icon, Slider } from '../../ui';
 import { t } from '../../i18n';
 
@@ -38,6 +39,7 @@ export function ParticipantTile(props: Props) {
   const staff = () => currentUser()?.role === 'admin' || currentUser()?.role === 'moderator';
   /** Moderators act on plain members only; admins on everybody. */
   const mayModerate = () => !props.isMe && staff() && (currentUser()?.role === 'admin' || (user()?.role ?? 'member') === 'member');
+  const otherRooms = () => channels().filter((channel) => channel.channel_type === 'voice' && channel.id !== activeVoiceChannel()?.id);
   const poor = () => !props.isMe && voiceQuality()[p().peer_id]?.quality === 'poor';
 
   return (
@@ -60,6 +62,16 @@ export function ParticipantTile(props: Props) {
         <div class="row g4 mod-actions">
           <Button size="sm" variant="ghost" onClick={() => void moderateVoice(p().user_id, p().server_muted ? 'unmute' : 'mute')}>{t(p().server_muted ? 'Allow to speak' : 'Silence')}</Button>
           <Button size="sm" variant="ghost" onClick={() => void moderateVoice(p().user_id, 'kick')}>{t('Remove')}</Button>
+          <Show when={otherRooms().length > 0}>
+            <select class="move-to" aria-label={t('Move to…')} value="" onChange={(event) => {
+              const target = event.currentTarget.value;
+              event.currentTarget.value = '';
+              if (target) void moveVoice(p().user_id, target);
+            }}>
+              <option value="">{t('Move to…')}</option>
+              <For each={otherRooms()}>{(room) => <option value={room.id}>{room.name}</option>}</For>
+            </select>
+          </Show>
         </div>
       </Show>
       <Show when={!props.isMe}>

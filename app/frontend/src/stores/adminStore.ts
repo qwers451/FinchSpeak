@@ -161,6 +161,15 @@ export async function makeBackup(): Promise<boolean> {
   }
 }
 
+/** Staff: move someone who is in a voice room into another voice channel. */
+export async function moveVoice(userId: string, channelId: string) {
+  try {
+    await api.moveVoice(userId, channelId);
+  } catch (err) {
+    setAppError(describeError(err));
+  }
+}
+
 /** Staff action on someone in a voice room. */
 export async function moderateVoice(userId: string, action: 'kick' | 'mute' | 'unmute') {
   try {

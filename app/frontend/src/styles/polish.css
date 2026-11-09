@@ -169,3 +169,4 @@
   .dock,[data-theme="custom"] .dock { padding:6px; }
   .ctl,[data-theme="custom"] .ctl { width:44px; height:42px; }
 }
+.vc .mod-actions select.move-to { font-size:12px; max-width:140px; }

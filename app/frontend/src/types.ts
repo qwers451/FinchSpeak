@@ -245,6 +245,7 @@ export interface SessionEvents {
   'server-mute-changed': { peer_id: number; server_muted: boolean };
   'voice-kicked': { channel_id: string };
   /** Level of the processed microphone, about 25 times a second during a call. */
+  'voice-moved': { channel_id: string };
   'mic-level': { db: number; speaking: boolean };
   /** A system-wide mute or deafen key was pressed. */
   hotkey: 'toggle_mute' | 'toggle_deafen';

@@ -193,6 +193,11 @@ pub enum ServerMessage {
         channel_id: Uuid,
     },
 
+    /// A moderator moved you to another voice room; the client switches rooms itself.
+    VoiceMoved {
+        channel_id: Uuid,
+    },
+
     /// A user started sharing their screen.
     ScreenShareStarted {
         user_id: Uuid,

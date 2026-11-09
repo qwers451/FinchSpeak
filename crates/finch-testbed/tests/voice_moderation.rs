@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use finch_client_core::error::ClientError;
 use finch_protocol::messages::ServerMessage;
+use finch_protocol::models::ChannelType;
+use uuid::Uuid;
 use finch_testbed::client::{audio_datagram, TestClient};
 use finch_testbed::server::TestServer;
 
@@ -104,6 +106,27 @@ async fn only_staff_may_moderate_voice_and_only_members() -> anyhow::Result<()> 
     assert_eq!(status(&moderator.api.moderate_voice(boss.session.user_id, "mute").await.expect_err("admin")), Some(403));
     assert_eq!(status(&boss.api.moderate_voice(alice.session.user_id, "dance").await.expect_err("action")), Some(400));
     assert_eq!(status(&boss.api.moderate_voice(boss.session.user_id, "kick").await.expect_err("self")), Some(400));
+    Ok(())
+}
+
+#[tokio::test]
+async fn moving_someone_tells_their_client_to_switch_rooms() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let (boss, moderator, mut alice, bob, _) = room_with_staff(&server).await?;
+    let lounge = boss.api.create_channel("Lounge", "voice", None, None).await?;
+    let lounge_id = Uuid::parse_str(&lounge.id)?;
+
+    moderator.api.move_voice(alice.session.user_id, lounge_id).await?;
+    alice.expect_control(WAIT, |m| matches!(m, ServerMessage::VoiceMoved { channel_id } if *channel_id == lounge_id).then_some(())).await?;
+
+    assert_eq!(status(&bob.api.move_voice(alice.session.user_id, lounge_id).await.expect_err("member")), Some(403));
+    let (text_id, _) = bob.channel(ChannelType::Text);
+    assert_eq!(status(&moderator.api.move_voice(alice.session.user_id, text_id).await.expect_err("text")), Some(400));
+    assert_eq!(status(&moderator.api.move_voice(alice.session.user_id, Uuid::new_v4()).await.expect_err("missing")), Some(400));
+    let (voice_id, _) = alice.channel(ChannelType::Voice);
+    assert_eq!(status(&moderator.api.move_voice(alice.session.user_id, voice_id).await.expect_err("same")), Some(400));
+    let log = boss.api.audit_log(None, 10).await?;
+    assert!(log.iter().any(|e| e.action == "voice_move" && e.target.as_deref() == Some("alice")));
     Ok(())
 }
 

@@ -433,6 +433,10 @@ export const api = {
     if (isTauri()) return invoke<string>('reset_user_password', { userId });
     return '';
   },
+  moveVoice: async (userId: string, channelId: string): Promise<void> => {
+    if (isTauri()) return invoke('move_voice', { userId, channelId });
+  },
+
 
   updateChannel: async (channelId: string, name?: string, topic?: string): Promise<void> => {
     if (isTauri()) {

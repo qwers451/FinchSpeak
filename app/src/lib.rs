@@ -238,6 +238,7 @@ pub fn run() {
             commands::voice::test_microphone,
             commands::voice::start_audio_diagnostics,
             commands::voice::stop_audio_diagnostics,
+            commands::admin::move_voice,
             commands::voice::get_audio_diagnostics,
             commands::screen::capture_thumbnail,
             commands::chat::download_thumb,

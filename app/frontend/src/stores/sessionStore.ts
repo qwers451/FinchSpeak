@@ -3,7 +3,7 @@ import type { DeviceSession, SessionEvents, SessionSnapshot, User, UserStatus } 
 import { setPendingMismatch, setPendingTofu } from './tofuStore';
 import { receiveInviteLink, setPendingInvite } from './inviteLink';
 import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
-import { activeVoiceChannel, allVoiceParticipants, handlePushToTalk, toggleMute, handleHotkey, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
+import { activeVoiceChannel, allVoiceParticipants, handlePushToTalk, toggleMute, handleHotkey, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, joinVoice, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
 import { classifyEnd, sessionEnded, setSessionEnded } from './sessionEnd';
@@ -163,6 +163,12 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     pushToast({ kind: 'warn', title: t('You were removed from the voice room'), text: t('A moderator sent you out. You can join again.') });
   },
   'avatar-changed': ({ user_id, avatar_url }) => {
+  'voice-moved': ({ channel_id }) => {
+    const room = channels().find((channel) => channel.id === channel_id && channel.channel_type === 'voice');
+    if (!room) return;
+    void joinVoice(room);
+    pushToast({ kind: 'info', title: t('A moderator moved you to {room}', { room: room.name }) });
+  },
     setKnownUsers((previous) => previous.map((user) => (user.id === user_id ? { ...user, avatar_url } : user)));
     const me = currentUser();
     if (me && me.id === user_id) setCurrentUser({ ...me, avatar_url });
