@@ -3,6 +3,7 @@
 pub mod admin;
 pub mod auth;
 pub mod avatars;
+pub mod join_sounds;
 pub mod channels;
 pub mod files;
 pub mod health;
@@ -47,6 +48,8 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .route("/api/auth/password", post(auth::change_password_handler))
         .route("/api/auth/avatar", post(avatars::upload_handler).delete(avatars::delete_handler).layer(DefaultBodyLimit::max(4 * 1024 * 1024)))
         .route("/api/users/{id}/avatar", get(avatars::download_handler))
+        .route("/api/auth/join-sound", post(join_sounds::upload_handler).delete(join_sounds::delete_handler).layer(DefaultBodyLimit::max(1024 * 1024)))
+        .route("/api/users/{id}/join-sound", get(join_sounds::download_handler))
         .route("/api/state", get(state::state_handler))
         .route("/api/search", get(search::search_handler))
         // Moderation (admins)

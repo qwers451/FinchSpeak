@@ -21,6 +21,8 @@ import { VoiceSettingsPage } from '../voice/VoiceSettingsModal';
 import { HotkeyButton } from '../voice/HotkeyButton';
 import { ThemeEditor } from './ThemeEditor';
 import { paletteFromImage, type ThemeColors } from '../../stores/themeColors';
+import { encodeJoinSound } from '../../stores/joinSoundEncode';
+import { invalidateJoinSound, previewJoinSound } from '../../stores/joinSound';
 
 export const APP_VERSION = '0.1.0';
 
@@ -68,9 +70,9 @@ function ProfilePage() {
   const strength = () => passwordStrength(next());
   const mismatch = () => (again() && next() !== again() ? t('The passwords do not match') : undefined);
 
+  const [offered, setOffered] = createSignal<ThemeColors | null>(null);
   const choose = (event: Event) => {
     const input = event.currentTarget as HTMLInputElement;
-  const [offered, setOffered] = createSignal<ThemeColors | null>(null);
     const picked = input.files?.[0];
     input.value = '';
     if (!picked) return;
@@ -177,6 +179,62 @@ function ProfilePage() {
   );
 }
 
+function JoinSoundRow() {
+  const [has, setHas] = createSignal(false);
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+  let picker: HTMLInputElement | undefined;
+  const myId = () => currentUser()?.id;
+  onMount(() => {
+    const id = myId();
+    if (id) void api.downloadJoinSound(id).then((bytes) => setHas(bytes !== null), () => undefined);
+  });
+  const choose = async (event: Event) => {
+    const input = event.currentTarget as HTMLInputElement;
+    const picked = input.files?.[0];
+    input.value = '';
+    if (!picked) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.uploadJoinSound(await encodeJoinSound(picked));
+      if (myId()) invalidateJoinSound(myId()!);
+      setHas(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const reset = async () => {
+    setError(null);
+    try {
+      await api.removeJoinSound();
+      if (myId()) invalidateJoinSound(myId()!);
+      setHas(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  return (
+    <div class="setrow">
+      <div class="col grow">
+        <strong class="fs13">{t('Join sound')}</strong>
+        <span class="t3 fs12">{t('Everyone in the room hears it when you join. Up to 2 seconds.')}</span>
+        <Show when={error()}><span class="err"><Icon name="warn" size="sm" />{error()}</span></Show>
+      </div>
+      <div class="row g8">
+        <input ref={picker} type="file" accept="audio/*" hidden onChange={(event) => void choose(event)} />
+        <Button size="sm" variant="secondary" disabled={busy()} onClick={() => picker?.click()}>{t('Choose file')}</Button>
+        <Show when={has()}>
+          <Button size="sm" variant="secondary" onClick={() => { const id = myId(); if (id) void previewJoinSound(id); }}>{t('Play')}</Button>
+          <Button size="sm" variant="ghost" onClick={() => void reset()}>{t('Reset to default')}</Button>
+        </Show>
+      </div>
+    </div>
+  );
+}
+
 function NotificationsPage() {
   const n = () => prefs().notifications;
   const textChannels = () => channels().filter((channel) => channel.channel_type === 'text');
@@ -190,6 +248,7 @@ function NotificationsPage() {
         <div class="col grow"><strong class="fs13">{t('Sound volume')}</strong></div>
         <div style={{ width: '180px' }}><Slider label={t('Sound volume')} min={0} max={1} step={0.05} value={n().soundVolume} onChange={(v) => updateNotifications({ soundVolume: v })} /></div>
       </div>
+      <JoinSoundRow />
       <Row title={t('Sounds for voice actions')} hint={t('Joining and leaving, microphone and sound on or off, push-to-talk.')} control={<Toggle label={t('Sounds for voice actions')} checked={n().voiceSounds} onChange={(v) => updateNotifications({ voiceSounds: v })} />} />
       <Row title={t('Flash the taskbar')} hint={t('While the window is in the background.')} control={<Toggle label={t('Flash the taskbar')} checked={n().flash} onChange={(v) => updateNotifications({ flash: v })} />} />
       <span class="field-label" style={{ 'margin-top': '16px' }}>{t('Muted channels')}</span>

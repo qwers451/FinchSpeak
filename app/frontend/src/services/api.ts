@@ -210,6 +210,22 @@ export const api = {
     throw new Error('Pictures need the desktop app');
   },
 
+  uploadJoinSound: async (bytes: Uint8Array): Promise<void> => {
+    if (isTauri()) return invoke('upload_join_sound', { data: Array.from(bytes) });
+    throw new Error('Join sounds need the desktop app');
+  },
+
+  removeJoinSound: async (): Promise<void> => {
+    if (isTauri()) return invoke('remove_join_sound');
+  },
+
+  /** A user's join sound as WAV bytes, or null when they have none. */
+  downloadJoinSound: async (userId: string): Promise<ArrayBuffer | null> => {
+    if (!isTauri()) return null;
+    const bytes = await invoke<ArrayBuffer>('download_join_sound', { userId });
+    return bytes.byteLength === 0 ? null : bytes;
+  },
+
   setStatus: async (status: UserStatus, text: string | null): Promise<void> => {
     if (isTauri()) return invoke('set_status', { status, text });
   },
@@ -417,6 +433,10 @@ export const api = {
     if (isTauri()) return invoke('moderate_voice', { userId, action });
   },
 
+  moveVoice: async (userId: string, channelId: string): Promise<void> => {
+    if (isTauri()) return invoke('move_voice', { userId, channelId });
+  },
+
   searchMessages: async (text: string, channelId?: string, offset = 0, limit = 30): Promise<SearchHit[]> => {
     if (isTauri()) return invoke('search_messages', { text, channelId, offset, limit });
     return [];
@@ -433,10 +453,6 @@ export const api = {
     if (isTauri()) return invoke<string>('reset_user_password', { userId });
     return '';
   },
-  moveVoice: async (userId: string, channelId: string): Promise<void> => {
-    if (isTauri()) return invoke('move_voice', { userId, channelId });
-  },
-
 
   updateChannel: async (channelId: string, name?: string, topic?: string): Promise<void> => {
     if (isTauri()) {

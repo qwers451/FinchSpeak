@@ -10,6 +10,7 @@ import { isSharing } from './screenState';
 import { activeVoiceChannel, isMuted } from './voiceStore';
 import { t } from '../i18n';
 import { playTone } from './tones';
+import { playJoinSound } from './joinSound';
 
 export { TONES, playTone, type Tone } from './tones';
 
@@ -80,7 +81,8 @@ export function reactToMessage(
 export function reactToVoiceMovement(kind: 'join' | 'leave', name: string, userId: string, focused = document.hasFocus()) {
   const settings = prefs().notifications;
   if (!settings.voiceJoin || userId === currentUser()?.id) return;
-  playTone(kind);
+  if (kind === 'join') void playJoinSound(userId);
+  else playTone(kind);
   if (kind === 'join' && !focused && !isDoNotDisturb()) void notifyDesktop(t('{name} joined {room}', { name, room: activeVoiceChannel()?.name ?? t('your voice room') }), '');
 }
 

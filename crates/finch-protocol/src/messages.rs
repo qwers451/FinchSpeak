@@ -284,6 +284,11 @@ pub enum ServerMessage {
         avatar_url: Option<String>,
     },
 
+    /// Someone set or removed their custom join sound; fetch it again (or fall back to the default tone).
+    JoinSoundChanged {
+        user_id: Uuid,
+    },
+
     /// Heartbeat pong — echo of the client's timestamp.
     Pong {
         timestamp: u64,

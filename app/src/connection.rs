@@ -428,6 +428,9 @@ fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
         ServerMessage::VoiceMoved { channel_id } => {
             let _ = app_handle.emit("voice-moved", serde_json::json!({ "channel_id": channel_id }));
         }
+        ServerMessage::JoinSoundChanged { user_id } => {
+            let _ = app_handle.emit("join-sound-changed", serde_json::json!({ "user_id": user_id }));
+        }
         ServerMessage::AvatarChanged { user_id, avatar_url } => {
             let _ = app_handle.emit("avatar-changed", serde_json::json!({ "user_id": user_id, "avatar_url": avatar_url }));
         }

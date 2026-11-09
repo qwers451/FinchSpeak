@@ -8,6 +8,7 @@ import { setAppError } from './notificationStore';
 import { t } from '../i18n';
 import { classifyEnd, sessionEnded, setSessionEnded } from './sessionEnd';
 import { reactToMessage, reactToVoiceMovement } from './desktop';
+import { invalidateJoinSound } from './joinSound';
 import { clearTyping, isMentioned, noteIncoming, noteTyping, resetActivity, setUnreadFromServer } from './activityStore';
 import { handleMessageDeleted, handleMessageEdited, handleReactionChanged, renameAuthor } from './chatStore';
 import { currentUser, setCurrentUser } from './authStore';
@@ -162,17 +163,18 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     void leaveVoice();
     pushToast({ kind: 'warn', title: t('You were removed from the voice room'), text: t('A moderator sent you out. You can join again.') });
   },
-  'avatar-changed': ({ user_id, avatar_url }) => {
   'voice-moved': ({ channel_id }) => {
     const room = channels().find((channel) => channel.id === channel_id && channel.channel_type === 'voice');
     if (!room) return;
     void joinVoice(room);
     pushToast({ kind: 'info', title: t('A moderator moved you to {room}', { room: room.name }) });
   },
+  'avatar-changed': ({ user_id, avatar_url }) => {
     setKnownUsers((previous) => previous.map((user) => (user.id === user_id ? { ...user, avatar_url } : user)));
     const me = currentUser();
     if (me && me.id === user_id) setCurrentUser({ ...me, avatar_url });
   },
+  'join-sound-changed': ({ user_id }) => invalidateJoinSound(user_id),
   'connection-lost': (reason) => {
     resetMicPreview();
     const ended = classifyEnd(reason);

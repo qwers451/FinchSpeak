@@ -20,6 +20,16 @@ export const TONES: Record<Tone, { notes: number[]; noteMs: number }> = {
 
 let context: AudioContext | null = null;
 
+/** The shared audio context (made on first use), or null when the platform has none. */
+export function audioContext(): AudioContext | null {
+  try {
+    const Audio = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Audio) return null;
+    context ??= new Audio();
+    return context;
+  } catch { return null; }
+}
+
 /** Play a tone at the chosen volume; silently does nothing when sounds are off or unavailable. */
 export function playTone(tone: Tone, volume = prefs().notifications.soundVolume) {
   if (!prefs().notifications.sounds || volume <= 0) return;

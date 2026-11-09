@@ -212,6 +212,26 @@ pub async fn download_avatar(user_id: String, state: State<'_, AppState>) -> Res
     Ok(tauri::ipc::Response::new(bytes.to_vec()))
 }
 
+#[tauri::command]
+pub async fn upload_join_sound(data: Vec<u8>, state: State<'_, AppState>) -> Result<(), String> {
+    api_client(&state).await?.upload_join_sound(data).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remove_join_sound(state: State<'_, AppState>) -> Result<(), String> {
+    api_client(&state).await?.delete_join_sound().await.map_err(|e| e.to_string())
+}
+
+/// A user's join sound (WAV bytes); an empty response means they have none.
+#[tauri::command]
+pub async fn download_join_sound(user_id: String, state: State<'_, AppState>) -> Result<tauri::ipc::Response, String> {
+    match api_client(&state).await?.download_join_sound_cached(parse_id(&user_id)?, None).await {
+        Ok((bytes, _)) => Ok(tauri::ipc::Response::new(bytes.map(|b| b.to_vec()).unwrap_or_default())),
+        Err(finch_client_core::error::ClientError::Http { status: 404, .. }) => Ok(tauri::ipc::Response::new(Vec::<u8>::new())),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// Choose how you appear: `online`, `idle` or `donotdisturb`, with an optional short text.
 #[tauri::command]
 pub async fn set_status(status: String, text: Option<String>, state: State<'_, AppState>) -> Result<(), String> {

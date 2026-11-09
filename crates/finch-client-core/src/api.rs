@@ -616,6 +616,35 @@ impl ApiClient {
         Ok((Some(resp.bytes().await?), tag))
     }
 
+    /// Set your join sound (a WAV of at most 2 seconds).
+    pub async fn upload_join_sound(&self, data: Vec<u8>) -> Result<(), ClientError> {
+        let part = Part::bytes(data).file_name("join-sound.wav".to_string()).mime_str("audio/wav")?;
+        let req = self.authorized(self.http.post(self.url("/api/auth/join-sound"))).multipart(Form::new().part("file", part));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
+    pub async fn delete_join_sound(&self) -> Result<(), ClientError> {
+        let req = self.authorized(self.http.delete(self.url("/api/auth/join-sound")));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
+    /// A user's join sound; `(None, etag)` when `etag` is still current. A 404 error means they have none.
+    pub async fn download_join_sound_cached(&self, user_id: Uuid, etag: Option<&str>) -> Result<(Option<Bytes>, Option<String>), ClientError> {
+        let mut req = self.authorized(self.http.get(self.url(&format!("/api/users/{user_id}/join-sound"))));
+        if let Some(etag) = etag {
+            req = req.header("If-None-Match", etag);
+        }
+        let resp = self.send(req).await?;
+        if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+            return Ok((None, etag.map(str::to_string)));
+        }
+        let resp = check_status(resp).await?;
+        let tag = resp.headers().get("etag").and_then(|v| v.to_str().ok()).map(str::to_string);
+        Ok((Some(resp.bytes().await?), tag))
+    }
+
     /// Tell the server how far you have read `channel_id` (only moves forward).
     pub async fn mark_read(&self, channel_id: Uuid, message_id: Uuid) -> Result<(), ClientError> {
         let req = self
