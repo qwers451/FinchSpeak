@@ -62,7 +62,7 @@ pub fn wav_duration_ms(bytes: &[u8]) -> Result<u32, String> {
     Err("The WAV file is damaged".to_string())
 }
 
-fn sound_file(state: &ArcSharedState, user_id: &str) -> PathBuf {
+fn legacy_sound_file(state: &ArcSharedState, user_id: &str) -> PathBuf {
     PathBuf::from(&state.config.storage.upload_dir).join("join_sounds").join(format!("{user_id}.wav"))
 }
 
@@ -92,13 +92,12 @@ pub async fn upload_handler(auth: AuthUser, State(state): State<ArcSharedState>,
     }
 
     let user = auth.user_id.to_string();
-    let path = sound_file(&state, &user);
-    if let Some(dir) = path.parent() {
-        tokio::fs::create_dir_all(dir).await.map_err(|e| ServerError::Internal(e.to_string()))?;
-    }
-    tokio::fs::write(&path, &data).await.map_err(|e| ServerError::Internal(e.to_string()))?;
-    let version = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
-    sqlx::query("UPDATE users SET join_sound_version = ? WHERE id = ?").bind(version).bind(&user).execute(&state.pool).await?;
+    sqlx::query("UPDATE users SET join_sound_version = random(), join_sound_data = ? WHERE id = ?")
+        .bind(data)
+        .bind(&user)
+        .execute(&state.pool)
+        .await?;
+    let _ = tokio::fs::remove_file(legacy_sound_file(&state, &user)).await;
     state.sessions.broadcast_all(ServerMessage::JoinSoundChanged { user_id: auth.user_id }).await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -106,10 +105,12 @@ pub async fn upload_handler(auth: AuthUser, State(state): State<ArcSharedState>,
 /// DELETE /api/auth/join-sound
 pub async fn delete_handler(auth: AuthUser, State(state): State<ArcSharedState>) -> Result<StatusCode, ServerError> {
     let user = auth.user_id.to_string();
-    let had: Option<i64> = sqlx::query_scalar("SELECT join_sound_version FROM users WHERE id = ?").bind(&user).fetch_one(&state.pool).await?;
-    sqlx::query("UPDATE users SET join_sound_version = NULL WHERE id = ?").bind(&user).execute(&state.pool).await?;
-    let _ = tokio::fs::remove_file(sound_file(&state, &user)).await;
-    if had.is_some() {
+    let deleted = sqlx::query("UPDATE users SET join_sound_version = NULL, join_sound_data = NULL WHERE id = ? AND join_sound_version IS NOT NULL")
+        .bind(&user)
+        .execute(&state.pool)
+        .await?;
+    let _ = tokio::fs::remove_file(legacy_sound_file(&state, &user)).await;
+    if deleted.rows_affected() > 0 {
         state.sessions.broadcast_all(ServerMessage::JoinSoundChanged { user_id: auth.user_id }).await;
     }
     Ok(StatusCode::NO_CONTENT)
@@ -117,20 +118,25 @@ pub async fn delete_handler(auth: AuthUser, State(state): State<ArcSharedState>)
 
 /// GET /api/users/{id}/join-sound
 pub async fn download_handler(_auth: AuthUser, State(state): State<ArcSharedState>, Path(id): Path<Uuid>, headers: HeaderMap) -> Result<Response, ServerError> {
-    let version: Option<i64> = sqlx::query_scalar("SELECT join_sound_version FROM users WHERE id = ?")
-        .bind(id.to_string())
+    let user = id.to_string();
+    let (version, data): (i64, Option<Vec<u8>>) = sqlx::query_as("SELECT join_sound_version, join_sound_data FROM users WHERE id = ? AND join_sound_version IS NOT NULL")
+        .bind(&user)
         .fetch_optional(&state.pool)
         .await?
-        .flatten();
-    let version = version.ok_or_else(|| ServerError::NotFound("No join sound".into()))?;
+        .ok_or_else(|| ServerError::NotFound("No join sound".into()))?;
+    let data = match data {
+        Some(data) => data,
+        None => tokio::fs::read(legacy_sound_file(&state, &user))
+            .await
+            .map_err(|_| ServerError::NotFound("No join sound".into()))?,
+    };
     let etag = format!("\"{version}\"");
     let mut response_headers = HeaderMap::new();
     response_headers.insert(ETAG, HeaderValue::from_str(&etag).map_err(|e| ServerError::Internal(e.to_string()))?);
-    response_headers.insert(CACHE_CONTROL, HeaderValue::from_static("private, max-age=3600"));
+    response_headers.insert(CACHE_CONTROL, HeaderValue::from_static("private, no-cache"));
     if headers.get(IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
         return Ok((StatusCode::NOT_MODIFIED, response_headers).into_response());
     }
-    let data = tokio::fs::read(sound_file(&state, &id.to_string())).await.map_err(|_| ServerError::NotFound("No join sound".into()))?;
     response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("audio/wav"));
     response_headers.insert("X-Content-Type-Options", HeaderValue::from_static("nosniff"));
     Ok((response_headers, data).into_response())

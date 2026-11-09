@@ -8,7 +8,7 @@ import { setAppError } from './notificationStore';
 import { t } from '../i18n';
 import { classifyEnd, sessionEnded, setSessionEnded } from './sessionEnd';
 import { reactToMessage, reactToVoiceMovement } from './desktop';
-import { invalidateJoinSound } from './joinSound';
+import { clearJoinSounds, invalidateJoinSound } from './joinSound';
 import { clearTyping, isMentioned, noteIncoming, noteTyping, resetActivity, setUnreadFromServer } from './activityStore';
 import { handleMessageDeleted, handleMessageEdited, handleReactionChanged, renameAuthor } from './chatStore';
 import { currentUser, setCurrentUser } from './authStore';
@@ -49,6 +49,7 @@ export function currentSessionGeneration(): number {
 
 export function resetSessionState() {
   sessionGeneration++;
+  clearJoinSounds();
   resetMicPreview();
   setSessions([]);
   setConnectionStatus('disconnected');
@@ -192,6 +193,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   },
   reconnecting: () => setConnectionStatus('reconnecting'),
   reconnected: () => {
+    clearJoinSounds();
     setConnectionStatus('connected'); setConnectionError(null); setReconnectInfo(null);
     const channel = activeChannel();
     if (channel?.channel_type === 'text') void selectChannel(channel);

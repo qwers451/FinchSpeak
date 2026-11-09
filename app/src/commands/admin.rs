@@ -82,9 +82,9 @@ pub async fn moderate_voice(user_id: String, action: String, state: State<'_, Ap
 
 /// Move someone who is in a voice room into another voice channel.
 #[tauri::command]
-pub async fn move_voice(user_id: String, channel_id: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn move_voice(user_id: String, peer_id: u32, channel_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let channel = uuid::Uuid::parse_str(&channel_id).map_err(|e| e.to_string())?;
-    api(&state).await?.move_voice(parse_user(&user_id)?, channel).await.map_err(|e| e.to_string())
+    api(&state).await?.move_voice(parse_user(&user_id)?, peer_id, channel).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

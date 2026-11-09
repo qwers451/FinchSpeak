@@ -373,6 +373,9 @@ pub struct VoiceModerationRequest {
     /// For `move`: the voice channel to send them to.
     #[serde(default)]
     pub channel_id: Option<Uuid>,
+    /// For `move`: the specific device shown in the voice room.
+    #[serde(default)]
+    pub peer_id: Option<u32>,
 }
 
 /// POST /api/admin/users/{id}/voice: send someone out of their voice room, or silence/un-silence them there.
@@ -394,20 +397,27 @@ pub async fn moderate_voice_handler(
     if !may_act_on(&auth.role, &role) {
         return Err(ServerError::Forbidden);
     }
-    // The session of that person that is in a voice room.
+    let target_peer = if request.action == "move" {
+        Some(request.peer_id.ok_or_else(|| ServerError::BadRequest("peer_id is required to move someone".into()))?)
+    } else {
+        None
+    };
     let in_room = state
         .sessions
         .sessions
         .iter()
-        .find(|s| s.user_id == id && s.current_voice_channel.is_some())
-        .map(|s| (s.peer_id, s.current_voice_channel.unwrap_or_default(), s.control_tx.clone(), s.sharing_screen));
-    let Some((peer_id, short_id, control_tx, was_sharing)) = in_room else {
+        .find(|s| s.user_id == id && s.current_voice_channel.is_some() && target_peer.is_none_or(|peer| s.peer_id == peer))
+        .map(|s| (s.peer_id, s.current_voice_channel.unwrap_or_default(), s.control_tx.clone(), s.sharing_screen, s.supports_voice_extensions));
+    let Some((peer_id, short_id, control_tx, was_sharing, supports_voice_extensions)) = in_room else {
         return Err(ServerError::BadRequest("They are not in a voice room".into()));
     };
     let channel_id = state.sessions.short_to_channel.get(&short_id).map(|c| *c);
     let mut audit_detail: Option<String> = None;
     match request.action.as_str() {
         "move" => {
+            if !supports_voice_extensions {
+                return Err(ServerError::BadRequest("They need to update FinchSpeak before you can move them".into()));
+            }
             let Some(target) = request.channel_id else {
                 return Err(ServerError::BadRequest("channel_id is required to move someone".into()));
             };
@@ -424,7 +434,8 @@ pub async fn moderate_voice_handler(
             if channel_id == Some(target) {
                 return Err(ServerError::BadRequest("They are already there".into()));
             }
-            let _ = control_tx.send(ServerMessage::VoiceMoved { channel_id: target }).await;
+            control_tx.send(ServerMessage::VoiceMoved { channel_id: target }).await
+                .map_err(|_| ServerError::BadRequest("They are no longer connected".into()))?;
             audit_detail = Some(channel_name);
         }
         "kick" => {

@@ -433,8 +433,8 @@ export const api = {
     if (isTauri()) return invoke('moderate_voice', { userId, action });
   },
 
-  moveVoice: async (userId: string, channelId: string): Promise<void> => {
-    if (isTauri()) return invoke('move_voice', { userId, channelId });
+  moveVoice: async (userId: string, peerId: number, channelId: string): Promise<void> => {
+    if (isTauri()) return invoke('move_voice', { userId, peerId, channelId });
   },
 
   searchMessages: async (text: string, channelId?: string, offset = 0, limit = 30): Promise<SearchHit[]> => {

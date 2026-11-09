@@ -162,9 +162,9 @@ export async function makeBackup(): Promise<boolean> {
 }
 
 /** Staff: move someone who is in a voice room into another voice channel. */
-export async function moveVoice(userId: string, channelId: string) {
+export async function moveVoice(userId: string, peerId: number, channelId: string) {
   try {
-    await api.moveVoice(userId, channelId);
+    await api.moveVoice(userId, peerId, channelId);
   } catch (err) {
     setAppError(describeError(err));
   }

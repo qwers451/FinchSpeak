@@ -88,6 +88,23 @@ mod tests {
     use crate::messages::ClientMessage;
 
     #[test]
+    fn authentication_with_voice_extensions_is_readable_by_a_legacy_server() {
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "type")]
+        enum LegacyClientMessage {
+            Authenticate { token: String },
+        }
+
+        let frame = encode_message(&ClientMessage::Authenticate {
+            token: "token".into(),
+            supports_voice_extensions: true,
+        }).unwrap();
+        let mut buf = BytesMut::from(frame.as_slice());
+        let LegacyClientMessage::Authenticate { token } = decode_message(&mut buf).unwrap();
+        assert_eq!(token, "token");
+    }
+
+    #[test]
     fn round_trip_client_message() {
         let msg = ClientMessage::Ping { timestamp: 42 };
         let frame = encode_message(&msg).unwrap();

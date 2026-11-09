@@ -145,7 +145,10 @@ pub async fn connect(
         .map_err(|e| ClientError::Quic(e.to_string()))?;
 
     // Step 1: Send Authenticate message
-    let encoded = encode_message(&ClientMessage::Authenticate { token: params.token })?;
+    let encoded = encode_message(&ClientMessage::Authenticate {
+        token: params.token,
+        supports_voice_extensions: true,
+    })?;
     send_stream
         .write_all(&encoded)
         .await
