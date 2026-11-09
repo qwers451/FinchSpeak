@@ -385,10 +385,10 @@ impl ApiClient {
     }
 
     /// Moderator: move someone who is in a voice room into another voice channel.
-    pub async fn move_voice(&self, user_id: Uuid, channel_id: Uuid) -> Result<(), ClientError> {
+    pub async fn move_voice(&self, user_id: Uuid, peer_id: u32, channel_id: Uuid) -> Result<(), ClientError> {
         let req = self
             .authorized(self.http.post(self.url(&format!("/api/admin/users/{user_id}/voice"))))
-            .json(&serde_json::json!({ "action": "move", "channel_id": channel_id }));
+            .json(&serde_json::json!({ "action": "move", "peer_id": peer_id, "channel_id": channel_id }));
         check_status(self.send(req).await?).await?;
         Ok(())
     }

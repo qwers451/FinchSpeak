@@ -3,10 +3,11 @@
 use std::time::Duration;
 
 use finch_client_core::error::ClientError;
-use finch_protocol::messages::ServerMessage;
+use finch_client_core::session::SessionEvent;
+use finch_protocol::messages::{ClientMessage, ServerMessage};
 use finch_protocol::models::ChannelType;
 use uuid::Uuid;
-use finch_testbed::client::{audio_datagram, TestClient};
+use finch_testbed::client::{audio_datagram, connect_with_token, TestClient, TEST_PASSWORD};
 use finch_testbed::server::TestServer;
 
 const WAIT: Duration = Duration::from_secs(3);
@@ -110,21 +111,37 @@ async fn only_staff_may_moderate_voice_and_only_members() -> anyhow::Result<()> 
 }
 
 #[tokio::test]
-async fn moving_someone_tells_their_client_to_switch_rooms() -> anyhow::Result<()> {
+async fn moving_someone_targets_the_selected_device() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
     let (boss, moderator, mut alice, bob, _) = room_with_staff(&server).await?;
     let lounge = boss.api.create_channel("Lounge", "voice", None, None).await?;
     let lounge_id = Uuid::parse_str(&lounge.id)?;
-
-    moderator.api.move_voice(alice.session.user_id, lounge_id).await?;
-    alice.expect_control(WAIT, |m| matches!(m, ServerMessage::VoiceMoved { channel_id } if *channel_id == lounge_id).then_some(())).await?;
-
-    assert_eq!(status(&bob.api.move_voice(alice.session.user_id, lounge_id).await.expect_err("member")), Some(403));
-    let (text_id, _) = bob.channel(ChannelType::Text);
-    assert_eq!(status(&moderator.api.move_voice(alice.session.user_id, text_id).await.expect_err("text")), Some(400));
-    assert_eq!(status(&moderator.api.move_voice(alice.session.user_id, Uuid::new_v4()).await.expect_err("missing")), Some(400));
+    let alice_id = alice.session.user_id;
     let (voice_id, _) = alice.channel(ChannelType::Voice);
-    assert_eq!(status(&moderator.api.move_voice(alice.session.user_id, voice_id).await.expect_err("same")), Some(400));
+    let login = server.api()?.login("alice", TEST_PASSWORD).await?;
+    let (other_device, mut other_events) = connect_with_token(&server, &login.token).await?;
+    let other_peer = other_device.session_peer_id;
+    other_device.control_tx.send(ClientMessage::JoinVoice { channel_id: voice_id }).await?;
+    alice.expect_control(WAIT, |m| matches!(m, ServerMessage::UserJoinedVoice { peer_id, .. } if *peer_id == other_peer).then_some(())).await?;
+
+    moderator.api.move_voice(alice_id, other_peer, lounge_id).await?;
+    let move_delivered = tokio::time::timeout(WAIT, async {
+        while let Some(event) = other_events.recv().await {
+            if matches!(event, SessionEvent::Control(ServerMessage::VoiceMoved { channel_id }) if channel_id == lounge_id) {
+                return true;
+            }
+        }
+        false
+    }).await?;
+    assert!(move_delivered);
+    alice.expect_no_control(Duration::from_millis(100), |m| matches!(m, ServerMessage::VoiceMoved { .. })).await?;
+
+    assert_eq!(status(&bob.api.move_voice(alice_id, other_peer, lounge_id).await.expect_err("member")), Some(403));
+    assert_eq!(status(&moderator.api.move_voice(alice_id, bob.session.session_peer_id, lounge_id).await.expect_err("wrong account")), Some(400));
+    let (text_id, _) = bob.channel(ChannelType::Text);
+    assert_eq!(status(&moderator.api.move_voice(alice_id, other_peer, text_id).await.expect_err("text")), Some(400));
+    assert_eq!(status(&moderator.api.move_voice(alice_id, other_peer, Uuid::new_v4()).await.expect_err("missing")), Some(400));
+    assert_eq!(status(&moderator.api.move_voice(alice_id, other_peer, voice_id).await.expect_err("same")), Some(400));
     let log = boss.api.audit_log(None, 10).await?;
     assert!(log.iter().any(|e| e.action == "voice_move" && e.target.as_deref() == Some("alice")));
     Ok(())

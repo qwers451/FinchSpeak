@@ -2,7 +2,7 @@ import { api } from '../services/api';
 import { prefs } from './settingsStore';
 import { audioContext, playTone } from './tones';
 
-// Custom join sounds: decoded once per person, dropped when the server says theirs changed.
+// Custom join sounds: decoded once per person until changed or the session reconnects.
 
 const cache = new Map<string, Promise<AudioBuffer | null>>();
 
@@ -28,7 +28,8 @@ export function joinSoundOf(userId: string): Promise<AudioBuffer | null> {
   const known = cache.get(userId);
   if (known) return known;
   const loading = load(userId).catch(() => {
-    cache.delete(userId); // a failure is not remembered: try again next time
+    // An invalidation may have started a replacement while this request was in flight.
+    if (cache.get(userId) === loading) cache.delete(userId);
     return null;
   });
   cache.set(userId, loading);

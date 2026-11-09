@@ -19,6 +19,9 @@ pub enum ClientMessage {
     /// First message after QUIC handshake — authenticate with a JWT token.
     Authenticate {
         token: String,
+        /// Understands the `VoiceMoved` and `JoinSoundChanged` server messages.
+        #[serde(default)]
+        supports_voice_extensions: bool,
     },
 
     /// Join a voice channel. The client can only be in one voice channel at a time.

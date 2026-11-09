@@ -130,7 +130,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/test-client-runtime.ps1 -Executable target/release/finch-app.exe
-          ./scripts/test-client-install.ps1
+          ./scripts/test-client-install.ps1 -PreviousVersion 1.4.0
 
       - uses: actions/upload-artifact@v4
         with:

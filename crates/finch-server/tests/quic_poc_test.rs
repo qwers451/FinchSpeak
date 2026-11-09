@@ -139,7 +139,7 @@ async fn test_quic_poc_full_suite() -> anyhow::Result<()> {
     let (mut send_stream, mut recv_stream) = connection.open_bi().await?;
 
     // Send Authenticate with JWT
-    let auth_msg = ClientMessage::Authenticate { token: jwt_token };
+    let auth_msg = ClientMessage::Authenticate { token: jwt_token, supports_voice_extensions: false };
     send_stream.write_all(&encode_message(&auth_msg)?).await?;
 
     // Read Authenticated response

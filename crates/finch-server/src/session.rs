@@ -25,6 +25,8 @@ pub struct ClientSession {
     pub sharing_screen: bool,
     /// Silenced by a moderator; cleared when the person leaves the room.
     pub server_muted: bool,
+    /// Accepts `VoiceMoved` and `JoinSoundChanged` on the control stream.
+    pub supports_voice_extensions: bool,
     pub connection: quinn::Connection,
     pub control_tx: Sender<ServerMessage>,
 }
@@ -251,9 +253,11 @@ impl SessionManager {
 
     /// Broadcast a Control Stream message to all connected sessions.
     pub async fn broadcast_all(&self, msg: ServerMessage) {
+        let requires_voice_extensions = matches!(msg, ServerMessage::JoinSoundChanged { .. });
         let targets: Vec<_> = self
             .sessions
             .iter()
+            .filter(|session| !requires_voice_extensions || session.supports_voice_extensions)
             .map(|entry| (*entry.key(), entry.value().control_tx.clone(), entry.value().connection.clone()))
             .collect();
         deliver(targets, &msg);
@@ -332,6 +336,7 @@ mod tests {
                 token_id: String::new(),
                 peer_id, user_id, username: "alice".into(), role: "member".into(),
                 current_voice_channel: None, muted: false, deafened: false, sharing_screen: false, server_muted: false,
+                supports_voice_extensions: false,
                 connection: connection.clone(), control_tx,
             });
         }

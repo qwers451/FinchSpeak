@@ -184,7 +184,7 @@ pub async fn handle_connection(
     let mut read_buf = vec![0u8; 4096];
 
     // 2. Wait for Authenticate message
-    let auth_msg = loop {
+    let (token, supports_voice_extensions) = loop {
         let n = recv_stream
             .read(&mut read_buf)
             .await?
@@ -193,7 +193,7 @@ pub async fn handle_connection(
         frame_buf.extend_from_slice(&read_buf[..n]);
 
         match decode_message::<ClientMessage>(&mut frame_buf) {
-            Ok(ClientMessage::Authenticate { token }) => break token,
+            Ok(ClientMessage::Authenticate { token, supports_voice_extensions }) => break (token, supports_voice_extensions),
             Ok(_) => {
                 let err = ServerMessage::Error {
                     code: 401,
@@ -208,7 +208,7 @@ pub async fn handle_connection(
     };
 
     // 3. Verify JWT
-    let claims = match check_active_jwt(&auth_msg, &jwt_secret, &pool).await {
+    let claims = match check_active_jwt(&token, &jwt_secret, &pool).await {
         Ok(c) => c,
         Err(crate::api::auth::TokenProblem::Internal) => {
             // Not the token's fault: drop the connection without an auth verdict, so the client just retries.
@@ -266,6 +266,7 @@ pub async fn handle_connection(
         deafened: false,
         sharing_screen: false,
         server_muted: false,
+        supports_voice_extensions,
         connection: conn.clone(),
         control_tx: control_tx.clone(),
     };

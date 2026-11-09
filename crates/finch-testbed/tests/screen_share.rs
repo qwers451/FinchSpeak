@@ -150,7 +150,9 @@ async fn sharer_reports_when_capture_keeps_failing() -> anyhow::Result<()> {
             let _ = tx.send(reason);
         },
     );
-    let reason = tokio::time::timeout(Duration::from_secs(10), rx).await??;
+    // Persistent capture failures are reported after about 30 seconds. Allow for
+    // Windows timer granularity and scheduling delays during the retry loop.
+    let reason = tokio::time::timeout(Duration::from_secs(60), rx).await??;
     assert!(reason.contains("window closed"), "{reason}");
     assert!(!sharer.is_running());
     Ok(())

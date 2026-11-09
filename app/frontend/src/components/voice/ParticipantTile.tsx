@@ -66,7 +66,7 @@ export function ParticipantTile(props: Props) {
             <select class="move-to" aria-label={t('Move to…')} value="" onChange={(event) => {
               const target = event.currentTarget.value;
               event.currentTarget.value = '';
-              if (target) void moveVoice(p().user_id, target);
+              if (target) void moveVoice(p().user_id, p().peer_id, target);
             }}>
               <option value="">{t('Move to…')}</option>
               <For each={otherRooms()}>{(room) => <option value={room.id}>{room.name}</option>}</For>

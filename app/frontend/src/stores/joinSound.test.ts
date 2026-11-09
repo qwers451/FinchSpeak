@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../services/api';
 import { encodeWav } from './joinSoundEncode';
-import { clearJoinSounds, invalidateJoinSound, playJoinSound } from './joinSound';
+import { clearJoinSounds, invalidateJoinSound, joinSoundOf, playJoinSound } from './joinSound';
+import { sessionHandlers } from './sessionStore';
 import { DEFAULT_PREFS, setPrefs } from './settingsStore';
 
 const frequencies: number[] = [];
@@ -60,6 +61,33 @@ it('plays the custom sound once decoded, and again after it is invalidated', asy
   invalidateJoinSound('u1');
   await playJoinSound('u1');
   expect(download).toHaveBeenCalledTimes(2);
+});
+
+it('uses the default tone if the sound was removed during a disconnect', async () => {
+  const download = vi.spyOn(api, 'downloadJoinSound').mockResolvedValue(new ArrayBuffer(8));
+  await playJoinSound('u1');
+  sessionHandlers['connection-lost']('network interrupted');
+  download.mockResolvedValue(null);
+  sessionHandlers.reconnected(null);
+
+  await playJoinSound('u1');
+  expect(frequencies).toEqual([660, 880]);
+  expect(started).toHaveLength(1);
+});
+
+it('keeps a replacement download when the invalidated download fails', async () => {
+  let fail!: (reason: Error) => void;
+  const first = new Promise<ArrayBuffer>((_, reject) => { fail = reject; });
+  vi.spyOn(api, 'downloadJoinSound').mockReturnValueOnce(first).mockResolvedValue(new ArrayBuffer(8));
+  const obsolete = joinSoundOf('u1');
+  invalidateJoinSound('u1');
+  const replacement = joinSoundOf('u1');
+
+  fail(new Error('download interrupted'));
+  expect(await obsolete).toBeNull();
+  const sound = await replacement;
+  expect(sound).not.toBeNull();
+  expect(await joinSoundOf('u1')).toBe(sound);
 });
 
 it('stays silent when sounds are off', async () => {
