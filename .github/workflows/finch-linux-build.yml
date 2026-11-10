@@ -1,0 +1,80 @@
+name: FinchSpeak Linux 1.4.2
+
+on:
+  push:
+    branches: ['codex/finchspeak-linux-1.4.2']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v1.4.2
+          persist-credentials: false
+
+      - name: Build the locked Linux amd64 image
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 70a59fef9b42d7a7a94e3bc4648dc546df1f43fb
+          context="$(mktemp -d)"
+          git archive HEAD Cargo.toml Cargo.lock crates app deploy/Dockerfile | tar -x -C "$context"
+          sed -i 's/cargo build --release -p finch-server/cargo build --release --locked -p finch-server/' "$context/deploy/Dockerfile"
+          docker build --platform linux/amd64 -f "$context/deploy/Dockerfile" -t finchspeak-server:1.4.2 "$context"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}} {{.Config.User}}' finchspeak-server:1.4.2)" = 'linux/amd64 finch:finch'
+
+      - name: Test HTTPS health and persistence under the VPS resource limit
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=finch-linux-qa
+          volume=finch-linux-qa-data
+          trap 'docker rm -f "$name" >/dev/null 2>&1 || true; docker volume rm "$volume" >/dev/null 2>&1 || true' EXIT
+          docker volume create "$volume" >/dev/null
+          start() {
+            docker run -d --name "$name" --memory 256m --cpus 1 \
+              --mount "type=volume,source=$volume,target=/app/data" \
+              --publish 127.0.0.1:18443:8443 finchspeak-server:1.4.2
+            for attempt in {1..40}; do
+              if curl -kfsS --max-time 3 https://127.0.0.1:18443/health > "$RUNNER_TEMP/health.json" 2>/dev/null; then
+                python3 -c 'import json,sys; h=json.load(open(sys.argv[1])); assert h["status"]=="ok" and h["version"]=="1.4.2"; print(h)' "$RUNNER_TEMP/health.json"
+                return
+              fi
+              sleep 2
+            done
+            docker logs "$name"
+            return 1
+          }
+          start
+          cert="$(docker exec "$name" sha256sum /app/data/tls/cert.der)"
+          docker exec "$name" test -s /app/data/finchspeak.db
+          docker stop "$name" >/dev/null
+          docker rm "$name" >/dev/null
+          start
+          test "$(docker exec "$name" sha256sum /app/data/tls/cert.der)" = "$cert"
+          docker exec "$name" test -s /app/data/finchspeak.db
+          docker stats --no-stream "$name" --format 'CPU={{.CPUPerc}} memory={{.MemUsage}}'
+          echo 'PASS Linux 1.4.2 health, SQLite persistence and TLS identity after recreation'
+
+      - name: Export the tested image with its checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cd dist
+          docker save finchspeak-server:1.4.2 | gzip -1 > finchspeak-server-1.4.2-linux-amd64.tar.gz
+          sha256sum finchspeak-server-1.4.2-linux-amd64.tar.gz > SHA256SUMS.txt
+          git rev-parse HEAD > source-commit.txt
+          docker image inspect --format '{{.Id}}' finchspeak-server:1.4.2 > image-id.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: finchspeak-server-1.4.2-linux-amd64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
