@@ -294,6 +294,7 @@ function AppearancePage() {
   );
   return (
     <div class="col g8">
+      <Row title={t('Interface')} hint={t('Finch turns the whole window into a tree: voice rooms are nests, text channels are birdhouses.')} control={seg(t('Interface'), nestView() ? 'finch' : 'classic', [['classic', t('Classic')], ['finch', t('Finch')]], (mode) => setNestView(mode === 'finch'))} />
       <Row title={t('Theme')} control={seg(t('Theme'), a().theme, [['claude', 'Claude Dark'], ['custom', 'Finch Custom'], ['user', t('My colors')]], (theme) => updateAppearance({ theme }))} />
       <Show when={a().theme === 'user'}><ThemeEditor /></Show>
       <Row title={t('Language')} control={seg(t('Language'), a().language, [['ru', 'Русский'], ['en', 'English']], (language) => updateAppearance({ language }))} />
@@ -302,7 +303,6 @@ function AppearancePage() {
       <Row title={t('Reduce motion')} hint={t('Turns off pulsing rings and slides.')} control={<Toggle label={t('Reduce motion')} checked={a().reduceMotion} onChange={(v) => updateAppearance({ reduceMotion: v })} />} />
       <Row title={t('Start with Windows')} hint={t('Starts hidden in the tray and signs you in.')} control={<Toggle label={t('Start with Windows')} checked={autostart()} onChange={(v) => void changeAutostart(v)} />} />
       <Row title={t('Members panel')} hint={t('The list of people on the right.')} control={<Toggle label={t('Members panel')} checked={a().showMembers} onChange={(v) => updateAppearance({ showMembers: v })} />} />
-      <Row title={t('Rooms as nests')} hint={t('Voice channels in the sidebar look like nests with people inside.')} control={<Toggle label={t('Rooms as nests')} checked={nestView()} onChange={setNestView} />} />
     </div>
   );
 }

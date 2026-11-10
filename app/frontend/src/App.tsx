@@ -6,6 +6,8 @@ import { subscribeSessionEvents } from './services/sessionEvents';
 import { receiveInviteLink } from './stores/inviteLink';
 import { api } from './services/api';
 import { Sidebar } from './components/Sidebar';
+import { TreeView } from './components/tree/TreeView';
+import { nestView } from './stores/nestView';
 import { prefs } from './stores/settingsStore';
 import { startDesktopSync } from './stores/desktop';
 import { restoreAudioDevices, restoreVoiceSettings } from './stores/voiceStore';
@@ -81,6 +83,7 @@ export function App() {
       <Show when={eventsReady() && !resuming()} fallback={<Splash />}>
         <Show when={!sessionEnded()} fallback={<SessionEndedScreen />}>
         <Show when={currentUser()} fallback={<AuthModal />}>
+          <Show when={!nestView()} fallback={<TreeView />}>
           <div class="app-layout">
             <Sidebar />
             <Show when={activeChannel()} fallback={
@@ -96,6 +99,7 @@ export function App() {
             </Show>
             <Show when={prefs().appearance.showMembers}><MembersPanel /></Show>
           </div>
+          </Show>
         </Show>
         </Show>
       </Show>

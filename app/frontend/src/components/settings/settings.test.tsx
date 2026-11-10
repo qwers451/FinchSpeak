@@ -108,17 +108,18 @@ it('appearance changes reach the page', async () => {
   setPrefs(DEFAULT_PREFS);
 });
 
-it('the nest view of voice rooms is switched on and off in appearance', async () => {
+it('appearance switches the interface between Classic and Finch', async () => {
   try {
     button('Appearance').click();
     await flush();
-    const toggle = () => document.querySelector<HTMLElement>('[aria-label="Rooms as nests"]')!;
-    expect(nestView()).toBe(false);
-    toggle().click();
+    const option = (text: string) => Array.from(document.querySelectorAll<HTMLElement>('[aria-label="Interface"] [role="radio"]')).find((r) => r.textContent === text)!;
+    expect(option('Classic').getAttribute('aria-checked')).toBe('true');
+    option('Finch').click();
     await flush();
     expect(nestView()).toBe(true);
     expect(localStorage.getItem('finchspeak.nestView')).toBe('1');
-    toggle().click();
+    expect(option('Finch').getAttribute('aria-checked')).toBe('true');
+    option('Classic').click();
     await flush();
     expect(nestView()).toBe(false);
   } finally {

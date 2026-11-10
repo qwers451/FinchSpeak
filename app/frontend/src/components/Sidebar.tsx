@@ -18,8 +18,7 @@ import {
 } from '../stores/voiceStore';
 import { isSharing } from '../stores/screenState';
 import { isMeParticipant } from './voice/ParticipantTile';
-import { NestMap } from './voice/NestMap';
-import { nestView, setNestView } from '../stores/nestView';
+import { setNestView } from '../stores/nestView';
 import { connectionStatus, localPeerId, knownUsers, myStatus as ownStatus, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
 import { currentUser } from '../stores/authStore';
@@ -30,7 +29,7 @@ import { Avatar, Button, ConfirmDialog, Field, Icon, Modal } from '../ui';
 import { t } from '../i18n';
 import { describeError } from '../i18n/errors';
 
-type ChannelDialog =
+export type ChannelDialog =
   | { kind: 'create'; type: 'text' | 'voice' }
   | { kind: 'rename'; channel: Channel }
   | { kind: 'delete'; channel: Channel }
@@ -40,7 +39,7 @@ const isAdmin = () => currentUser()?.role === 'admin';
 const isStaff = () => currentUser()?.role === 'admin' || currentUser()?.role === 'moderator';
 
 /** Up / down / rename / delete, shown on hover (and keyboard focus) to admins. */
-function ChannelActions(props: { channel: Channel; onDialog: (dialog: ChannelDialog) => void }) {
+export function ChannelActions(props: { channel: Channel; onDialog: (dialog: ChannelDialog) => void }) {
   const act = (action: () => void) => (event: MouseEvent) => {
     event.stopPropagation();
     action();
@@ -92,6 +91,30 @@ function ChannelNameDialog(props: { dialog: Extract<ChannelDialog, { kind: 'crea
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** The create / rename / delete dialogs behind the channel actions; shared by the classic sidebar and the Finch tree. */
+export function ChannelDialogs(props: { dialog: ChannelDialog; onClose: () => void }) {
+  return (
+    <Show when={props.dialog}>
+      {(current) => (
+        <>
+          <Show when={current().kind !== 'delete'}>
+            <ChannelNameDialog dialog={current() as Extract<ChannelDialog, { kind: 'create' | 'rename' }>} onClose={props.onClose} />
+          </Show>
+          <ConfirmDialog
+            open={current().kind === 'delete'}
+            danger
+            title={t('Delete #{channel}?', { channel: (current() as { channel?: Channel }).channel?.name ?? '' })}
+            message={t('All messages and files in this channel will be removed. People in a deleted voice channel are sent out.')}
+            confirmLabel={t('Delete channel')}
+            onCancel={props.onClose}
+            onConfirm={() => { const d = current(); if (d.kind === 'delete') void removeChannel(d.channel); props.onClose(); }}
+          />
+        </>
+      )}
+    </Show>
   );
 }
 
@@ -154,13 +177,13 @@ export function Sidebar() {
             <button type="button" class="cat-toggle" aria-expanded={!collapsed().voice} onClick={() => toggleCategory('voice')}>
             <Icon name={collapsed().voice ? 'chev-r' : 'chev-d'} />{t('Voice channels')}
           </button>
-          <button type="button" class="cat-add nest-toggle" aria-pressed={nestView()} title={t(nestView() ? 'Show rooms as a list' : 'Show rooms as nests')} aria-label={t(nestView() ? 'Show rooms as a list' : 'Show rooms as nests')} onClick={() => setNestView(!nestView())}><Icon name="feather" /></button>
+          <button type="button" class="cat-add nest-toggle" title={t('Switch to Finch mode')} aria-label={t('Switch to Finch mode')} onClick={() => setNestView(true)}><Icon name="feather" /></button>
           <Show when={isAdmin()}>
             <button type="button" class="cat-add" title={t('Create voice channel')} aria-label={t('Create voice channel')} onClick={() => setDialog({ kind: 'create', type: 'voice' })}><Icon name="plus" /></button>
           </Show>
         </div>
         <Show when={!collapsed().voice}>
-          <Show when={nestView()} fallback={<For each={voiceChannels()}>
+          <For each={voiceChannels()}>
             {(channel) => (
               <>
                 <div
@@ -193,9 +216,7 @@ export function Sidebar() {
                 </For>
               </>
             )}
-          </For>}>
-            <NestMap channels={voiceChannels()} actions={(channel) => <ChannelActions channel={channel} onDialog={setDialog} />} />
-          </Show>
+          </For>
         </Show>
       </nav>
 
@@ -230,24 +251,7 @@ export function Sidebar() {
         </Show>
       </div>
 
-      <Show when={dialog()}>
-        {(current) => (
-          <>
-            <Show when={current().kind !== 'delete'}>
-              <ChannelNameDialog dialog={current() as Extract<ChannelDialog, { kind: 'create' | 'rename' }>} onClose={() => setDialog(null)} />
-            </Show>
-            <ConfirmDialog
-              open={current().kind === 'delete'}
-              danger
-              title={t('Delete #{channel}?', { channel: (current() as { channel?: Channel }).channel?.name ?? '' })}
-              message={t('All messages and files in this channel will be removed. People in a deleted voice channel are sent out.')}
-              confirmLabel={t('Delete channel')}
-              onCancel={() => setDialog(null)}
-              onConfirm={() => { const d = current(); if (d.kind === 'delete') void removeChannel(d.channel); setDialog(null); }}
-            />
-          </>
-        )}
-      </Show>
+      <ChannelDialogs dialog={dialog()} onClose={() => setDialog(null)} />
     </aside>
   );
 }

@@ -51,7 +51,7 @@ it('Russian texts are not empty and keep the {placeholders} of their English key
 it('a Russian text equals its English key only for names that are not translated', () => {
   const same = Object.entries(ru).filter(([key, value]) => key === value).map(([key]) => key);
   // Theme names are proper names; '{action}: {name}?' reads the same in both languages.
-  expect(same.sort()).toEqual(['Claude Dark', 'Finch Custom', '{action}: {name}?']);
+  expect(same.sort()).toEqual(['Claude Dark', 'Finch', 'Finch Custom', '{action}: {name}?']);
 });
 
 // ---- 3. no string that reads like interface text is left outside the dictionary

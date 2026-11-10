@@ -207,11 +207,16 @@ export const ru: Readonly<Record<string, string>> = {
   'Match the theme to your picture?': 'Подобрать тему под аватарку?',
   'Apply theme': 'Применить тему',
   'Not now': 'Не сейчас',
-  'Show rooms as nests': 'Показать комнаты гнёздами',
-  'Show rooms as a list': 'Показать комнаты списком',
+  'Switch to Finch mode': 'Перейти в режим Finch',
+  'Switch to classic mode': 'Перейти в классический режим',
   'Empty nest': 'Пустое гнездо',
-  'Rooms as nests': 'Комнаты гнёздами',
-  'Voice channels in the sidebar look like nests with people inside.': 'Голосовые каналы в боковой панели выглядят как гнёзда с людьми внутри.',
+  'Interface': 'Интерфейс', 'Classic': 'Классический', 'Finch': 'Finch',
+  'Finch turns the whole window into a tree: voice rooms are nests, text channels are birdhouses.': 'Finch превращает всё окно в дерево: голосовые комнаты — гнёзда, текстовые каналы — скворечники.',
+  'Nest': 'Гнездо', 'Birdhouse': 'Скворечник',
+  'Show the tree': 'Показать дерево', 'Hide the tree': 'Свернуть дерево', 'Back to the tree': 'Вернуться к дереву',
+  'Tree of rooms': 'Дерево комнат', 'On the wire — {count}': 'На проводе — {count}',
+  'You are on the wire. Pick a nest to talk.': 'Вы на проводе. Выберите гнездо, чтобы поговорить.',
+  'In the nest: {channel}': 'В гнезде: {channel}', 'Fly out of the nest': 'Вылететь из гнезда',
 };
 
 /** Russian plural forms, keyed by the English `other` form that `plural()` is called with. */
