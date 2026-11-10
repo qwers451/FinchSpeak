@@ -1,6 +1,7 @@
 import { createMemo, For, Show } from 'solid-js';
 import { currentUser } from '../../stores/authStore';
 import { knownUsers } from '../../stores/sessionStore';
+import { isLocallyMuted } from '../../stores/localMuteStore';
 import { setVolume, volumeFor } from '../../stores/volumeStore';
 import { activeVoiceChannel, isDeafened, isLocalSpeaking, isMuted, speakingPeers, voiceQuality } from '../../stores/voiceStore';
 import type { VoiceParticipant } from '../../types';
@@ -47,6 +48,7 @@ export function ParticipantTile(props: Props) {
       <Show when={!props.isMe}><Quality peerId={p().peer_id} /></Show>
       <div class="badges">
       <Show when={p().server_muted}><span title={t('Silenced by a moderator')} style={{ color: 'var(--amber)' }}><Icon name="shield" size="sm" /></span></Show>
+      <Show when={!props.isMe && isLocallyMuted(p().user_id)}><span title={t('You muted this person')}><Icon name="vol-off" size="sm" /></span></Show>
       <Show when={muted()}><span title={t('Muted')}><Icon name="mic-off" size="sm" /></span></Show>
       <Show when={deafened()}><span title={t('Deafened')}><Icon name="phones-off" size="sm" /></span></Show>
       </div>
@@ -77,7 +79,7 @@ export function ParticipantTile(props: Props) {
       <Show when={!props.isMe}>
         <div class="vol">
           <Icon name={volume() === 0 ? 'vol-off' : 'vol'} size="sm" />
-          <Slider cool label={t('Volume of {name}', { name: name() })} min={0} max={2} step={0.05} value={volume()}
+          <Slider cool label={t('Volume of {name}', { name: name() })} min={0} max={2} step={0.05} value={volume()} disabled={isLocallyMuted(p().user_id)}
             onChange={(value) => void setVolume(p().user_id, p().peer_id, value)} />
           <span class="fs12 t2 vol-num">{Math.round(volume() * 100)}%</span>
         </div>
