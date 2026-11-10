@@ -2,7 +2,9 @@
 
 use std::sync::atomic::Ordering;
 
-use finch_client_core::screen::{encoded_size, AudioPacketSource, ScreenAudioForwarder, FrameSource, MonitorSource, ScreenSharer, ScreenViewer, ShareConfig, WindowSource};
+use finch_client_core::screen::{share_size, AudioPacketSource, ScreenAudioForwarder, FrameSource, MonitorSource, ScreenSharer, ScreenViewer, ShareConfig, ShareHooks, ShareStats, WindowSource};
+#[cfg(windows)]
+use finch_client_core::screen::WgcSource;
 use finch_protocol::messages::ClientMessage;
 use finch_protocol::models::VideoCodec;
 use finch_screen::{capture_monitor, capture_window, list_monitors, list_windows, thumbnail_jpeg, window_process_id, AudioSourceKind, ScreenAudioCapturer, ScreenAudioConfig, ThumbnailCache};
@@ -11,9 +13,37 @@ use tauri::{AppHandle, Emitter, State};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::state::{AppState, ScreenShareReservation, VideoChunkPayload};
+use crate::state::{AppState, ScreenShareReservation};
 
-const SHARE_FPS: u8 = 30;
+/// 60 FPS only when asked for; every other request (including none) shares at 30.
+fn share_fps(requested: Option<u8>) -> u8 {
+    if requested == Some(60) { 60 } else { 30 }
+}
+
+/// The frame source for a screen or window and the size of its first picture. On Windows a capture
+/// session is tried first (frames arrive as fast as the screen changes); if it cannot start or shows
+/// nothing, the older snapshot capture takes over.
+fn open_source(kind: &str, id: u32) -> Result<(Box<dyn FrameSource>, u32, u32), String> {
+    if kind != "monitor" && kind != "window" {
+        return Err(format!("Unknown screen source kind: {kind}"));
+    }
+    #[cfg(windows)]
+    {
+        let session = if kind == "monitor" { WgcSource::monitor(id) } else { WgcSource::window(id) };
+        match session.and_then(|mut source| source.next_frame().map(|frame| (source, frame.width, frame.height))) {
+            Ok((source, width, height)) => return Ok((Box::new(source), width, height)),
+            Err(e) => tracing::warn!("Windows Graphics Capture is not available for {kind} {id} ({e}); using snapshot capture"),
+        }
+    }
+    let mut source: Box<dyn FrameSource> = if kind == "monitor" { Box::new(MonitorSource(id as usize)) } else { Box::new(WindowSource(id)) };
+    let frame = source.next_frame()?;
+    Ok((source, frame.width, frame.height))
+}
+
+/// One decimal place, as the statistics show it.
+fn round1(value: f32) -> f32 {
+    (value * 10.0).round() / 10.0
+}
 
 #[derive(Serialize)]
 pub struct MonitorDto {
@@ -151,9 +181,11 @@ pub async fn start_screen_share(
     id: u32,
     with_audio: Option<bool>,
     audio_scope: Option<String>,
+    fps: Option<u8>,
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<u64, String> {
+    let fps = share_fps(fps);
     let preflight_state = (*state).clone();
     let source_kind = kind.clone();
     let (reservation, (source, width, height, short_id, tx, connection, sender_peer_id, session_generation)) =
@@ -167,21 +199,16 @@ pub async fn start_screen_share(
                 let connection = preflight_state.quic_connection.read().await.clone().ok_or_else(|| "Not connected via QUIC".to_string())?;
                 (short_id, tx, connection, preflight_state.session_peer_id.load(Ordering::SeqCst), preflight_state.session_generation.load(Ordering::SeqCst))
             };
-            let mut source: Box<dyn FrameSource> = match source_kind.as_str() {
-                "monitor" => Box::new(MonitorSource(id as usize)),
-                "window" => Box::new(WindowSource(id)),
-                other => return Err(format!("Unknown screen source kind: {other}")),
-            };
-            let (source, width, height) = tokio::task::spawn_blocking(move || {
-                let frame = source.next_frame()?;
-                Ok::<_, String>((source, frame.width, frame.height))
-            }).await.map_err(|e| e.to_string())?
+            let (source, width, height) = tokio::task::spawn_blocking(move || open_source(&source_kind, id))
+                .await.map_err(|e| e.to_string())?
                 .map_err(|e| format!("Could not capture the screen: {e}"))?;
-            let (width, height) = encoded_size(width, height);
+            let (width, height) = share_size(width, height, fps);
             Ok((source, width, height, short_id, tx, connection, sender_peer_id, session_generation))
         }).await?;
     let generation = reservation.generation();
     let audio_app_handle = app_handle.clone();
+    let stats_app_handle = app_handle.clone();
+    let fallback_app_handle = app_handle.clone();
     let runtime = tokio::runtime::Handle::current();
     let on_end = {
         let state = (*state).clone();
@@ -196,9 +223,24 @@ pub async fn start_screen_share(
     };
     let audio_connection = connection.clone();
     announce_screen_share(&state, generation, short_id, session_generation, &tx,
-        ClientMessage::StartScreenShare { codec: VideoCodec::H264, width, height, fps: SHARE_FPS }, || {
-            let sharer = ScreenSharer::start(connection, runtime, short_id, sender_peer_id,
-                ShareConfig { fps: SHARE_FPS, bitrate_bps: None }, source, on_end);
+        ClientMessage::StartScreenShare { codec: VideoCodec::H264, width, height, fps }, || {
+            let hooks = ShareHooks {
+                on_stats: Some(Box::new(move |stats: ShareStats| {
+                    let _ = stats_app_handle.emit("screen-share-stats", serde_json::json!({
+                        "generation": generation,
+                        "captured_fps": round1(stats.captured_fps),
+                        "sent_fps": round1(stats.sent_fps),
+                        "encode_ms": round1(stats.encode_ms),
+                        "bitrate_kbps": stats.bitrate_kbps,
+                        "target_fps": stats.target_fps,
+                    }));
+                })),
+                on_fps_fallback: Some(Box::new(move |fallback_fps: u8| {
+                    let _ = fallback_app_handle.emit("screen-share-fps-fallback", serde_json::json!({ "generation": generation, "fps": fallback_fps }));
+                })),
+            };
+            let sharer = ScreenSharer::start_with_hooks(connection, runtime, short_id, sender_peer_id,
+                ShareConfig { fps, bitrate_bps: None }, source, hooks, on_end);
             *state.screen_sharer.lock().map_err(|_| "screen share state poisoned".to_string())? = Some(sharer);
             Ok(())
         }).await?;
@@ -247,7 +289,7 @@ pub async fn stop_screen_share(state: State<'_, AppState>) -> Result<(), String>
 
 #[tauri::command]
 pub async fn register_video_channel(
-    on_frame: tauri::ipc::Channel<VideoChunkPayload>,
+    on_frame: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     *state.video_channel.write().await = Some(on_frame);
@@ -366,6 +408,24 @@ pub async fn capture_thumbnail(kind: String, id: u32, max_width: Option<u32>) ->
     .await
     .map_err(|e| e.to_string())??;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[cfg(test)]
+mod share_fps_tests {
+    use super::*;
+
+    #[test]
+    fn share_fps_table() {
+        for (requested, expected) in [(None, 30), (Some(30), 30), (Some(60), 60), (Some(0), 30), (Some(120), 30)] {
+            assert_eq!(share_fps(requested), expected, "requested {requested:?}");
+        }
+    }
+
+    #[test]
+    fn round1_keeps_one_decimal() {
+        assert_eq!(round1(58.44), 58.4);
+        assert_eq!(round1(29.96), 30.0);
+    }
 }
 
 #[cfg(test)]

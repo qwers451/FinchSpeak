@@ -32,3 +32,8 @@ pub use hw_encoder::{
 
 #[cfg(windows)]
 pub mod process_loopback;
+
+#[cfg(windows)]
+pub mod wgc;
+#[cfg(windows)]
+pub use wgc::{WgcCapture, WgcTarget};

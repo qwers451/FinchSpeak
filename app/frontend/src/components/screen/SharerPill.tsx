@@ -1,10 +1,24 @@
 import { Show } from 'solid-js';
 import { screenAudioSource, sharingInfo, stopSharing } from '../../stores/screenStore';
+import { shareStats } from '../../stores/screenState';
 import { Button, Icon } from '../../ui';
-import { t } from '../../i18n';
+import { formatBitrate, t } from '../../i18n';
 
 /** E2: while you share, a plate at the top of the room says so and stops it. */
 export function SharerPill() {
+  const status = (info: { audio: boolean; fps: 30 | 60 }) => {
+    const stats = shareStats();
+    if (stats) {
+      const fps = Math.round(stats.sent_fps);
+      const bitrate = formatBitrate(stats.bitrate_kbps);
+      return info.audio
+        ? t('With system sound · {fps} fps · {bitrate}', { fps, bitrate })
+        : t('Without sound · {fps} fps · {bitrate}', { fps, bitrate });
+    }
+    return info.audio
+      ? t('With system sound · {fps} fps', { fps: info.fps })
+      : t('Without sound · {fps} fps', { fps: info.fps });
+  };
   return (
     <Show when={sharingInfo()}>
       {(info) => (
@@ -12,7 +26,7 @@ export function SharerPill() {
           <span class="dot live" aria-hidden="true" />
           <div class="col grow" style={{ 'min-width': 0 }}>
             <strong class="fs13 trunc">{t('You are sharing {label}', { label: info().label || t('your screen') })}</strong>
-            <span class="t2 fs12">{info().audio ? t('With system sound · 30 fps') : t('Without sound · 30 fps')}</span>
+            <span class="t2 fs12">{status(info())}</span>
             <Show when={info().audio && screenAudioSource() === 'device'}>
               <div class="auth-banner amber" role="note">
                 <span class="fs12">{t('This version of Windows cannot leave FinchSpeak out of the sound: people in the room will hear themselves with a delay. Update to Windows 10 2004 or newer.')}</span>

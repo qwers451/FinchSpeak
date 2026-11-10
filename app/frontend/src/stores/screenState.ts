@@ -12,7 +12,9 @@ export const [lastEndedScreenShareGeneration, setLastEndedScreenShareGeneration]
 /** We are sharing our screen. */
 export const [isSharing, setIsSharing] = createSignal<boolean>(false);
 /** What our own share shows, for the "You are sharing" plate. */
-export const [sharingInfo, setSharingInfo] = createSignal<{ label: string; audio: boolean } | null>(null);
+export const [sharingInfo, setSharingInfo] = createSignal<{ label: string; audio: boolean; fps: 30 | 60 } | null>(null);
+/** Live statistics of our own share; null until the first report and when sharing ends. */
+export const [shareStats, setShareStats] = createSignal<Omit<SessionEvents['screen-share-stats'], 'generation'> | null>(null);
 /** The share we are watching, if any. */
 export const [watching, setWatching] = createSignal<WatchedShare | null>(null);
 /** A share we were watching ended: kept on screen for a few seconds so people know why. */
@@ -27,6 +29,7 @@ export function endLocalScreenShare() {
   setScreenShareGeneration(null);
   setScreenAudioSource(null);
   setSharingInfo(null);
+  setShareStats(null);
 }
 
 /** Our own share ends with the connection; what we watch is resumed after a reconnect. */

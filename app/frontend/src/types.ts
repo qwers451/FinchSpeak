@@ -238,6 +238,10 @@ export interface SessionEvents {
   /** The sound of the shared screen could not be captured; the picture still goes out. */
   'screen-audio-failed': string;
   'screen-audio-source': { source: 'all-except-self' | 'only-process' | 'device' };
+  /** Our own share's measured frame rate and bitrate, about once every two seconds. */
+  'screen-share-stats': { generation: number; captured_fps: number; sent_fps: number; encode_ms: number; bitrate_kbps: number; target_fps: number };
+  /** The computer could not keep up with 60 FPS; the share went on at 30. */
+  'screen-share-fps-fallback': { generation: number; fps: number };
   'presence-update': { user_id: string; status: UserStatus; status_text?: string | null };
   'avatar-changed': { user_id: string; avatar_url: string | null };
   'join-sound-changed': { user_id: string };

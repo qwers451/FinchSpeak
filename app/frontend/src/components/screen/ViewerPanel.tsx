@@ -7,11 +7,7 @@ import { screenAudioKey, setVolume, volumeFor } from '../../stores/volumeStore';
 import { Button, Icon, Slider, pushToast } from '../../ui';
 import { ENDED_AUTOCLOSE_MS, ViewerMachine, type ViewerSnapshot } from './viewerState';
 import { formatBitrate, t, unit } from '../../i18n';
-
-interface VideoChunkPayload {
-  is_key: boolean;
-  data: number[];
-}
+import { parseVideoChunk } from './videoChunk';
 
 // Constrained Baseline, level 5.1: OpenH264 picks the real level itself and the SPS in the
 // stream is authoritative, but a low level here makes some decoders refuse 1080p and above.
@@ -38,7 +34,7 @@ function Viewer(props: { peerId: number; userId: string }) {
   let decoder: VideoDecoder | null = null;
   let closed = false;
   let waitingForKey = true;
-  let microTimestamp = 0;
+  let lastTimestamp = 0;
   const machine = new ViewerMachine(performance.now());
   const [view, setView] = createSignal<ViewerSnapshot>(INITIAL);
   const [hud, setHud] = createSignal(true);
@@ -131,17 +127,22 @@ function Viewer(props: { peerId: number; userId: string }) {
       const support = await VideoDecoder.isConfigSupported({ codec: CODEC, optimizeForLatency: true });
       if (!support.supported) throw new Error('H.264 is not supported');
       createDecoder();
-      const onFrameChannel = new Channel<VideoChunkPayload>();
-      onFrameChannel.onmessage = (payload: VideoChunkPayload) => {
-        machine.chunk(payload.data.length);
+      const onFrameChannel = new Channel<ArrayBuffer>();
+      onFrameChannel.onmessage = (message: ArrayBuffer) => {
+        const chunk = parseVideoChunk(message);
+        if (!chunk) return;
+        machine.chunk(chunk.data.byteLength);
         if (!decoder || decoder.state !== 'configured') return;
         if (pageHidden()) { waitingForKey = true; return; }
         if (decoder.decodeQueueSize > MAX_DECODE_QUEUE) { resyncDecoder(); return; }
-        if (waitingForKey && !payload.is_key) return;
+        if (waitingForKey && !chunk.isKey) return;
+        // Real time in microseconds; it must strictly increase for the decoder.
+        const now = Math.round(performance.now() * 1000);
+        const timestamp = now > lastTimestamp ? now : lastTimestamp + 1;
         try {
-          decoder.decode(new EncodedVideoChunk({ type: payload.is_key ? 'key' : 'delta', timestamp: microTimestamp, data: new Uint8Array(payload.data) }));
+          decoder.decode(new EncodedVideoChunk({ type: chunk.isKey ? 'key' : 'delta', timestamp, data: chunk.data }));
           waitingForKey = false;
-          microTimestamp += 33333; // ~30 fps; only has to increase
+          lastTimestamp = timestamp;
         } catch (err) {
           console.error('Failed to decode video chunk:', err);
           waitingForKey = true;
@@ -193,7 +194,7 @@ function Viewer(props: { peerId: number; userId: string }) {
       if (document.pictureInPictureElement) { await document.exitPictureInPicture(); return; }
       const video = document.createElement('video');
       video.muted = true;
-      video.srcObject = canvas.captureStream(30);
+      video.srcObject = canvas.captureStream();
       await video.play();
       await video.requestPictureInPicture();
       video.addEventListener('leavepictureinpicture', () => { video.srcObject = null; }, { once: true });
@@ -232,11 +233,10 @@ function Viewer(props: { peerId: number; userId: string }) {
         )}
       </Show>
 
-      <div class={`viewer-hud top${hud() || showOverlay() || status() === 'weak' ? ' on' : ''}`}>
+      <div class={`viewer-hud top${hud() || showOverlay() ? ' on' : ''}`}>
         <span class="tag cyan">{name()}</span>
         <Show when={view().width > 0}><span class="tag cyan">{view().width} × {view().height}</span></Show>
-        <Show when={status() === 'live' || status() === 'weak'}><span class="tag cyan">{view().fps} {unit('fps')} · {formatBitrate(view().bitrateKbps)}</span></Show>
-        <Show when={status() === 'weak'}><span class="tag amber">{t('Weak connection')}</span></Show>
+        <Show when={status() === 'live'}><span class="tag cyan">{view().fps} {unit('fps')} · {formatBitrate(view().bitrateKbps)}</span></Show>
       </div>
 
       <div class={`viewer-hud bottom${hud() ? ' on' : ''}`}>

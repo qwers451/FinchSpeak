@@ -7,6 +7,8 @@ call npm install
 call npm run build
 if errorlevel 1 goto :fail
 cd ..\..
+where.exe nasm >nul 2>&1
+if errorlevel 1 echo Warning: NASM is missing. OpenH264 will build without x64 assembly and screen encoding may be slower.
 echo Building the desktop client (release)...
 cargo build --release -p finch-app --features custom-protocol
 if errorlevel 1 goto :fail

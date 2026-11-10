@@ -4,8 +4,9 @@
 //! Everything here is synchronous and network-free so it can be tested without a server; the
 //! Tauri app glues it to a [`Session`](crate::session::Session).
 
+use std::borrow::Cow;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -44,7 +45,26 @@ impl Default for ShareConfig {
     }
 }
 
+/// Largest picture for shares up to 30 FPS; faster shares are limited to 1080p.
+pub const MAX_WIDTH_60: u32 = 1920;
+pub const MAX_HEIGHT_60: u32 = 1080;
+
+impl ShareConfig {
+    /// The largest picture this share sends.
+    pub fn size_limit(&self) -> (u32, u32) {
+        if self.fps > 30 {
+            (MAX_WIDTH_60, MAX_HEIGHT_60)
+        } else {
+            (MAX_WIDTH, MAX_HEIGHT)
+        }
+    }
+}
+
 fn default_bitrate(width: u32, height: u32, fps: u8) -> u32 {
+    if fps > 30 {
+        let bits = u64::from(width) * u64::from(height) * u64::from(fps) / 18;
+        return bits.clamp(1_000_000, 10_000_000) as u32;
+    }
     let bits = u64::from(width) * u64::from(height) * u64::from(fps) / 12;
     bits.clamp(1_000_000, 8_000_000) as u32
 }
@@ -77,6 +97,10 @@ pub struct ScreenPacketizer {
     losses_ms: VecDeque<u32>,
     /// When the rate last changed or the last loss happened.
     last_event_ms: u32,
+    /// Picture limit, fixed by the frame rate the share started with.
+    size_limit: (u32, u32),
+    /// The bitrate was picked from the picture size (not given in the config).
+    auto_bitrate: bool,
 }
 
 /// This many reports within [`LOSS_WINDOW_MS`] lower the bitrate.
@@ -99,12 +123,25 @@ impl ScreenPacketizer {
             start_bitrate_bps: config.bitrate_bps,
             losses_ms: VecDeque::new(),
             last_event_ms: 0,
+            size_limit: config.size_limit(),
+            auto_bitrate: config.bitrate_bps.is_none(),
         }
     }
 
     /// The bitrate the encoder is currently asked for.
     pub fn bitrate_bps(&self) -> Option<u32> {
         self.bitrate_bps
+    }
+
+    /// Change the frame rate of the share. The next frame starts a new encoder (with a key
+    /// frame); an automatically chosen bitrate is picked again for the new rate.
+    pub fn set_fps(&mut self, fps: u8) {
+        self.config.fps = fps;
+        self.encoder = None;
+        if self.auto_bitrate {
+            self.bitrate_bps = None;
+            self.start_bitrate_bps = None;
+        }
     }
 
     /// A viewer reported that it lost part of the stream (`at_ms` on the share's clock).
@@ -160,7 +197,7 @@ impl ScreenPacketizer {
         max_datagram: usize,
     ) -> Result<OutgoingVideo, ScreenError> {
         // H.264 4:2:0 needs even dimensions, and the encoder has an upper limit.
-        let (w, h) = encoded_size(frame.width, frame.height);
+        let (w, h) = encoded_size_within(frame.width, frame.height, self.size_limit.0, self.size_limit.1);
         if w == 0 || h == 0 {
             return Err(ScreenError::FrameTooSmall(frame.width, frame.height));
         }
@@ -191,7 +228,8 @@ impl ScreenPacketizer {
             encoder.force_keyframe();
         }
 
-        let encoded = encoder.encode_bgra(&fit_to_bgra(frame, w, h))?;
+        let picture = fit_to_bgra(frame, w, h);
+        let encoded = encoder.encode_bgra(&picture)?;
 
         if encoded.is_keyframe {
             if encoded.data.len() > MAX_KEYFRAME_BYTES {
@@ -242,24 +280,39 @@ impl ScreenPacketizer {
 /// The picture size sent for a `width`x`height` screen: even, and scaled down (keeping the
 /// shape) when it is larger than the encoder supports.
 pub fn encoded_size(width: u32, height: u32) -> (u32, u32) {
-    if width <= MAX_WIDTH && height <= MAX_HEIGHT {
+    encoded_size_within(width, height, MAX_WIDTH, MAX_HEIGHT)
+}
+
+/// [`encoded_size`] with the picture limits given: even, shape kept, never larger than the
+/// limits, and at least 2 pixels per side for inputs of at least 2 pixels.
+pub fn encoded_size_within(width: u32, height: u32, max_width: u32, max_height: u32) -> (u32, u32) {
+    if width <= max_width && height <= max_height {
         return (width & !1, height & !1);
     }
-    let scale = (f64::from(MAX_WIDTH) / f64::from(width)).min(f64::from(MAX_HEIGHT) / f64::from(height));
-    let fit = |side: u32, limit: u32| (((f64::from(side) * scale) as u32) & !1).min(limit);
-    (fit(width, MAX_WIDTH), fit(height, MAX_HEIGHT))
+    let scale = (f64::from(max_width) / f64::from(width)).min(f64::from(max_height) / f64::from(height));
+    let fit = |side: u32, limit: u32| (((f64::from(side) * scale).round() as u32).max(2) & !1).min(limit);
+    (fit(width, max_width), fit(height, max_height))
+}
+
+/// The picture size a `width`x`height` screen is shared at when the share runs at `fps`.
+pub fn share_size(width: u32, height: u32, fps: u8) -> (u32, u32) {
+    let (max_width, max_height) = ShareConfig { fps, bitrate_bps: None }.size_limit();
+    encoded_size_within(width, height, max_width, max_height)
 }
 
 /// BGRA pixels of `frame` as a `w`x`h` picture: cropped by a pixel for odd sizes, scaled
-/// (nearest neighbour) when `encoded_size` shrank it.
-fn fit_to_bgra(frame: &RawFrame, w: u32, h: u32) -> Vec<u8> {
-    let bgra = match frame.format {
-        PixelFormat::Bgra => frame.data.to_vec(),
-        PixelFormat::Rgba => frame.to_bgra(),
-    };
-    if (w, h) == (frame.width, frame.height) {
-        return bgra;
+/// (nearest neighbour) when `encoded_size` shrank it. A BGRA frame of the same size is borrowed.
+fn fit_to_bgra(frame: &RawFrame, w: u32, h: u32) -> Cow<'_, [u8]> {
+    let same_size = (w, h) == (frame.width, frame.height);
+    let is_bgra = matches!(frame.format, PixelFormat::Bgra);
+    if same_size && is_bgra {
+        return Cow::Borrowed(&frame.data[..]);
     }
+    if same_size {
+        return Cow::Owned(frame.to_bgra());
+    }
+    // Only an RGBA frame needs its channels swapped; BGRA rows are read in place.
+    let bgra: Cow<'_, [u8]> = if is_bgra { Cow::Borrowed(&frame.data[..]) } else { Cow::Owned(frame.to_bgra()) };
     let (src_w, src_h) = (frame.width as usize, frame.height as usize);
     let (w, h) = (w as usize, h as usize);
     // Same size class (odd crop): copy rows. Otherwise map each output pixel to a source pixel.
@@ -268,7 +321,7 @@ fn fit_to_bgra(frame: &RawFrame, w: u32, h: u32) -> Vec<u8> {
         for y in 0..h {
             out.extend_from_slice(&bgra[y * src_w * 4..(y * src_w + w) * 4]);
         }
-        return out;
+        return Cow::Owned(out);
     }
     let x_map: Vec<usize> = (0..w).map(|x| (x * src_w / w) * 4).collect();
     let mut out = Vec::with_capacity(w * h * 4);
@@ -278,7 +331,19 @@ fn fit_to_bgra(frame: &RawFrame, w: u32, h: u32) -> Vec<u8> {
             out.extend_from_slice(&row[sx..sx + 4]);
         }
     }
-    out
+    Cow::Owned(out)
+}
+
+/// Whether an encoder that re-sends the last frame should do so now: a key frame was requested,
+/// or nothing was sent for a second (keeps a still screen visible and viewers in sync).
+pub fn resend_last(key_requested: bool, since_last_sent: Duration) -> bool {
+    key_requested || since_last_sent >= Duration::from_secs(1)
+}
+
+/// Whether a share running above 30 FPS should drop to 30: encoding is too slow for the target
+/// over a window of at least 3 seconds.
+fn should_fall_back(target_fps: u8, average_encode: Duration, window: Duration) -> bool {
+    target_fps > 30 && window >= Duration::from_secs(3) && average_encode > Duration::from_millis(15)
 }
 
 /// Receiving side: decides which frames may be decoded and when to ask for a key frame.
@@ -385,8 +450,85 @@ impl ScreenViewer {
 // ---- sending side driver --------------------------------------------------------------------
 
 /// Where frames come from: a monitor, a window, or (in tests) a generator.
+/// What a frame source returned this time.
+pub enum FramePoll {
+    Frame(RawFrame),
+    /// Nothing new since the last call (a still screen); not a failure.
+    Idle,
+    Failed(String),
+    /// The source ended permanently, for example when a WGC target closes.
+    Closed(String),
+}
+
 pub trait FrameSource: Send + 'static {
     fn next_frame(&mut self) -> Result<RawFrame, String>;
+
+    /// Like `next_frame`, but a source may report that nothing changed since the last call.
+    fn poll_frame(&mut self) -> FramePoll {
+        match self.next_frame() {
+            Ok(frame) => FramePoll::Frame(frame),
+            Err(e) => FramePoll::Failed(e),
+        }
+    }
+}
+
+/// What a running share reports every two seconds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShareStats {
+    pub captured_fps: f32,
+    pub sent_fps: f32,
+    /// Average time to fit, convert and encode one frame.
+    pub encode_ms: f32,
+    /// Video payload queued for transmission, in kilobits per second.
+    pub bitrate_kbps: u32,
+    /// The frame rate the share is paced to now (30 after a fallback from 60).
+    pub target_fps: u8,
+}
+
+/// Optional callbacks of a share; both run on the encoder thread and must return quickly.
+#[derive(Default)]
+pub struct ShareHooks {
+    pub on_stats: Option<Box<dyn Fn(ShareStats) + Send>>,
+    pub on_fps_fallback: Option<Box<dyn Fn(u8) + Send>>,
+}
+
+/// Counts of one reporting window.
+#[derive(Debug, Default)]
+struct StatsWindow {
+    sent: u32,
+    sent_bytes: usize,
+    encode_total: Duration,
+}
+
+impl StatsWindow {
+    fn record_sent(&mut self, encode_time: Duration) {
+        self.sent += 1;
+        self.encode_total += encode_time;
+    }
+
+    /// Turn the window into stats and start a new window.
+    fn take(&mut self, captured: u32, elapsed: Duration, target_fps: u8) -> ShareStats {
+        let secs = elapsed.as_secs_f32();
+        let per_second = |count: u32| if secs > 0.0 { count as f32 / secs } else { 0.0 };
+        let encode_ms = if self.sent > 0 {
+            self.encode_total.as_secs_f32() * 1000.0 / self.sent as f32
+        } else {
+            0.0
+        };
+        let stats = ShareStats {
+            captured_fps: per_second(captured),
+            sent_fps: per_second(self.sent),
+            encode_ms,
+            bitrate_kbps: if secs > 0.0 {
+                (self.sent_bytes as f32 * 8.0 / secs / 1000.0).round() as u32
+            } else {
+                0
+            },
+            target_fps,
+        };
+        *self = Self::default();
+        stats
+    }
 }
 
 /// Captures a whole monitor.
@@ -404,6 +546,57 @@ pub struct WindowSource(pub u32);
 impl FrameSource for WindowSource {
     fn next_frame(&mut self) -> Result<RawFrame, String> {
         finch_screen::capture_window(self.0).map_err(|e| e.to_string())
+    }
+}
+
+/// Captures a monitor or a window through a Windows Graphics Capture session: frames arrive as
+/// the picture changes, so a still screen (or a minimized window) is idle, not failing.
+#[cfg(windows)]
+pub struct WgcSource {
+    capture: finch_screen::WgcCapture,
+    /// The frame `next_frame` handed out to measure the picture: the share starts with it, because a
+    /// still screen sends no second one.
+    primed: Option<RawFrame>,
+}
+
+#[cfg(windows)]
+impl WgcSource {
+    /// How long the first frame may take before the session counts as not working.
+    const FIRST_FRAME: Duration = Duration::from_secs(2);
+    /// How long one poll waits for a new frame.
+    const POLL: Duration = Duration::from_millis(100);
+
+    pub fn monitor(id: u32) -> Result<Self, String> {
+        Self::start(finch_screen::WgcTarget::Monitor(id))
+    }
+
+    pub fn window(id: u32) -> Result<Self, String> {
+        Self::start(finch_screen::WgcTarget::Window(id))
+    }
+
+    fn start(target: finch_screen::WgcTarget) -> Result<Self, String> {
+        let capture = finch_screen::WgcCapture::start(target).map_err(|e| e.to_string())?;
+        Ok(Self { capture, primed: None })
+    }
+}
+
+#[cfg(windows)]
+impl FrameSource for WgcSource {
+    fn next_frame(&mut self) -> Result<RawFrame, String> {
+        let frame = self.capture.take_frame(Self::FIRST_FRAME).ok_or_else(|| "Windows Graphics Capture delivered no picture".to_string())?;
+        self.primed = Some(frame.clone());
+        Ok(frame)
+    }
+
+    fn poll_frame(&mut self) -> FramePoll {
+        if let Some(frame) = self.primed.take() {
+            return FramePoll::Frame(frame);
+        }
+        match self.capture.take_frame(Self::POLL) {
+            Some(frame) => FramePoll::Frame(frame),
+            None if self.capture.is_closed() => FramePoll::Closed("the shared screen or window is gone".to_string()),
+            None => FramePoll::Idle,
+        }
     }
 }
 
@@ -442,7 +635,31 @@ impl ScreenSharer {
         channel_id: u32,
         sender_peer_id: u32,
         config: ShareConfig,
+        source: Box<dyn FrameSource>,
+        on_end: impl FnOnce(String) + Send + 'static,
+    ) -> Self {
+        Self::start_with_hooks(
+            connection,
+            runtime,
+            channel_id,
+            sender_peer_id,
+            config,
+            source,
+            ShareHooks::default(),
+            on_end,
+        )
+    }
+
+    /// [`start`](Self::start) with callbacks for statistics and the 60 to 30 FPS fallback.
+    #[allow(clippy::too_many_arguments)]
+    pub fn start_with_hooks(
+        connection: quinn::Connection,
+        runtime: tokio::runtime::Handle,
+        channel_id: u32,
+        sender_peer_id: u32,
+        config: ShareConfig,
         mut source: Box<dyn FrameSource>,
+        hooks: ShareHooks,
         on_end: impl FnOnce(String) + Send + 'static,
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
@@ -450,36 +667,46 @@ impl ScreenSharer {
         let loss = Arc::new(AtomicBool::new(false));
         let slot: SharedSlot = Arc::new((Mutex::new(FrameSlot::default()), Condvar::new()));
         let mut threads = Vec::new();
+        // Frames captured so far (counted by the capture thread, read by the encoder for stats).
+        let captured = Arc::new(AtomicU32::new(0));
 
         // Capture thread: as fast as the source delivers, keeping only the newest frame.
-        let (capture_stop, capture_slot) = (stop.clone(), slot.clone());
+        let (capture_stop, capture_slot, capture_count) = (stop.clone(), slot.clone(), captured.clone());
         threads.extend(
             std::thread::Builder::new()
                 .name("screen-capture".into())
                 .spawn(move || {
                     let mut failures = 0u32;
-                    while !capture_stop.load(Ordering::Relaxed) {
-                        match source.next_frame() {
-                            Ok(frame) => {
+                    let reason = loop {
+                        if capture_stop.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        match source.poll_frame() {
+                            FramePoll::Idle => {
+                                // Nothing new (a still screen): the source has waited already, and this is no failure.
+                            }
+                            FramePoll::Frame(frame) => {
                                 failures = 0;
+                                capture_count.fetch_add(1, Ordering::Relaxed);
                                 if let Ok(mut guard) = capture_slot.0.lock() {
                                     guard.frame = Some(frame);
                                 }
                                 capture_slot.1.notify_one();
                             }
-                            Err(e) => {
+                            FramePoll::Closed(reason) => break reason,
+                            FramePoll::Failed(e) => {
                                 failures += 1;
                                 if failures >= MAX_CAPTURE_FAILURES {
-                                    if let Ok(mut guard) = capture_slot.0.lock() {
-                                        guard.failed = Some(format!("screen capture keeps failing: {e}"));
-                                    }
-                                    capture_slot.1.notify_one();
-                                    return;
+                                    break format!("screen capture keeps failing: {e}");
                                 }
                                 std::thread::sleep(Duration::from_millis(33));
                             }
                         }
+                    };
+                    if let Ok(mut guard) = capture_slot.0.lock() {
+                        guard.failed = Some(reason);
                     }
+                    capture_slot.1.notify_one();
                 })
                 .ok(),
         );
@@ -491,71 +718,159 @@ impl ScreenSharer {
                 .name("screen-encode".into())
                 .spawn(move || {
                     let mut packetizer = ScreenPacketizer::new(config, channel_id, sender_peer_id);
-                    let interval = Duration::from_millis(1000 / u64::from(config.fps.max(1)));
+                    let mut target_fps = config.fps.max(1);
+                    let mut interval = Duration::from_secs_f64(1.0 / f64::from(target_fps));
                     let started = Instant::now();
+                    // Pacing by absolute deadlines, so the work of one tick does not shift the next.
+                    let mut next = Instant::now();
+                    let mut last_frame: Option<RawFrame> = None;
+                    let mut last_sent = Instant::now();
+                    let mut stats = StatsWindow::default();
+                    let mut stats_since = Instant::now();
+                    let mut log_since = Instant::now();
+                    // Encode times for the 60 to 30 FPS fallback (its own 3 second window).
+                    let mut fallback_total = Duration::ZERO;
+                    let mut fallback_frames = 0u32;
+                    let mut fallback_since = Instant::now();
                     let reason = loop {
                         if stop_flag.load(Ordering::Relaxed) {
                             return;
                         }
-                        let frame_start = Instant::now();
-                        let frame = {
+                        // Take the newest frame without blocking. Only before the first frame does the
+                        // loop wait for one.
+                        let fresh = {
                             let Ok(mut guard) = slot.0.lock() else {
                                 break "internal error".to_string();
                             };
-                            while guard.frame.is_none() && guard.failed.is_none() {
-                                if stop_flag.load(Ordering::Relaxed) {
-                                    return;
+                            if last_frame.is_none() {
+                                while guard.frame.is_none() && guard.failed.is_none() {
+                                    if stop_flag.load(Ordering::Relaxed) {
+                                        return;
+                                    }
+                                    guard = match slot.1.wait_timeout(guard, Duration::from_millis(100)) {
+                                        Ok((guard, _)) => guard,
+                                        Err(_) => return,
+                                    };
                                 }
-                                guard = match slot.1.wait_timeout(guard, Duration::from_millis(100)) {
-                                    Ok((guard, _)) => guard,
-                                    Err(_) => return,
-                                };
                             }
-                            match (guard.frame.take(), guard.failed.take()) {
-                                (Some(frame), _) => frame,
-                                (None, Some(reason)) => break reason,
-                                (None, None) => continue,
+                            match guard.frame.take() {
+                                Some(frame) => Some(frame),
+                                None => match guard.failed.take() {
+                                    Some(reason) => break reason,
+                                    None => None,
+                                },
                             }
                         };
-                        if key_flag.swap(false, Ordering::Relaxed) {
-                            packetizer.request_keyframe();
+                        let key_requested = key_flag.swap(false, Ordering::Relaxed);
+                        let send = fresh.is_some() || resend_last(key_requested, last_sent.elapsed());
+                        if let Some(frame) = fresh {
+                            last_frame = Some(frame);
                         }
-                        let Some(max_datagram) = connection.max_datagram_size() else {
-                            break "the connection does not support datagrams".to_string();
-                        };
-                        let timestamp = started.elapsed().as_millis() as u32;
-                        if loss_flag.swap(false, Ordering::Relaxed) {
-                            packetizer.report_loss(timestamp);
-                        }
-                        match packetizer.push_frame(&frame, timestamp, max_datagram) {
-                            Ok(OutgoingVideo::KeyFrame { header, data }) => {
-                                let connection = connection.clone();
-                                runtime.spawn(async move {
-                                    let _ = crate::session::send_keyframe_on(&connection, &header, &data).await;
-                                });
+                        let to_send = if send { last_frame.as_ref() } else { None };
+                        if let Some(frame) = to_send {
+                            if key_requested {
+                                packetizer.request_keyframe();
                             }
-                            Ok(OutgoingVideo::Delta(datagrams)) => {
-                                for datagram in datagrams {
-                                    if let Err(e) = connection.send_datagram(datagram) {
-                                        if connection.close_reason().is_some() {
-                                            break;
+                            let Some(max_datagram) = connection.max_datagram_size() else {
+                                break "the connection does not support datagrams".to_string();
+                            };
+                            let timestamp = started.elapsed().as_millis() as u32;
+                            if loss_flag.swap(false, Ordering::Relaxed) {
+                                packetizer.report_loss(timestamp);
+                            }
+                            let encode_start = Instant::now();
+                            let outcome = packetizer.push_frame(frame, timestamp, max_datagram);
+                            let encode_time = encode_start.elapsed();
+                            fallback_total += encode_time;
+                            fallback_frames += 1;
+                            match outcome {
+                                Ok(OutgoingVideo::KeyFrame { header, data }) => {
+                                    stats.sent_bytes += data.len();
+                                    stats.record_sent(encode_time);
+                                    last_sent = Instant::now();
+                                    let connection = connection.clone();
+                                    runtime.spawn(async move {
+                                        let _ = crate::session::send_keyframe_on(&connection, &header, &data).await;
+                                    });
+                                }
+                                Ok(OutgoingVideo::Delta(datagrams)) => {
+                                    last_sent = Instant::now();
+                                    let complete = datagrams.into_iter().all(|datagram| {
+                                        let payload_len = datagram.len() - MEDIA_HEADER_SIZE;
+                                        if let Err(e) = connection.send_datagram(datagram) {
+                                            if connection.close_reason().is_none() {
+                                                tracing::debug!("screen share datagram dropped: {e}");
+                                                packetizer.request_keyframe();
+                                            }
+                                            return false;
                                         }
-                                        // Congested or oversized: viewers need a new key frame.
-                                        tracing::debug!("screen share datagram dropped: {e}");
-                                        packetizer.request_keyframe();
-                                        break;
+                                        stats.sent_bytes += payload_len;
+                                        true
+                                    });
+                                    if complete {
+                                        stats.record_sent(encode_time);
                                     }
                                 }
+                                Ok(OutgoingVideo::Dropped) => {}
+                                Err(e) => break e.to_string(),
                             }
-                            Ok(OutgoingVideo::Dropped) => {}
-                            Err(e) => break e.to_string(),
                         }
                         if connection.close_reason().is_some() {
                             break "connection closed".to_string();
                         }
-                        if let Some(rest) = interval.checked_sub(frame_start.elapsed()) {
-                            std::thread::sleep(rest);
+
+                        // Fallback: a 60 FPS share whose encoder cannot keep up drops to 30 for good.
+                        let fallback_elapsed = fallback_since.elapsed();
+                        if fallback_elapsed >= Duration::from_secs(3) {
+                            let average = if fallback_frames > 0 {
+                                fallback_total / fallback_frames
+                            } else {
+                                Duration::ZERO
+                            };
+                            if should_fall_back(target_fps, average, fallback_elapsed) {
+                                target_fps = 30;
+                                interval = Duration::from_secs_f64(1.0 / f64::from(target_fps));
+                                packetizer.set_fps(target_fps);
+                                tracing::warn!(
+                                    "screen share: encoding takes {:.1} ms per frame, falling back to 30 fps",
+                                    average.as_secs_f32() * 1000.0
+                                );
+                                if let Some(on_fallback) = &hooks.on_fps_fallback {
+                                    on_fallback(target_fps);
+                                }
+                            }
+                            fallback_total = Duration::ZERO;
+                            fallback_frames = 0;
+                            fallback_since = Instant::now();
                         }
+
+                        // Statistics every two seconds; a log line every ten.
+                        let stats_elapsed = stats_since.elapsed();
+                        if stats_elapsed >= Duration::from_secs(2) {
+                            stats_since = Instant::now();
+                            let captured_now = captured.swap(0, Ordering::Relaxed);
+                            let snapshot = stats.take(captured_now, stats_elapsed, target_fps);
+                            if let Some(on_stats) = &hooks.on_stats {
+                                on_stats(snapshot);
+                            }
+                            if log_since.elapsed() >= Duration::from_secs(10) {
+                                log_since = Instant::now();
+                                tracing::info!(
+                                    "screen share: captured {:.0} fps, sent {:.0} fps, encode {:.1} ms, {} kbit/s",
+                                    snapshot.captured_fps,
+                                    snapshot.sent_fps,
+                                    snapshot.encode_ms,
+                                    snapshot.bitrate_kbps
+                                );
+                            }
+                        }
+
+                        next += interval;
+                        let now = Instant::now();
+                        if next < now {
+                            next = now;
+                        }
+                        std::thread::sleep(next.saturating_duration_since(now));
                     };
                     // Tell the capture thread to stop too, then report.
                     let ended_by_stop = stop_flag.swap(true, Ordering::Relaxed);
@@ -698,5 +1013,145 @@ impl ScreenAudioForwarder {
 impl Drop for ScreenAudioForwarder {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gradient(width: u32, height: u32) -> RawFrame {
+        let mut data = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                data.extend_from_slice(&[x as u8, y as u8, 0, 255]);
+            }
+        }
+        RawFrame::new(width, height, PixelFormat::Bgra, Bytes::from(data))
+    }
+
+    fn filled(width: u32, height: u32, format: PixelFormat, px: [u8; 4]) -> RawFrame {
+        let data: Vec<u8> = px.iter().copied().cycle().take((width * height * 4) as usize).collect();
+        RawFrame::new(width, height, format, Bytes::from(data))
+    }
+
+    #[test]
+    fn encoded_size_keeps_the_shape_within_the_limits() {
+        assert_eq!(share_size(2560, 1440, 60), (1920, 1080));
+        let (w, h) = share_size(3440, 1440, 60);
+        assert_eq!(w, 1920);
+        assert!(h % 2 == 0 && h <= 1080);
+        assert!((f64::from(w) / f64::from(h) - 3440.0 / 1440.0).abs() < 0.01);
+        assert_eq!(share_size(1920, 1080, 60), (1920, 1080));
+        assert_eq!(share_size(2560, 1440, 30), (2560, 1440));
+        assert_eq!(share_size(1921, 1081, 30), (1920, 1080));
+        assert!(encoded_size_within(10_000, 2, 1920, 1080).1 >= 2);
+    }
+
+    #[test]
+    fn size_limit_depends_on_the_frame_rate() {
+        assert_eq!(ShareConfig { fps: 60, bitrate_bps: None }.size_limit(), (MAX_WIDTH_60, MAX_HEIGHT_60));
+        assert_eq!(ShareConfig { fps: 30, bitrate_bps: None }.size_limit(), (MAX_WIDTH, MAX_HEIGHT));
+    }
+
+    #[test]
+    fn bitrate_follows_the_picture_and_the_frame_rate() {
+        assert_eq!(default_bitrate(1920, 1080, 30), 5_184_000);
+        assert_eq!(default_bitrate(1920, 1080, 60), 6_912_000);
+        assert_eq!(default_bitrate(3840, 2160, 30), 8_000_000);
+        assert_eq!(default_bitrate(640, 360, 60), 1_000_000);
+    }
+
+    #[test]
+    fn bgra_frame_of_the_same_size_is_borrowed() {
+        let frame = filled(8, 8, PixelFormat::Bgra, [1, 2, 3, 255]);
+        let out = fit_to_bgra(&frame, 8, 8);
+        assert!(matches!(out, Cow::Borrowed(_)));
+        assert_eq!(&out[..4], &[1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn rgba_frame_of_the_same_size_is_swapped_to_bgra() {
+        let frame = filled(8, 8, PixelFormat::Rgba, [200, 100, 50, 255]);
+        let out = fit_to_bgra(&frame, 8, 8);
+        assert!(matches!(out, Cow::Owned(_)));
+        assert_eq!(&out[..4], &[50, 100, 200, 255]);
+    }
+
+    #[test]
+    fn odd_size_is_cropped_to_the_even_size() {
+        let frame = gradient(9, 5);
+        let out = fit_to_bgra(&frame, 8, 4);
+        assert_eq!(out.len(), 8 * 4 * 4);
+        assert_eq!(&out[..4], &[0, 0, 0, 255]);
+        assert_eq!(&out[(3 * 8 + 7) * 4..][..4], &[7, 3, 0, 255]);
+    }
+
+    #[test]
+    fn downscaling_by_two_takes_every_second_pixel() {
+        let frame = gradient(8, 8);
+        let out = fit_to_bgra(&frame, 4, 4);
+        assert_eq!(out.len(), 4 * 4 * 4);
+        assert_eq!(&out[..4], &[0, 0, 0, 255]);
+        assert_eq!(&out[(4 + 1) * 4..][..4], &[2, 2, 0, 255]);
+    }
+
+    #[test]
+    fn resend_only_when_asked_or_after_a_second() {
+        assert!(!resend_last(false, Duration::from_millis(500)));
+        assert!(resend_last(true, Duration::ZERO));
+        assert!(resend_last(false, Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn falls_back_only_for_a_slow_60_fps_share_over_three_seconds() {
+        let slow = Duration::from_millis(16);
+        let window = Duration::from_secs(3);
+        assert!(should_fall_back(60, slow, window));
+        assert!(!should_fall_back(30, slow, window), "already at 30");
+        assert!(!should_fall_back(60, Duration::from_millis(15), window), "not slower than 15 ms");
+        assert!(!should_fall_back(60, slow, Duration::from_secs(2)), "window too short");
+    }
+
+    #[test]
+    fn stats_count_sent_frames_per_second() {
+        let mut window = StatsWindow::default();
+        for _ in 0..60 {
+            window.sent_bytes += 1_000;
+            window.record_sent(Duration::from_millis(5));
+        }
+        let stats = window.take(60, Duration::from_secs(2), 30);
+        assert_eq!(stats.sent_fps, 30.0);
+        assert_eq!(stats.captured_fps, 30.0);
+        assert!((stats.encode_ms - 5.0).abs() < 0.01);
+        assert_eq!(stats.bitrate_kbps, 240);
+        assert_eq!(window.take(0, Duration::from_secs(2), 30).bitrate_kbps, 0);
+        assert_eq!(stats.target_fps, 30);
+    }
+
+    #[test]
+    fn stats_without_frames_are_zero_and_the_window_restarts() {
+        let mut window = StatsWindow::default();
+        let stats = window.take(0, Duration::ZERO, 60);
+        assert_eq!(stats.encode_ms, 0.0);
+        assert_eq!(stats.sent_fps, 0.0);
+        assert_eq!(stats.captured_fps, 0.0);
+        assert_eq!(stats.bitrate_kbps, 0);
+        assert_eq!(window.take(0, Duration::from_secs(1), 60).sent_fps, 0.0);
+    }
+
+    #[test]
+    fn a_share_that_falls_back_to_30_keeps_its_size_and_uses_the_30_fps_bitrate() {
+        let mut p = ScreenPacketizer::new(ShareConfig { fps: 60, bitrate_bps: None }, 1, 2);
+        let frame = RawFrame::new(2560, 1440, PixelFormat::Bgra, Bytes::from(vec![0u8; 2560 * 1440 * 4]));
+        p.push_frame(&frame, 0, 1200).unwrap();
+        assert_eq!(p.dimensions(), Some((1920, 1080)));
+        assert_eq!(p.bitrate_bps(), Some(6_912_000));
+
+        p.set_fps(30);
+        let out = p.push_frame(&frame, 33, 1200).unwrap();
+        assert!(matches!(out, OutgoingVideo::KeyFrame { .. }));
+        assert_eq!(p.dimensions(), Some((1920, 1080)));
+        assert_eq!(p.bitrate_bps(), Some(5_184_000));
     }
 }

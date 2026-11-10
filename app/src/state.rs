@@ -15,12 +15,6 @@ use finch_client_core::screen::{ScreenAudioForwarder, ScreenSharer, ScreenViewer
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex, RwLock};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VideoChunkPayload {
-    pub is_key: bool,
-    pub data: Vec<u8>,
-}
-
 /// Audio devices the user picked; `None` means the system default.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AudioDeviceSelection {
@@ -200,7 +194,7 @@ pub struct AppState {
     /// Pending TOFU fingerprint to be accepted: (hostname, fingerprint)
     pub pending_fingerprint: Arc<RwLock<Option<(String, String)>>>,
     /// Screen video channel to WebCodecs in Webview
-    pub video_channel: Arc<RwLock<Option<tauri::ipc::Channel<VideoChunkPayload>>>>,
+    pub video_channel: Arc<RwLock<Option<tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>>>>,
     pub audio_engine: Arc<Mutex<crate::audio_engine::AudioEngine>>,
     /// Read by the audio worker thread when it opens devices, hence a std lock.
     pub audio_devices: Arc<std::sync::RwLock<AudioDeviceSelection>>,

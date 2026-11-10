@@ -80,9 +80,23 @@ jobs:
         # Keep wall-clock media checks independent of CPU-heavy signal metrics.
         run: cargo test --workspace --locked -- --test-threads=1
 
+      - name: Check NASM for the screen encoder
+        shell: pwsh
+        run: nasm -v
+
       - name: Installer
         working-directory: app
         run: ./frontend/node_modules/.bin/tauri build --bundles nsis
+
+      - name: Verify OpenH264 x64 assembly
+        shell: pwsh
+        run: |
+          $codecBuilds = Get-ChildItem -Path target/release/build -Directory -Filter 'openh264-sys2-*'
+          $optimized = $codecBuilds | Where-Object {
+            (Test-Path (Join-Path $_.FullName 'out/cpuid.o')) -and
+            (Test-Path (Join-Path $_.FullName 'out/coeff.o'))
+          }
+          if (!$optimized) { throw 'OpenH264 was built without the expected NASM objects' }
 
       - name: Server package
         shell: pwsh
@@ -130,7 +144,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/test-client-runtime.ps1 -Executable target/release/finch-app.exe
-          ./scripts/test-client-install.ps1 -PreviousVersion 1.4.0
+          ./scripts/test-client-install.ps1 -PreviousVersion 1.4.1
 
       - uses: actions/upload-artifact@v4
         with:

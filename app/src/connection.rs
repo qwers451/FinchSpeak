@@ -18,7 +18,7 @@ use tauri::Emitter;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use crate::state::{AppState, VideoChunkPayload};
+use crate::state::AppState;
 
 /// How long a quit may take in total; the app exits after this whatever the network does.
 const QUIT_BOUND: Duration = Duration::from_millis(1500);
@@ -590,9 +590,17 @@ fn is_watching(state: &AppState, header: &MediaHeader) -> bool {
     peer != 0 && header.sender_peer_id == peer
 }
 
+/// One raw binary IPC message: byte 0 is the flags (bit 0 = key frame), the rest is the access unit.
+fn video_message(is_key: bool, data: &[u8]) -> Vec<u8> {
+    let mut message = Vec::with_capacity(data.len() + 1);
+    message.push(u8::from(is_key));
+    message.extend_from_slice(data);
+    message
+}
+
 async fn send_video(state: &AppState, is_key: bool, data: Bytes) {
     if let Some(channel) = &*state.video_channel.read().await {
-        let _ = channel.send(VideoChunkPayload { is_key, data: data.to_vec() });
+        let _ = channel.send(tauri::ipc::InvokeResponseBody::Raw(video_message(is_key, &data)));
     }
 }
 
@@ -656,6 +664,14 @@ pub fn spawn_sleep_watch(state: AppState) {
 mod tests {
     use super::*;
     use finch_protocol::models::{ShareEndReason, VideoCodec};
+
+    #[test]
+    fn video_message_flags_and_payload() {
+        assert_eq!(video_message(true, &[0xAA, 0x00, 0xFF]), vec![1, 0xAA, 0x00, 0xFF]);
+        assert_eq!(video_message(false, &[0x01, 0x02]), vec![0, 0x01, 0x02]);
+        assert_eq!(video_message(true, &[]), vec![1]);
+        assert_eq!(video_message(false, &[]), vec![0]);
+    }
     use finch_testbed::{client::TestClient, server::TestServer};
 
     #[test]
