@@ -456,6 +456,8 @@ pub enum FramePoll {
     /// Nothing new since the last call (a still screen); not a failure.
     Idle,
     Failed(String),
+    /// The source ended permanently, for example when a WGC target closes.
+    Closed(String),
 }
 
 pub trait FrameSource: Send + 'static {
@@ -477,6 +479,7 @@ pub struct ShareStats {
     pub sent_fps: f32,
     /// Average time to fit, convert and encode one frame.
     pub encode_ms: f32,
+    /// Video payload queued for transmission, in kilobits per second.
     pub bitrate_kbps: u32,
     /// The frame rate the share is paced to now (30 after a fallback from 60).
     pub target_fps: u8,
@@ -493,6 +496,7 @@ pub struct ShareHooks {
 #[derive(Debug, Default)]
 struct StatsWindow {
     sent: u32,
+    sent_bytes: usize,
     encode_total: Duration,
 }
 
@@ -503,7 +507,7 @@ impl StatsWindow {
     }
 
     /// Turn the window into stats and start a new window.
-    fn take(&mut self, captured: u32, elapsed: Duration, bitrate_bps: Option<u32>, target_fps: u8) -> ShareStats {
+    fn take(&mut self, captured: u32, elapsed: Duration, target_fps: u8) -> ShareStats {
         let secs = elapsed.as_secs_f32();
         let per_second = |count: u32| if secs > 0.0 { count as f32 / secs } else { 0.0 };
         let encode_ms = if self.sent > 0 {
@@ -515,7 +519,11 @@ impl StatsWindow {
             captured_fps: per_second(captured),
             sent_fps: per_second(self.sent),
             encode_ms,
-            bitrate_kbps: bitrate_bps.map_or(0, |bps| bps / 1000),
+            bitrate_kbps: if secs > 0.0 {
+                (self.sent_bytes as f32 * 8.0 / secs / 1000.0).round() as u32
+            } else {
+                0
+            },
             target_fps,
         };
         *self = Self::default();
@@ -544,7 +552,12 @@ impl FrameSource for WindowSource {
 /// Captures a monitor or a window through a Windows Graphics Capture session: frames arrive as
 /// the picture changes, so a still screen (or a minimized window) is idle, not failing.
 #[cfg(windows)]
-pub struct WgcSource(finch_screen::WgcCapture);
+pub struct WgcSource {
+    capture: finch_screen::WgcCapture,
+    /// The frame `next_frame` handed out to measure the picture: the share starts with it, because a
+    /// still screen sends no second one.
+    primed: Option<RawFrame>,
+}
 
 #[cfg(windows)]
 impl WgcSource {
@@ -554,24 +567,34 @@ impl WgcSource {
     const POLL: Duration = Duration::from_millis(100);
 
     pub fn monitor(id: u32) -> Result<Self, String> {
-        finch_screen::WgcCapture::start(finch_screen::WgcTarget::Monitor(id)).map(Self).map_err(|e| e.to_string())
+        Self::start(finch_screen::WgcTarget::Monitor(id))
     }
 
     pub fn window(id: u32) -> Result<Self, String> {
-        finch_screen::WgcCapture::start(finch_screen::WgcTarget::Window(id)).map(Self).map_err(|e| e.to_string())
+        Self::start(finch_screen::WgcTarget::Window(id))
+    }
+
+    fn start(target: finch_screen::WgcTarget) -> Result<Self, String> {
+        let capture = finch_screen::WgcCapture::start(target).map_err(|e| e.to_string())?;
+        Ok(Self { capture, primed: None })
     }
 }
 
 #[cfg(windows)]
 impl FrameSource for WgcSource {
     fn next_frame(&mut self) -> Result<RawFrame, String> {
-        self.0.take_frame(Self::FIRST_FRAME).ok_or_else(|| "Windows Graphics Capture delivered no picture".to_string())
+        let frame = self.capture.take_frame(Self::FIRST_FRAME).ok_or_else(|| "Windows Graphics Capture delivered no picture".to_string())?;
+        self.primed = Some(frame.clone());
+        Ok(frame)
     }
 
     fn poll_frame(&mut self) -> FramePoll {
-        match self.0.take_frame(Self::POLL) {
+        if let Some(frame) = self.primed.take() {
+            return FramePoll::Frame(frame);
+        }
+        match self.capture.take_frame(Self::POLL) {
             Some(frame) => FramePoll::Frame(frame),
-            None if self.0.is_closed() => FramePoll::Failed("the shared screen or window is gone".to_string()),
+            None if self.capture.is_closed() => FramePoll::Closed("the shared screen or window is gone".to_string()),
             None => FramePoll::Idle,
         }
     }
@@ -654,7 +677,10 @@ impl ScreenSharer {
                 .name("screen-capture".into())
                 .spawn(move || {
                     let mut failures = 0u32;
-                    while !capture_stop.load(Ordering::Relaxed) {
+                    let reason = loop {
+                        if capture_stop.load(Ordering::Relaxed) {
+                            return;
+                        }
                         match source.poll_frame() {
                             FramePoll::Idle => {
                                 // Nothing new (a still screen): the source has waited already, and this is no failure.
@@ -667,19 +693,20 @@ impl ScreenSharer {
                                 }
                                 capture_slot.1.notify_one();
                             }
+                            FramePoll::Closed(reason) => break reason,
                             FramePoll::Failed(e) => {
                                 failures += 1;
                                 if failures >= MAX_CAPTURE_FAILURES {
-                                    if let Ok(mut guard) = capture_slot.0.lock() {
-                                        guard.failed = Some(format!("screen capture keeps failing: {e}"));
-                                    }
-                                    capture_slot.1.notify_one();
-                                    return;
+                                    break format!("screen capture keeps failing: {e}");
                                 }
                                 std::thread::sleep(Duration::from_millis(33));
                             }
                         }
+                    };
+                    if let Ok(mut guard) = capture_slot.0.lock() {
+                        guard.failed = Some(reason);
                     }
+                    capture_slot.1.notify_one();
                 })
                 .ok(),
         );
@@ -758,6 +785,7 @@ impl ScreenSharer {
                             fallback_frames += 1;
                             match outcome {
                                 Ok(OutgoingVideo::KeyFrame { header, data }) => {
+                                    stats.sent_bytes += data.len();
                                     stats.record_sent(encode_time);
                                     last_sent = Instant::now();
                                     let connection = connection.clone();
@@ -766,18 +794,21 @@ impl ScreenSharer {
                                     });
                                 }
                                 Ok(OutgoingVideo::Delta(datagrams)) => {
-                                    stats.record_sent(encode_time);
                                     last_sent = Instant::now();
-                                    for datagram in datagrams {
+                                    let complete = datagrams.into_iter().all(|datagram| {
+                                        let payload_len = datagram.len() - MEDIA_HEADER_SIZE;
                                         if let Err(e) = connection.send_datagram(datagram) {
-                                            if connection.close_reason().is_some() {
-                                                break;
+                                            if connection.close_reason().is_none() {
+                                                tracing::debug!("screen share datagram dropped: {e}");
+                                                packetizer.request_keyframe();
                                             }
-                                            // Congested or oversized: viewers need a new key frame.
-                                            tracing::debug!("screen share datagram dropped: {e}");
-                                            packetizer.request_keyframe();
-                                            break;
+                                            return false;
                                         }
+                                        stats.sent_bytes += payload_len;
+                                        true
+                                    });
+                                    if complete {
+                                        stats.record_sent(encode_time);
                                     }
                                 }
                                 Ok(OutgoingVideo::Dropped) => {}
@@ -818,7 +849,7 @@ impl ScreenSharer {
                         if stats_elapsed >= Duration::from_secs(2) {
                             stats_since = Instant::now();
                             let captured_now = captured.swap(0, Ordering::Relaxed);
-                            let snapshot = stats.take(captured_now, stats_elapsed, packetizer.bitrate_bps(), target_fps);
+                            let snapshot = stats.take(captured_now, stats_elapsed, target_fps);
                             if let Some(on_stats) = &hooks.on_stats {
                                 on_stats(snapshot);
                             }
@@ -1086,25 +1117,27 @@ mod tests {
     fn stats_count_sent_frames_per_second() {
         let mut window = StatsWindow::default();
         for _ in 0..60 {
+            window.sent_bytes += 1_000;
             window.record_sent(Duration::from_millis(5));
         }
-        let stats = window.take(60, Duration::from_secs(2), Some(4_000_000), 30);
+        let stats = window.take(60, Duration::from_secs(2), 30);
         assert_eq!(stats.sent_fps, 30.0);
         assert_eq!(stats.captured_fps, 30.0);
         assert!((stats.encode_ms - 5.0).abs() < 0.01);
-        assert_eq!(stats.bitrate_kbps, 4_000);
+        assert_eq!(stats.bitrate_kbps, 240);
+        assert_eq!(window.take(0, Duration::from_secs(2), 30).bitrate_kbps, 0);
         assert_eq!(stats.target_fps, 30);
     }
 
     #[test]
     fn stats_without_frames_are_zero_and_the_window_restarts() {
         let mut window = StatsWindow::default();
-        let stats = window.take(0, Duration::ZERO, None, 60);
+        let stats = window.take(0, Duration::ZERO, 60);
         assert_eq!(stats.encode_ms, 0.0);
         assert_eq!(stats.sent_fps, 0.0);
         assert_eq!(stats.captured_fps, 0.0);
         assert_eq!(stats.bitrate_kbps, 0);
-        assert_eq!(window.take(0, Duration::from_secs(1), None, 60).sent_fps, 0.0);
+        assert_eq!(window.take(0, Duration::from_secs(1), 60).sent_fps, 0.0);
     }
 
     #[test]

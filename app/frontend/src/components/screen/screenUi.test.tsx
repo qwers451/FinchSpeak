@@ -6,7 +6,8 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: core.invoke, Channel: class { o
 
 import { api } from '../../services/api';
 import { setCurrentUser } from '../../stores/authStore';
-import { setScreenAudioSource, endedShare, setEndedShare, setIsSharing, setScreenSources, setSharingInfo, setWatching } from '../../stores/screenState';
+import { setScreenAudioSource, endedShare, setEndedShare, setIsSharing, setScreenSources, setSharingInfo, setShareStats, setWatching } from '../../stores/screenState';
+import { formatBitrate } from '../../i18n';
 import { resetSessionState, setConnectionStatus, setKnownUsers } from '../../stores/sessionStore';
 import { setVoiceParticipants } from '../../stores/voiceStore';
 import { setVolumes } from '../../stores/volumeStore';
@@ -50,6 +51,7 @@ beforeEach(() => {
   setEndedShare(null);
   setIsSharing(false);
   setSharingInfo(null);
+  setShareStats(null);
   setVoiceParticipants([{ user_id: 'carol', peer_id: 5, username: 'Carol', channel_id: 'room' }]);
   vi.spyOn(api, 'listScreenSources').mockResolvedValue(sources);
   vi.spyOn(api, 'captureThumbnail').mockResolvedValue(new Uint8Array([0xff, 0xd8, 0xff]).buffer as ArrayBuffer);
@@ -95,7 +97,7 @@ it('the Windows tab lists windows with their app, and starting shares exactly th
   button('Start sharing').click();
   await flush();
   await flush();
-  expect(start).toHaveBeenCalledWith('window', 9, false, 'system');
+  expect(start).toHaveBeenCalledWith('window', 9, false, 'system', 30);
   expect(closed).toHaveBeenCalled();
 });
 
@@ -111,7 +113,7 @@ it('unsupported Windows warns that viewers hear themselves, and sound is passed 
   button('Start sharing').click();
   await flush();
   await flush();
-  expect(start).toHaveBeenCalledWith('monitor', 1, true, 'system');
+  expect(start).toHaveBeenCalledWith('monitor', 1, true, 'system', 30);
 });
 
 it('a capture that fails stays in the dialog with the reason, and Cancel does not share anything', async () => {
@@ -139,12 +141,54 @@ it('says so when there is nothing to share', async () => {
   expect(button('Start sharing').disabled).toBe(true);
 });
 
+const fpsButton = (value: string) =>
+  Array.from(document.querySelectorAll<HTMLButtonElement>('[aria-label="Frame rate"] button')).find((b) => b.textContent === value) as HTMLButtonElement;
+
+it('shares at 30 FPS by default, and a chosen 60 is sent and remembered', async () => {
+  const start = vi.spyOn(api, 'startScreenShare').mockResolvedValue();
+  mount(() => <SharePickerModal open onClose={() => {}} />);
+  await flush();
+  button('Start sharing').click();
+  await flush();
+  await flush();
+  expect(start).toHaveBeenLastCalledWith('monitor', 1, false, 'system', 30);
+  fpsButton('60').click();
+  await flush();
+  button('Start sharing').click();
+  await flush();
+  await flush();
+  expect(start).toHaveBeenLastCalledWith('monitor', 1, false, 'system', 60);
+  expect(localStorage.getItem('finchspeak.shareFps')).toBe('60');
+});
+
+it('a saved 60 is preselected, and the 1080p note is shown only for 60', async () => {
+  localStorage.setItem('finchspeak.shareFps', '60');
+  mount(() => <SharePickerModal open onClose={() => {}} />);
+  await flush();
+  expect(fpsButton('60').getAttribute('aria-pressed')).toBe('true');
+  expect(fpsButton('30').getAttribute('aria-pressed')).toBe('false');
+  expect(document.body.textContent).toContain('The picture is limited to 1080p.');
+  fpsButton('30').click();
+  await flush();
+  expect(fpsButton('30').getAttribute('aria-pressed')).toBe('true');
+  expect(document.body.textContent).not.toContain('The picture is limited to 1080p.');
+});
+
+it('the sharer plate shows the set frame rate, then the measured rate and bitrate', async () => {
+  setSharingInfo({ label: 'DISPLAY1', audio: false, fps: 60 });
+  mount(() => <SharerPill />);
+  expect(document.body.textContent).toContain('Without sound · 60 fps');
+  setShareStats({ sent_fps: 58.4, captured_fps: 60, encode_ms: 9, bitrate_kbps: 6900, target_fps: 60 });
+  await flush();
+  expect(document.body.textContent).toContain('Without sound · 58 fps · ' + formatBitrate(6900));
+});
+
 // ---- sharer plate (E2)
 
 it('while you share, a plate says what and offers to stop', async () => {
   const stop = vi.spyOn(api, 'stopScreenShare').mockResolvedValue();
   setIsSharing(true);
-  setSharingInfo({ label: 'DISPLAY1', audio: true });
+  setSharingInfo({ label: 'DISPLAY1', audio: true, fps: 30 });
   const host = mount(() => <SharerPill />);
   expect(host.textContent).toContain('You are sharing DISPLAY1');
   expect(host.textContent).toContain('With system sound');
@@ -238,7 +282,7 @@ it('process loopback shares sound without an amber warning', async () => {
 });
 
 it('warns about runtime device fallback while the share is active', () => {
-  setSharingInfo({ label: 'DISPLAY1', audio: true });
+  setSharingInfo({ label: 'DISPLAY1', audio: true, fps: 30 });
   setScreenAudioSource('device');
   mount(() => <SharerPill />);
   expect(document.querySelector('.auth-banner.amber')?.textContent).toContain('people in the room will hear themselves with a delay');
@@ -265,7 +309,7 @@ it('offers window sound only for a supported window and sends the selected scope
   expect(document.body.textContent).not.toContain('Everything your computer plays goes out with the picture');
   button('Start sharing').click();
   await flush();
-  expect(start).toHaveBeenCalledWith('window', 9, true, 'window');
+  expect(start).toHaveBeenCalledWith('window', 9, true, 'window', 30);
 });
 
 it('does not offer window scope on unsupported Windows', async () => {

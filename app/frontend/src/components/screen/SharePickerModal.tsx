@@ -10,6 +10,17 @@ export const monitorName = (name: string) => name.replace(/^\\\\\.\\/, '');
 
 type Picked = { kind: 'monitor' | 'window'; id: number; label: string };
 
+const FPS_KEY = 'finchspeak.shareFps';
+
+/** The frame rate the sharer chose last time; 30 unless 60 was saved. */
+function savedFps(): 30 | 60 {
+  try {
+    return localStorage.getItem(FPS_KEY) === '60' ? 60 : 30;
+  } catch {
+    return 30;
+  }
+}
+
 /** How often a visible tile gets a fresh picture. */
 const PREVIEW_REFRESH_MS = 1000;
 
@@ -63,6 +74,15 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
   const [starting, setStarting] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
+  const [fps, setFps] = createSignal<30 | 60>(savedFps());
+  const chooseFps = (value: 30 | 60) => {
+    setFps(value);
+    try {
+      localStorage.setItem(FPS_KEY, String(value));
+    } catch {
+      // Remembering the choice is a convenience; sharing works without it.
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -90,7 +110,7 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
     if (!choice || starting()) return;
     setStarting(true);
     setError(null);
-    const failure = await startSharing(choice.kind, choice.id, withAudio(), choice.label, choice.kind === 'window' && excludesSelf() ? audioScope() : 'system');
+    const failure = await startSharing(choice.kind, choice.id, withAudio(), choice.label, choice.kind === 'window' && excludesSelf() ? audioScope() : 'system', fps());
     setStarting(false);
     if (failure) setError(failure);
     else props.onClose();
@@ -166,6 +186,16 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
         </div>
 
         <div class="setrow">
+          <strong class="fs13">{t('Frame rate')}</strong>
+          <div class="tabs" role="group" aria-label={t('Frame rate')}>
+            <button type="button" class={`tab${fps() === 30 ? ' on' : ''}`} aria-pressed={fps() === 30} onClick={() => chooseFps(30)}>30</button>
+            <button type="button" class={`tab${fps() === 60 ? ' on' : ''}`} aria-pressed={fps() === 60} onClick={() => chooseFps(60)}>60</button>
+          </div>
+        </div>
+        <Show when={fps() === 60}>
+          <span class="t3 fs12">{t('Smoother, but needs a faster computer and connection. The picture is limited to 1080p.')}</span>
+        </Show>
+        <div class="setrow">
           <div class="col grow">
             <strong class="fs13">{t('Share system sound too')}</strong>
             <span class="t3 fs12">{withAudio() && picked()?.kind === 'window' && excludesSelf() && audioScope() === 'window' ? t('Only this window') : excludesSelf() ? t('Everything your computer plays goes out with the picture, except voices from FinchSpeak.') : t('Everything your speakers play goes out with the picture.')}</span>
@@ -187,7 +217,7 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
             <span class="fs13">{t("This version of Windows cannot leave FinchSpeak out of the sound: people in the room will hear themselves with a delay. Update to Windows 10 2004 or newer.")}</span>
           </div>
         </Show>
-        <span class="t3 fs12">{t('30 frames per second; pictures larger than 4K are scaled down before they are sent.')}</span>
+        <span class="t3 fs12">{t('Pictures larger than 4K are scaled down before they are sent.')}</span>
 
         <div class="row g8" style={{ 'justify-content': 'flex-end' }}>
           <Button variant="secondary" onClick={props.onClose}>{t('Cancel')}</Button>

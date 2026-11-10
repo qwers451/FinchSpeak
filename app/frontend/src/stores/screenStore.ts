@@ -2,7 +2,8 @@ import { api } from '../services/api';
 import type { SessionEvents } from '../types';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
-import { screenShareGeneration, setScreenShareGeneration, lastEndedScreenShareGeneration, setLastEndedScreenShareGeneration, endLocalScreenShare, screenShareEpoch, setScreenAudioSource, endedShare, isSharing, resetScreenState, setEndedShare, setIsSharing, setScreenSources, setSharingInfo, setWatching, sharingInfo, watching } from './screenState';
+import { screenShareGeneration, setScreenShareGeneration, lastEndedScreenShareGeneration, setLastEndedScreenShareGeneration, endLocalScreenShare, screenShareEpoch, setScreenAudioSource, endedShare, isSharing, resetScreenState, setEndedShare, setIsSharing, setScreenSources, setSharingInfo, setShareStats, setWatching, sharingInfo, watching } from './screenState';
+import { pushToast } from '../ui/toastStore';
 import { allVoiceParticipants, setVoiceParticipants } from './voiceStore';
 import { endReasonFromServer } from '../components/screen/viewerState';
 import { describeError } from '../i18n/errors';
@@ -20,15 +21,15 @@ export async function loadScreenSources() {
 }
 
 /** Start sharing; returns the reason when it did not work (the picker shows it), else `null`. */
-export async function startSharing(kind: 'monitor' | 'window', id: number, withAudio = false, label = '', audioScope: 'system' | 'window' = 'system'): Promise<string | null> {
+export async function startSharing(kind: 'monitor' | 'window', id: number, withAudio = false, label = '', audioScope: 'system' | 'window' = 'system', fps: 30 | 60 = 30): Promise<string | null> {
   const epoch = screenShareEpoch();
   setScreenAudioSource(null);
   try {
-    const generation = await api.startScreenShare(kind, id, withAudio, audioScope);
+    const generation = await api.startScreenShare(kind, id, withAudio, audioScope, fps);
     if (screenShareEpoch() !== epoch || (typeof generation === 'number' && generation <= lastEndedScreenShareGeneration())) return t('Screen sharing stopped before it could start.');
     setScreenShareGeneration(typeof generation === 'number' ? generation : null);
     setIsSharing(true);
-    setSharingInfo({ label, audio: withAudio });
+    setSharingInfo({ label, audio: withAudio, fps });
     return null;
   } catch (err) {
     const reason = String(err).replace(/^Error:\s*/, '');
@@ -93,8 +94,15 @@ const markSharing = (peerId: number, sharing: boolean) =>
   setVoiceParticipants((previous) => previous.map((participant) =>
     participant.peer_id === peerId ? { ...participant, is_sharing: sharing } : participant));
 
+function showFpsFallback(fps: number) {
+  const info = sharingInfo();
+  if (fps !== 30 || info?.fps !== 60) return;
+  setSharingInfo({ ...info, fps });
+  pushToast({ kind: 'warn', title: t('Switched to 30 FPS'), text: t('This computer cannot encode 60 frames per second in time.') });
+}
+
 export const screenHandlers: Pick<{ [K in keyof SessionEvents]: (payload: SessionEvents[K]) => void },
-  'screen-share-started' | 'screen-share-stopped' | 'screen-share-ended' | 'screen-audio-failed' | 'screen-audio-source'> = {
+  'screen-share-started' | 'screen-share-stopped' | 'screen-share-ended' | 'screen-audio-failed' | 'screen-audio-source' | 'screen-share-stats' | 'screen-share-fps-fallback'> = {
   'screen-share-started': (data) => {
     markSharing(data.peer_id, true);
     // The share we watch restarted under a new peer id: it is not followed, watching ends.
@@ -106,6 +114,15 @@ export const screenHandlers: Pick<{ [K in keyof SessionEvents]: (payload: Sessio
     markSharing(data.peer_id, false);
   },
   'screen-audio-source': (data) => setScreenAudioSource(data.source),
+  'screen-share-stats': ({ generation, ...stats }) => {
+    if (generation !== screenShareGeneration()) return;
+    setShareStats(stats);
+    // The fallback event can arrive before a slow start command has returned its generation.
+    showFpsFallback(stats.target_fps);
+  },
+  'screen-share-fps-fallback': ({ generation, fps }) => {
+    if (generation === screenShareGeneration()) showFpsFallback(fps);
+  },
   'screen-audio-failed': (reason) => setAppError(reason === 'window-audio-unavailable'
     ? t('Screen sound is not shared: the selected window is no longer available.')
     : t('Screen sound is not shared: {reason}', { reason })),

@@ -1,11 +1,8 @@
 name: Encoder bench
 
-# Measures OpenH264 with and without NASM (SIMD) on the same runner. Manual, or on a change to the bench.
+# Measures OpenH264 with and without NASM (SIMD) on the same runner. Run it by hand.
 on:
   workflow_dispatch:
-  push:
-    branches: ['feat/stream-quality']
-    paths: ['.github/workflows/encoder-bench.yml', 'crates/finch-screen/examples/encode_bench.rs']
 
 jobs:
   bench:

@@ -80,6 +80,10 @@ jobs:
         # Keep wall-clock media checks independent of CPU-heavy signal metrics.
         run: cargo test --workspace --locked -- --test-threads=1
 
+      - name: Check NASM for the screen encoder
+        shell: pwsh
+        run: nasm -v
+
       - name: Installer
         working-directory: app
         run: ./frontend/node_modules/.bin/tauri build --bundles nsis
@@ -130,7 +134,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/test-client-runtime.ps1 -Executable target/release/finch-app.exe
-          ./scripts/test-client-install.ps1 -PreviousVersion 1.4.0
+          ./scripts/test-client-install.ps1 -PreviousVersion 1.4.1
 
       - uses: actions/upload-artifact@v4
         with:

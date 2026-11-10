@@ -3,12 +3,15 @@ import { t } from '../i18n';
 import { api } from '../services/api';
 import { appError, setAppError } from './notificationStore';
 import { endedShare, screenAudioSource, isSharing, loadScreenSources, screenAudioKey, screenSources, sharingInfo, startSharing, stopSharing, stopWatching, watchShare, watching } from './screenStore';
+import { shareStats } from './screenState';
 import { sessionHandlers, resetSessionState } from './sessionStore';
 import { allVoiceParticipants, setVoiceParticipants } from './voiceStore';
+import { clearToasts, toasts } from '../ui/toastStore';
 
 beforeEach(() => {
   vi.restoreAllMocks();
   resetSessionState();
+  clearToasts();
   setAppError(null);
   setVoiceParticipants([
     { user_id: 'alice', peer_id: 20, username: 'alice', channel_id: 'room' },
@@ -32,7 +35,7 @@ it('AUD-018 marks us as sharing only when the backend accepted the share', async
   vi.spyOn(api, 'startScreenShare').mockResolvedValue();
   expect(await startSharing('monitor', 1, true, 'DISPLAY1')).toBeNull();
   expect(isSharing()).toBe(true);
-  expect(sharingInfo()).toEqual({ label: 'DISPLAY1', audio: true });
+  expect(sharingInfo()).toEqual({ label: 'DISPLAY1', audio: true, fps: 30 });
 
   const stop = vi.spyOn(api, 'stopScreenShare').mockResolvedValue();
   await stopSharing();
@@ -165,9 +168,9 @@ it('AUD-018 the snapshot tells a late joiner who is already sharing', () => {
 it('AUD-018 the screen sound is requested only when asked for, and failures are shown', async () => {
   const start = vi.spyOn(api, 'startScreenShare').mockResolvedValue();
   await startSharing('monitor', 1);
-  expect(start).toHaveBeenLastCalledWith('monitor', 1, false, 'system');
+  expect(start).toHaveBeenLastCalledWith('monitor', 1, false, 'system', 30);
   await startSharing('monitor', 1, true);
-  expect(start).toHaveBeenLastCalledWith('monitor', 1, true, 'system');
+  expect(start).toHaveBeenLastCalledWith('monitor', 1, true, 'system', 30);
   sessionHandlers['screen-audio-failed']('no output device');
   expect(appError()).toContain('no output device');
 });
@@ -249,4 +252,32 @@ it('a room-changed end of our current share stops it without an error message', 
   expect(isSharing()).toBe(false);
   expect(sharingInfo()).toBeNull();
   expect(appError()).toBeNull();
+});
+
+it('a 60 FPS share that the computer cannot keep up with falls back to 30 and says so', async () => {
+  const start = vi.spyOn(api, 'startScreenShare').mockResolvedValue(10);
+  await startSharing('monitor', 1, false, 'DISPLAY1', 'system', 60);
+  expect(start).toHaveBeenLastCalledWith('monitor', 1, false, 'system', 60);
+  expect(sharingInfo()?.fps).toBe(60);
+  sessionHandlers['screen-share-fps-fallback']({ generation: 10, fps: 30 });
+  expect(sharingInfo()?.fps).toBe(30);
+  expect(toasts().some((toast) => toast.title === t('Switched to 30 FPS'))).toBe(true);
+});
+
+it('the live statistics of our share are kept, and stopping the share clears them', async () => {
+  vi.spyOn(api, 'startScreenShare').mockResolvedValue(10);
+  await startSharing('monitor', 1, false, 'DISPLAY1', 'system', 60);
+  sessionHandlers['screen-share-stats']({ generation: 10, captured_fps: 60, sent_fps: 58.4, encode_ms: 9, bitrate_kbps: 6900, target_fps: 60 });
+  expect(shareStats()).toEqual({ captured_fps: 60, sent_fps: 58.4, encode_ms: 9, bitrate_kbps: 6900, target_fps: 60 });
+  vi.spyOn(api, 'stopScreenShare').mockResolvedValue();
+  await stopSharing();
+  expect(shareStats()).toBeNull();
+
+  vi.spyOn(api, 'startScreenShare').mockResolvedValue(20);
+  await startSharing('monitor', 1, false, 'New display', 'system', 60);
+  sessionHandlers['screen-share-stats']({ generation: 10, captured_fps: 60, sent_fps: 58.4, encode_ms: 9, bitrate_kbps: 6900, target_fps: 60 });
+  sessionHandlers['screen-share-fps-fallback']({ generation: 10, fps: 30 });
+  expect(shareStats()).toBeNull();
+  expect(sharingInfo()?.fps).toBe(60);
+  expect(toasts()).toHaveLength(0);
 });

@@ -42,15 +42,14 @@ describe('ViewerMachine', () => {
     expect(machine.tick(now + STALL_MS + 300).status).toBe('live');
   });
 
-  it('calls a slow stream weak only after two slow seconds, and live again once it speeds up', () => {
+  it('keeps a still screen live when one picture arrives per second', () => {
     const machine = new ViewerMachine(0);
-    let { snapshot, now } = run(machine, 0, 1, 30);
-    ({ snapshot, now } = run(machine, now, 1, 12));
-    expect(snapshot.status).toBe('live');
-    ({ snapshot, now } = run(machine, now, 2, 12));
-    expect(snapshot.status).toBe('weak');
-    ({ snapshot } = run(machine, now, 2, 30));
-    expect(snapshot.status).toBe('live');
+    machine.frame(1920, 1080, 0);
+    for (let now = 1000; now <= 4000; now += 1000) {
+      machine.frame(1920, 1080, now);
+      expect(machine.tick(now)).toMatchObject({ status: 'live', wantKeyFrame: false });
+    }
+    expect(machine.tick(4500)).toMatchObject({ status: 'live', fps: 1 });
   });
 
   it('a decoder reset asks for a fresh key frame and shows restoring until a picture is drawn', () => {

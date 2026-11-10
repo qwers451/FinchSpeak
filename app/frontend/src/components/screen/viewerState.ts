@@ -7,7 +7,6 @@ export type ViewerStatus =
   | 'connecting' // asked for the stream, no picture yet
   | 'live' // pictures are arriving
   | 'buffering' // they stopped arriving for a while
-  | 'weak' // arriving, but slowly: the connection is weak
   | 'decoder-reset' // the decoder failed and was restarted
   | 'reconnecting' // our own connection to the server is down
   | 'unsupported' // this computer cannot decode H.264
@@ -27,8 +26,7 @@ export interface ViewerSnapshot {
 
 /** No picture for this long, after having had one, counts as buffering. */
 export const STALL_MS = 1500;
-/** Below this many frames per second for two seconds in a row the connection is called weak. */
-export const WEAK_FPS = 20;
+
 /** While waiting for a picture a key frame is asked for this often. */
 export const KEYFRAME_RETRY_MS = 1000;
 /** The sharer stopped: the "ended" screen closes itself after this long. */
@@ -46,7 +44,6 @@ export class ViewerMachine {
   private bitrateKbps = 0;
   private lastFrameAt: number | null = null;
   private lastKeyAsk: number | null = null;
-  private slowSeconds = 0;
   private offline = false;
   private endedAt: number | null = null;
   private wantKey = false;
@@ -114,7 +111,6 @@ export class ViewerMachine {
       const seconds = (now - this.windowStart) / 1000;
       this.fps = Math.round(this.framesInWindow / seconds);
       this.bitrateKbps = Math.round((this.bytesInWindow * 8) / 1000 / seconds);
-      this.slowSeconds = this.fps > 0 && this.fps < WEAK_FPS ? this.slowSeconds + 1 : 0;
       this.framesInWindow = 0;
       this.bytesInWindow = 0;
       this.windowStart = now;
@@ -122,14 +118,11 @@ export class ViewerMachine {
 
     const terminal = this.status === 'ended' || this.status === 'unsupported' || this.status === 'reconnecting';
     if (!terminal) {
-      if (this.status === 'live' || this.status === 'weak') {
-        if (this.lastFrameAt !== null && now - this.lastFrameAt >= STALL_MS) {
-          this.status = 'buffering';
-          this.wantKey = true;
-          this.lastKeyAsk = now;
-        } else {
-          this.status = this.slowSeconds >= 2 ? 'weak' : 'live';
-        }
+      // Still content can legitimately arrive at one frame per second.
+      if (this.status === 'live' && this.lastFrameAt !== null && now - this.lastFrameAt >= STALL_MS) {
+        this.status = 'buffering';
+        this.wantKey = true;
+        this.lastKeyAsk = now;
       }
       // Still waiting (for the first picture, or after a stall): keep asking.
       if ((this.status === 'connecting' || this.status === 'buffering' || this.status === 'decoder-reset')
@@ -144,8 +137,8 @@ export class ViewerMachine {
     return {
       status: this.status,
       endReason: this.endReason,
-      fps: this.status === 'live' || this.status === 'weak' ? this.fps : 0,
-      bitrateKbps: this.status === 'live' || this.status === 'weak' ? this.bitrateKbps : 0,
+      fps: this.status === 'live' ? this.fps : 0,
+      bitrateKbps: this.status === 'live' ? this.bitrateKbps : 0,
       width: this.width,
       height: this.height,
       wantKeyFrame,

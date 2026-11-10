@@ -119,7 +119,7 @@ it('switching to another room clears the share we watched; our own share ends on
   vi.spyOn(api, 'setAudioDevices').mockResolvedValue();
   vi.spyOn(api, 'joinVoiceChannel').mockResolvedValue();
   setIsSharing(true);
-  setSharingInfo({ label: 'Notes', audio: false });
+  setSharingInfo({ label: 'Notes', audio: false, fps: 30 });
   setScreenShareGeneration(11);
   setWatching({ user_id: 'bob', peer_id: 7 });
   setEndedShare(null);

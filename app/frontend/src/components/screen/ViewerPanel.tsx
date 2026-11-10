@@ -233,11 +233,10 @@ function Viewer(props: { peerId: number; userId: string }) {
         )}
       </Show>
 
-      <div class={`viewer-hud top${hud() || showOverlay() || status() === 'weak' ? ' on' : ''}`}>
+      <div class={`viewer-hud top${hud() || showOverlay() ? ' on' : ''}`}>
         <span class="tag cyan">{name()}</span>
         <Show when={view().width > 0}><span class="tag cyan">{view().width} × {view().height}</span></Show>
-        <Show when={status() === 'live' || status() === 'weak'}><span class="tag cyan">{view().fps} {unit('fps')} · {formatBitrate(view().bitrateKbps)}</span></Show>
-        <Show when={status() === 'weak'}><span class="tag amber">{t('Weak connection')}</span></Show>
+        <Show when={status() === 'live'}><span class="tag cyan">{view().fps} {unit('fps')} · {formatBitrate(view().bitrateKbps)}</span></Show>
       </div>
 
       <div class={`viewer-hud bottom${hud() ? ' on' : ''}`}>

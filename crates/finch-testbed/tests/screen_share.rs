@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use finch_client_core::screen::{FrameSource, ScreenSharer, ScreenViewer, ShareConfig};
+use finch_client_core::screen::{FramePoll, FrameSource, ScreenSharer, ScreenViewer, ShareConfig};
 use finch_client_core::session::SessionEvent;
 use finch_protocol::media::{MediaHeader, MediaType, MEDIA_HEADER_SIZE};
 use finch_protocol::messages::{ClientMessage, ServerMessage};
@@ -42,6 +42,18 @@ struct Broken;
 impl FrameSource for Broken {
     fn next_frame(&mut self) -> Result<RawFrame, String> {
         Err("window closed".into())
+    }
+}
+
+struct Closed;
+
+impl FrameSource for Closed {
+    fn next_frame(&mut self) -> Result<RawFrame, String> {
+        Err("shared window closed".into())
+    }
+
+    fn poll_frame(&mut self) -> FramePoll {
+        FramePoll::Closed("shared window closed".into())
     }
 }
 
@@ -155,6 +167,26 @@ async fn sharer_reports_when_capture_keeps_failing() -> anyhow::Result<()> {
     let reason = tokio::time::timeout(Duration::from_secs(60), rx).await??;
     assert!(reason.contains("window closed"), "{reason}");
     assert!(!sharer.is_running());
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_closed_capture_ends_the_share_without_waiting_for_retries() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let (a, _b, voice_short) = join_voice_pair(&server).await?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let _sharer = ScreenSharer::start(
+        a.session.connection.clone(),
+        tokio::runtime::Handle::current(),
+        voice_short,
+        a.session.session_peer_id,
+        ShareConfig { fps: 30, bitrate_bps: None },
+        Box::new(Closed),
+        move |reason| { let _ = tx.send(reason); },
+    );
+
+    let reason = tokio::time::timeout(Duration::from_secs(2), rx).await??;
+    assert_eq!(reason, "shared window closed");
     Ok(())
 }
 
