@@ -207,6 +207,9 @@ export const ru: Readonly<Record<string, string>> = {
   'Match the theme to your picture?': 'Подобрать тему под аватарку?',
   'Apply theme': 'Применить тему',
   'Not now': 'Не сейчас',
+  'Show rooms as nests': 'Показать комнаты гнёздами',
+  'Show rooms as a list': 'Показать комнаты списком',
+  'Empty nest': 'Пустое гнездо',
 };
 
 /** Russian plural forms, keyed by the English `other` form that `plural()` is called with. */

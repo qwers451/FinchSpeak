@@ -20,7 +20,7 @@ export function IconSprite() {
   );
 }
 
-const CUSTOM_NAMES: Partial<Record<IconName, string>> = {"full": "fullscreen", "pip": "grid", "grip": "more", "vol": "volume", "vol-off": "volume-off", "phones": "headphones", "phones-off": "headphones-off", "share": "screen-share", "logout": "logout", "x": "close", "chev-d": "chevron-down", "chev-r": "chevron-right", "clip": "paperclip", "smile": "reaction", "up": "chevron-up", "down": "chevron-down", "warn": "warning", "bars": "signal", "db": "server", "dl": "download", "moon": "eye-off", "clock": "info", "door": "logout", "play": "broadcast", "stop": "screen-share-off", "at": "user", "min": "minimize", "box": "maximize"};
+const CUSTOM_NAMES: Partial<Record<IconName, string>> = {"full": "fullscreen", "pip": "grid", "grip": "more", "vol": "volume", "vol-off": "volume-off", "phones": "headphones", "phones-off": "headphones-off", "share": "screen-share", "logout": "logout", "x": "close", "chev-d": "chevron-down", "chev-r": "chevron-right", "clip": "paperclip", "smile": "reaction", "up": "chevron-up", "down": "chevron-down", "warn": "warning", "bars": "signal", "db": "server", "dl": "download", "moon": "eye-off", "clock": "info", "door": "logout", "play": "broadcast", "stop": "screen-share-off", "at": "user", "min": "minimize", "box": "maximize", "feather": "reaction"};
 
 type IconProps = { name: IconName; size?: 'sm' | 'md' | 'lg' | 'xl'; class?: string; style?: JSX.CSSProperties; title?: string };
 

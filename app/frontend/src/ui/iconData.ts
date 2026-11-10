@@ -55,6 +55,7 @@ export const ICONS = {
   'at': { d: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM16 8v5a2.5 2.5 0 0 0 5 0v-1a9 9 0 1 0-3.5 7' },
   'min': { d: 'M6 12h12' },
   'box': { d: 'M6 6h12v12H6z' },
+  'feather': { d: 'M20 4c-8 0-14 5-14 12v4M20 4c0 8-5 14-12 14M9 15l7-7' },
 } as const;
 
 export type IconName = keyof typeof ICONS;

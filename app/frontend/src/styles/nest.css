@@ -1,0 +1,46 @@
+/* Nest view of the voice channels: each room is a nest on a branch, with its birds peeking out. */
+.nest-map { padding:4px 8px 8px; }
+.nest-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px 6px; }
+.nest { display:flex; flex-direction:column; gap:4px; min-width:0; cursor:pointer; color:var(--text-3); border-radius:var(--r-sm); }
+.nest-top { position:relative; display:flex; align-items:center; gap:6px; min-width:0; height:20px; padding:0 2px; }
+.nest-top .trunc { flex:1; min-width:0; font:550 12px/1.2 var(--font-ui); }
+.nest .acts { display:none; position:absolute; top:0; bottom:0; right:0; align-items:center; gap:2px; padding:0 2px 0 4px; color:var(--text-2); background:var(--bg-panel); border-radius:var(--r-sm); }
+.nest:hover .acts, .nest:focus-within .acts { display:flex; }
+.nest .acts button { all:unset; display:flex; cursor:pointer; padding:2px; border-radius:4px; }
+.nest .acts button:hover { color:var(--text); background:var(--bg-card); }
+.nest .acts button:focus-visible { outline:2px solid var(--yellow); outline-offset:1px; }
+.nest .acts .ic { width:16px; height:16px; }
+.nest.lit { color:var(--text); }
+.nest.on .nest-top { color:var(--yellow); }
+.nest-art { position:relative; width:100%; aspect-ratio:120/72; margin-top:-8px; }
+.nest-back, .nest-front { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+.nest-back { z-index:0; }
+.nest-front { z-index:2; }
+.nest-hollow { fill:var(--bg-deep); }
+.nest-body { fill:var(--bg-card); }
+.nest.lit[data-level="1"] .nest-body { fill:color-mix(in srgb, var(--yellow) 22%, var(--bg-deep)); }
+.nest.lit[data-level="2"] .nest-body { fill:color-mix(in srgb, var(--yellow) 32%, var(--bg-deep)); }
+.nest.lit[data-level="3"] .nest-body { fill:color-mix(in srgb, var(--yellow) 42%, var(--bg-deep)); }
+.nest-twigs { fill:none; stroke:var(--line); stroke-width:1.2; stroke-linecap:round; }
+.nest.lit .nest-twigs { stroke:color-mix(in srgb, var(--yellow) 55%, transparent); }
+.nest-rim { fill:none; stroke:var(--line); stroke-width:2; stroke-linecap:round; }
+.nest.lit .nest-rim { stroke:color-mix(in srgb, var(--yellow) 60%, var(--line)); }
+.nest.on .nest-rim { stroke:var(--yellow); stroke-width:2.5; }
+.nest-branch { fill:none; stroke:var(--line); stroke-width:3; stroke-linecap:round; }
+.nest-leaf { fill:var(--line); }
+.nest.lit .nest-leaf { fill:var(--teal); }
+.nest:focus-visible { outline:2px solid var(--yellow); outline-offset:2px; }
+.nest-birds { position:absolute; z-index:1; left:0; right:0; top:23%; display:flex; justify-content:center; align-items:center; }
+.nest-birds > * + * { margin-left:-3px; }
+.nest-more { flex:none; align-self:flex-start; display:grid; place-items:center; width:17px; height:17px; margin-left:2px!important; border-radius:50%; background:var(--bg-card); color:var(--text-2); font:700 10px/1 var(--font-ui); }
+.nest-count { flex:none; font:500 11px/1 var(--font-ui); color:var(--text-3); }
+.nest-eq { flex:none; display:inline-flex; align-items:flex-end; gap:2px; height:12px; }
+.nest-eq i { display:block; width:3px; height:100%; border-radius:1px; background:var(--yellow); transform-origin:bottom; }
+@keyframes nest-eq { 0%, 100% { transform:scaleY(.3); } 50% { transform:scaleY(1); } }
+@media (prefers-reduced-motion: no-preference) {
+  .nest { transition:transform var(--motion-small) var(--ease-out); }
+  .nest:hover { transform:translateY(-1px); }
+  .nest-eq i { animation:nest-eq 900ms ease-in-out infinite; }
+  .nest-eq i:nth-child(2) { animation-delay:150ms; }
+  .nest-eq i:nth-child(3) { animation-delay:300ms; }
+}

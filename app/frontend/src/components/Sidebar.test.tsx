@@ -5,6 +5,7 @@ import { setCurrentUser } from '../stores/authStore';
 import { setKnownUsers } from '../stores/sessionStore';
 import { setActiveVoiceChannel, setVoiceParticipants } from '../stores/voiceStore';
 import type { Channel, User } from '../types';
+import { setNestView } from '../stores/nestView';
 import { Sidebar } from './Sidebar';
 
 const nav = vi.hoisted(() => ({ selectChannel: vi.fn(async () => {}), joinVoice: vi.fn(async () => {}) }));
@@ -33,6 +34,25 @@ afterEach(() => {
   setActiveChannel(null);
   setActiveVoiceChannel(null);
   setVoiceParticipants([]);
+  setNestView(false);
+  try { localStorage.removeItem('finchspeak.nestView'); } catch { /* ignore */ }
+});
+
+it('shows voice channels as nests only after the toggle is pressed', async () => {
+  setChannels([voice, { ...voice, id: 'voice2', short_id: 3, name: 'second' }]);
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  dispose = render(() => <Sidebar />, host);
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  expect(host.querySelector('.nest-map')).toBeNull();
+  (host.querySelector('.nest-toggle') as HTMLElement).click();
+  await flush();
+  expect(host.querySelector('.nest-map')).not.toBeNull();
+  expect(host.querySelectorAll('.nest').length).toBe(2);
+  (host.querySelector('.nest-toggle') as HTMLElement).click();
+  await flush();
+  expect(host.querySelector('.nest-map')).toBeNull();
+  expect(host.querySelectorAll('.channel-item').length).toBe(2);
 });
 
 it('updates a voice participant picture when knownUsers changes and falls back to the initial when removed', async () => {

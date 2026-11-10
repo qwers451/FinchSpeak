@@ -8,6 +8,7 @@ import './styles/motion.css';
 import './styles/polish.css';
 import './styles/user-theme.css';
 import './styles/spatial.css';
+import './styles/nest.css';
 import { App } from './App';
 
 const root = document.getElementById('root');

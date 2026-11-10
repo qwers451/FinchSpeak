@@ -18,6 +18,8 @@ import {
 } from '../stores/voiceStore';
 import { isSharing } from '../stores/screenState';
 import { isMeParticipant } from './voice/ParticipantTile';
+import { NestMap } from './voice/NestMap';
+import { nestView, setNestView } from '../stores/nestView';
 import { connectionStatus, localPeerId, knownUsers, myStatus as ownStatus, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
 import { currentUser } from '../stores/authStore';
@@ -152,12 +154,13 @@ export function Sidebar() {
             <button type="button" class="cat-toggle" aria-expanded={!collapsed().voice} onClick={() => toggleCategory('voice')}>
             <Icon name={collapsed().voice ? 'chev-r' : 'chev-d'} />{t('Voice channels')}
           </button>
+          <button type="button" class="cat-add nest-toggle" aria-pressed={nestView()} title={t(nestView() ? 'Show rooms as a list' : 'Show rooms as nests')} aria-label={t(nestView() ? 'Show rooms as a list' : 'Show rooms as nests')} onClick={() => setNestView(!nestView())}><Icon name="feather" /></button>
           <Show when={isAdmin()}>
             <button type="button" class="cat-add" title={t('Create voice channel')} aria-label={t('Create voice channel')} onClick={() => setDialog({ kind: 'create', type: 'voice' })}><Icon name="plus" /></button>
           </Show>
         </div>
         <Show when={!collapsed().voice}>
-          <For each={voiceChannels()}>
+          <Show when={nestView()} fallback={<For each={voiceChannels()}>
             {(channel) => (
               <>
                 <div
@@ -190,7 +193,9 @@ export function Sidebar() {
                 </For>
               </>
             )}
-          </For>
+          </For>}>
+            <NestMap channels={voiceChannels()} actions={(channel) => <ChannelActions channel={channel} onDialog={setDialog} />} />
+          </Show>
         </Show>
       </nav>
 
