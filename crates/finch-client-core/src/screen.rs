@@ -541,6 +541,42 @@ impl FrameSource for WindowSource {
     }
 }
 
+/// Captures a monitor or a window through a Windows Graphics Capture session: frames arrive as
+/// the picture changes, so a still screen (or a minimized window) is idle, not failing.
+#[cfg(windows)]
+pub struct WgcSource(finch_screen::WgcCapture);
+
+#[cfg(windows)]
+impl WgcSource {
+    /// How long the first frame may take before the session counts as not working.
+    const FIRST_FRAME: Duration = Duration::from_secs(2);
+    /// How long one poll waits for a new frame.
+    const POLL: Duration = Duration::from_millis(100);
+
+    pub fn monitor(id: u32) -> Result<Self, String> {
+        finch_screen::WgcCapture::start(finch_screen::WgcTarget::Monitor(id)).map(Self).map_err(|e| e.to_string())
+    }
+
+    pub fn window(id: u32) -> Result<Self, String> {
+        finch_screen::WgcCapture::start(finch_screen::WgcTarget::Window(id)).map(Self).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(windows)]
+impl FrameSource for WgcSource {
+    fn next_frame(&mut self) -> Result<RawFrame, String> {
+        self.0.take_frame(Self::FIRST_FRAME).ok_or_else(|| "Windows Graphics Capture delivered no picture".to_string())
+    }
+
+    fn poll_frame(&mut self) -> FramePoll {
+        match self.0.take_frame(Self::POLL) {
+            Some(frame) => FramePoll::Frame(frame),
+            None if self.0.is_closed() => FramePoll::Failed("the shared screen or window is gone".to_string()),
+            None => FramePoll::Idle,
+        }
+    }
+}
+
 /// Consecutive capture failures (window closed, display off) before the share ends. A shared window that
 /// is minimized yields no frames, so this is about 30 seconds (at 33 ms per try): enough to restore it.
 const MAX_CAPTURE_FAILURES: u32 = 900;
