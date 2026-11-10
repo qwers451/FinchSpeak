@@ -39,6 +39,7 @@ jobs:
           start() {
             docker run -d --name "$name" --memory 256m --cpus 1 \
               --mount "type=volume,source=$volume,target=/app/data" \
+              --mount "type=bind,source=$GITHUB_WORKSPACE/deploy/finch-server.toml,target=/app/finch-server.toml,readonly" \
               --publish 127.0.0.1:18443:8443 finchspeak-server:1.4.2
             for attempt in {1..40}; do
               if curl -kfsS --max-time 3 https://127.0.0.1:18443/health > "$RUNNER_TEMP/health.json" 2>/dev/null; then
@@ -53,11 +54,16 @@ jobs:
           start
           cert="$(docker exec "$name" sha256sum /app/data/tls/cert.der)"
           docker exec "$name" test -s /app/data/finchspeak.db
+          credentials='{"username":"linux_smoke","password":"Temporary-test-password-42"}'
+          curl -kfSs --max-time 10 -o /dev/null -H 'Content-Type: application/json' \
+            -d "$credentials" https://127.0.0.1:18443/api/auth/register
           docker stop "$name" >/dev/null
           docker rm "$name" >/dev/null
           start
           test "$(docker exec "$name" sha256sum /app/data/tls/cert.der)" = "$cert"
           docker exec "$name" test -s /app/data/finchspeak.db
+          curl -kfSs --max-time 10 -o /dev/null -H 'Content-Type: application/json' \
+            -d "$credentials" https://127.0.0.1:18443/api/auth/login
           docker stats --no-stream "$name" --format 'CPU={{.CPUPerc}} memory={{.MemUsage}}'
           echo 'PASS Linux 1.4.2 health, SQLite persistence and TLS identity after recreation'
 
