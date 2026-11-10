@@ -8,6 +8,7 @@ import { endSession, loadSessions, profileOpen, setProfileMessage, setProfileOpe
 import { resetSessionState, sessionHandlers, setKnownUsers } from '../../stores/sessionStore';
 import { DEFAULT_PREFS, prefs, setPrefs } from '../../stores/settingsStore';
 import { setChannels } from '../../stores/chatStore';
+import { nestView, setNestView } from '../../stores/nestView';
 import { clearToasts } from '../../ui';
 import { checkAvatarFile, CROP_SIDE, placement } from './AvatarCropDialog';
 import { SettingsModal } from './SettingsModal';
@@ -105,6 +106,25 @@ it('appearance changes reach the page', async () => {
   await flush();
   expect(prefs().appearance.showMembers).toBe(false);
   setPrefs(DEFAULT_PREFS);
+});
+
+it('the nest view of voice rooms is switched on and off in appearance', async () => {
+  try {
+    button('Appearance').click();
+    await flush();
+    const toggle = () => document.querySelector<HTMLElement>('[aria-label="Rooms as nests"]')!;
+    expect(nestView()).toBe(false);
+    toggle().click();
+    await flush();
+    expect(nestView()).toBe(true);
+    expect(localStorage.getItem('finchspeak.nestView')).toBe('1');
+    toggle().click();
+    await flush();
+    expect(nestView()).toBe(false);
+  } finally {
+    setNestView(false);
+    localStorage.removeItem('finchspeak.nestView');
+  }
 });
 
 it('autostart toggle reflects and changes the OS setting', async () => {

@@ -9,6 +9,7 @@ import { presence, statusTexts } from '../../stores/sessionStore';
 import {
   isChannelMuted, muteChannel, prefs, unmuteChannel, updateAppearance, updateNotifications,
 } from '../../stores/settingsStore';
+import { nestView, setNestView } from '../../stores/nestView';
 import { availableUpdate, setAvailableUpdate } from '../../stores/updateStore';
 import { activeVoiceChannel } from '../../stores/voiceStore';
 import type { UserStatus } from '../../types';
@@ -301,6 +302,7 @@ function AppearancePage() {
       <Row title={t('Reduce motion')} hint={t('Turns off pulsing rings and slides.')} control={<Toggle label={t('Reduce motion')} checked={a().reduceMotion} onChange={(v) => updateAppearance({ reduceMotion: v })} />} />
       <Row title={t('Start with Windows')} hint={t('Starts hidden in the tray and signs you in.')} control={<Toggle label={t('Start with Windows')} checked={autostart()} onChange={(v) => void changeAutostart(v)} />} />
       <Row title={t('Members panel')} hint={t('The list of people on the right.')} control={<Toggle label={t('Members panel')} checked={a().showMembers} onChange={(v) => updateAppearance({ showMembers: v })} />} />
+      <Row title={t('Rooms as nests')} hint={t('Voice channels in the sidebar look like nests with people inside.')} control={<Toggle label={t('Rooms as nests')} checked={nestView()} onChange={setNestView} />} />
     </div>
   );
 }

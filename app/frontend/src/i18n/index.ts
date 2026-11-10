@@ -210,6 +210,8 @@ export const ru: Readonly<Record<string, string>> = {
   'Show rooms as nests': 'Показать комнаты гнёздами',
   'Show rooms as a list': 'Показать комнаты списком',
   'Empty nest': 'Пустое гнездо',
+  'Rooms as nests': 'Комнаты гнёздами',
+  'Voice channels in the sidebar look like nests with people inside.': 'Голосовые каналы в боковой панели выглядят как гнёзда с людьми внутри.',
 };
 
 /** Russian plural forms, keyed by the English `other` form that `plural()` is called with. */
