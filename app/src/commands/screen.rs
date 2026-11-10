@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, State};
 use tracing::info;
 use uuid::Uuid;
 
-use crate::state::{AppState, ScreenShareReservation, VideoChunkPayload};
+use crate::state::{AppState, ScreenShareReservation};
 
 const SHARE_FPS: u8 = 30;
 
@@ -247,7 +247,7 @@ pub async fn stop_screen_share(state: State<'_, AppState>) -> Result<(), String>
 
 #[tauri::command]
 pub async fn register_video_channel(
-    on_frame: tauri::ipc::Channel<VideoChunkPayload>,
+    on_frame: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     *state.video_channel.write().await = Some(on_frame);
