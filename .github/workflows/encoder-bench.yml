@@ -1,0 +1,45 @@
+name: Encoder bench
+
+# Measures OpenH264 with and without NASM (SIMD) on the same runner. Manual, or on a change to the bench.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['feat/stream-quality']
+    paths: ['.github/workflows/encoder-bench.yml', 'crates/finch-screen/examples/encode_bench.rs']
+
+jobs:
+  bench:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Is NASM on the runner already?
+        shell: pwsh
+        run: |
+          $nasm = Get-Command nasm -ErrorAction SilentlyContinue
+          if ($nasm) { "NASM preinstalled: $($nasm.Source)"; nasm -v } else { "NASM is NOT preinstalled on this runner" }
+      - name: Without NASM
+        shell: pwsh
+        env:
+          OPENH264_NO_ASM: '1'
+          CARGO_TARGET_DIR: target/no-asm
+        run: |
+          cargo build --release -p finch-screen --example encode_bench
+          ./target/no-asm/release/examples/encode_bench.exe 1920 1080 30
+          ./target/no-asm/release/examples/encode_bench.exe 1920 1080 60
+          ./target/no-asm/release/examples/encode_bench.exe 2560 1440 30
+      - uses: ilammy/setup-nasm@v1
+      - name: With NASM
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: target/asm
+        run: |
+          nasm -v
+          cargo build --release -p finch-screen --example encode_bench
+          ./target/asm/release/examples/encode_bench.exe 1920 1080 30
+          ./target/asm/release/examples/encode_bench.exe 1920 1080 60
+          ./target/asm/release/examples/encode_bench.exe 2560 1440 30
