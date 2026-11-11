@@ -7,12 +7,12 @@ import type { AdminUser, AuditEntry, Invite, ServerOverview } from '../types';
 import { setAppError } from './notificationStore';
 import { describeError } from '../i18n/errors';
 
-/** Moderators can act on known members. Administrators can act on anyone except themselves. */
+/** Moderators can act on members. Administrators can act on anyone except themselves. */
 export function mayModerate(userId: string): boolean {
   const actor = currentUser();
   if (!actor || actor.id === userId) return false;
   if (actor.role === 'admin') return true;
-  return actor.role === 'moderator' && knownUsers().find((user) => user.id === userId)?.role === 'member';
+  return actor.role === 'moderator' && (knownUsers().find((user) => user.id === userId)?.role ?? 'member') === 'member';
 }
 
 export const [adminOpen, setAdminOpen] = createSignal(false);

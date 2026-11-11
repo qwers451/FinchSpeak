@@ -50,6 +50,15 @@ it('opens shared volume and mute actions from tile, sidebar and member row with 
   expect(document.querySelector('[role="menu"]')).toBeTruthy();
 });
 
+it('keeps the existing member fallback until a voice profile has arrived', async () => {
+  setCurrentUser({ ...me, role: 'moderator' });
+  setKnownUsers([me]);
+  const root = mount();
+  root.querySelector('.vc')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await flush();
+  expect(document.querySelector('[role="menu"]')?.textContent).toContain('Silence for everyone');
+});
+
 it('moderators can act on members, and stale permissions are checked again on selection', async () => {
   setCurrentUser({ ...me, role: 'moderator' });
   const moderate = vi.spyOn(api, 'moderateVoice').mockResolvedValue();
