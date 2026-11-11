@@ -231,6 +231,9 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 .vc .participant-actions { position:absolute; top:6px; right:6px; z-index:2; opacity:0; }
 .vc:hover .participant-actions,.vc:focus-within .participant-actions { opacity:1; }
 .vc .badges { top:42px; }
+.drop-target { outline:2px solid var(--cyan); outline-offset:-2px; }
+.vp[draggable="true"] { cursor:grab; }
+.voice-people { border-radius:var(--r-sm); }
 
 /* Search */
 .search-box { position: relative; }

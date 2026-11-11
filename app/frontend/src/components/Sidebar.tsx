@@ -1,10 +1,11 @@
 import { createSignal, For, Show } from 'solid-js';
-import { setAdminOpen } from '../stores/adminStore';
+import { mayModerate, moveVoice, setAdminOpen } from '../stores/adminStore';
 import { markRead, unread } from '../stores/activityStore';
 import { setProfileOpen } from '../stores/profileStore';
 import { channels, activeChannel, selectChannel, loadChannels } from '../stores/chatStore';
 import {
   activeVoiceChannel,
+  allVoiceParticipants,
   joinVoice,
   leaveVoice,
   isMuted,
@@ -23,12 +24,25 @@ import { isMeParticipant } from './voice/ParticipantTile';
 import { connectionStatus, localPeerId, knownUsers, myStatus as ownStatus, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
 import { currentUser } from '../stores/authStore';
-import type { Channel } from '../types';
+import type { Channel, VoiceParticipant } from '../types';
 import { api } from '../services/api';
 import { moveChannel, removeChannel, renameChannel } from '../stores/channelAdminStore';
 import { Avatar, Button, ConfirmDialog, Field, Icon, Modal } from '../ui';
 import { t } from '../i18n';
 import { describeError } from '../i18n/errors';
+
+const VOICE_USER_DRAG = 'application/x-finch-voice-user';
+type VoiceDrag = { userId: string; peerId: number; from: string };
+
+function readVoiceDrag(transfer: DataTransfer | null): VoiceDrag | null {
+  if (!transfer?.types.includes(VOICE_USER_DRAG) || transfer.types.includes('Files')) return null;
+  try {
+    const value: unknown = JSON.parse(transfer.getData(VOICE_USER_DRAG));
+    if (value && typeof value === 'object' && 'userId' in value && typeof value.userId === 'string' &&
+      'peerId' in value && Number.isSafeInteger(value.peerId) && 'from' in value && typeof value.from === 'string') return value as VoiceDrag;
+  } catch { /* a different or malformed drag */ }
+  return null;
+}
 
 type ChannelDialog =
   | { kind: 'create'; type: 'text' | 'voice' }
@@ -96,6 +110,37 @@ function ChannelNameDialog(props: { dialog: Extract<ChannelDialog, { kind: 'crea
 }
 
 export function Sidebar() {
+  const [dragged, setDragged] = createSignal<VoiceDrag | null>(null);
+  const [dropChannel, setDropChannel] = createSignal<string | null>(null);
+  const canDrag = (participant: VoiceParticipant) => isMeParticipant(participant, localPeerId()) || mayModerate(participant.user_id);
+  const validDrop = (payload: VoiceDrag | null, channel: Channel) => {
+    if (!payload || channel.channel_type !== 'voice' || channel.id === payload.from) return undefined;
+    const participant = allVoiceParticipants().find((person) => person.user_id === payload.userId && person.peer_id === payload.peerId && person.channel_id === payload.from);
+    return participant && canDrag(participant) ? participant : undefined;
+  };
+  const dragStart = (event: DragEvent, participant: VoiceParticipant) => {
+    if (!canDrag(participant) || !event.dataTransfer) { event.preventDefault(); return; }
+    const payload = { userId: participant.user_id, peerId: participant.peer_id, from: participant.channel_id };
+    event.dataTransfer.setData(VOICE_USER_DRAG, JSON.stringify(payload));
+    event.dataTransfer.effectAllowed = 'move';
+    setDragged(payload);
+  };
+  const dragOver = (event: DragEvent, channel: Channel) => {
+    if (!event.dataTransfer?.types.includes(VOICE_USER_DRAG) || event.dataTransfer.types.includes('Files') || !validDrop(dragged(), channel)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDropChannel(channel.id);
+  };
+  const drop = (event: DragEvent, channel: Channel) => {
+    const participant = validDrop(readVoiceDrag(event.dataTransfer), channel);
+    setDropChannel(null);
+    setDragged(null);
+    if (!participant) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (isMeParticipant(participant, localPeerId())) void joinVoice(channel);
+    else void moveVoice(participant.user_id, participant.peer_id, channel.id);
+  };
   const [dialog, setDialog] = createSignal<ChannelDialog>(null);
   const [collapsed, setCollapsed] = createSignal<{ text: boolean; voice: boolean }>({ text: false, voice: false });
   const textChannels = () => channels().filter((c) => c.channel_type === 'text');
@@ -161,9 +206,10 @@ export function Sidebar() {
         <Show when={!collapsed().voice}>
           <For each={voiceChannels()}>
             {(channel) => (
-              <>
+              <div class="voice-channel-group" onDragOver={(event) => dragOver(event, channel)} onDrop={(event) => drop(event, channel)}
+                onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropChannel(null); }}>
                 <div
-                  class={`ch channel-item${activeVoiceChannel()?.id === channel.id ? ' on' : ''}`}
+                  class={`ch channel-item${activeVoiceChannel()?.id === channel.id ? ' on' : ''}${dropChannel() === channel.id ? ' drop-target' : ''}`}
                   role="button"
                   tabindex="0"
                   onClick={() => { void selectChannel(channel); if (activeVoiceChannel()?.id !== channel.id) void joinVoice(channel); }}
@@ -179,9 +225,11 @@ export function Sidebar() {
                     <span class="tag violet" style={{ 'margin-left': participantsForChannel(channel.id).some((participant) => participant.is_sharing) ? '0' : 'auto' }}>{participantsForChannel(channel.id).length}</span>
                   </Show>
                 </div>
+                <div class="voice-people" classList={{ 'drop-target': dropChannel() === channel.id }}>
                 <For each={participantsForChannel(channel.id)}>
                   {(participant) => (
-                    <div class="vp" tabindex="0" onContextMenu={(event) => participantContextMenu(event, participant.user_id, participant)} onKeyDown={(event) => participantMenuKey(event, participant.user_id, participant)}>
+                    <div class="vp" tabindex="0" draggable={canDrag(participant)}
+                      onDragStart={(event) => dragStart(event, participant)} onDragEnd={() => { setDragged(null); setDropChannel(null); }} onContextMenu={(event) => participantContextMenu(event, participant.user_id, participant)} onKeyDown={(event) => participantMenuKey(event, participant.user_id, participant)}>
                       <Avatar name={participant.username} id={participant.user_id} size={24} src={knownUsers().find((user) => user.id === participant.user_id)?.avatar_url} speaking={speakingPeers().has(participant.peer_id) || (isMeParticipant(participant, localPeerId()) && !isMuted() && isLocalSpeaking())} levelPeerId={participant.peer_id} />
                       <span class="grow trunc">{participant.username}</span>
                       <Show when={!isMeParticipant(participant, localPeerId()) && isLocallyMuted(participant.user_id)}><Icon name="vol-off" title={t('You muted this person')} /></Show>
@@ -191,7 +239,8 @@ export function Sidebar() {
                     </div>
                   )}
                 </For>
-              </>
+                </div>
+              </div>
             )}
           </For>
         </Show>
