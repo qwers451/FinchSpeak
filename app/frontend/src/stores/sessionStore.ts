@@ -71,12 +71,16 @@ export function resetSessionState() {
 
 export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEvents[K]) => void } = {
   authenticated: (data) => {
+    const { online_users, offline_users = [] } = data.initial_state;
     setSessionUserId(data.user_id);
     setLocalPeerId(data.session_peer_id);
     setChannels(data.initial_state.channels);
-    setKnownUsers(data.initial_state.online_users);
-    setPresence(Object.fromEntries(data.initial_state.online_users.map((user) => [user.id, user.status ?? 'online'])));
-    setStatusTexts(Object.fromEntries(data.initial_state.online_users.flatMap((user) => (user.status_text ? [[user.id, user.status_text]] : []))));
+    setKnownUsers([...online_users, ...offline_users]);
+    setPresence(Object.fromEntries([
+      ...online_users.map((user) => [user.id, user.status ?? 'online'] as const),
+      ...offline_users.map((user) => [user.id, 'offline'] as const),
+    ]));
+    setStatusTexts(Object.fromEntries(online_users.flatMap((user) => (user.status_text ? [[user.id, user.status_text]] : []))));
     setVoiceParticipants(data.initial_state.voice_states.map(({ muted, deafened, sharing_screen, ...participant }) => ({
       ...participant, is_muted: muted, is_deafened: deafened, is_sharing: sharing_screen,
     })));
@@ -224,6 +228,19 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'audio-device-fallback': ({ kind, wanted }) =>
     setAppError(t('"{wanted}" is not available; using the system default {kind} device instead.', { wanted, kind: t(kind) })),
 };
+
+export function appendMissingProfiles({ online_users, offline_users = [] }: SessionEvents['authenticated']['initial_state']) {
+  setKnownUsers((previous) => {
+    const knownIds = new Set(previous.map((user) => user.id));
+    const added: User[] = [];
+    for (const user of [...online_users, ...offline_users]) {
+      if (knownIds.has(user.id)) continue;
+      knownIds.add(user.id);
+      added.push(user);
+    }
+    return added.length ? [...previous, ...added] : previous;
+  });
+}
 
 export function restoreSessionSnapshot(snapshot: SessionSnapshot) {
   if (snapshot.connected && snapshot.initial_state) {

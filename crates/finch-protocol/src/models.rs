@@ -182,4 +182,7 @@ pub struct ServerState {
     /// Unread messages per channel for the user who asks (empty when read or unknown).
     #[serde(default)]
     pub unread: Vec<ChannelUnread>,
+    /// Registered users without an active session.
+    #[serde(default)]
+    pub offline_users: Vec<User>,
 }

@@ -1,46 +1,94 @@
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import type { SessionEvents } from '../types';
 import { api } from './api';
-import { knownUsers, restoreSessionSnapshot, sessionHandlers, sessionUserId, setAppError } from '../stores/sessionStore';
+import { appendMissingProfiles, currentSessionGeneration, knownUsers, localPeerId, restoreSessionSnapshot, sessionHandlers, sessionUserId, setAppError } from '../stores/sessionStore';
 import { currentUser } from '../stores/authStore';
 import { describeError } from '../i18n/errors';
 
+const PROFILE_REFRESH_INTERVAL_MS = 10_000;
+type RefreshScope = { userId: string; isCurrent: () => boolean };
+
 export async function subscribeSessionEvents(): Promise<{ dispose: UnlistenFn; refresh: () => Promise<void> }> {
   let disposed = false;
-  let pending: Promise<void> | undefined;
-  let buffered: (() => void)[] | null = null;
+  let pending: { scope: RefreshScope; full: boolean; updates: (() => void)[]; done: Promise<void> } | undefined;
+  let profiles: { scope: RefreshScope; queued: Set<string>; attempted: Map<string, number> } | undefined;
   const stateEvents = new Set<keyof SessionEvents>(['authenticated', 'presence-update', 'channel-created', 'user-joined-voice', 'user-left-voice', 'user-voice-state-changed', 'connection-lost', 'reconnecting', 'reconnect-failed']);
   const expectedUser = () => currentUser()?.id ?? sessionUserId();
-  const refresh = (): Promise<void> => {
-    if (pending) return pending;
+  const currentScope = (): RefreshScope | undefined => {
     const userId = expectedUser();
-    if (!userId || disposed) return Promise.resolve();
+    if (!userId || disposed) return;
+    const generation = currentSessionGeneration();
+    return { userId, isCurrent: () => !disposed && expectedUser() === userId && currentSessionGeneration() === generation };
+  };
+  const startRefresh = (scope: RefreshScope, full: boolean) => {
+    const peerId = localPeerId();
     const updates: (() => void)[] = [];
-    buffered = updates;
-    pending = (async () => {
-      try {
-        const snapshot = await api.getSessionSnapshot();
-        if (disposed || expectedUser() !== userId) return;
-        if (snapshot?.user_id === userId) {
-          restoreSessionSnapshot(snapshot);
-          updates.forEach((apply) => apply());
+    const flight = {
+      scope, full, updates,
+      done: (async (): Promise<void> => {
+        try {
+          const snapshot = await api.getSessionSnapshot();
+          if (!scope.isCurrent() || snapshot?.user_id !== scope.userId) return;
+          if (flight.full) {
+            restoreSessionSnapshot(snapshot);
+            updates.forEach((apply) => apply());
+          } else if (localPeerId() === peerId && snapshot.connected && snapshot.initial_state) {
+            appendMissingProfiles(snapshot.initial_state);
+          }
+        } catch (error) {
+          if (scope.isCurrent()) throw error;
+        } finally {
+          pending = undefined;
+          // A presence event received during the request may still need a newer snapshot.
+          refreshProfiles();
         }
-      } finally {
-        buffered = null;
-        pending = undefined;
-      }
-    })();
-    return pending;
+      })(),
+    };
+    pending = flight;
+    return flight.done;
+  };
+  const refresh = (): Promise<void> => {
+    const scope = currentScope();
+    if (!scope) return Promise.resolve();
+    if (!pending) return startRefresh(scope, true);
+    if (pending.scope.isCurrent()) {
+      // An explicit refresh can use the same snapshot and replay events buffered since it began.
+      pending.full = true;
+      return pending.done;
+    }
+    const afterFlight = () => scope.isCurrent() ? refresh() : undefined;
+    return pending.done.then(afterFlight, afterFlight);
+  };
+  function refreshProfiles() {
+    if (pending || !profiles?.scope.isCurrent() || !profiles.queued.size) return;
+    const { scope, queued, attempted } = profiles;
+    const knownIds = new Set(knownUsers().map((user) => user.id));
+    const missing = [...queued].filter((id) => !knownIds.has(id));
+    queued.clear();
+    if (!missing.length) return;
+    const now = Date.now();
+    for (const id of missing) attempted.set(id, now);
+    void startRefresh(scope, false).catch((error) => { if (scope.isCurrent()) setAppError(describeError(error)); });
+  }
+  const queueProfile = (id: string) => {
+    if (knownUsers().some((user) => user.id === id)) return;
+    if (!profiles?.scope.isCurrent()) {
+      const scope = currentScope();
+      if (!scope) return;
+      profiles = { scope, queued: new Set(), attempted: new Map() };
+    }
+    const lastAttempt = profiles.attempted.get(id);
+    if (lastAttempt !== undefined && Date.now() - lastAttempt < PROFILE_REFRESH_INTERVAL_MS) return;
+    profiles.queued.add(id);
+    refreshProfiles();
   };
   const dispatch = <K extends keyof SessionEvents>(event: K, payload: SessionEvents[K]) => {
+    if (disposed) return;
     const apply = () => sessionHandlers[event](payload);
-    if (buffered && stateEvents.has(event)) buffered.push(apply);
+    if (pending?.scope.isCurrent() && stateEvents.has(event)) pending.updates.push(apply);
     apply();
     if (event === 'presence-update') {
-      const update = payload as SessionEvents['presence-update'];
-      if (update.status !== 'offline' && !knownUsers().some((user) => user.id === update.user_id)) {
-        void refresh().catch((error) => { if (!disposed) setAppError(describeError(error)); });
-      }
+      queueProfile((payload as SessionEvents['presence-update']).user_id);
     }
   };
   const register = <K extends keyof SessionEvents>(event: K) =>

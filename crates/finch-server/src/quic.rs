@@ -238,7 +238,7 @@ pub async fn handle_connection(
     let (control_tx, mut control_rx) = mpsc::channel::<ServerMessage>(128);
 
     // 5. Build Initial Server State
-    let initial_state = crate::api::state::server_state(&pool, &sessions, Uuid::parse_str(&claims.sub).ok()).await?;
+    let initial_state = crate::api::state::server_state(&pool, &sessions, Some(user_id), Some(user_id)).await?;
     let mut channel_mappings = Vec::new();
     for channel in &initial_state.channels {
         channel_mappings.push(ChannelMapping { id: channel.id, short_id: channel.short_id });

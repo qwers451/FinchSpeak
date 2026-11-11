@@ -1,6 +1,6 @@
 import { render } from 'solid-js/web';
-import { afterEach, beforeEach, expect, it } from 'vitest';
-import { resetSessionState, setKnownUsers, setPresence } from '../stores/sessionStore';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { resetSessionState, sessionHandlers, setKnownUsers, setPresence } from '../stores/sessionStore';
 import { DEFAULT_PREFS, setPrefs } from '../stores/settingsStore';
 import type { Role, User } from '../types';
 import { MembersPanel } from './MembersPanel';
@@ -44,6 +44,18 @@ it('puts an offline admin or moderator into the offline group, without splitting
   setKnownUsers([user('adm', 'admin', 'Ada'), user('mod', 'moderator', 'Moe'), user('m1', 'member', 'Mia')]);
   setPresence({ adm: 'offline', mod: 'offline', m1: 'online' });
   expect(layout(mount())).toEqual(['# Online — 1', 'Mia', '# Offline — 2', 'Ada', 'Moe']);
+});
+
+it('shows an offline member from the server snapshot with their avatar', async () => {
+  setLanguage('ru');
+  const initial_state = {
+    channels: [], online_users: [], voice_states: [],
+    offline_users: [{ ...user('ada', 'admin', 'Ада'), avatar_url: 'data:image/png;base64,YQ==' }],
+  };
+  sessionHandlers.authenticated({ user_id: 'me', session_peer_id: 10, channels: [], initial_state });
+  const host = mount();
+  expect(layout(host)).toEqual(['# Не в сети — 1', 'Ада']);
+  await vi.waitFor(() => expect(host.querySelector<HTMLElement>('.mem.off .av-art')?.style.backgroundImage).toContain('data:image/png;base64,YQ=='));
 });
 
 it('sorts names inside a group by display name, falling back to the login', () => {

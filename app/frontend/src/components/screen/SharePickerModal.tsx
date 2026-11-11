@@ -11,6 +11,7 @@ export const monitorName = (name: string) => name.replace(/^\\\\\.\\/, '');
 type Picked = { kind: 'monitor' | 'window'; id: number; label: string };
 
 const FPS_KEY = 'finchspeak.shareFps';
+const SHARE_AUDIO_KEY = 'finchspeak.shareAudio';
 
 /** The frame rate the sharer chose last time; 30 unless 60 was saved. */
 function savedFps(): 30 | 60 {
@@ -67,9 +68,10 @@ function SourceThumb(props: { kind: 'monitor' | 'window'; id: number; index: num
 export function SharePickerModal(props: { open: boolean; onClose: () => void }) {
   const [tab, setTab] = createSignal<'monitor' | 'window'>('monitor');
   const [picked, setPicked] = createSignal<Picked | null>(null);
-  const [withAudio, setWithAudio] = createSignal(false);
-  const [loopbackSupported, setLoopbackSupported] = createSignal(false);
-  const excludesSelf = () => loopbackSupported() && screenAudioSource() !== 'device';
+  const [audioChoice, setAudioChoice] = createSignal<boolean>();
+  const [loopbackSupported, setLoopbackSupported] = createSignal<boolean>();
+  const withAudio = () => audioChoice() ?? loopbackSupported();
+  const excludesSelf = () => loopbackSupported() === true && screenAudioSource() !== 'device';
   const [audioScope, setAudioScope] = createSignal<'system' | 'window'>('system');
   const [starting, setStarting] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
@@ -95,22 +97,34 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
     }
   };
   createEffect(on(() => props.open, (open) => {
-    if (open) {
-      setError(null);
-      setPicked(null);
-      setAudioScope('system');
-      setLoopbackSupported(false);
-      void api.processLoopbackSupported().then(setLoopbackSupported).catch(() => setLoopbackSupported(false));
-      void load();
-    }
+    if (!open) return;
+    let current = true;
+    onCleanup(() => { current = false; });
+    setError(null);
+    setPicked(null);
+    setAudioScope('system');
+    let savedAudio: string | null = null;
+    try { savedAudio = localStorage.getItem(SHARE_AUDIO_KEY); } catch { /* storage unavailable */ }
+    setAudioChoice(savedAudio === '1' || savedAudio === '0' ? savedAudio === '1' : undefined);
+    setLoopbackSupported(undefined);
+    void api.processLoopbackSupported().catch(() => false).then((supported) => {
+      if (current) setLoopbackSupported(supported);
+    });
+    void load();
   }));
+
+  const changeAudio = (enabled: boolean) => {
+    setAudioChoice(enabled);
+    try { localStorage.setItem(SHARE_AUDIO_KEY, enabled ? '1' : '0'); } catch { /* storage unavailable */ }
+  };
 
   const start = async () => {
     const choice = picked();
-    if (!choice || starting()) return;
+    const audio = withAudio();
+    if (!choice || audio === undefined || starting()) return;
     setStarting(true);
     setError(null);
-    const failure = await startSharing(choice.kind, choice.id, withAudio(), choice.label, choice.kind === 'window' && excludesSelf() ? audioScope() : 'system', fps());
+    const failure = await startSharing(choice.kind, choice.id, audio, choice.label, choice.kind === 'window' && excludesSelf() ? audioScope() : 'system', fps());
     setStarting(false);
     if (failure) setError(failure);
     else props.onClose();
@@ -200,7 +214,7 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
             <strong class="fs13">{t('Share system sound too')}</strong>
             <span class="t3 fs12">{withAudio() && picked()?.kind === 'window' && excludesSelf() && audioScope() === 'window' ? t('Only this window') : excludesSelf() ? t('Everything your computer plays goes out with the picture, except voices from FinchSpeak.') : t('Everything your speakers play goes out with the picture.')}</span>
           </div>
-          <Toggle label={t('Share system sound too')} checked={withAudio()} onChange={setWithAudio} />
+          <Toggle label={t('Share system sound too')} checked={withAudio() ?? false} onChange={changeAudio} />
         </div>
         <Show when={withAudio() && picked()?.kind === 'window' && excludesSelf()}>
           <div class="setrow">
@@ -221,7 +235,7 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
 
         <div class="row g8" style={{ 'justify-content': 'flex-end' }}>
           <Button variant="secondary" onClick={props.onClose}>{t('Cancel')}</Button>
-          <Button variant="primary" icon="share" loading={starting()} disabled={!picked()} onClick={() => void start()}>{t('Start sharing')}</Button>
+          <Button variant="primary" icon="share" loading={starting()} disabled={!picked() || withAudio() === undefined} onClick={() => void start()}>{t('Start sharing')}</Button>
         </div>
       </div>
     </Modal>

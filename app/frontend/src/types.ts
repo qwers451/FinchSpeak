@@ -205,6 +205,7 @@ export interface SessionEvents {
     initial_state: {
       channels: Channel[];
       online_users: User[];
+      offline_users?: User[];
       voice_states: (Omit<VoiceParticipant, 'is_muted' | 'is_deafened' | 'is_sharing'> & {
         muted: boolean; deafened: boolean; sharing_screen: boolean;
       })[];
