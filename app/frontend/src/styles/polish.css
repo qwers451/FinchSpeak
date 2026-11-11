@@ -53,6 +53,9 @@
 .setrow > .col.grow { min-width:0; }
 .setrow .toggle { flex-shrink:0; }
 .setrow .seg { max-width:100%; }
+.setrow .speaking-animation-control { min-width:0; }
+.setrow .speaking-animation-control > .seg { flex:0 1 auto; min-width:0; }
+.speaking-animation-control > .av { margin:12px; }
 .seg { gap:2px; }
 .seg span { min-height:32px; height:auto; padding:6px 10px; line-height:1.4; justify-content:center; text-align:center; }
 .field,.field .input { min-width:0; }
@@ -82,7 +85,7 @@
 .members-table td:first-child .trunc { white-space:normal; }
 
 @container (max-width:540px) {
-  .setrow:has(> .seg) { flex-direction:column; align-items:stretch; gap:12px; }
+  .setrow:has(> .seg, > .speaking-animation-control) { flex-direction:column; align-items:stretch; gap:12px; }
   .setrow > .seg { align-self:flex-start; }
   .settings-page .row:has(> .btn):has(> .col) { flex-wrap:wrap; }
 }

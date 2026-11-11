@@ -50,7 +50,7 @@ export function ParticipantTile(props: Props) {
       <Show when={muted()}><span title={t('Muted')}><Icon name="mic-off" size="sm" /></span></Show>
       <Show when={deafened()}><span title={t('Deafened')}><Icon name="phones-off" size="sm" /></span></Show>
       </div>
-      <Avatar name={name()} id={p().user_id} size={props.isMe ? Math.max(props.avatarSize, 72) as 128 | 96 | 72 | 56 : props.avatarSize} src={user()?.avatar_url} speaking={speaking()} />
+      <Avatar name={name()} id={p().user_id} size={props.isMe ? Math.max(props.avatarSize, 72) as 128 | 96 | 72 | 56 : props.avatarSize} src={user()?.avatar_url} speaking={speaking()} levelPeerId={p().peer_id} />
       <span class="nm head trunc">
         {name()}
         <Show when={props.isMe}> <span class="t3 fs12" style={{ 'font-family': 'var(--font-ui)' }}>{t('(you)')}</span></Show>

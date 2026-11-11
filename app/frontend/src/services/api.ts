@@ -529,7 +529,7 @@ export const api = {
     }
   },
 
-  setTrayState: async (state: 'idle' | 'voice' | 'muted' | 'live', language: 'ru' | 'en' = 'ru'): Promise<void> => {
+  setTrayState: async (state: 'idle' | 'voice' | 'speaking' | 'muted' | 'live', language: 'ru' | 'en' = 'ru'): Promise<void> => {
     if (isTauri()) return invoke('set_tray_state', { state, language });
   },
 

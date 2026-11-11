@@ -78,7 +78,7 @@ export function VoicePanel() {
               <For each={arranged().roster}>
                 {(participant) => (
                   <div class="mem">
-                    <Avatar name={participant.username} id={participant.user_id} size={24} speaking={speakingPeers().has(participant.peer_id)} />
+                    <Avatar name={participant.username} id={participant.user_id} size={24} speaking={speakingPeers().has(participant.peer_id)} levelPeerId={participant.peer_id} />
                     <span class="grow trunc">{participant.username}</span>
                     <Show when={participant.is_muted}><Icon name="mic-off" size="sm" class="tr" /></Show>
                   </div>

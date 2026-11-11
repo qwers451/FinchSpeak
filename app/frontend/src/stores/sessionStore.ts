@@ -16,6 +16,7 @@ import { resetScreenState, resetScreenStateOnDisconnect, setWatching, watching }
 import { endWatching, screenHandlers } from './screenStore';
 import { applySavedVolume } from './volumeStore';
 import { pushToast } from '../ui/toastStore';
+import { updateVoiceLevels } from './levelStore';
 export { appError, setAppError } from './notificationStore';
 
 export const [connectionStatus, setConnectionStatus] = createSignal<'connected' | 'disconnected' | 'reconnecting' | 'failed'>('disconnected');
@@ -48,6 +49,7 @@ export function currentSessionGeneration(): number {
 }
 
 export function resetSessionState() {
+  updateVoiceLevels({ levels: [] });
   sessionGeneration++;
   clearJoinSounds();
   resetMicPreview();
@@ -118,6 +120,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'local-speaking': setIsLocalSpeaking,
   'ping-rtt': (data) => setPingRtt(data.rtt_ms),
   'mic-level': handleMicLevel,
+  'voice-levels': updateVoiceLevels,
   'mic-test': handleMicTest,
   hotkey: (action) => void handleHotkey(action),
   'voice-quality': handleVoiceQuality,

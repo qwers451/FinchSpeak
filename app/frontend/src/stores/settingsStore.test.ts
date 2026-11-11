@@ -69,6 +69,18 @@ it('repairs invalid theme and language while preserving valid choices', () => {
     .toMatchObject({ theme: 'claude', language: 'ru', density: 'compact' });
 });
 
+it('defaults missing or unknown speaking styles to pulse', () => {
+  expect(parsePrefs(null).appearance.speakingStyle).toBe('pulse');
+  expect(parsePrefs('{"appearance":{"speakingStyle":"unknown"}}').appearance.speakingStyle).toBe('pulse');
+  expect(parsePrefs('{"appearance":{"speakingStyle":"glow"}}').appearance.speakingStyle).toBe('glow');
+});
+
+it('puts the selected speaking style on the document root', () => {
+  expect(document.documentElement.dataset.speakingStyle).toBe('pulse');
+  updateAppearance({ speakingStyle: 'waves' });
+  expect(document.documentElement.dataset.speakingStyle).toBe('waves');
+});
+
 it('translates reactive source strings and interpolates dynamic values', () => {
   setPrefs((current) => ({ ...current, appearance: { ...current.appearance, language: 'ru' } }));
   expect(t('Settings')).toBe('Настройки');

@@ -23,9 +23,9 @@ export async function subscribeSessionEvents(): Promise<{ dispose: UnlistenFn; r
   const startRefresh = (scope: RefreshScope, full: boolean) => {
     const peerId = localPeerId();
     const updates: (() => void)[] = [];
-    const flight = {
-      scope, full, updates,
-      done: (async (): Promise<void> => {
+    const flight = { scope, full, updates, done: Promise.resolve() };
+    pending = flight;
+    flight.done = (async (): Promise<void> => {
         try {
           const snapshot = await api.getSessionSnapshot();
           if (!scope.isCurrent() || snapshot?.user_id !== scope.userId) return;
@@ -42,9 +42,7 @@ export async function subscribeSessionEvents(): Promise<{ dispose: UnlistenFn; r
           // A presence event received during the request may still need a newer snapshot.
           refreshProfiles();
         }
-      })(),
-    };
-    pending = flight;
+      })();
     return flight.done;
   };
   const refresh = (): Promise<void> => {

@@ -27,6 +27,7 @@ export interface AppearancePrefs {
   density: 'comfortable' | 'compact';
   textSize: 'small' | 'medium' | 'large';
   reduceMotion: boolean;
+  speakingStyle: 'pulse' | 'ring' | 'waves' | 'bars' | 'glow';
   showMembers: boolean;
 }
 
@@ -39,7 +40,7 @@ export interface Prefs {
 
 export const DEFAULT_PREFS: Prefs = {
   notifications: { mentions: true, allMessages: false, voiceJoin: true, sounds: true, voiceSounds: true, soundVolume: 0.6, flash: true },
-  appearance: { theme: 'claude', customColors: DEFAULT_THEME_COLORS, language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, showMembers: true },
+  appearance: { theme: 'claude', customColors: DEFAULT_THEME_COLORS, language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, speakingStyle: 'pulse', showMembers: true },
   mutedChannels: {},
 };
 
@@ -83,6 +84,7 @@ export function parsePrefs(raw: string | null): Prefs {
       density: pick(a.density, ['comfortable', 'compact'] as const, d.appearance.density),
       textSize: pick(a.textSize, ['small', 'medium', 'large'] as const, d.appearance.textSize),
       reduceMotion: bool(a.reduceMotion, d.appearance.reduceMotion),
+      speakingStyle: pick(a.speakingStyle, ['pulse', 'ring', 'waves', 'bars', 'glow'], d.appearance.speakingStyle),
       showMembers: bool(a.showMembers, d.appearance.showMembers),
     },
     mutedChannels: muted,
@@ -158,6 +160,7 @@ export function applyAppearance(appearance: AppearancePrefs, root: HTMLElement =
   root.lang = appearance.language;
   root.dataset.density = appearance.density;
   root.dataset.reduceMotion = String(appearance.reduceMotion);
+  root.dataset.speakingStyle = appearance.speakingStyle;
   root.style.setProperty('--zoom', String(TEXT_ZOOM[appearance.textSize]));
 }
 

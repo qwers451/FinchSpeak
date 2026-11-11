@@ -2,6 +2,7 @@ import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PREFS, setPrefs } from '../stores/settingsStore';
+import { updateVoiceLevels } from '../stores/levelStore';
 import { Avatar, Button, ConfirmDialog, Icon, Modal, Slider, ToastHost, Toggle, clearToasts, pushToast, toasts, MAX_TOASTS } from './index';
 import { avatarColor, initialOf } from './avatarColor';
 
@@ -18,6 +19,7 @@ afterEach(() => {
   dispose = undefined;
   document.body.innerHTML = '';
   clearToasts();
+  updateVoiceLevels({ levels: [] });
   vi.useRealTimers();
 });
 
@@ -52,6 +54,23 @@ describe('Avatar', () => {
     const el = host.querySelector('.av');
     expect(el?.textContent).toContain('C');
     expect(el?.classList.contains('speaking')).toBe(true);
+  });
+
+  it('follows the peer id supplied after mounting and unbinds on disposal', () => {
+    vi.useFakeTimers();
+    const [peerId, setPeerId] = createSignal<number>();
+    const host = mount(() => <Avatar name="carol" levelPeerId={peerId()} speaking />);
+    const avatar = host.querySelector<HTMLElement>('.av')!;
+    updateVoiceLevels({ levels: [[7, 64], [8, 37]] });
+    expect(avatar.style.getPropertyValue('--lvl')).toBe('');
+    setPeerId(7);
+    expect(avatar.style.getPropertyValue('--lvl')).toBe('0.64');
+    setPeerId(8);
+    expect(avatar.style.getPropertyValue('--lvl')).toBe('0.37');
+    dispose?.();
+    dispose = undefined;
+    updateVoiceLevels({ levels: [[8, 79]] });
+    expect(avatar.style.getPropertyValue('--lvl')).toBe('');
   });
 });
 

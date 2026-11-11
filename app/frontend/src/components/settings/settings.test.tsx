@@ -38,6 +38,8 @@ beforeEach(() => {
 afterEach(() => {
   dispose?.();
   document.body.innerHTML = '';
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 it('saves a new display name', async () => {
@@ -105,6 +107,40 @@ it('appearance changes reach the page', async () => {
   await flush();
   expect(prefs().appearance.showMembers).toBe(false);
   setPrefs(DEFAULT_PREFS);
+});
+
+it('previews the selected speaking style and stops updating when reduced or closed', () => {
+  vi.useFakeTimers();
+  button('Appearance').click();
+  const choices = document.querySelector('[aria-label="Speaking animation"]')!;
+  const avatar = choices.parentElement!.querySelector<HTMLElement>('.av.s56.speaking')!;
+  Array.from(choices.querySelectorAll<HTMLElement>('[role="radio"]')).find((choice) => choice.textContent === 'Glow')!.click();
+  expect(document.documentElement.dataset.speakingStyle).toBe('glow');
+  const initial = Number(avatar.style.getPropertyValue('--lvl'));
+  expect(initial).toBeGreaterThan(0);
+  vi.advanceTimersByTime(80);
+  expect(Number(avatar.style.getPropertyValue('--lvl'))).toBeGreaterThan(initial);
+
+  document.querySelector<HTMLElement>('[aria-label="Reduce motion"]')!.click();
+  expect(avatar.style.getPropertyValue('--lvl')).toBe('');
+  vi.advanceTimersByTime(80);
+  expect(avatar.style.getPropertyValue('--lvl')).toBe('');
+
+  document.querySelector<HTMLElement>('[aria-label="Reduce motion"]')!.click();
+  expect(Number(avatar.style.getPropertyValue('--lvl'))).toBeGreaterThan(0);
+  setProfileOpen(false);
+  vi.advanceTimersByTime(80);
+  expect(avatar.style.getPropertyValue('--lvl')).toBe('');
+});
+
+it('keeps the speaking preview static when the system prefers reduced motion', () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('matchMedia', () => ({ matches: true }));
+  button('Appearance').click();
+  const avatar = document.querySelector<HTMLElement>('.speaking-animation-control .av')!;
+  expect(avatar.classList.contains('speaking')).toBe(true);
+  vi.advanceTimersByTime(160);
+  expect(avatar.style.getPropertyValue('--lvl')).toBe('');
 });
 
 it('autostart toggle reflects and changes the OS setting', async () => {

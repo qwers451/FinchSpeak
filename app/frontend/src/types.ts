@@ -215,6 +215,7 @@ export interface SessionEvents {
   'new-message': IncomingMessage;
   'message-rejected': { client_msg_id: string; code: number; message: string };
   'user-speaking': { peer_id: number; is_speaking: boolean };
+  'voice-levels': { levels: [peerId: number, level: number][] };
   'local-speaking': boolean;
   'ping-rtt': { rtt_ms: number };
   'tofu-required': { hostname: string; fingerprint: string };
