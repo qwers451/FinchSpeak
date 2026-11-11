@@ -113,8 +113,6 @@
 .room-grid .vc .nm { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:4px; width:100%; white-space:normal; overflow-wrap:anywhere; text-align:center; line-height:1.4; }
 .room-grid .vc .nm > .tag { font-size:8px; }
 .room-grid .vc .vol { width:100%; max-width:220px; }
-.vc .mod-actions { flex-wrap:wrap; gap:4px; }
-.vc .mod-actions .btn { max-width:100%; height:auto; min-height:28px; white-space:normal; line-height:1.35; }
 .room-grid.compact { flex:none; min-height:0; margin:0; }
 .room-grid.compact .vc { min-height:88px; }
 .room-grid.compact .vc > .av { width:40px; height:40px; font-size:18px; }
@@ -172,4 +170,3 @@
   .dock,[data-theme="custom"] .dock { padding:6px; }
   .ctl,[data-theme="custom"] .ctl { width:44px; height:42px; }
 }
-.vc .mod-actions select.move-to { font-size:12px; max-width:140px; }

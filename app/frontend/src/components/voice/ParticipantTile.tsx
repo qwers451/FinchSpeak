@@ -1,12 +1,11 @@
-import { createMemo, For, Show } from 'solid-js';
+import { createMemo, Show } from 'solid-js';
 import { currentUser } from '../../stores/authStore';
 import { knownUsers } from '../../stores/sessionStore';
 import { isLocallyMuted } from '../../stores/localMuteStore';
 import { setVolume, volumeFor } from '../../stores/volumeStore';
-import { activeVoiceChannel, isDeafened, isLocalSpeaking, isMuted, speakingPeers, voiceQuality } from '../../stores/voiceStore';
+import { isDeafened, isLocalSpeaking, isMuted, speakingPeers, voiceQuality } from '../../stores/voiceStore';
 import type { VoiceParticipant } from '../../types';
-import { channels } from '../../stores/chatStore';
-import { moderateVoice, moveVoice } from '../../stores/adminStore';
+import { openParticipantMenu, participantContextMenu, participantMenuKey } from './participantMenu';
 import { Avatar, Button, Icon, Slider } from '../../ui';
 import { t } from '../../i18n';
 
@@ -37,14 +36,15 @@ export function ParticipantTile(props: Props) {
   const user = createMemo(() => knownUsers().find((candidate) => candidate.id === p().user_id));
   const name = () => user()?.display_name || p().username;
   const volume = () => volumeFor(p().user_id);
-  const staff = () => currentUser()?.role === 'admin' || currentUser()?.role === 'moderator';
-  /** Moderators act on plain members only; admins on everybody. */
-  const mayModerate = () => !props.isMe && staff() && (currentUser()?.role === 'admin' || (user()?.role ?? 'member') === 'member');
-  const otherRooms = () => channels().filter((channel) => channel.channel_type === 'voice' && channel.id !== activeVoiceChannel()?.id);
   const poor = () => !props.isMe && voiceQuality()[p().peer_id]?.quality === 'poor';
 
   return (
-    <div class={`vc${speaking() ? ' speaking' : ''}`} data-peer-id={p().peer_id} aria-label={`${name()}${muted() ? `, ${t('Muted').toLowerCase()}` : ''}${deafened() ? `, ${t('Deafened').toLowerCase()}` : ''}`}>
+    <div class={`vc${speaking() ? ' speaking' : ''}`} data-peer-id={p().peer_id} tabindex="0"
+      onContextMenu={(event) => participantContextMenu(event, p().user_id, p())}
+      onKeyDown={(event) => participantMenuKey(event, p().user_id, p())}
+      aria-label={`${name()}${muted() ? `, ${t('Muted').toLowerCase()}` : ''}${deafened() ? `, ${t('Deafened').toLowerCase()}` : ''}`}>
+      <Button iconOnly size="sm" variant="ghost" icon="more" class="participant-actions" label={t('Actions for {name}', { name: name() })}
+        onClick={(event) => openParticipantMenu(event.currentTarget, p().user_id, p())} />
       <Show when={!props.isMe}><Quality peerId={p().peer_id} /></Show>
       <div class="badges">
       <Show when={p().server_muted}><span title={t('Silenced by a moderator')} style={{ color: 'var(--amber)' }}><Icon name="shield" size="sm" /></span></Show>
@@ -60,22 +60,6 @@ export function ParticipantTile(props: Props) {
       </span>
       <Show when={speaking()}><span class="tag cyan">{t('Speaking')}</span></Show>
       <Show when={poor()}><span class="tag amber">{t('Poor connection')}</span></Show>
-      <Show when={mayModerate()}>
-        <div class="row g4 mod-actions">
-          <Button size="sm" variant="ghost" onClick={() => void moderateVoice(p().user_id, p().server_muted ? 'unmute' : 'mute')}>{t(p().server_muted ? 'Allow to speak' : 'Silence')}</Button>
-          <Button size="sm" variant="ghost" onClick={() => void moderateVoice(p().user_id, 'kick')}>{t('Remove')}</Button>
-          <Show when={otherRooms().length > 0}>
-            <select class="move-to" aria-label={t('Move to…')} value="" onChange={(event) => {
-              const target = event.currentTarget.value;
-              event.currentTarget.value = '';
-              if (target) void moveVoice(p().user_id, p().peer_id, target);
-            }}>
-              <option value="">{t('Move to…')}</option>
-              <For each={otherRooms()}>{(room) => <option value={room.id}>{room.name}</option>}</For>
-            </select>
-          </Show>
-        </div>
-      </Show>
       <Show when={!props.isMe}>
         <div class="vol">
           <Icon name={volume() === 0 ? 'vol-off' : 'vol'} size="sm" />

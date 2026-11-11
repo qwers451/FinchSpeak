@@ -39,12 +39,12 @@ function persist() {
 }
 
 /** Set someone's volume now (mixer key `mixerKey`) and remember it under `key`. */
-export async function setVolume(key: string, mixerKey: number, value: number) {
+export async function setVolume(key: string, mixerKey: number | undefined, value: number) {
   if (isLocallyMuted(key)) return;
   const volume = clamp(value);
   setVolumes((previous) => ({ ...previous, [key]: volume }));
   persist();
-  await api.setSpeakerVolume(mixerKey, volume);
+  if (mixerKey !== undefined) await api.setSpeakerVolume(mixerKey, volume);
 }
 
 /** A person (or their shared screen) appeared: give the mixer their remembered volume. */

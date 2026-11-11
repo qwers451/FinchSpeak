@@ -216,8 +216,21 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 .stat { padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
 .invite-fresh { display: flex; align-items: center; gap: 16px; padding: 14px 16px; border-radius: 12px; background: rgba(255, 194, 14, .08); border: 1.5px solid var(--yellow); }
 .invite-code { font: 800 28px/32px var(--font-head); letter-spacing: .12em; color: var(--yellow); user-select: text; }
-.mod-actions { opacity: 0; transition: opacity 120ms; }
-.vc:hover .mod-actions, .vc:focus-within .mod-actions { opacity: 1; }
+.popover-host { font-size:calc(13px * var(--zoom,1)); }
+.floating-panel { position:fixed; left:var(--popover-x,8px); top:var(--popover-y,8px); z-index:var(--z-popover); max-width:calc(100vw - 16px); max-height:calc(100vh - 16px); overflow:auto; overscroll-behavior:contain; }
+.ctx-menu { display:flex; flex-direction:column; width:calc(240px * var(--zoom,1)); padding:6px; border:1px solid var(--line); border-radius:var(--r-md); background:var(--bg-card); box-shadow:var(--shadow-pop); }
+.ctx-entry { display:flex; align-items:center; gap:10px; flex:none; min-height:36px; padding:8px 10px; border:0; border-radius:var(--r-sm); background:transparent; color:var(--text-2); font:inherit; text-align:left; overflow-wrap:anywhere; cursor:pointer; }
+.ctx-entry:hover:not(:disabled),.ctx-entry:focus-visible { background:var(--bg-hover); color:var(--text); }
+.ctx-entry:focus-visible,.vc:focus-visible,.vp:focus-visible,.mem:focus-visible { outline:2px solid var(--yellow); outline-offset:-2px; }
+.ctx-entry:disabled { opacity:.45; cursor:default; }
+.ctx-entry.danger { color:var(--red-text); }
+.ctx-header { padding:8px 10px; color:var(--text-3); font-weight:600; overflow-wrap:anywhere; }
+.ctx-separator { height:1px; margin:4px 6px; background:var(--line); flex:none; }
+.ctx-slider { display:flex; flex-direction:column; gap:8px; padding:8px 10px; color:var(--text-2); }
+.ctx-slider .range-value { display:none; }
+.vc .participant-actions { position:absolute; top:6px; right:6px; z-index:2; opacity:0; }
+.vc:hover .participant-actions,.vc:focus-within .participant-actions { opacity:1; }
+.vc .badges { top:42px; }
 
 /* Search */
 .search-box { position: relative; }

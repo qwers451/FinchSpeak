@@ -17,6 +17,7 @@ import { CertChangedModal, TofuModal } from './components/TofuModal';
 import { ConnectionBanner, Splash } from './components/ConnectionBanner';
 import { Overlays, SessionEndedScreen } from './components/overlays/Overlays';
 import { sessionEnded } from './stores/sessionEnd';
+import { ContextMenuHost } from './ui/ContextMenu';
 import { IconSprite, Titlebar, ToastHost } from './ui';
 import { AdminModal } from './components/admin/AdminModal';
 import { SettingsModal } from './components/settings/SettingsModal';
@@ -105,6 +106,7 @@ export function App() {
       <AdminModal />
       <SettingsModal />
       <ToastHost />
+      <ContextMenuHost />
     </div>
   );
 }

@@ -18,6 +18,7 @@ import {
 } from '../stores/voiceStore';
 import { isLocallyMuted } from '../stores/localMuteStore';
 import { isSharing } from '../stores/screenState';
+import { participantContextMenu, participantMenuKey } from './voice/participantMenu';
 import { isMeParticipant } from './voice/ParticipantTile';
 import { connectionStatus, localPeerId, knownUsers, myStatus as ownStatus, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
@@ -180,7 +181,7 @@ export function Sidebar() {
                 </div>
                 <For each={participantsForChannel(channel.id)}>
                   {(participant) => (
-                    <div class="vp">
+                    <div class="vp" tabindex="0" onContextMenu={(event) => participantContextMenu(event, participant.user_id, participant)} onKeyDown={(event) => participantMenuKey(event, participant.user_id, participant)}>
                       <Avatar name={participant.username} id={participant.user_id} size={24} src={knownUsers().find((user) => user.id === participant.user_id)?.avatar_url} speaking={speakingPeers().has(participant.peer_id) || (isMeParticipant(participant, localPeerId()) && !isMuted() && isLocalSpeaking())} levelPeerId={participant.peer_id} />
                       <span class="grow trunc">{participant.username}</span>
                       <Show when={!isMeParticipant(participant, localPeerId()) && isLocallyMuted(participant.user_id)}><Icon name="vol-off" title={t('You muted this person')} /></Show>

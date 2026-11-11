@@ -13,6 +13,7 @@ import { VoiceSettingsModal } from './voice/VoiceSettingsModal';
 import { SpatialStage } from './voice/SpatialStage';
 import { spatialEnabled } from '../stores/spatialStore';
 import { arrange, avatarSizeFor, gridColumns, gridRows } from './voice/voiceLayout';
+import { participantContextMenu, participantMenuKey } from './voice/participantMenu';
 import { t } from '../i18n';
 
 /** What the round-trip time to the server says about the link. */
@@ -77,7 +78,7 @@ export function VoicePanel() {
             <div class="roster-list">
               <For each={arranged().roster}>
                 {(participant) => (
-                  <div class="mem">
+                  <div class="mem" tabindex="0" onContextMenu={(event) => participantContextMenu(event, participant.user_id, participant)} onKeyDown={(event) => participantMenuKey(event, participant.user_id, participant)}>
                     <Avatar name={participant.username} id={participant.user_id} size={24} speaking={speakingPeers().has(participant.peer_id)} levelPeerId={participant.peer_id} />
                     <span class="grow trunc">{participant.username}</span>
                     <Show when={participant.is_muted}><Icon name="mic-off" size="sm" class="tr" /></Show>
