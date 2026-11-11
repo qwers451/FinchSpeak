@@ -3,6 +3,20 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Public metadata. Storage paths are always private to the server.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MusicTrack {
+    pub id: Uuid,
+    pub uploader_id: Uuid,
+    pub title: String,
+    pub artist: Option<String>,
+    pub duration_ms: u64,
+    pub size_bytes: u64,
+    pub format: String,
+    pub temporary: bool,
+    pub created_at: i64,
+}
+
 /// A registered user.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct User {
