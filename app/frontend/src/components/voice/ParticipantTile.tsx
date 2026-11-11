@@ -21,10 +21,8 @@ function Quality(props: { peerId: number }) {
   const level = () => voiceQuality()[props.peerId]?.quality ?? 'good';
   const lit = () => (level() === 'good' ? 4 : level() === 'fair' ? 2 : 1);
   return (
-    <div class="q" title={t(level() === 'good' ? 'Good connection' : level() === 'fair' ? 'Fair connection' : 'Poor connection')}>
-      {[5, 8, 11, 14].map((height, index) => (
-        <i style={{ height: `${height}px`, background: index < lit() ? (level() === 'good' ? 'var(--teal)' : 'var(--amber)') : 'var(--line)' }} />
-      ))}
+    <div class="q" data-quality={level()} title={t(level() === 'good' ? 'Good connection' : level() === 'fair' ? 'Fair connection' : 'Poor connection')}>
+      {[0, 1, 2, 3].map((index) => <i classList={{ lit: index < lit() }} />)}
     </div>
   );
 }
@@ -84,7 +82,7 @@ export function ParticipantTile(props: Props) {
         onClick={(event) => openParticipantMenu(event.currentTarget, p().user_id, p())} />
       <Show when={!props.isMe}><Quality peerId={p().peer_id} /></Show>
       <div class="badges">
-      <Show when={p().server_muted}><span title={t('Silenced by a moderator')} style={{ color: 'var(--amber)' }}><Icon name="shield" size="sm" /></span></Show>
+      <Show when={p().server_muted}><span title={t('Silenced by a moderator')} class="server-muted-badge"><Icon name="shield" size="sm" /></span></Show>
       <Show when={!props.isMe && isLocallyMuted(p().user_id)}><span title={t('You muted this person')}><Icon name="vol-off" size="sm" /></span></Show>
       <Show when={muted()}><span title={t('Muted')}><Icon name="mic-off" size="sm" /></span></Show>
       <Show when={deafened()}><span title={t('Deafened')}><Icon name="phones-off" size="sm" /></span></Show>
@@ -92,7 +90,7 @@ export function ParticipantTile(props: Props) {
       <Avatar name={name()} id={p().user_id} size={props.isMe ? Math.max(props.avatarSize, 72) as 128 | 96 | 72 | 56 : props.avatarSize} src={user()?.avatar_url} speaking={speaking()} levelPeerId={p().peer_id} />
       <span class="nm head trunc">
         {name()}
-        <Show when={props.isMe}> <span class="t3 fs12" style={{ 'font-family': 'var(--font-ui)' }}>{t('(you)')}</span></Show>
+        <Show when={props.isMe}> <span class="t3 fs12 participant-you">{t('(you)')}</span></Show>
         <Show when={user()?.role === 'admin'}> <span class="tag admin">{t('Admin')}</span></Show>
       </span>
       <Show when={speaking()}><span class="tag cyan">{t('Speaking')}</span></Show>

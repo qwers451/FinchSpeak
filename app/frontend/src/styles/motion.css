@@ -16,7 +16,7 @@
 .overlay[data-exiting="true"] .modal { opacity:0; transform:translateY(6px) scale(.98); transition-duration:var(--motion-exit); transition-timing-function:var(--ease-in); }
 /* Transitions can reverse without replaying keyframes. */
 .toast { animation:none; opacity:1; transform:none; transition:opacity var(--motion-enter) var(--ease-out),transform var(--motion-enter) var(--ease-out); }
-.emoji-picker,.search-results,.mention-menu,.ctx-menu {
+.emoji-picker,.search-results,.mention-menu,.ctx-menu,.select-listbox {
   animation:none; opacity:1; transform:none; transform-origin:top right;
   transition:opacity var(--motion-panel) var(--ease-out),transform var(--motion-panel) var(--ease-out);
 }
@@ -26,7 +26,7 @@
   .overlay { opacity:0; }
   .modal { opacity:0; transform:translateY(6px) scale(.98); }
   .toast { opacity:0; transform:translateX(12px); }
-  .emoji-picker,.search-results,.ctx-menu { opacity:0; transform:translateY(-4px) scale(.98); }
+  .emoji-picker,.search-results,.ctx-menu,.select-listbox { opacity:0; transform:translateY(-4px) scale(.98); }
   .composer-picker .emoji-picker,.picker-anchor.up .emoji-picker,.mention-menu { opacity:0; transform:translateY(4px) scale(.98); }
 }
 .vc,.toggle { transition:none; }

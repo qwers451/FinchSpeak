@@ -226,8 +226,8 @@ function Viewer(props: { peerId: number; userId: string }) {
         {(o) => (
           <div class={`viewer-overlay${status() === 'unsupported' ? ' bad' : ''}`} role="status">
             <Show when={o().spin}><span class="spin" /></Show>
-            <strong class="head" style={{ 'font-size': '17px' }}>{t(o().head)}</strong>
-            <span class="t2 fs12" style={{ 'max-width': '300px' }}>{t(o().body)}</span>
+            <strong class="head viewer-title">{t(o().head)}</strong>
+            <span class="t2 fs12 viewer-description">{t(o().body)}</span>
             <Show when={status() === 'unsupported'}><Button size="sm" variant="secondary" icon="copy" onClick={copyDetails}>{t('Copy details')}</Button></Show>
           </div>
         )}
@@ -241,7 +241,7 @@ function Viewer(props: { peerId: number; userId: string }) {
 
       <div class={`viewer-hud bottom${hud() ? ' on' : ''}`}>
         <Icon name={volumeFor(volumeKey()) === 0 ? 'vol-off' : 'vol'} size="sm" />
-        <div style={{ width: '120px' }}>
+        <div class="viewer-volume">
           <Slider cool label={t('Volume of the shared sound')} min={0} max={2} step={0.05} value={volumeFor(volumeKey())} onChange={(value) => void setVolume(volumeKey(), screenAudioKey(props.peerId), value)} />
         </div>
         <span class="grow" />
@@ -270,8 +270,8 @@ function Ended(props: { name: string; reason: 'stopped' | 'left' | 'disconnected
   onCleanup(() => clearTimeout(timer));
   return (
     <div class="viewer ended" role="status">
-      <div class="viewer-overlay" style={{ background: 'rgba(5, 8, 15, .9)' }}>
-        <strong class="head" style={{ 'font-size': '17px' }}>{text().head}</strong>
+      <div class="viewer-overlay ended-overlay">
+        <strong class="head viewer-title">{text().head}</strong>
         <span class="t2 fs12">{text().body}</span>
         <Button variant="primary" size="sm" onClick={closeEndedShare}>{t('Back to the room')}</Button>
       </div>

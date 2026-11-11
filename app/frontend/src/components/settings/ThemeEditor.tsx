@@ -25,7 +25,7 @@ function ColorField(props: { name: keyof ThemeColors }) {
   return (
     <div class="theme-color">
       <label class="swatch" title={t(label)}>
-        <i style={{ 'background-color': colors()[props.name] }} />
+        <i style={{ '--swatch-color': colors()[props.name] }} />
         <input type="color" aria-label={t(label)} value={colors()[props.name]} onInput={(event) => set(event.currentTarget.value)} />
       </label>
       <div class="col grow">

@@ -100,7 +100,7 @@ function ChannelNameDialog(props: { dialog: Extract<ChannelDialog, { kind: 'crea
     <Modal open onClose={props.onClose} title={title()} width="420px">
       <form class="col g16" onSubmit={submit}>
         <Field label={t('Channel name')} value={name()} onInput={setName} placeholder={props.dialog.kind === 'create' && props.dialog.type === 'voice' ? t('Quiet corner') : t('general')} autofocus />
-        <div class="row g8" style={{ 'justify-content': 'flex-end' }}>
+        <div class="row g8 dialog-actions-primary">
           <Button variant="secondary" onClick={props.onClose}>{t('Cancel')}</Button>
           <Button type="submit" variant="primary" loading={busy()} disabled={!name().trim()}>{props.dialog.kind === 'rename' ? t('Save') : t('Create')}</Button>
         </div>
@@ -185,7 +185,7 @@ export function Sidebar() {
                 <ChannelActions channel={channel} onDialog={setDialog} />
                 <Show when={unread()[channel.id]}>
                   {(entry) => (
-                    <span class={`badge${entry().mention ? ' mention' : ''}`} style={{ 'margin-left': 'auto' }} title={entry().mention ? t('You were mentioned') : t('Unread messages')}>
+                    <span class={`badge${entry().mention ? ' mention' : ''}`} title={entry().mention ? t('You were mentioned') : t('Unread messages')}>
                       {entry().count > 99 ? '99+' : entry().count}
                     </span>
                   )}
@@ -219,10 +219,10 @@ export function Sidebar() {
                   <span class="trunc" title={channel.name}>{channel.name}</span>
                   <ChannelActions channel={channel} onDialog={setDialog} />
                   <Show when={participantsForChannel(channel.id).some((participant) => participant.is_sharing)}>
-                    <span class="tag live" style={{ 'margin-left': 'auto' }}>{t('LIVE')}</span>
+                    <span class="tag live channel-live">{t('LIVE')}</span>
                   </Show>
                   <Show when={participantsForChannel(channel.id).length > 0}>
-                    <span class="tag violet" style={{ 'margin-left': participantsForChannel(channel.id).some((participant) => participant.is_sharing) ? '0' : 'auto' }}>{participantsForChannel(channel.id).length}</span>
+                    <span class="tag violet channel-count" classList={{ 'with-live': participantsForChannel(channel.id).some((participant) => participant.is_sharing) }}>{participantsForChannel(channel.id).length}</span>
                   </Show>
                 </div>
                 <div class="voice-people" classList={{ 'drop-target': dropChannel() === channel.id }}>
@@ -233,8 +233,8 @@ export function Sidebar() {
                       <Avatar name={participant.username} id={participant.user_id} size={24} src={knownUsers().find((user) => user.id === participant.user_id)?.avatar_url} speaking={speakingPeers().has(participant.peer_id) || (isMeParticipant(participant, localPeerId()) && !isMuted() && isLocalSpeaking())} levelPeerId={participant.peer_id} />
                       <span class="grow trunc">{participant.username}</span>
                       <Show when={!isMeParticipant(participant, localPeerId()) && isLocallyMuted(participant.user_id)}><Icon name="vol-off" title={t('You muted this person')} /></Show>
-                      <Show when={participant.is_muted}><Icon name="mic-off" title={t('Muted')} style={{ color: 'var(--red-text)' }} /></Show>
-                      <Show when={participant.is_deafened}><Icon name="phones-off" title={t('Deafened')} style={{ color: 'var(--red-text)' }} /></Show>
+                      <Show when={participant.is_muted}><Icon name="mic-off" title={t('Muted')} class="tr" /></Show>
+                      <Show when={participant.is_deafened}><Icon name="phones-off" title={t('Deafened')} class="tr" /></Show>
                       <Show when={participant.is_sharing}><span class="tag live" title={t('Sharing screen')}><Icon name="share" size="sm" /> {t('LIVE')}</span></Show>
                     </div>
                   )}
@@ -249,12 +249,12 @@ export function Sidebar() {
       <Show when={activeVoiceChannel()}>
         {(channel) => (
           <div class="vstrip voice-banner">
-            <div class="col grow" style={{ 'min-width': 0 }}>
-                <span class="row g6 b fs13" style={{ color: '#A39CFF' }}>
+            <div class="col grow">
+                <span class="row g6 b fs13 voice-connection">
                 <Icon name="bars" size="sm" />{connectionStatus() === 'connected' ? t('Voice connected') : t('Voice disconnected')}
               </span>
               <span class="t2 fs12 trunc">{channel().name}{pingRtt() !== null ? ` · ${pingRtt()} ms` : ''}</span>
-              <Show when={isSharing()}><span class="row g6 fs12" style={{ color: 'var(--red-text)' }}><Icon name="share" size="sm" />{t('You are sharing your screen')}</span></Show>
+              <Show when={isSharing()}><span class="row g6 fs12 tr"><Icon name="share" size="sm" />{t('You are sharing your screen')}</span></Show>
             </div>
             <Button iconOnly size="sm" variant="danger" icon="hangup" label={t('Disconnect from voice')} title={t('Disconnect')} onClick={() => void leaveVoice()} />
           </div>
@@ -262,9 +262,9 @@ export function Sidebar() {
       </Show>
 
       <div class="upanel user-panel">
-        <button type="button" class="row g12 grow profile-open" style={{ gap: '10px', 'min-width': 0 }} aria-label={t('Open profile')} title={currentUser()?.display_name || currentUser()?.username} onClick={() => setProfileOpen(true)}>
+        <button type="button" class="row g12 grow profile-open" aria-label={t('Open profile')} title={currentUser()?.display_name || currentUser()?.username} onClick={() => setProfileOpen(true)}>
           <Avatar name={currentUser()?.display_name || currentUser()?.username} id={currentUser()?.id} size={40} status={myStatus()} speaking={isLocalSpeaking()} src={currentUser()?.avatar_url} levelPeerId={localPeerId() ?? undefined} />
-          <div class="col grow" style={{ 'min-width': 0, 'text-align': 'left' }}>
+          <div class="col grow">
             <span class="b trunc fs13">{currentUser()?.display_name || currentUser()?.username}</span>
             <span class="t3 fs12 trunc">{(currentUser() && statusTexts()[currentUser()!.id]) || statusLabel()}</span>
           </div>

@@ -57,7 +57,7 @@ function SourceThumb(props: { kind: 'monitor' | 'window'; id: number; index: num
 
   return (
     <div class="thumb source-thumb">
-      <Show when={url()} fallback={<span class={failed() ? 'thumb-fail' : 'skel pulse'} style={{ position: 'absolute', inset: '0', 'border-radius': '0' }}>{failed() ? t('No preview') : ''}</span>}>
+      <Show when={url()} fallback={<span class={`source-placeholder ${failed() ? 'thumb-fail' : 'skel pulse'}`}>{failed() ? t('No preview') : ''}</span>}>
         <img src={url()!} alt="" draggable={false} />
       </Show>
     </div>
@@ -168,7 +168,7 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
                   <SourceThumb kind="monitor" id={monitor.id} index={index()} />
                   <div class="tmeta">
                     <Icon name="monitor" size="sm" class="t3" />
-                    <div class="col grow" style={{ 'min-width': 0 }}><strong class="fs13 trunc">{monitorName(monitor.name)}</strong><span class="t3 fs12">{monitor.width} × {monitor.height}</span></div>
+                    <div class="col grow"><strong class="fs13 trunc">{monitorName(monitor.name)}</strong><span class="t3 fs12">{monitor.width} × {monitor.height}</span></div>
                     <Show when={monitor.is_primary}><span class="tag admin">{t('Main')}</span></Show>
                   </div>
                 </div>
@@ -183,7 +183,7 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
                   <SourceThumb kind="window" id={window.id} index={index()} />
                   <div class="tmeta">
                     <Icon name="box" size="sm" class="t3" />
-                    <div class="col grow" style={{ 'min-width': 0 }}><strong class="fs13 trunc" title={window.title}>{window.title}</strong><span class="t3 fs12 trunc">{window.app_name}</span></div>
+                    <div class="col grow"><strong class="fs13 trunc" title={window.title}>{window.title}</strong><span class="t3 fs12 trunc">{window.app_name}</span></div>
                   </div>
                 </div>
               )}
@@ -196,7 +196,7 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
               <span class="t2 fs13">{tab() === 'monitor' ? t('Check that a display is connected, then refresh.') : t('Minimised windows are not listed. Open the window you want and refresh.')}</span>
             </div>
           </Show>
-          <Show when={loading() && monitors().length + windows().length === 0}><span class="skel pulse" style={{ height: '160px' }} /></Show>
+          <Show when={loading() && monitors().length + windows().length === 0}><span class="skel pulse picker-loading" /></Show>
         </div>
 
         <div class="setrow">
@@ -233,7 +233,7 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
         </Show>
         <span class="t3 fs12">{t('Pictures larger than 4K are scaled down before they are sent.')}</span>
 
-        <div class="row g8" style={{ 'justify-content': 'flex-end' }}>
+        <div class="row g8 dialog-actions-primary">
           <Button variant="secondary" onClick={props.onClose}>{t('Cancel')}</Button>
           <Button variant="primary" icon="share" loading={starting()} disabled={!picked() || withAudio() === undefined} onClick={() => void start()}>{t('Start sharing')}</Button>
         </div>

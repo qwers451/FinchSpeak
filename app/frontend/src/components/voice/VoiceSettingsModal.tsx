@@ -8,6 +8,7 @@ import { resetSeats, seats, setSpatialEnabled, spatialEnabled } from '../../stor
 import type { AudioDevice } from '../../types';
 import { Button, Icon, Modal, Slider, Toggle } from '../../ui';
 import { t } from '../../i18n';
+import { Select } from '../../ui/Select';
 import { api } from '../../services/api';
 
 function DevicePicker(props: { kind: keyof DeviceSelection; label: string; devices: AudioDevice[] }) {
@@ -18,16 +19,13 @@ function DevicePicker(props: { kind: keyof DeviceSelection; label: string; devic
   return (
     <div class="field">
       <span class="field-label">{props.label}</span>
-      <div class="input">
-        <Icon name={props.kind === 'input' ? 'mic' : 'vol'} size="sm" class="t3" />
-        <select aria-label={props.label} onChange={(event) => void chooseAudioDevice(props.kind, event.currentTarget.value || null)}>
-          <option value="" selected={selectedDevices()[props.kind] === null}>{t('System default')}</option>
-          <For each={props.devices}>
-            {(device) => <option value={device.name} selected={selectedDevices()[props.kind] === device.name}>{device.name}{device.is_default ? t(' (default)') : ''}</option>}
-          </For>
-        </select>
-        <Icon name="chev-d" size="sm" class="t3" />
-      </div>
+      <Select label={props.label} value={selectedDevices()[props.kind] ?? ''}
+        options={[
+          { value: '', label: t('System default') },
+          ...props.devices.map((device) => ({ value: device.name, label: device.name + (device.is_default ? t(' (default)') : '') })),
+          ...(missing() ? [{ value: selectedDevices()[props.kind] ?? '', label: selectedDevices()[props.kind] ?? '', disabled: true }] : []),
+        ]}
+        onChange={(value) => void chooseAudioDevice(props.kind, value || null)} />
       <Show when={missing()}>
         <span class="err"><Icon name="warn" size="sm" />{t('This device is not connected; the system default is used instead.')}</span>
       </Show>
