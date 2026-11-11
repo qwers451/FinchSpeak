@@ -22,6 +22,7 @@ pub mod capture;
 pub mod devices;
 pub mod jitter;
 pub mod mixer;
+pub mod music;
 pub mod noise;
 pub mod opus;
 pub mod quality;
