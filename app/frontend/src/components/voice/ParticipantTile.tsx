@@ -1,12 +1,13 @@
-import { createMemo, Show } from 'solid-js';
+import { createMemo, createSignal, Show } from 'solid-js';
 import { currentUser } from '../../stores/authStore';
-import { knownUsers } from '../../stores/sessionStore';
+import { knownUsers, localPeerId } from '../../stores/sessionStore';
 import { isLocallyMuted } from '../../stores/localMuteStore';
 import { setVolume, volumeFor } from '../../stores/volumeStore';
-import { isDeafened, isLocalSpeaking, isMuted, speakingPeers, voiceQuality } from '../../stores/voiceStore';
+import { isDeafened, isLocalSpeaking, isMuted, speakingPeers, voiceQuality, voiceParticipants } from '../../stores/voiceStore';
 import type { VoiceParticipant } from '../../types';
 import { openParticipantMenu, participantContextMenu, participantMenuKey } from './participantMenu';
 import { Avatar, Button, Icon, Slider } from '../../ui';
+import { draggedTile, setDraggedTile, moveTile } from '../../stores/tileOrderStore';
 import { t } from '../../i18n';
 
 type Props = {
@@ -36,10 +37,46 @@ export function ParticipantTile(props: Props) {
   const user = createMemo(() => knownUsers().find((candidate) => candidate.id === p().user_id));
   const name = () => user()?.display_name || p().username;
   const volume = () => volumeFor(p().user_id);
+  const [dropSide, setDropSide] = createSignal<'before' | 'after' | null>(null);
+  const dragType = 'application/x-finch-tile';
+  const validSource = (userId: string | null) => !props.isMe && userId !== p().user_id &&
+    voiceParticipants().some((participant) => participant.user_id === userId && !isMeParticipant(participant, localPeerId()));
+  const side = (event: DragEvent) => {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    return event.clientX >= rect.left + rect.width / 2 ? 'after' : 'before';
+  };
+  const startDrag = (event: DragEvent) => {
+    if (props.isMe || !event.dataTransfer || (event.target !== event.currentTarget && (event.target as HTMLElement).closest('button,input'))) { event.preventDefault(); return; }
+    event.dataTransfer.setData(dragType, JSON.stringify({ userId: p().user_id }));
+    event.dataTransfer.effectAllowed = 'move';
+    setDraggedTile(p().user_id);
+  };
+  const dragOver = (event: DragEvent) => {
+    if (!event.dataTransfer?.types.includes(dragType) || !validSource(draggedTile())) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDropSide(side(event));
+  };
+  const drop = (event: DragEvent) => {
+    setDropSide(null);
+    setDraggedTile(null);
+    if (!event.dataTransfer?.types.includes(dragType)) return;
+    try {
+      const payload: unknown = JSON.parse(event.dataTransfer.getData(dragType));
+      if (!payload || typeof payload !== 'object' || !('userId' in payload) || typeof payload.userId !== 'string' || !validSource(payload.userId)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      moveTile(payload.userId, p().user_id, side(event) === 'after',
+        voiceParticipants().filter((participant) => !isMeParticipant(participant, localPeerId())).map((participant) => participant.user_id));
+    } catch { /* ignore a foreign or malformed drag */ }
+  };
   const poor = () => !props.isMe && voiceQuality()[p().peer_id]?.quality === 'poor';
 
   return (
-    <div class={`vc${speaking() ? ' speaking' : ''}`} data-peer-id={p().peer_id} tabindex="0"
+    <div class={`vc${speaking() ? ' speaking' : ''}`} data-peer-id={p().peer_id} tabindex="0" draggable={!props.isMe}
+      classList={{ 'tile-drop-before': dropSide() === 'before', 'tile-drop-after': dropSide() === 'after' }}
+      onDragStart={startDrag} onDragOver={dragOver} onDrop={drop}
+      onDragLeave={() => setDropSide(null)} onDragEnd={() => { setDropSide(null); setDraggedTile(null); }}
       onContextMenu={(event) => participantContextMenu(event, p().user_id, p())}
       onKeyDown={(event) => participantMenuKey(event, p().user_id, p())}
       aria-label={`${name()}${muted() ? `, ${t('Muted').toLowerCase()}` : ''}${deafened() ? `, ${t('Deafened').toLowerCase()}` : ''}`}>

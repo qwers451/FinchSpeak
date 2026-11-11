@@ -58,7 +58,7 @@ it('a Russian text equals its English key only for names that are not translated
 
 /** Strings that look like text but are not shown to people. Each needs a reason; a new entry is a deliberate decision. */
 const NOT_INTERFACE_TEXT: [RegExp, string][] = [
-  [/^(Enter|Escape|Tab|Backspace|Delete|Home|End|Arrow(Up|Down|Left|Right)|Control|Alt|Super|Shift|(Key|Digit)([A-Z]|\d)?)$/, 'KeyboardEvent key and code names'],
+  [/^(Enter|Escape|Tab|Backspace|Delete|Home|End|ContextMenu|Arrow(Up|Down|Left|Right)|Control|Alt|Super|Shift|(Key|Digit)([A-Z]|\d)?)$/, 'KeyboardEvent key and code names'],
   [/^(Ctrl|Esc|Shift \+ Enter)$/, 'key caps: the Latin labels printed on keyboards, also in Russian'],
   [/^(POST|Content-Type|INPUT|TEXTAREA|SELECT|Files|FinchSpeak)$/, 'HTTP, DOM and product names'],
   [/^(Left|Disconnected|RoomClosed)$/, 'reason codes sent by the server (stores and viewerState map them to translated texts)'],

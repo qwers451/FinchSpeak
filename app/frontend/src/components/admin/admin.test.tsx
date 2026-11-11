@@ -10,6 +10,7 @@ import { resetSessionState, sessionHandlers, setKnownUsers, setLocalPeerId } fro
 import { setActiveVoiceChannel, setSpeakingPeers, setVoiceParticipants } from '../../stores/voiceStore';
 import { clearToasts, toasts } from '../../ui';
 import { DEFAULT_PREFS, setPrefs } from '../../stores/settingsStore';
+import { ContextMenuHost } from '../../ui/ContextMenu';
 import { VoicePanel } from '../VoicePanel';
 import { AdminModal } from './AdminModal';
 
@@ -200,18 +201,19 @@ const tileUser = (id: string, role: 'admin' | 'moderator' | 'member') => ({ id, 
 
 function room(viewer: typeof boss | typeof mod) {
   setCurrentUser(viewer);
-  setKnownUsers([viewer, tileUser('alice', 'member'), tileUser('boss', 'admin')]);
+  const third = viewer.role === 'admin' ? tileUser('moddy', 'moderator') : tileUser('boss', 'admin');
+  setKnownUsers([viewer, tileUser('alice', 'member'), third]);
   setLocalPeerId(1);
   setActiveVoiceChannel({ id: 'room', short_id: 2, name: 'Voice', channel_type: 'voice', position: 0, bitrate_kbps: 64 });
   setVoiceParticipants([
     { user_id: viewer.id, peer_id: 1, username: viewer.username, channel_id: 'room' },
     { user_id: 'alice', peer_id: 2, username: 'alice', channel_id: 'room' },
-    { user_id: 'boss', peer_id: 3, username: 'boss', channel_id: 'room' },
+    { user_id: third.id, peer_id: 3, username: third.username, channel_id: 'room' },
   ]);
   setSpeakingPeers(new Set<number>());
   const host = document.createElement('div');
   document.body.appendChild(host);
-  dispose = render(() => <VoicePanel />, host);
+  dispose = render(() => <><ContextMenuHost /><VoicePanel /></>, host);
   return host;
 }
 
@@ -219,30 +221,45 @@ it('a moderator can silence and remove a member in the room, but not an admin', 
   const moderate = vi.spyOn(api, 'moderateVoice').mockResolvedValue();
   const host = room({ ...mod });
   const alice = host.querySelector('[data-peer-id="2"]')!;
-  button('Silence', alice).click();
-  button('Remove', alice).click();
+  alice.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+  await flush();
+  button('Silence for everyone').click();
+  alice.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+  await flush();
+  button('Remove from the room').click();
   await flush();
   expect(moderate.mock.calls).toEqual([['alice', 'mute'], ['alice', 'kick']]);
-  expect(host.querySelector('[data-peer-id="3"] .mod-actions')).toBeNull();
-  expect(host.querySelector('[data-peer-id="1"] .mod-actions')).toBeNull();
+  host.querySelector('[data-peer-id="3"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+  await flush();
+  expect(button('Silence for everyone')).toBeUndefined();
+  host.querySelector('[data-peer-id="1"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+  await flush();
+  expect(button('Silence for everyone')).toBeUndefined();
 });
 
 it('an admin may moderate everybody; a server-muted person shows the badge and can be allowed again', async () => {
   const moderate = vi.spyOn(api, 'moderateVoice').mockResolvedValue();
   const host = room({ ...boss });
-  expect(host.querySelector('[data-peer-id="3"] .mod-actions')).not.toBeNull();
+  host.querySelector('[data-peer-id="3"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+  await flush();
+  expect(button('Silence for everyone')).toBeTruthy();
   sessionHandlers['server-mute-changed']({ peer_id: 2, server_muted: true });
   await flush();
   const alice = host.querySelector('[data-peer-id="2"]')!;
   expect(alice.querySelector('[title="Silenced by a moderator"]')).not.toBeNull();
-  button('Allow to speak', alice).click();
+  alice.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+  await flush();
+  button('Allow to speak').click();
   await flush();
   expect(moderate).toHaveBeenCalledWith('alice', 'unmute');
 });
 
-it('members get no moderation controls', () => {
+it('members get no moderation actions', async () => {
   const host = room({ id: 'carl', username: 'carl', display_name: 'Carl', role: 'member' } as never);
-  expect(host.querySelector('.mod-actions')).toBeNull();
+  host.querySelector('[data-peer-id="2"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+  await flush();
+  expect(button('Silence for everyone')).toBeUndefined();
+  expect(button('Remove from the room')).toBeUndefined();
 });
 
 it('an admin resets a member password: it is shown once, and Copy puts it on the clipboard', async () => {

@@ -234,6 +234,8 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 .drop-target { outline:2px solid var(--cyan); outline-offset:-2px; }
 .vp[draggable="true"] { cursor:grab; }
 .voice-people { border-radius:var(--r-sm); }
+.vc.tile-drop-before { outline:3px solid var(--cyan); outline-offset:-3px; }
+.vc.tile-drop-after { outline:3px dashed var(--cyan); outline-offset:-3px; }
 
 /* Search */
 .search-box { position: relative; }

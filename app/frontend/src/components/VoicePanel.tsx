@@ -14,6 +14,7 @@ import { SpatialStage } from './voice/SpatialStage';
 import { spatialEnabled } from '../stores/spatialStore';
 import { arrange, avatarSizeFor, gridColumns, gridRows } from './voice/voiceLayout';
 import { participantContextMenu, participantMenuKey } from './voice/participantMenu';
+import { tileOrder } from '../stores/tileOrderStore';
 import { t } from '../i18n';
 
 /** What the round-trip time to the server says about the link. */
@@ -27,7 +28,7 @@ function pingLabel(ms: number | null): { text: string; color: string } | null {
 export function VoicePanel() {
   const [picker, setPicker] = createSignal(false);
   const [settings, setSettings] = createSignal(false);
-  const arranged = createMemo(() => arrange(voiceParticipants(), localPeerId(), speakingPeers()));
+  const arranged = createMemo(() => arrange(voiceParticipants(), localPeerId(), speakingPeers(), tileOrder()));
   const tiles = () => arranged().grid.length;
   const ping = () => pingLabel(pingRtt());
   const showViewer = () => !!watching() || !!endedShare();
