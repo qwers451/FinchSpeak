@@ -27,6 +27,7 @@ pub struct ClientSession {
     pub server_muted: bool,
     /// Accepts `VoiceMoved` and `JoinSoundChanged` on the control stream.
     pub supports_voice_extensions: bool,
+    pub client_level: u16,
     pub connection: quinn::Connection,
     pub control_tx: Sender<ServerMessage>,
 }
@@ -72,6 +73,20 @@ impl Default for SessionManager {
 }
 
 impl SessionManager {
+    /// Keep optional control variants away from clients that cannot decode them.
+    fn accepts_message(session: &ClientSession, msg: &ServerMessage) -> bool {
+        session.client_level >= msg.minimum_client_level()
+            && (!matches!(msg, ServerMessage::JoinSoundChanged { .. } | ServerMessage::VoiceMoved { .. })
+                || session.supports_voice_extensions)
+    }
+
+    pub fn send_control_to_peer(&self, peer_id: u32, msg: &ServerMessage) {
+        let targets = self.sessions.get(&peer_id)
+            .filter(|session| Self::accepts_message(session, msg))
+            .map(|session| vec![(peer_id, session.control_tx.clone(), session.connection.clone())])
+            .unwrap_or_default();
+        deliver(targets, msg);
+    }
     pub fn new() -> Self {
         Self {
             next_peer_id: Arc::new(AtomicU32::new(1001)),
@@ -253,11 +268,10 @@ impl SessionManager {
 
     /// Broadcast a Control Stream message to all connected sessions.
     pub async fn broadcast_all(&self, msg: ServerMessage) {
-        let requires_voice_extensions = matches!(msg, ServerMessage::JoinSoundChanged { .. });
         let targets: Vec<_> = self
             .sessions
             .iter()
-            .filter(|session| !requires_voice_extensions || session.supports_voice_extensions)
+            .filter(|session| Self::accepts_message(session, &msg))
             .map(|entry| (*entry.key(), entry.value().control_tx.clone(), entry.value().connection.clone()))
             .collect();
         deliver(targets, &msg);
@@ -269,6 +283,7 @@ impl SessionManager {
             .sessions
             .iter()
             .filter(|entry| entry.value().user_id != user_id)
+            .filter(|session| Self::accepts_message(session, &msg))
             .map(|entry| (*entry.key(), entry.value().control_tx.clone(), entry.value().connection.clone()))
             .collect();
         deliver(targets, &msg);
@@ -282,6 +297,7 @@ impl SessionManager {
                 .filter_map(|&peer_id| {
                     self.sessions
                         .get(&peer_id)
+                        .filter(|session| Self::accepts_message(session, &msg))
                         .map(|s| (peer_id, s.control_tx.clone(), s.connection.clone()))
                 })
                 .collect()
@@ -306,6 +322,39 @@ fn deliver(targets: Vec<(u32, Sender<ServerMessage>, quinn::Connection)>, msg: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn negotiated_control_variants_are_filtered_on_every_delivery_path() {
+        let (server, client, connection, remote) = connection_pair().await;
+        let manager = SessionManager::new();
+        let room = 5;
+        manager.register_channel(Uuid::new_v4(), room);
+        let mut receivers = Vec::new();
+        for (peer_id, client_level) in [(1001, 0), (1002, 149), (1003, 150)] {
+            let (control_tx, control_rx) = tokio::sync::mpsc::channel(8);
+            manager.register_session(ClientSession {
+                token_id: String::new(), peer_id, user_id: Uuid::new_v4(),
+                username: "client".into(), role: "member".into(), current_voice_channel: None,
+                muted: false, deafened: false, sharing_screen: false, server_muted: false,
+                supports_voice_extensions: true, client_level,
+                connection: connection.clone(), control_tx,
+            });
+            manager.join_voice(peer_id, room);
+            receivers.push((client_level, control_rx));
+        }
+        let message = ServerMessage::ActivityChanged { user_id: Uuid::new_v4(), game: Some("Game".into()) };
+        manager.broadcast_all(message.clone()).await;
+        manager.broadcast_except_user(message.clone(), Uuid::new_v4()).await;
+        manager.broadcast_voice(room, message.clone(), None).await;
+        for peer in [1001, 1002, 1003] { manager.send_control_to_peer(peer, &message); }
+        for (level, mut receiver) in receivers {
+            if level >= 150 {
+                for _ in 0..4 { assert_eq!(receiver.try_recv().unwrap(), message); }
+            }
+            assert!(receiver.try_recv().is_err(), "unsupported control variant reached level {level}");
+        }
+        drop((server, client, remote));
+    }
 
     async fn connection_pair() -> (quinn::Endpoint, quinn::Endpoint, quinn::Connection, quinn::Connection) {
         let (cert, key) = crate::quic::generate_self_signed_cert().unwrap();
@@ -336,7 +385,7 @@ mod tests {
                 token_id: String::new(),
                 peer_id, user_id, username: "alice".into(), role: "member".into(),
                 current_voice_channel: None, muted: false, deafened: false, sharing_screen: false, server_muted: false,
-                supports_voice_extensions: false,
+                supports_voice_extensions: false, client_level: 0,
                 connection: connection.clone(), control_tx,
             });
         }

@@ -24,7 +24,9 @@ async fn run_corrupting_server(endpoint: quinn::Endpoint) -> anyhow::Result<()> 
     loop {
         let n = recv.read(&mut chunk).await?.ok_or_else(|| anyhow::anyhow!("closed"))?;
         buf.extend_from_slice(&chunk[..n]);
-        if let Ok(ClientMessage::Authenticate { .. }) = decode_message::<ClientMessage>(&mut buf) {
+        if let Ok(ClientMessage::Authenticate { client_level, supports_voice_extensions, .. }) = decode_message::<ClientMessage>(&mut buf) {
+            assert_eq!(client_level, 150);
+            assert!(supports_voice_extensions);
             break;
         }
     }
@@ -33,14 +35,7 @@ async fn run_corrupting_server(endpoint: quinn::Endpoint) -> anyhow::Result<()> 
         user_id: uuid::Uuid::new_v4(),
         session_peer_id: 1001,
         channels: vec![],
-        initial_state: ServerState {
-            channels: vec![],
-            online_users: vec![],
-            offline_users: vec![],
-            voice_states: vec![],
-            unread: vec![],
-        },
-    };
+        initial_state: ServerState { channels: vec![], online_users: vec![], offline_users: vec![], voice_states: vec![], unread: vec![], features: vec![] },    };
     send.write_all(&encode_message(&ack)?).await?;
     // Length prefix 4, then 4 bytes that are not a valid ServerMessage.
     send.write_all(&[0, 0, 0, 4, 0xc1, 0xc1, 0xc1, 0xc1]).await?;

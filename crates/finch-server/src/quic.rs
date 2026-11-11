@@ -184,7 +184,7 @@ pub async fn handle_connection(
     let mut read_buf = vec![0u8; 4096];
 
     // 2. Wait for Authenticate message
-    let (token, supports_voice_extensions) = loop {
+    let (token, supports_voice_extensions, client_level) = loop {
         let n = recv_stream
             .read(&mut read_buf)
             .await?
@@ -193,7 +193,7 @@ pub async fn handle_connection(
         frame_buf.extend_from_slice(&read_buf[..n]);
 
         match decode_message::<ClientMessage>(&mut frame_buf) {
-            Ok(ClientMessage::Authenticate { token, supports_voice_extensions }) => break (token, supports_voice_extensions),
+            Ok(ClientMessage::Authenticate { token, supports_voice_extensions, client_level }) => break (token, supports_voice_extensions, client_level),
             Ok(_) => {
                 let err = ServerMessage::Error {
                     code: 401,
@@ -267,6 +267,7 @@ pub async fn handle_connection(
         sharing_screen: false,
         server_muted: false,
         supports_voice_extensions,
+        client_level,
         connection: conn.clone(),
         control_tx: control_tx.clone(),
     };

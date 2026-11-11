@@ -173,6 +173,9 @@ pub struct ChannelMapping {
 /// Full server state sent to the client upon authentication.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ServerState {
+    /// Optional server functionality, absent on legacy servers.
+    #[serde(default)]
+    pub features: Vec<String>,
     /// All channels on the server.
     pub channels: Vec<Channel>,
     /// Currently online users.

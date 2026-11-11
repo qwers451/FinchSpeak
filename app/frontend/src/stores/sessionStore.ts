@@ -29,6 +29,7 @@ export const [knownUsers, setKnownUsers] = createSignal<User[]>([]);
 export const [presence, setPresence] = createSignal<Record<string, UserStatus>>({});
 /** What people wrote next to their status. */
 export const [statusTexts, setStatusTexts] = createSignal<Record<string, string>>({});
+export const [serverFeatures, setServerFeatures] = createSignal<string[]>([]);
 export const onlineUsers = () => knownUsers().filter((user) => (presence()[user.id] ?? user.status) !== 'offline');
 /**
  * My own status. The presence map wins: the server's self presence-update can arrive before the
@@ -50,6 +51,7 @@ export function currentSessionGeneration(): number {
 
 export function resetSessionState() {
   updateVoiceLevels({ levels: [] });
+  setServerFeatures([]);
   sessionGeneration++;
   clearJoinSounds();
   resetMicPreview();
@@ -74,6 +76,7 @@ export function resetSessionState() {
 export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEvents[K]) => void } = {
   authenticated: (data) => {
     const { online_users, offline_users = [] } = data.initial_state;
+    setServerFeatures(data.initial_state.features ?? []);
     setSessionUserId(data.user_id);
     setLocalPeerId(data.session_peer_id);
     setChannels(data.initial_state.channels);
@@ -184,6 +187,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   },
   'join-sound-changed': ({ user_id }) => invalidateJoinSound(user_id),
   'connection-lost': (reason) => {
+    setServerFeatures([]);
     resetMicPreview();
     const ended = classifyEnd(reason);
     if (ended) {
@@ -206,6 +210,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     if (channel?.channel_type === 'text') void selectChannel(channel);
   },
   'reconnect-failed': (reason) => {
+    setServerFeatures([]);
     setConnectionStatus('failed');
     setConnectionError(reason);
     // Keep the more specific reason we may already have (banned, kicked).
@@ -250,6 +255,7 @@ export function restoreSessionSnapshot(snapshot: SessionSnapshot) {
     sessionHandlers.authenticated({ user_id: snapshot.user_id, session_peer_id: snapshot.session_peer_id,
       channels: snapshot.initial_state.channels, initial_state: snapshot.initial_state });
   } else {
+    setServerFeatures([]);
     resetMicPreview();
     setConnectionStatus('disconnected');
   }

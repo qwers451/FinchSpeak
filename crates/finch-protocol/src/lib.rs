@@ -6,6 +6,9 @@
 //! the FinchSpeak client and server over QUIC.
 
 pub mod codec;
+
+/// First client release with negotiated activity and room music control messages.
+pub const CLIENT_LEVEL_1_5: u16 = 150;
 pub mod e2ee;
 pub mod media;
 pub mod messages;

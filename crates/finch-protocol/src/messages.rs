@@ -22,6 +22,9 @@ pub enum ClientMessage {
         /// Understands the `VoiceMoved` and `JoinSoundChanged` server messages.
         #[serde(default)]
         supports_voice_extensions: bool,
+        /// Highest control protocol level understood by this client.
+        #[serde(default)]
+        client_level: u16,
     },
 
     /// Join a voice channel. The client can only be in one voice channel at a time.
@@ -292,10 +295,26 @@ pub enum ServerMessage {
         user_id: Uuid,
     },
 
+    /// The most recently reporting device's game activity.
+    ActivityChanged {
+        user_id: Uuid,
+        game: Option<String>,
+    },
+
     /// Heartbeat pong — echo of the client's timestamp.
     Pong {
         timestamp: u64,
     },
+}
+
+impl ServerMessage {
+    /// Control variants introduced after legacy clients must be filtered before delivery.
+    pub fn minimum_client_level(&self) -> u16 {
+        match self {
+            Self::ActivityChanged { .. } => crate::CLIENT_LEVEL_1_5,
+            _ => 0,
+        }
+    }
 }
 
 #[cfg(test)]

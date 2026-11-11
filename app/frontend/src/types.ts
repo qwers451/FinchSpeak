@@ -203,6 +203,7 @@ export interface SessionEvents {
     user_id: string;
     channels: { id: string; short_id: number }[];
     initial_state: {
+      features?: string[];
       channels: Channel[];
       online_users: User[];
       offline_users?: User[];
