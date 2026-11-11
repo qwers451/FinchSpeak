@@ -46,6 +46,8 @@ type HashMapStreamers = std::collections::HashMap<u32, HashSet<u32>>;
 /// Registry managing active sessions and rooms.
 #[derive(Clone)]
 pub struct SessionManager {
+    /// Configured before the API/QUIC listeners begin accepting clients.
+    pub music: Arc<std::sync::OnceLock<Arc<crate::music::MusicService>>>,
     next_peer_id: Arc<AtomicU32>,
     /// Map session_peer_id -> ClientSession
     pub sessions: Arc<DashMap<u32, ClientSession>>,
@@ -89,6 +91,7 @@ impl SessionManager {
     }
     pub fn new() -> Self {
         Self {
+            music: Arc::new(std::sync::OnceLock::new()),
             next_peer_id: Arc::new(AtomicU32::new(1001)),
             sessions: Arc::new(DashMap::new()),
             user_to_peer: Arc::new(DashMap::new()),

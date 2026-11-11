@@ -9,6 +9,7 @@ pub mod files;
 pub mod health;
 pub mod invites;
 pub mod messages;
+pub mod music;
 pub mod search;
 pub mod state;
 
@@ -26,6 +27,8 @@ use crate::session::SessionManager;
 pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionManager) -> Router {
     // axum caps request bodies at 2 MB by default; uploads follow the configured limit instead.
     let upload_limit = files::upload_body_limit(config.storage.max_file_size_mb);
+    let music_upload_limit = config.music.max_track_mb.saturating_mul(crate::music::MIB).saturating_add(64 * 1024).min(usize::MAX as u64) as usize;
+    sessions.music.get_or_init(|| std::sync::Arc::new(crate::music::MusicService::new(pool.clone(), &config)));
     health::mark_started();
     let shared_state = ArcSharedState { pool, config, sessions, login_guard: Default::default(), register_hits: Default::default(), avatar_hits: Default::default() };
 
@@ -51,6 +54,9 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .route("/api/auth/join-sound", post(join_sounds::upload_handler).delete(join_sounds::delete_handler).layer(DefaultBodyLimit::max(1024 * 1024)))
         .route("/api/users/{id}/join-sound", get(join_sounds::download_handler))
         .route("/api/state", get(state::state_handler))
+        .route("/api/music/tracks", get(music::library).post(music::upload).layer(DefaultBodyLimit::max(music_upload_limit)))
+        .route("/api/music/tracks/{id}/file", get(music::download))
+        .route("/api/music/tracks/{id}", axum::routing::delete(music::delete))
         .route("/api/search", get(search::search_handler))
         // Moderation (admins)
         .route("/api/admin/users", get(admin::list_users_handler))

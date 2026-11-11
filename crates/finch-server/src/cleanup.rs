@@ -30,14 +30,28 @@ pub async fn remove_orphans(pool: &SqlitePool, now: i64) -> Result<usize, sqlx::
 
 /// Run `remove_orphans` now and then every hour, until the task is aborted.
 pub fn spawn(pool: SqlitePool) -> JoinHandle<()> {
+    spawn_with_music(pool, None)
+}
+
+pub fn spawn_with_music(pool: SqlitePool, music: Option<std::sync::Arc<crate::music::MusicService>>) -> JoinHandle<()> {
     tokio::spawn(async move {
+        let mut last_attachment_sweep = None;
         loop {
-            match remove_orphans(&pool, crate::api::invites::now_secs()).await {
+            let now = crate::api::invites::now_secs();
+            if last_attachment_sweep.is_none_or(|last| now - last >= EVERY.as_secs() as i64) {
+              match remove_orphans(&pool, now).await {
                 Ok(0) => {}
                 Ok(count) => tracing::info!("Removed {count} unattached uploads"),
                 Err(error) => tracing::warn!("Cleaning up uploads failed: {error}"),
+              }
+              last_attachment_sweep = Some(now);
             }
-            tokio::time::sleep(EVERY).await;
+            if let Some(music) = &music
+                && let Err(error) = music.sweep(now).await
+            {
+                tracing::warn!("Cleaning up music failed: {error}");
+            }
+            tokio::time::sleep(Duration::from_secs(60)).await;
         }
     })
 }
