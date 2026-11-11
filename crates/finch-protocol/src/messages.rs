@@ -7,8 +7,20 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::models::{
-    AttachmentInfo, Channel, ChannelMapping, HistoryMessage, ReplyRef, ServerState, ShareEndReason, UserStatus, VideoCodec,
+    AttachmentInfo, Channel, ChannelMapping, HistoryMessage, MusicRoomState, ReplyRef, ServerState, ShareEndReason, UserStatus, VideoCodec,
 };
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MusicCommand {
+    Enqueue { track_id: Uuid },
+    Pause,
+    Resume,
+    Skip,
+    Seek { position_ms: u64 },
+    Remove { entry_id: Uuid },
+    Clear,
+}
 
 // ─── Client → Server ────────────────────────────────────────────────────────
 
@@ -16,6 +28,7 @@ use crate::models::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum ClientMessage {
+    MusicCommand { command: MusicCommand },
     /// First message after QUIC handshake — authenticate with a JWT token.
     Authenticate {
         token: String,
@@ -117,6 +130,7 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
+    MusicState { channel_id: Uuid, state: MusicRoomState, server_ms: u64 },
     /// Authentication succeeded. Contains session peer ID, channel mappings, and initial server state.
     Authenticated {
         user_id: Uuid,
@@ -311,7 +325,7 @@ impl ServerMessage {
     /// Control variants introduced after legacy clients must be filtered before delivery.
     pub fn minimum_client_level(&self) -> u16 {
         match self {
-            Self::ActivityChanged { .. } => crate::CLIENT_LEVEL_1_5,
+            Self::ActivityChanged { .. } | Self::MusicState { .. } => crate::CLIENT_LEVEL_1_5,
             _ => 0,
         }
     }

@@ -17,6 +17,27 @@ pub struct MusicTrack {
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueueEntry {
+    pub entry_id: Uuid,
+    pub track: MusicTrack,
+    pub added_by: Uuid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Playing {
+    pub entry: QueueEntry,
+    pub position_ms: u64,
+    pub at_server_ms: u64,
+    pub paused: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MusicRoomState {
+    pub queue: Vec<QueueEntry>,
+    pub playing: Option<Playing>,
+}
+
 /// A registered user.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct User {
