@@ -38,7 +38,7 @@ pub fn classify(exe_path: &str, covers_monitor: bool) -> Option<String> {
         "finch-app",
         "finchspeak",
     ];
-    if stem.is_empty() || excluded.contains(&name.as_str()) || name.starts_with("potplayer") {
+    if stem.is_empty() || matches!(name.as_str(), "msedgewebview2" | "finch-app" | "finchspeak") {
         return None;
     }
     let segments = [
@@ -55,7 +55,9 @@ pub fn classify(exe_path: &str, covers_monitor: bool) -> Option<String> {
         "\\origin games\\",
         "\\rockstar games\\",
     ];
-    if !covers_monitor && !segments.iter().any(|segment| lower.contains(segment)) {
+    let known_directory = segments.iter().any(|segment| lower.contains(segment));
+    let fullscreen_game = covers_monitor && !excluded.contains(&name.as_str()) && !name.starts_with("potplayer");
+    if !known_directory && !fullscreen_game {
         return None;
     }
     let steam_segment = "\\steamapps\\common\\";
@@ -156,9 +158,10 @@ mod tests {
         }
         assert_eq!(
             classify("C:/Epic Games/Launcher/epicgameslauncher.exe", false),
-            None
+            Some("epicgameslauncher".into())
         );
-        assert_eq!(classify("C:/Epic Games/browser.exe", false), None);
+        assert_eq!(classify("C:/Epic Games/browser.exe", false), Some("browser".into()));
+        assert_eq!(classify("C:/Epic Games/msedgewebview2.exe", false), None);
     }
 
     #[test]
