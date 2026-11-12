@@ -913,6 +913,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             } else {
                                 mix_next_frame(&state.mixer, &mut playback_frame_48k, &mut playback_right_48k, Instant::now())
                             };
+                            if !local_only {
+                                state.music.mix_frame(&mut playback_frame_48k, &mut playback_right_48k, state.is_deafened.load(Ordering::Relaxed));
+                            }
                             if let Some(test) = &mut mic_test {
                                 if let Some(recorded) = test.next_playback_frame() {
                                     for ((left, right), mine) in playback_frame_48k.iter_mut().zip(playback_right_48k.iter_mut()).zip(recorded.iter()) {

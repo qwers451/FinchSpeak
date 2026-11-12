@@ -12,6 +12,8 @@ pub mod connection;
 pub mod state;
 pub mod activity;
 pub mod credentials;
+pub mod music;
+mod music_clock;
 
 use state::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
