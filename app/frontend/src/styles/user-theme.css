@@ -2,9 +2,12 @@
    The variables themselves are set on <html> by applyAppearance(). */
 
 /* Text that sits right on the accent or signal color picks dark or light, whichever reads. */
-[data-theme="user"] :is(.btn.primary, .av.c1, .av.c6, .av.c2, .av.c8) { color:var(--on-accent); }
-[data-theme="user"] :is(.ctl.live, .av.c4, .av.c5) { color:var(--on-signal); }
-[data-theme="user"] ::selection { background:var(--yellow); color:var(--on-accent); }
+[data-theme="user"] :is(.btn.primary, .av.c1, .av.c6, .av.c2, .av.c8),
+[data-theme="bullfinch"] :is(.btn.primary, .av.c1, .av.c6, .av.c2, .av.c8) { color:var(--on-accent); }
+[data-theme="user"] :is(.ctl.live, .av.c4, .av.c5),
+[data-theme="bullfinch"] :is(.ctl.live, .av.c4, .av.c5) { color:var(--on-signal); }
+[data-theme="user"] ::selection,
+[data-theme="bullfinch"] ::selection { background:var(--yellow); color:var(--on-accent); }
 
 /* Choosing a theme: every color blends into the new one instead of jumping. */
 html[data-theme-blend],

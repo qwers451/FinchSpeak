@@ -164,7 +164,7 @@ export function Sidebar() {
   return (
     <aside class="side sidebar" aria-label={t('Channels')}>
       <div class="brand">
-        <img src="/custom/assets/brand/finch-mark.svg" alt="" />
+        <img src="/custom/assets/brand/finchspeak-mark.svg" alt="" />
         <span>FinchSpeak</span>
       </div>
 

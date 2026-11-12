@@ -328,7 +328,7 @@ function AppearancePage() {
   return (
     <div class="col g8">
       <Row title={t('Interface')} hint={t('Finch turns the whole window into a tree: voice rooms are nests, text channels are birdhouses.')} control={seg(t('Interface'), nestView() ? 'finch' : 'classic', [['classic', t('Classic')], ['finch', t('Finch')]], (mode) => setNestView(mode === 'finch'))} />
-      <Row title={t('Theme')} control={seg(t('Theme'), a().theme, [['claude', 'Claude Dark'], ['custom', 'Finch Custom'], ['user', t('My colors')]], (theme) => updateAppearance({ theme }))} />
+      <Row title={t('Theme')} control={seg(t('Theme'), a().theme, [['bullfinch', t('Bullfinch')], ['claude', 'Claude Dark'], ['custom', 'Finch Custom'], ['user', t('My colors')]], (theme) => updateAppearance({ theme }))} />
       <Show when={a().theme === 'user'}><ThemeEditor /></Show>
       <Row title={t('Language')} control={seg(t('Language'), a().language, [['ru', 'Русский'], ['en', 'English']], (language) => updateAppearance({ language }))} />
       <Row title={t('Density')} hint={t('Compact fits more messages on the screen.')} control={seg(t('Density'), a().density, [['comfortable', t('Comfortable')], ['compact', t('Compact')]], (density) => updateAppearance({ density }))} />

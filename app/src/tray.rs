@@ -81,14 +81,8 @@ impl TrayState {
     }
 }
 
-fn bird_icon_bytes(state: TrayState) -> &'static [u8] {
-    match state {
-        TrayState::Idle => include_bytes!("../frontend/public/custom/assets/tray-icons/png/tray-01-online-32@2x.png"),
-        TrayState::Voice | TrayState::Live => include_bytes!("../frontend/public/custom/assets/tray-icons/png/tray-02-voice-32@2x.png"),
-        TrayState::Speaking => include_bytes!("../frontend/public/custom/assets/tray-icons/png/tray-03-speaking-32@2x.png"),
-        TrayState::Muted => include_bytes!("../frontend/public/custom/assets/tray-icons/png/tray-04-muted-32@2x.png"),
-    }
-}
+/// One tray picture for every state; the state is shown by the coloured dot.
+const TRAY_PICTURE: &[u8] = include_bytes!("../icons/tray.png");
 
 /// `rgba` (width x height) with a filled circle of `color` in the bottom-right corner.
 pub fn with_dot(rgba: &[u8], width: u32, height: u32, color: [u8; 3]) -> Vec<u8> {
@@ -142,12 +136,17 @@ fn tooltip_with_mentions(base: &str, mentions: u32, language: &str) -> String {
     }
 }
 
+/// The tray picture with the dot for `state` (no dot when idle).
+fn state_icon(base: &Image<'static>, state: TrayState) -> Image<'static> {
+    match state.dot() {
+        None => base.to_owned(),
+        Some(color) => Image::new_owned(with_dot(base.rgba(), base.width(), base.height(), color), base.width(), base.height()),
+    }
+}
+
 fn icon_for(app: &AppHandle, state: TrayState) -> Option<Image<'static>> {
-    let base = Image::from_bytes(bird_icon_bytes(state)).ok().or_else(|| app.default_window_icon().cloned())?.to_owned();
-    let Some(color) = state.dot() else {
-        return Some(base);
-    };
-    Some(Image::new_owned(with_dot(base.rgba(), base.width(), base.height(), color), base.width(), base.height()))
+    let base = Image::from_bytes(TRAY_PICTURE).ok().or_else(|| app.default_window_icon().cloned())?.to_owned();
+    Some(state_icon(&base, state))
 }
 
 pub fn set_state(app: &AppHandle, state: TrayState, language: Option<&str>) {
@@ -330,17 +329,18 @@ mod tests {
     }
 
     #[test]
-    fn tray_states_use_the_supplied_bird_artwork() {
-        let idle = Image::from_bytes(bird_icon_bytes(TrayState::Idle)).unwrap();
-        let voice = Image::from_bytes(bird_icon_bytes(TrayState::Voice)).unwrap();
-        let speaking = Image::from_bytes(bird_icon_bytes(TrayState::Speaking)).unwrap();
-        let muted = Image::from_bytes(bird_icon_bytes(TrayState::Muted)).unwrap();
-        assert_eq!((idle.width(), idle.height()), (64, 64));
-        assert_eq!((voice.width(), voice.height()), (64, 64));
-        assert_eq!((speaking.width(), speaking.height()), (64, 64));
-        assert_eq!((muted.width(), muted.height()), (64, 64));
-        assert_ne!(idle.rgba(), voice.rgba());
-        assert_ne!(voice.rgba(), speaking.rgba());
-        assert_ne!(voice.rgba(), muted.rgba());
+    fn tray_states_use_the_supplied_tray_picture() {
+        let base = Image::from_bytes(TRAY_PICTURE).unwrap();
+        assert_eq!((base.width(), base.height()), (64, 64));
+        let idle = state_icon(&base, TrayState::Idle);
+        assert_eq!(idle.rgba(), base.rgba());
+        // The coloured dot is what tells the states apart.
+        for state in [TrayState::Voice, TrayState::Speaking, TrayState::Muted, TrayState::Live] {
+            let icon = state_icon(&base, state);
+            assert_eq!((icon.width(), icon.height()), (64, 64));
+            assert_ne!(icon.rgba(), idle.rgba(), "{state:?} should differ from idle");
+        }
+        assert_ne!(state_icon(&base, TrayState::Voice).rgba(), state_icon(&base, TrayState::Speaking).rgba());
+        assert_ne!(state_icon(&base, TrayState::Voice).rgba(), state_icon(&base, TrayState::Muted).rgba());
     }
 }

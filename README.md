@@ -1,7 +1,7 @@
 # FinchSpeak
 
 <p align="center">
-  <img src="app/frontend/public/custom/assets/brand/finch-mark.svg" alt="FinchSpeak" width="120" height="82">
+  <img src="app/frontend/public/custom/assets/brand/finchspeak.svg" alt="FinchSpeak" width="120">
 </p>
 
 <p align="center"><strong>Свой сервер. Свои разговоры.</strong></p>

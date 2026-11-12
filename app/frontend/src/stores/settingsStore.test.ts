@@ -22,8 +22,40 @@ it('repairs values of the wrong type or outside their range and keeps the good o
     mutedChannels: { a: 123, b: null, c: 'x' },
   }));
   expect(repaired.notifications).toMatchObject({ mentions: true, sounds: false, soundVolume: 1 });
-  expect(repaired.appearance).toMatchObject({ theme: 'claude', language: 'ru', density: 'comfortable', textSize: 'large' });
+  expect(repaired.appearance).toMatchObject({ theme: 'bullfinch', language: 'ru', density: 'comfortable', textSize: 'large' });
   expect(repaired.mutedChannels).toEqual({ a: 123, b: null });
+});
+
+it('Bullfinch is the default for a fresh install', () => {
+  expect(DEFAULT_PREFS.appearance).toMatchObject({ theme: 'bullfinch', brandTheme161: true });
+  expect(parsePrefs(null).appearance).toMatchObject({ theme: 'bullfinch', brandTheme161: true });
+});
+
+it('a saved theme without the 1.6.1 flag switches to Bullfinch once, and the flag is kept', () => {
+  const switched = parsePrefs(JSON.stringify({ appearance: { theme: 'custom', customColors: { signal: '#00ff00' } } }));
+  expect(switched.appearance).toMatchObject({ theme: 'bullfinch', brandTheme161: true });
+  expect(switched.appearance.customColors.signal).toBe('#00ff00');
+  expect(parsePrefs(JSON.stringify({ appearance: { theme: 'user' } })).appearance.theme).toBe('bullfinch');
+  const again = parsePrefs(JSON.stringify(parsePrefs(JSON.stringify({ appearance: { theme: 'custom' } }))));
+  expect(again.appearance.theme).toBe('bullfinch');
+});
+
+it('a theme chosen after the switch is kept', () => {
+  expect(parsePrefs(JSON.stringify({ appearance: { theme: 'claude', brandTheme161: true } })).appearance.theme).toBe('claude');
+  expect(parsePrefs(JSON.stringify({ appearance: { theme: 'bullfinch', brandTheme161: true } })).appearance.theme).toBe('bullfinch');
+});
+
+it('an unknown theme value falls back to Bullfinch', () => {
+  expect(parsePrefs(JSON.stringify({ appearance: { theme: 'neon', brandTheme161: true } })).appearance.theme).toBe('bullfinch');
+});
+
+it('Bullfinch paints the logo colours and counts as a dark theme', () => {
+  const root = document.createElement('div');
+  applyAppearance({ ...DEFAULT_PREFS.appearance }, root);
+  expect(root.dataset.theme).toBe('bullfinch');
+  expect(root.style.getPropertyValue('--bg-app')).toBe('#171516');
+  expect(root.style.getPropertyValue('--yellow')).toBe('#ff7a1f');
+  expect(root.style.colorScheme).toBe('dark');
 });
 
 it('changes are saved for the next start', () => {
@@ -59,14 +91,14 @@ it('the looks are put on the page', () => {
 
 it('migrates old appearance preferences without losing saved settings', () => {
   const migrated = parsePrefs(JSON.stringify({ appearance: { density: 'compact', showMembers: false }, notifications: { sounds: false }, mutedChannels: { help: null } }));
-  expect(migrated.appearance).toMatchObject({ theme: 'claude', language: 'ru', density: 'compact', showMembers: false });
+  expect(migrated.appearance).toMatchObject({ theme: 'bullfinch', language: 'ru', density: 'compact', showMembers: false });
   expect(migrated.notifications.sounds).toBe(false);
   expect(migrated.mutedChannels).toEqual({ help: null });
 });
 
 it('repairs invalid theme and language while preserving valid choices', () => {
   expect(parsePrefs(JSON.stringify({ appearance: { theme: 'light', language: 'fr', density: 'compact' } })).appearance)
-    .toMatchObject({ theme: 'claude', language: 'ru', density: 'compact' });
+    .toMatchObject({ theme: 'bullfinch', language: 'ru', density: 'compact' });
 });
 
 it('defaults missing or unknown speaking styles to pulse', () => {

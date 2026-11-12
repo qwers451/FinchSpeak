@@ -2,7 +2,7 @@
    everyone online but not in a room sits on the wire, and your own controls are on the perch at the bottom. */
 .tree-layout { --bark:color-mix(in srgb, var(--yellow) 22%, var(--line)); flex:1; display:flex; flex-direction:column; min-height:0; min-width:0; background:var(--bg-app); }
 .tree-bar { flex:none; display:flex; align-items:center; gap:8px; height:52px; padding:0 16px; border-bottom:1px solid var(--line-soft); }
-.tree-bar img { width:28px; height:28px; object-fit:contain; }
+.tree-bar img { width:28px; height:auto; object-fit:contain; }
 .tree-title { font:800 16px var(--font-head); }
 .tree-bar .grow { flex:1; }
 .tree-bar .btn { flex:none; }
