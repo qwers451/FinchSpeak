@@ -15,6 +15,12 @@ const RULES: readonly Rule[] = [
   { pattern: /^Logged out locally, but could not revoke/i, key: 'Signed out on this computer. The server could not be reached to end the session.' },
   { pattern: /^Invalid server address/i, key: 'The server address is not valid' },
   { pattern: /^Not authenticated$/i, key: 'Not authenticated' },
+  // Room music errors from the server (and the client's own format probe).
+  { pattern: /^Music file is too large/i, key: 'The music file is too large' },
+  { pattern: /^Unsupported music format/i, key: 'This music format is not supported. Use MP3, OGG, FLAC or WAV.' },
+  { pattern: /^(Music library|Temporary music) quota exceeded/i, key: 'The music quota is used up. Remove a track and try again.' },
+  { pattern: /^Music queue is full/i, key: 'The music queue is full. Wait for a track to finish.' },
+  { pattern: /^Music is (disabled|unavailable)/i, key: 'Music is not enabled on this server.' },
   { pattern: /^The password must be at least 8 characters$/i, key: 'The password must be at least 8 characters' },
   // A QUIC connection closed without a reason from the server (quinn's own text).
   { pattern: /^connection lost$/i, key: 'connection lost' },

@@ -268,6 +268,7 @@ async fn stop_session_activity(state: &AppState) {
     state.game_activity.lock().await.disconnect();
     state.session_generation.fetch_add(1, Ordering::SeqCst);
     *state.last_connect.write().await = None;
+    state.music.set_room(None);
     state.audio_engine.lock().await.stop();
     *state.mixer.lock().await = finch_audio::AudioMixer::new();
     state.stop_screen_share();

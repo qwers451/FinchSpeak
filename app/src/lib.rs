@@ -273,6 +273,11 @@ pub fn run() {
             commands::voice::set_speaker_pan,
             commands::voice::get_voice_settings,
             commands::voice::set_voice_settings,
+            commands::music::music_library,
+            commands::music::music_upload,
+            commands::music::music_delete_track,
+            commands::music::music_command,
+            commands::music::music_set_volume,
             commands::voice::set_hotkey,
             // Administration
             commands::admin::create_invite,

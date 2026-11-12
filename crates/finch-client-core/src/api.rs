@@ -1,17 +1,23 @@
 //! REST API client for authentication, channels, message history and files.
 
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use bytes::Bytes;
-use finch_protocol::models::{AttachmentInfo, HistoryMessage, ServerState};
+use finch_protocol::models::{AttachmentInfo, HistoryMessage, MusicTrack, ServerState};
 use reqwest::multipart::{Form, Part};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use crate::error::ClientError;
 use crate::tofu::{TofuIssue, TofuIssueSlot, TofuVerifier};
+
+/// Music files are large; the client-wide 30 s timeout is too short for them on slow links.
+const MUSIC_TRANSFER_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserDto {
@@ -667,6 +673,66 @@ impl ApiClient {
         Ok(resp.bytes().await?)
     }
 
+    /// Room music library: the tracks the server keeps plus temporary uploads still queued.
+    pub async fn music_library(&self) -> Result<Vec<MusicTrack>, ClientError> {
+        let req = self.authorized(self.http.get(self.url("/api/music/tracks")));
+        parse_json(self.send(req).await?).await
+    }
+
+    /// Upload a track. Metadata goes before the file so the server knows the quota class up front.
+    pub async fn upload_music_track(
+        &self,
+        bytes: Vec<u8>,
+        filename: &str,
+        title: &str,
+        artist: Option<&str>,
+        duration_ms: u64,
+        keep: bool,
+    ) -> Result<MusicTrack, ClientError> {
+        let mut form = Form::new()
+            .text("title", title.to_string())
+            .text("duration_ms", duration_ms.to_string())
+            .text("keep", if keep { "true" } else { "false" });
+        if let Some(artist) = artist.map(str::trim).filter(|artist| !artist.is_empty()) {
+            form = form.text("artist", artist.to_string());
+        }
+        let part = Part::bytes(bytes).file_name(filename.to_string());
+        form = form.part("file", part);
+        let req = self
+            .authorized(self.http.post(self.url("/api/music/tracks")))
+            .timeout(MUSIC_TRANSFER_TIMEOUT)
+            .multipart(form);
+        parse_json(self.send(req).await?).await
+    }
+
+    pub async fn delete_music_track(&self, track_id: Uuid) -> Result<(), ClientError> {
+        let req = self.authorized(self.http.delete(self.url(&format!("/api/music/tracks/{track_id}"))));
+        check_status(self.send(req).await?).await?;
+        Ok(())
+    }
+
+    /// Streams a track into `dest` through `dest.part` and renames it when complete. Returns the bytes written.
+    pub async fn download_music_file(&self, track_id: Uuid, dest: &Path) -> Result<u64, ClientError> {
+        let req = self
+            .authorized(self.http.get(self.url(&format!("/api/music/tracks/{track_id}/file"))))
+            .timeout(MUSIC_TRANSFER_TIMEOUT);
+        let mut resp = check_status(self.send(req).await?).await?;
+        let mut part_name = dest.as_os_str().to_owned();
+        part_name.push(".part");
+        let part = PathBuf::from(part_name);
+        let written = match write_stream(&mut resp, &part).await {
+            Ok(written) => written,
+            Err(error) => {
+                let _ = tokio::fs::remove_file(&part).await;
+                return Err(error);
+            }
+        };
+        tokio::fs::rename(&part, dest)
+            .await
+            .map_err(|e| ClientError::Network(format!("Could not save music file: {e}")))?;
+        Ok(written)
+    }
+
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
     }
@@ -695,6 +761,19 @@ async fn check_status(resp: reqwest::Response) -> Result<reqwest::Response, Clie
 async fn parse_json<T: DeserializeOwned>(resp: reqwest::Response) -> Result<T, ClientError> {
     let resp = check_status(resp).await?;
     Ok(resp.json().await?)
+}
+
+/// Copies the body chunk by chunk into `part`. The file is closed before this returns.
+async fn write_stream(resp: &mut reqwest::Response, part: &Path) -> Result<u64, ClientError> {
+    let io_error = |e: std::io::Error| ClientError::Network(format!("Could not save music file: {e}"));
+    let mut file = tokio::fs::File::create(part).await.map_err(io_error)?;
+    let mut written = 0u64;
+    while let Some(chunk) = resp.chunk().await? {
+        file.write_all(&chunk).await.map_err(io_error)?;
+        written = written.saturating_add(chunk.len() as u64);
+    }
+    file.flush().await.map_err(io_error)?;
+    Ok(written)
 }
 
 /// QUIC address of a server: the host of its REST URL and the port the server announced,

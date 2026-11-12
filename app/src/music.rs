@@ -341,12 +341,14 @@ async fn run_track(player: Arc<MusicPlayer>, generation: u64, track: MusicTrack,
     }
 }
 
-/// Downloads through the server connection. `ApiClient` does not expose a music download yet
-/// (it must keep the pinned TLS configuration), so until it does, every download reports an error
-/// through `music-error` and the rest of the room is unaffected.
-fn api_fetch(_api: ApiClient) -> Fetch {
-    Arc::new(|_track_id: Uuid, _dest: PathBuf| -> Download {
-        Box::pin(async { Err("Music download is not available in this build".to_string()) })
+/// Downloads through the pinned REST client. A failure is reported through `music-error` by the caller;
+/// the rest of the room is unaffected.
+fn api_fetch(api: ApiClient) -> Fetch {
+    Arc::new(move |track_id: Uuid, dest: PathBuf| -> Download {
+        let api = api.clone();
+        Box::pin(async move {
+            api.download_music_file(track_id, &dest).await.map(|_| ()).map_err(|e| e.to_string())
+        })
     })
 }
 

@@ -60,6 +60,7 @@ pub async fn join_voice_channel(
         .map_err(|e| format!("Failed to send JoinVoice: {}", e))?;
 
     *state.current_voice_channel.write().await = Some(short_id);
+    state.music.set_room(Some(ch_uuid));
     state.mixer.lock().await.clear_playout();
 
     if switching {
@@ -97,6 +98,7 @@ pub(crate) async fn leave_room(state: &AppState) {
     state.stop_screen_share();
     state.stop_watching().await;
     *state.current_voice_channel.write().await = None;
+    state.music.set_room(None);
     state.mixer.lock().await.clear_playout();
 
     info!("Left voice channel");

@@ -58,3 +58,21 @@ export async function applySavedVolume(userId: string, peerId: number) {
     if (screen !== undefined && screen !== DEFAULT_VOLUME) await api.setSpeakerVolume(screenAudioKey(peerId), screen);
   } catch { /* voice and screen gain are independent */ }
 }
+
+// Room music volume is 0..1 (not 0..2 like people) and defaults to half; it is kept under the "music" key.
+export const MUSIC_VOLUME_KEY = 'music';
+export const DEFAULT_MUSIC_VOLUME = 0.5;
+
+const clampMusic = (value: number) => (Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : DEFAULT_MUSIC_VOLUME);
+
+/** My room music volume, 0..1. */
+export const musicVolumeValue = (): number => {
+  const saved = volumes()[MUSIC_VOLUME_KEY];
+  return saved === undefined ? DEFAULT_MUSIC_VOLUME : clampMusic(saved);
+};
+
+/** Remember my room music volume (the player itself is told by the caller). */
+export function rememberMusicVolume(value: number) {
+  setVolumes((previous) => ({ ...previous, [MUSIC_VOLUME_KEY]: clampMusic(value) }));
+  persist();
+}

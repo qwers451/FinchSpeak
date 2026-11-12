@@ -1,6 +1,7 @@
 import type { UnlistenFn } from '@tauri-apps/api/event';
-import type { SessionEvents } from '../types';
+import type { MusicEvents, SessionEvents } from '../types';
 import { api } from './api';
+import { musicHandlers } from '../stores/musicStore';
 import { appendMissingProfiles, currentSessionGeneration, knownUsers, localPeerId, restoreSessionSnapshot, sessionHandlers, sessionUserId, setAppError } from '../stores/sessionStore';
 import { currentUser } from '../stores/authStore';
 import { describeError } from '../i18n/errors';
@@ -91,9 +92,12 @@ export async function subscribeSessionEvents(): Promise<{ dispose: UnlistenFn; r
   };
   const register = <K extends keyof SessionEvents>(event: K) =>
     api.onSessionEvent(event, (payload) => dispatch(event, payload));
-  const registrations = await Promise.allSettled(
-    (Object.keys(sessionHandlers) as (keyof SessionEvents)[]).map(register),
-  );
+  const registerMusic = <K extends keyof MusicEvents>(event: K) =>
+    api.onMusicEvent(event, (payload) => musicHandlers[event](payload));
+  const registrations = await Promise.allSettled([
+    ...(Object.keys(sessionHandlers) as (keyof SessionEvents)[]).map(register),
+    ...(Object.keys(musicHandlers) as (keyof MusicEvents)[]).map(registerMusic),
+  ]);
   const unlisteners: UnlistenFn[] = [];
   const failures: unknown[] = [];
   for (const result of registrations) {
