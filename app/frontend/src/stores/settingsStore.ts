@@ -3,6 +3,9 @@ import { BULLFINCH_COLORS, DEFAULT_THEME_COLORS, isLightTheme, parseThemeColors,
 
 // Settings that live on this computer only: notifications, looks.
 
+/** Which synthesised set the feedback tones use: birds (chirps) or soft (the first, gentler tones). */
+export type SoundSet = 'birds' | 'soft';
+
 export interface NotificationPrefs {
   /** Tell me when I am mentioned (also when the window is in the background). */
   mentions: boolean;
@@ -15,6 +18,8 @@ export interface NotificationPrefs {
   voiceSounds: boolean;
   /** 0..1 */
   soundVolume: number;
+  /** The tone set for every feedback sound, and for the default join sound when someone has none of their own. */
+  soundSet: SoundSet;
   /** Flash the taskbar button while the window is in the background. */
   flash: boolean;
 }
@@ -43,7 +48,7 @@ export interface Prefs {
 
 export const DEFAULT_PREFS: Prefs = {
   privacy: { shareActivity: true },
-  notifications: { mentions: true, allMessages: false, voiceJoin: true, sounds: true, voiceSounds: true, soundVolume: 0.6, flash: true },
+  notifications: { mentions: true, allMessages: false, voiceJoin: true, sounds: true, voiceSounds: true, soundVolume: 0.6, soundSet: 'birds', flash: true },
   appearance: { theme: 'bullfinch', brandTheme161: true, customColors: DEFAULT_THEME_COLORS, language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, speakingStyle: 'pulse', showMembers: true },
   mutedChannels: {},
 };
@@ -80,6 +85,7 @@ export function parsePrefs(raw: string | null): Prefs {
       sounds: bool(n.sounds, d.notifications.sounds),
       voiceSounds: bool(n.voiceSounds, d.notifications.voiceSounds),
       soundVolume: volume,
+      soundSet: pick(n.soundSet, ['birds', 'soft'] as const, d.notifications.soundSet),
       flash: bool(n.flash, d.notifications.flash),
     },
     appearance: {

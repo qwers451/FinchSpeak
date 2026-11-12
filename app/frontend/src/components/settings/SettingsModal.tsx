@@ -24,6 +24,8 @@ import { ThemeEditor } from './ThemeEditor';
 import { paletteFromImage, type ThemeColors } from '../../stores/themeColors';
 import { encodeJoinSound } from '../../stores/joinSoundEncode';
 import { invalidateJoinSound, previewJoinSound } from '../../stores/joinSound';
+import { playTone } from '../../stores/tones';
+import { Select } from '../../ui/Select';
 
 export const APP_VERSION = '0.1.0';
 
@@ -250,6 +252,13 @@ function NotificationsPage() {
       <Row title={t('Every message')} hint={t('Also for channels you are not looking at.')} control={<Toggle label={t('Every message')} checked={n().allMessages} onChange={(v) => updateNotifications({ allMessages: v })} />} />
       <Row title={t('Someone joins my voice room')} control={<Toggle label={t('Someone joins my voice room')} checked={n().voiceJoin} onChange={(v) => updateNotifications({ voiceJoin: v })} />} />
       <Row title={t('Sounds')} hint={t('A short tone for mentions and for people joining.')} control={<Toggle label={t('Sounds')} checked={n().sounds} onChange={(v) => updateNotifications({ sounds: v })} />} />
+      <div class="setrow">
+        <div class="col grow"><strong class="fs13">{t('Sound set')}</strong><span class="t3 fs12">{t('Birds are short synthesised chirps; soft are the gentler first tones.')}</span></div>
+        <div class="row g8">
+          <div style={{ width: '150px' }}><Select label={t('Sound set')} value={n().soundSet} options={[{ value: 'birds', label: t('Birds') }, { value: 'soft', label: t('Soft') }]} onChange={(v) => updateNotifications({ soundSet: v })} /></div>
+          <Button size="sm" variant="secondary" icon="play" onClick={() => playTone('mention')}>{t('Listen')}</Button>
+        </div>
+      </div>
       <div class="setrow">
         <div class="col grow"><strong class="fs13">{t('Sound volume')}</strong></div>
         <div style={{ width: '180px' }}><Slider label={t('Sound volume')} min={0} max={1} step={0.05} value={n().soundVolume} onChange={(v) => updateNotifications({ soundVolume: v })} /></div>
