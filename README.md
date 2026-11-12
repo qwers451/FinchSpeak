@@ -21,7 +21,7 @@
 <p align="center">
   <a href="https://github.com/qwers451/FinchSpeak/releases/latest"><b>Скачать</b></a> ·
   <a href="#запуск-за-пять-минут">Запуск за пять минут</a> ·
-  <a href="docs/RELEASE-NOTES-1.6.1.md">Что нового</a>
+  <a href="docs/RELEASE-NOTES-1.6.3.md">Что нового</a>
 </p>
 
 ---
