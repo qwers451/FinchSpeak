@@ -79,6 +79,45 @@ pub struct EncodedFrame {
     pub frame_id: u16,
 }
 
+/// What one encode produced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EncodeOutcome {
+    /// A coded frame, to send.
+    Frame(EncodedFrame),
+    /// The encoder dropped the frame to hold the target bitrate. Nothing is coded and the frame
+    /// id does not advance, so the next coded frame continues the sequence.
+    Skipped,
+}
+
+/// What a screen share needs from a video encoder. [`H264VideoEncoder`] implements it; tests can
+/// substitute their own.
+pub trait FrameEncoder: Send {
+    /// Encodes one BGRA picture of [`width`](Self::width) x [`height`](Self::height).
+    fn encode_bgra(&mut self, bgra: &[u8]) -> Result<EncodeOutcome, H264EncoderError>;
+    /// The next coded frame is a key frame.
+    fn force_keyframe(&mut self);
+    fn width(&self) -> u32;
+    fn height(&self) -> u32;
+}
+
+impl FrameEncoder for H264VideoEncoder {
+    fn encode_bgra(&mut self, bgra: &[u8]) -> Result<EncodeOutcome, H264EncoderError> {
+        H264VideoEncoder::encode_bgra(self, bgra)
+    }
+
+    fn force_keyframe(&mut self) {
+        H264VideoEncoder::force_keyframe(self)
+    }
+
+    fn width(&self) -> u32 {
+        H264VideoEncoder::width(self)
+    }
+
+    fn height(&self) -> u32 {
+        H264VideoEncoder::height(self)
+    }
+}
+
 /// H.264 video encoder wrapping `openh264::encoder::Encoder`.
 pub struct H264VideoEncoder {
     encoder: Encoder,
@@ -117,7 +156,8 @@ impl H264VideoEncoder {
             .max_frame_rate(FrameRate::from_hz(config.fps.max(1) as f32))
             .usage_type(UsageType::ScreenContentRealTime)
             .rate_control_mode(RateControlMode::Bitrate)
-            .skip_frames(false);
+            // Bitrate control only holds the rate when the encoder may drop frames that do not fit.
+            .skip_frames(true);
 
         let encoder = Encoder::with_api_config(OpenH264API::from_source(), openh264_config)?;
 
@@ -194,7 +234,7 @@ impl H264VideoEncoder {
     /// - Y plane: `width * height` bytes
     /// - U plane: `(width / 2) * (height / 2)` bytes
     /// - V plane: `(width / 2) * (height / 2)` bytes
-    pub fn encode_frame(&mut self, yuv_i420: &[u8]) -> Result<EncodedFrame, H264EncoderError> {
+    pub fn encode_frame(&mut self, yuv_i420: &[u8]) -> Result<EncodeOutcome, H264EncoderError> {
         let w = self.config.width as usize;
         let h = self.config.height as usize;
         let expected_size = (w * h * 3) / 2;
@@ -222,7 +262,7 @@ impl H264VideoEncoder {
     /// Encodes an RGBA pixel buffer of dimensions `(width, height)`.
     ///
     /// The buffer size must be exactly `width * height * 4` bytes.
-    pub fn encode_rgba(&mut self, rgba: &[u8]) -> Result<EncodedFrame, H264EncoderError> {
+    pub fn encode_rgba(&mut self, rgba: &[u8]) -> Result<EncodeOutcome, H264EncoderError> {
         let w = self.config.width as usize;
         let h = self.config.height as usize;
         let expected_size = w * h * 4;
@@ -242,7 +282,7 @@ impl H264VideoEncoder {
     /// Encodes a BGRA pixel buffer of dimensions `(width, height)`.
     ///
     /// The buffer size must be exactly `width * height * 4` bytes.
-    pub fn encode_bgra(&mut self, bgra: &[u8]) -> Result<EncodedFrame, H264EncoderError> {
+    pub fn encode_bgra(&mut self, bgra: &[u8]) -> Result<EncodeOutcome, H264EncoderError> {
         let w = self.config.width as usize;
         let h = self.config.height as usize;
         let expected_size = w * h * 4;
@@ -259,7 +299,7 @@ impl H264VideoEncoder {
         self.encode_packed(bgra, PixelOrder::Bgra)
     }
 
-    fn encode_packed(&mut self, packed: &[u8], order: PixelOrder) -> Result<EncodedFrame, H264EncoderError> {
+    fn encode_packed(&mut self, packed: &[u8], order: PixelOrder) -> Result<EncodeOutcome, H264EncoderError> {
         let (w, h) = (self.config.width as usize, self.config.height as usize);
         let mut yuv = std::mem::take(&mut self.yuv_scratch);
         packed_to_i420(packed, w, h, order, &mut yuv);
@@ -272,7 +312,7 @@ impl H264VideoEncoder {
     fn encode_yuv_source<T: openh264::formats::YUVSource>(
         &mut self,
         yuv: &T,
-    ) -> Result<EncodedFrame, H264EncoderError> {
+    ) -> Result<EncodeOutcome, H264EncoderError> {
         if self.force_keyframe_pending {
             self.encoder.force_intra_frame();
             self.force_keyframe_pending = false;
@@ -284,28 +324,39 @@ impl H264VideoEncoder {
 
         let bitstream = self.encoder.encode_at(yuv, timestamp)?;
         let frame_type = bitstream.frame_type();
+        let encoded_bytes = bitstream.to_vec();
+        self.finish_bitstream(encoded_bytes, frame_type)
+    }
 
+    /// Turns one encoder output into a frame, or a skip when the bitstream is empty. A skipped
+    /// frame keeps the frame id, so the viewer sees no gap; it does not need a key frame.
+    fn finish_bitstream(
+        &mut self,
+        bytes: Vec<u8>,
+        frame_type: FrameType,
+    ) -> Result<EncodeOutcome, H264EncoderError> {
         if frame_type == FrameType::Invalid {
             return Err(H264EncoderError::InvalidFrame);
         }
 
-        let encoded_bytes = bitstream.to_vec();
-        if encoded_bytes.is_empty() {
-            return Err(H264EncoderError::EmptyBitstream);
+        // The clock moves on for a skipped frame too: the time it covered has passed.
+        self.frame_count = self.frame_count.wrapping_add(1);
+        self.is_initialized = true;
+
+        if bytes.is_empty() {
+            return Ok(EncodeOutcome::Skipped);
         }
 
         let is_keyframe = matches!(frame_type, FrameType::IDR | FrameType::I);
 
         let frame_id = self.next_frame_id;
         self.next_frame_id = self.next_frame_id.wrapping_add(1);
-        self.frame_count = self.frame_count.wrapping_add(1);
-        self.is_initialized = true;
 
-        Ok(EncodedFrame {
+        Ok(EncodeOutcome::Frame(EncodedFrame {
             is_keyframe,
-            data: Bytes::from(encoded_bytes),
+            data: Bytes::from(bytes),
             frame_id,
-        })
+        }))
     }
 }
 
@@ -368,6 +419,31 @@ mod tests {
         ));
     }
 
+    /// The frame an encode produced; a skipped frame is a test failure here.
+    fn encoded(outcome: EncodeOutcome) -> EncodedFrame {
+        match outcome {
+            EncodeOutcome::Frame(frame) => frame,
+            EncodeOutcome::Skipped => panic!("expected an encoded frame, got a skipped one"),
+        }
+    }
+
+    #[test]
+    fn skipped_frames_do_not_advance_the_frame_id() -> Result<(), Box<dyn std::error::Error>> {
+        let mut encoder = H264VideoEncoder::new(64, 64, 30, 100_000)?;
+
+        let first = encoded(encoder.encode_frame(&generate_test_yuv(64, 64, 128))?);
+        assert_eq!(first.frame_id, 0);
+
+        // The encoder reports a skip as an empty bitstream of type Skip.
+        let skipped = encoder.finish_bitstream(Vec::new(), FrameType::Skip)?;
+        assert_eq!(skipped, EncodeOutcome::Skipped);
+        assert_eq!(encoder.next_frame_id(), 1);
+
+        let next = encoded(encoder.encode_frame(&generate_test_yuv(64, 64, 130))?);
+        assert_eq!(next.frame_id, 1, "the frame after a skip continues the sequence");
+        Ok(())
+    }
+
     #[test]
     fn test_encode_yuv_frames_and_keyframes() -> Result<(), Box<dyn std::error::Error>> {
         let width = 128;
@@ -375,7 +451,7 @@ mod tests {
         let mut encoder = H264VideoEncoder::new(width, height, 30, 200_000)?;
 
         let yuv_frame1 = generate_test_yuv(width, height, 128);
-        let frame1 = encoder.encode_frame(&yuv_frame1)?;
+        let frame1 = encoded(encoder.encode_frame(&yuv_frame1)?);
 
         // The very first frame must be an IDR keyframe
         assert!(
@@ -392,14 +468,14 @@ mod tests {
 
         // Second frame should be a delta (P) frame
         let yuv_frame2 = generate_test_yuv(width, height, 130);
-        let frame2 = encoder.encode_frame(&yuv_frame2)?;
+        let frame2 = encoded(encoder.encode_frame(&yuv_frame2)?);
         assert_eq!(frame2.frame_id, 1);
         assert!(!frame2.data.is_empty());
 
         // Now force a keyframe
         encoder.force_keyframe();
         let yuv_frame3 = generate_test_yuv(width, height, 132);
-        let frame3 = encoder.encode_frame(&yuv_frame3)?;
+        let frame3 = encoded(encoder.encode_frame(&yuv_frame3)?);
         assert!(
             frame3.is_keyframe,
             "Expected frame after force_keyframe() to be a keyframe"
@@ -416,7 +492,7 @@ mod tests {
         let mut encoder = H264VideoEncoder::new(width, height, 30, 150_000)?;
 
         let rgba_data = vec![200u8; (width * height * 4) as usize];
-        let frame = encoder.encode_rgba(&rgba_data)?;
+        let frame = encoded(encoder.encode_rgba(&rgba_data)?);
 
         assert!(frame.is_keyframe);
         assert_eq!(frame.frame_id, 0);

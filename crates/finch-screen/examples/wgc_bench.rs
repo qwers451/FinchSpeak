@@ -15,6 +15,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     const RUN: Duration = Duration::from_secs(5);
 
+    // The share frame rate to capture at (first argument, default 60).
+    let fps: u8 = match std::env::args().nth(1) {
+        Some(arg) => arg.parse().map_err(|e| format!("FPS must be a number from 1 to 255: {e}"))?,
+        None => 60,
+    };
+
     let monitors = list_monitors()?;
     let primary = monitors
         .iter()
@@ -25,7 +31,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         primary.name, primary.width, primary.height, primary.id
     );
 
-    let capture = WgcCapture::start(WgcTarget::Monitor(primary.id))?;
+    let capture = WgcCapture::start(WgcTarget::Monitor(primary.id), fps)?;
+    println!("Capture limit: {fps} FPS");
     println!("WGC session started. Running for {} s.", RUN.as_secs());
     println!("Note: a still screen legitimately yields few frames; WGC only delivers on change.");
 

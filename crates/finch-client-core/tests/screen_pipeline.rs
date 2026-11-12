@@ -93,9 +93,20 @@ fn datagrams_respect_the_connection_limit() {
         let mut p = packetizer();
         let base = noise_frame(640, 360, 1);
         p.push_frame(&base, 0, limit).unwrap();
-        let OutgoingVideo::Delta(packets) = p.push_frame(&half_changed(&base, 2), 33, limit).unwrap() else {
-            panic!("delta expected")
-        };
+        // The encoder may skip a picture to hold the bitrate (a noise delta is far above the budget),
+        // so try fresh noise until it codes one.
+        let mut delta = None;
+        for seed in 2..200 {
+            match p.push_frame(&half_changed(&base, seed), 33 * seed, limit).unwrap() {
+                OutgoingVideo::Delta(packets) => {
+                    delta = Some(packets);
+                    break;
+                }
+                OutgoingVideo::Skipped => {}
+                other => panic!("delta or skip expected, got {other:?}"),
+            }
+        }
+        let packets = delta.expect("the encoder codes a delta picture");
         assert!(packets.len() > 1, "a noise frame needs several fragments at limit {limit}");
         assert!(packets.iter().all(|d| d.len() <= limit), "a datagram exceeds the limit {limit}");
     }
@@ -230,7 +241,7 @@ fn deliver(viewer: &mut ScreenViewer, out: OutgoingVideo, now: Instant) -> Vec<A
             .into_iter()
             .filter_map(|d| viewer.on_delta_fragment(&header_of(&d), d.slice(MEDIA_HEADER_SIZE..), now))
             .collect(),
-        OutgoingVideo::Dropped => Vec::new(),
+        OutgoingVideo::Dropped | OutgoingVideo::Skipped => Vec::new(),
     }
 }
 

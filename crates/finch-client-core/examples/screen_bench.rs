@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use finch_client_core::screen::encoded_size;
 use finch_screen::yuv::{packed_to_i420, PixelOrder};
-use finch_screen::{H264VideoEncoder, VideoEncoderConfig};
+use finch_screen::{EncodeOutcome, H264VideoEncoder, VideoEncoderConfig};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -69,7 +69,8 @@ fn main() {
 
         let t = Instant::now();
         match encoder.encode_frame(&yuv) {
-            Ok(encoded) => bytes += encoded.data.len(),
+            Ok(EncodeOutcome::Frame(encoded)) => bytes += encoded.data.len(),
+            Ok(EncodeOutcome::Skipped) => {}
             Err(e) => return eprintln!("encode failed: {e}"),
         }
         let spent = t.elapsed().as_secs_f64();

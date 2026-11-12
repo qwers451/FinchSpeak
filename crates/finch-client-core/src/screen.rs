@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use finch_protocol::media::{MediaHeader, MediaPacket, MAX_KEYFRAME_BYTES, MEDIA_HEADER_SIZE};
 use finch_screen::{
-    slice_p_frame_with_chunk, AssembledFrame, FrameAssembler, H264EncoderError, H264VideoEncoder,
-    PixelFormat, RawFrame, VideoEncoderConfig, DELTA_FRAME_TIMEOUT, MAX_HEIGHT, MAX_WIDTH,
+    slice_p_frame_with_chunk, AssembledFrame, EncodeOutcome, FrameAssembler, FrameEncoder, H264EncoderError,
+    H264VideoEncoder, PixelFormat, RawFrame, VideoEncoderConfig, DELTA_FRAME_TIMEOUT, MAX_HEIGHT, MAX_WIDTH,
 };
 use thiserror::Error;
 
@@ -79,6 +79,17 @@ pub enum OutgoingVideo {
     /// The frame could not be sent (too big for the datagram limit); the next one is a key
     /// frame, so viewers resynchronise instead of decoding garbage.
     Dropped,
+    /// The encoder skipped the frame to hold the bitrate. Nothing is sent; the sequence goes on
+    /// unchanged, and no key frame is needed.
+    Skipped,
+}
+
+/// Builds the encoder of a share for a picture size and rate.
+pub type EncoderFactory = Box<dyn Fn(VideoEncoderConfig) -> Result<Box<dyn FrameEncoder>, H264EncoderError> + Send>;
+
+/// The encoder a share uses unless a test substitutes one.
+fn openh264_encoder(config: VideoEncoderConfig) -> Result<Box<dyn FrameEncoder>, H264EncoderError> {
+    Ok(Box::new(H264VideoEncoder::with_config(config)?))
 }
 
 /// Turns raw captured frames into packets for one screen share.
@@ -86,7 +97,8 @@ pub struct ScreenPacketizer {
     config: ShareConfig,
     channel_id: u32,
     sender_peer_id: u32,
-    encoder: Option<H264VideoEncoder>,
+    factory: EncoderFactory,
+    encoder: Option<Box<dyn FrameEncoder>>,
     sequence: u16,
     force_key: bool,
     /// Current target rate (`None` until the first frame says how big the picture is).
@@ -112,10 +124,21 @@ const MIN_BITRATE_BPS: u32 = 500_000;
 
 impl ScreenPacketizer {
     pub fn new(config: ShareConfig, channel_id: u32, sender_peer_id: u32) -> Self {
+        Self::with_encoder_factory(config, channel_id, sender_peer_id, Box::new(openh264_encoder))
+    }
+
+    /// [`new`](Self::new) with the encoder built by `factory` instead of OpenH264.
+    pub fn with_encoder_factory(
+        config: ShareConfig,
+        channel_id: u32,
+        sender_peer_id: u32,
+        factory: EncoderFactory,
+    ) -> Self {
         Self {
             config,
             channel_id,
             sender_peer_id,
+            factory,
             encoder: None,
             sequence: 0,
             force_key: false,
@@ -213,7 +236,7 @@ impl ScreenPacketizer {
                     rate
                 }
             };
-            self.encoder = Some(H264VideoEncoder::with_config(VideoEncoderConfig {
+            self.encoder = Some((self.factory)(VideoEncoderConfig {
                 width: w,
                 height: h,
                 fps: self.config.fps,
@@ -229,7 +252,10 @@ impl ScreenPacketizer {
         }
 
         let picture = fit_to_bgra(frame, w, h);
-        let encoded = encoder.encode_bgra(&picture)?;
+        let encoded = match encoder.encode_bgra(&picture)? {
+            EncodeOutcome::Frame(encoded) => encoded,
+            EncodeOutcome::Skipped => return Ok(OutgoingVideo::Skipped),
+        };
 
         if encoded.is_keyframe {
             if encoded.data.len() > MAX_KEYFRAME_BYTES {
@@ -566,16 +592,18 @@ impl WgcSource {
     /// How long one poll waits for a new frame.
     const POLL: Duration = Duration::from_millis(100);
 
-    pub fn monitor(id: u32) -> Result<Self, String> {
-        Self::start(finch_screen::WgcTarget::Monitor(id))
+    /// A session that delivers at most `fps` frames per second.
+    pub fn monitor(id: u32, fps: u8) -> Result<Self, String> {
+        Self::start(finch_screen::WgcTarget::Monitor(id), fps)
     }
 
-    pub fn window(id: u32) -> Result<Self, String> {
-        Self::start(finch_screen::WgcTarget::Window(id))
+    /// A session that delivers at most `fps` frames per second.
+    pub fn window(id: u32, fps: u8) -> Result<Self, String> {
+        Self::start(finch_screen::WgcTarget::Window(id), fps)
     }
 
-    fn start(target: finch_screen::WgcTarget) -> Result<Self, String> {
-        let capture = finch_screen::WgcCapture::start(target).map_err(|e| e.to_string())?;
+    fn start(target: finch_screen::WgcTarget, fps: u8) -> Result<Self, String> {
+        let capture = finch_screen::WgcCapture::start(target, fps).map_err(|e| e.to_string())?;
         Ok(Self { capture, primed: None })
     }
 }
@@ -812,6 +840,8 @@ impl ScreenSharer {
                                     }
                                 }
                                 Ok(OutgoingVideo::Dropped) => {}
+                                // Not sent: the window does not count it, and `last_sent` stays put.
+                                Ok(OutgoingVideo::Skipped) => {}
                                 Err(e) => break e.to_string(),
                             }
                         }
@@ -1019,6 +1049,7 @@ impl Drop for ScreenAudioForwarder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use finch_screen::EncodedFrame;
 
     fn gradient(width: u32, height: u32) -> RawFrame {
         let mut data = Vec::with_capacity((width * height * 4) as usize);
@@ -1153,5 +1184,63 @@ mod tests {
         assert!(matches!(out, OutgoingVideo::KeyFrame { .. }));
         assert_eq!(p.dimensions(), Some((1920, 1080)));
         assert_eq!(p.bitrate_bps(), Some(5_184_000));
+    }
+
+    /// Test encoder: the second picture is skipped, the others are coded (the first as a key frame).
+    struct SkipSecond {
+        calls: u32,
+        next_id: u16,
+        key_requests: Arc<AtomicU32>,
+    }
+
+    impl FrameEncoder for SkipSecond {
+        fn encode_bgra(&mut self, _bgra: &[u8]) -> Result<EncodeOutcome, H264EncoderError> {
+            self.calls += 1;
+            if self.calls == 2 {
+                return Ok(EncodeOutcome::Skipped);
+            }
+            let frame_id = self.next_id;
+            self.next_id = self.next_id.wrapping_add(1);
+            Ok(EncodeOutcome::Frame(EncodedFrame {
+                is_keyframe: self.calls == 1,
+                data: Bytes::from_static(&[0, 0, 0, 1, 0x41, 1, 2, 3]),
+                frame_id,
+            }))
+        }
+
+        fn force_keyframe(&mut self) {
+            self.key_requests.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn width(&self) -> u32 {
+            16
+        }
+
+        fn height(&self) -> u32 {
+            16
+        }
+    }
+
+    #[test]
+    fn a_skipped_frame_is_dropped_without_a_key_frame() {
+        let key_requests = Arc::new(AtomicU32::new(0));
+        let shared = Arc::clone(&key_requests);
+        let mut p = ScreenPacketizer::with_encoder_factory(
+            ShareConfig { fps: 30, bitrate_bps: Some(4_000_000) },
+            1,
+            2,
+            Box::new(move |_config| {
+                Ok(Box::new(SkipSecond { calls: 0, next_id: 0, key_requests: Arc::clone(&shared) }) as Box<dyn FrameEncoder>)
+            }),
+        );
+        let frame = filled(16, 16, PixelFormat::Bgra, [10, 20, 30, 255]);
+
+        let first = p.push_frame(&frame, 0, 1200).unwrap();
+        assert!(matches!(first, OutgoingVideo::KeyFrame { .. }), "got {first:?}");
+        let skipped = p.push_frame(&frame, 33, 1200).unwrap();
+        assert!(matches!(skipped, OutgoingVideo::Skipped), "got {skipped:?}");
+        let third = p.push_frame(&frame, 66, 1200).unwrap();
+        assert!(matches!(third, OutgoingVideo::Delta(_)), "got {third:?}");
+        assert_eq!(key_requests.load(Ordering::SeqCst), 1, "only the first frame asks for a key frame");
     }
 }

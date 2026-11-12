@@ -5,7 +5,7 @@
 //! without a display. A build without NASM has no SIMD in OpenH264 and is several times slower.
 use std::time::Instant;
 
-use finch_screen::{H264VideoEncoder, VideoEncoderConfig};
+use finch_screen::{EncodeOutcome, H264VideoEncoder, VideoEncoderConfig};
 
 /// I420 picture of `w`x`h`: blocky "text" that moves down by `shift` rows.
 fn synthetic_i420(w: usize, h: usize, shift: usize, out: &mut Vec<u8>) {
@@ -37,7 +37,8 @@ fn main() {
         synthetic_i420(w as usize, h as usize, i * 6, &mut yuv);
         let started = Instant::now();
         match encoder.encode_frame(&yuv) {
-            Ok(frame) => bytes += frame.data.len(),
+            Ok(EncodeOutcome::Frame(frame)) => bytes += frame.data.len(),
+            Ok(EncodeOutcome::Skipped) => {}
             Err(e) => return eprintln!("encode failed: {e}"),
         }
         let spent = started.elapsed().as_secs_f64();

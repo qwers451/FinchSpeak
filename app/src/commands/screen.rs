@@ -23,13 +23,13 @@ fn share_fps(requested: Option<u8>) -> u8 {
 /// The frame source for a screen or window and the size of its first picture. On Windows a capture
 /// session is tried first (frames arrive as fast as the screen changes); if it cannot start or shows
 /// nothing, the older snapshot capture takes over.
-fn open_source(kind: &str, id: u32) -> Result<(Box<dyn FrameSource>, u32, u32), String> {
+fn open_source(kind: &str, id: u32, fps: u8) -> Result<(Box<dyn FrameSource>, u32, u32), String> {
     if kind != "monitor" && kind != "window" {
         return Err(format!("Unknown screen source kind: {kind}"));
     }
     #[cfg(windows)]
     {
-        let session = if kind == "monitor" { WgcSource::monitor(id) } else { WgcSource::window(id) };
+        let session = if kind == "monitor" { WgcSource::monitor(id, fps) } else { WgcSource::window(id, fps) };
         match session.and_then(|mut source| source.next_frame().map(|frame| (source, frame.width, frame.height))) {
             Ok((source, width, height)) => return Ok((Box::new(source), width, height)),
             Err(e) => tracing::warn!("Windows Graphics Capture is not available for {kind} {id} ({e}); using snapshot capture"),
@@ -199,7 +199,7 @@ pub async fn start_screen_share(
                 let connection = preflight_state.quic_connection.read().await.clone().ok_or_else(|| "Not connected via QUIC".to_string())?;
                 (short_id, tx, connection, preflight_state.session_peer_id.load(Ordering::SeqCst), preflight_state.session_generation.load(Ordering::SeqCst))
             };
-            let (source, width, height) = tokio::task::spawn_blocking(move || open_source(&source_kind, id))
+            let (source, width, height) = tokio::task::spawn_blocking(move || open_source(&source_kind, id, fps))
                 .await.map_err(|e| e.to_string())?
                 .map_err(|e| format!("Could not capture the screen: {e}"))?;
             let (width, height) = share_size(width, height, fps);
