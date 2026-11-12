@@ -2,13 +2,14 @@
 
 use std::sync::atomic::Ordering;
 
-use finch_client_core::screen::{share_size, AudioPacketSource, ScreenAudioForwarder, FrameSource, MonitorSource, ScreenSharer, ScreenViewer, ShareConfig, ShareHooks, ShareStats, WindowSource};
+use finch_client_core::screen::{share_size, AudioPacketSource, ScreenAudioForwarder, FirstFrame, FrameSource, MonitorSource, ScreenSharer, ScreenViewer, ShareConfig, ShareHooks, ShareStats, WindowSource};
 #[cfg(windows)]
 use finch_client_core::screen::WgcSource;
 use finch_protocol::messages::ClientMessage;
 use finch_protocol::models::VideoCodec;
-use finch_screen::{capture_monitor, capture_window, list_monitors, list_windows, thumbnail_jpeg, window_process_id, AudioSourceKind, ScreenAudioCapturer, ScreenAudioConfig, ThumbnailCache};
+use finch_screen::{capture_monitor, capture_window, list_monitors, list_windows, thumbnail_jpeg, window_process_id, AudioSourceKind, ScreenAudioCapturer, ScreenAudioConfig, ThumbnailCache, WindowInfo};
 use serde::Serialize;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 use tracing::info;
 use uuid::Uuid;
@@ -20,24 +21,108 @@ fn share_fps(requested: Option<u8>) -> u8 {
     if requested == Some(60) { 60 } else { 30 }
 }
 
+/// How long a capture session may take to show its first picture before it counts as having none yet.
+const FIRST_PICTURE_WAIT: Duration = Duration::from_secs(2);
+
+/// A capture session that can be asked for its first picture.
+#[cfg(any(windows, test))]
+trait PictureSession: FrameSource {
+    fn first_frame(&mut self, wait: Duration) -> FirstFrame;
+}
+
+#[cfg(windows)]
+impl PictureSession for WgcSource {
+    fn first_frame(&mut self, wait: Duration) -> FirstFrame {
+        WgcSource::first_frame(self, wait)
+    }
+}
+
+/// Starts a share from a capture session. A picture gives the size of the picture. A window with no
+/// picture yet (minimized) starts anyway, at the size it restores to, or the primary screen's size.
+/// `None` means the session cannot be used and the snapshot capture should take over.
+#[cfg(any(windows, test))]
+fn start_picture_session<S: PictureSession>(
+    mut session: S,
+    is_window: bool,
+    id: u32,
+    restore_size: impl Fn(u32) -> Option<(u32, u32)>,
+    primary_size: impl FnOnce() -> Option<(u32, u32)>,
+) -> Option<(Box<dyn FrameSource>, u32, u32)> {
+    match session.first_frame(FIRST_PICTURE_WAIT) {
+        FirstFrame::Frame(frame) => Some((Box::new(session), frame.width, frame.height)),
+        FirstFrame::NotYet if is_window => {
+            let (width, height) = restore_size(id).or_else(primary_size)?;
+            Some((Box::new(session), width, height))
+        }
+        // A screen with no picture, or a session that closed: the snapshot capture decides.
+        FirstFrame::NotYet | FirstFrame::Closed => None,
+    }
+}
+
+/// The size of the primary screen, for a window that has never shown a picture.
+#[cfg(windows)]
+fn primary_monitor_size() -> Option<(u32, u32)> {
+    list_monitors().ok()?.into_iter().find(|m| m.is_primary).map(|m| (m.width, m.height))
+}
+
+/// The size a minimized window returns to (its normal placement), from the window handle.
+#[cfg(windows)]
+fn window_restore_size(id: u32) -> Option<(u32, u32)> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowPlacement, WINDOWPLACEMENT};
+    // SAFETY: WINDOWPLACEMENT is plain data, and GetWindowPlacement writes it before it is read.
+    let mut placement: WINDOWPLACEMENT = unsafe { std::mem::zeroed() };
+    placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+    // SAFETY: the handle is only queried; a stale handle makes the call fail, which is handled.
+    if unsafe { GetWindowPlacement(id as usize as _, &mut placement) } == 0 {
+        return None;
+    }
+    let rect = placement.rcNormalPosition;
+    let width = u32::try_from(rect.right.saturating_sub(rect.left)).ok().filter(|w| *w > 0)?;
+    let height = u32::try_from(rect.bottom.saturating_sub(rect.top)).ok().filter(|h| *h > 0)?;
+    Some((width, height))
+}
+
+/// Without Windows there is no minimized window to restore, so the primary size is used.
+#[cfg(not(windows))]
+fn window_restore_size(_id: u32) -> Option<(u32, u32)> {
+    None
+}
+
 /// The frame source for a screen or window and the size of its first picture. On Windows a capture
-/// session is tried first (frames arrive as fast as the screen changes); if it cannot start or shows
-/// nothing, the older snapshot capture takes over.
-fn open_source(kind: &str, id: u32) -> Result<(Box<dyn FrameSource>, u32, u32), String> {
+/// session is tried first (frames arrive as fast as the screen changes); if it cannot start, or a
+/// screen shows no picture, the older snapshot capture takes over.
+fn open_source(kind: &str, id: u32, fps: u8) -> Result<(Box<dyn FrameSource>, u32, u32), String> {
+    open_source_with(kind, id, fps, window_restore_size)
+}
+
+/// [`open_source`] with the restore size of a window supplied by the caller.
+fn open_source_with(kind: &str, id: u32, fps: u8, restore_size: impl Fn(u32) -> Option<(u32, u32)>) -> Result<(Box<dyn FrameSource>, u32, u32), String> {
     if kind != "monitor" && kind != "window" {
         return Err(format!("Unknown screen source kind: {kind}"));
     }
     #[cfg(windows)]
     {
-        let session = if kind == "monitor" { WgcSource::monitor(id) } else { WgcSource::window(id) };
-        match session.and_then(|mut source| source.next_frame().map(|frame| (source, frame.width, frame.height))) {
-            Ok((source, width, height)) => return Ok((Box::new(source), width, height)),
+        let session = if kind == "monitor" { WgcSource::monitor(id, fps) } else { WgcSource::window(id, fps) };
+        match session {
+            Ok(session) => {
+                if let Some(started) = start_picture_session(session, kind == "window", id, restore_size, primary_monitor_size) {
+                    return Ok(started);
+                }
+            }
             Err(e) => tracing::warn!("Windows Graphics Capture is not available for {kind} {id} ({e}); using snapshot capture"),
         }
     }
+    #[cfg(not(windows))]
+    let _ = (&restore_size, fps);
     let mut source: Box<dyn FrameSource> = if kind == "monitor" { Box::new(MonitorSource(id as usize)) } else { Box::new(WindowSource(id)) };
     let frame = source.next_frame()?;
     Ok((source, frame.width, frame.height))
+}
+
+/// Windows offered in the share picker: a named window with a size, or a minimized one whatever its
+/// size (a minimized window reports a zero size).
+fn shareable(window: &WindowInfo) -> bool {
+    !window.title.is_empty() && (window.is_minimized || (window.width > 0 && window.height > 0))
 }
 
 /// One decimal place, as the statistics show it.
@@ -61,6 +146,7 @@ pub struct WindowDto {
     pub app_name: String,
     pub width: u32,
     pub height: u32,
+    pub is_minimized: bool,
 }
 
 #[derive(Serialize)]
@@ -82,8 +168,8 @@ pub async fn list_screen_sources() -> Result<ScreenSourcesDto, String> {
         let windows = list_windows()
             .unwrap_or_default()
             .into_iter()
-            .filter(|w| !w.is_minimized && w.width > 0 && w.height > 0 && !w.title.is_empty())
-            .map(|w| WindowDto { id: w.id, title: w.title, app_name: w.app_name, width: w.width, height: w.height })
+            .filter(shareable)
+            .map(|w| WindowDto { id: w.id, title: w.title, app_name: w.app_name, width: w.width, height: w.height, is_minimized: w.is_minimized })
             .collect();
         Ok(ScreenSourcesDto { monitors, windows })
     })
@@ -199,7 +285,7 @@ pub async fn start_screen_share(
                 let connection = preflight_state.quic_connection.read().await.clone().ok_or_else(|| "Not connected via QUIC".to_string())?;
                 (short_id, tx, connection, preflight_state.session_peer_id.load(Ordering::SeqCst), preflight_state.session_generation.load(Ordering::SeqCst))
             };
-            let (source, width, height) = tokio::task::spawn_blocking(move || open_source(&source_kind, id))
+            let (source, width, height) = tokio::task::spawn_blocking(move || open_source(&source_kind, id, fps))
                 .await.map_err(|e| e.to_string())?
                 .map_err(|e| format!("Could not capture the screen: {e}"))?;
             let (width, height) = share_size(width, height, fps);
@@ -425,6 +511,59 @@ mod share_fps_tests {
     fn round1_keeps_one_decimal() {
         assert_eq!(round1(58.44), 58.4);
         assert_eq!(round1(29.96), 30.0);
+    }
+}
+
+#[cfg(test)]
+mod minimized_window_tests {
+    use super::*;
+    use finch_screen::PixelFormat;
+
+    /// A capture session that answers its first picture with a fixed outcome.
+    struct FakePicture(Option<FirstFrame>);
+
+    impl FrameSource for FakePicture {
+        fn next_frame(&mut self) -> Result<finch_screen::RawFrame, String> {
+            Err("no picture".to_string())
+        }
+    }
+
+    impl PictureSession for FakePicture {
+        fn first_frame(&mut self, _wait: Duration) -> FirstFrame {
+            self.0.take().unwrap_or(FirstFrame::NotYet)
+        }
+    }
+
+    fn window(title: &str, width: u32, height: u32, is_minimized: bool) -> WindowInfo {
+        WindowInfo { id: 9, title: title.into(), app_name: "game.exe".into(), width, height, is_minimized, is_maximized: false }
+    }
+
+    #[test]
+    fn list_keeps_minimized_windows() {
+        assert!(shareable(&window("Rocket League", 0, 0, true)));
+        assert!(!shareable(&window("Rocket League", 0, 0, false)));
+        assert!(!shareable(&window("", 1920, 1080, false)));
+        assert!(!shareable(&window("", 0, 0, true)));
+    }
+
+    #[test]
+    fn a_minimized_window_starts_without_a_first_frame() {
+        let restored = start_picture_session(FakePicture(Some(FirstFrame::NotYet)), true, 9, |_| Some((800, 600)), || Some((1920, 1080)));
+        assert!(matches!(restored, Some((_, 800, 600))));
+        let primary = start_picture_session(FakePicture(Some(FirstFrame::NotYet)), true, 9, |_| None, || Some((1920, 1080)));
+        assert!(matches!(primary, Some((_, 1920, 1080))));
+    }
+
+    #[test]
+    fn a_screen_without_a_picture_or_a_closed_window_uses_snapshots() {
+        assert!(start_picture_session(FakePicture(Some(FirstFrame::NotYet)), false, 1, |_| Some((800, 600)), || None).is_none());
+        assert!(start_picture_session(FakePicture(Some(FirstFrame::Closed)), true, 9, |_| Some((800, 600)), || None).is_none());
+    }
+
+    #[test]
+    fn a_first_picture_gives_its_size() {
+        let frame = finch_screen::RawFrame::new(64, 48, PixelFormat::Bgra, bytes::Bytes::from(vec![0; 64 * 48 * 4]));
+        assert!(matches!(start_picture_session(FakePicture(Some(FirstFrame::Frame(frame))), true, 9, |_| None, || None), Some((_, 64, 48))));
     }
 }
 

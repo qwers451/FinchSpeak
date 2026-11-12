@@ -3,6 +3,41 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Public metadata. Storage paths are always private to the server.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MusicTrack {
+    pub id: Uuid,
+    pub uploader_id: Uuid,
+    pub title: String,
+    pub artist: Option<String>,
+    pub duration_ms: u64,
+    pub size_bytes: u64,
+    pub format: String,
+    pub temporary: bool,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueueEntry {
+    pub entry_id: Uuid,
+    pub track: MusicTrack,
+    pub added_by: Uuid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Playing {
+    pub entry: QueueEntry,
+    pub position_ms: u64,
+    pub at_server_ms: u64,
+    pub paused: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MusicRoomState {
+    pub queue: Vec<QueueEntry>,
+    pub playing: Option<Playing>,
+}
+
 /// A registered user.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct User {
@@ -170,9 +205,20 @@ pub struct ChannelMapping {
     pub short_id: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UserActivity {
+    pub user_id: Uuid,
+    pub game: String,
+}
+
 /// Full server state sent to the client upon authentication.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ServerState {
+    #[serde(default)]
+    pub activities: Vec<UserActivity>,
+    /// Optional server functionality, absent on legacy servers.
+    #[serde(default)]
+    pub features: Vec<String>,
     /// All channels on the server.
     pub channels: Vec<Channel>,
     /// Currently online users.
@@ -182,4 +228,7 @@ pub struct ServerState {
     /// Unread messages per channel for the user who asks (empty when read or unknown).
     #[serde(default)]
     pub unread: Vec<ChannelUnread>,
+    /// Registered users without an active session.
+    #[serde(default)]
+    pub offline_users: Vec<User>,
 }

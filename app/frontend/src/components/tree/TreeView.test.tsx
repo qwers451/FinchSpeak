@@ -6,10 +6,16 @@ import { setKnownUsers, setPresence } from '../../stores/sessionStore';
 import { setActiveVoiceChannel, setVoiceParticipants } from '../../stores/voiceStore';
 import { setUnread } from '../../stores/activityStore';
 import { nestView, setNestView } from '../../stores/nestView';
+import { setGameActivity } from '../../stores/activityGameStore';
+import { api } from '../../services/api';
+import { t } from '../../i18n';
+import { ContextMenuHost } from '../../ui/ContextMenu';
 import type { Channel, User } from '../../types';
 import { TreeView } from './TreeView';
 
 const nav = vi.hoisted(() => ({ selectChannel: vi.fn(async () => {}), joinVoice: vi.fn(async () => {}), leaveVoice: vi.fn(async () => {}) }));
+const mutes = vi.hoisted(() => ({ muted: new Set<string>() }));
+vi.mock('../../stores/localMuteStore', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../stores/localMuteStore')>()), isLocallyMuted: (userId: string) => mutes.muted.has(userId) }));
 vi.mock('../../stores/chatStore', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../stores/chatStore')>()), selectChannel: nav.selectChannel }));
 vi.mock('../../stores/voiceStore', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../stores/voiceStore')>()), joinVoice: nav.joinVoice, leaveVoice: nav.leaveVoice }));
 // The opened room is covered by its own tests; here only the tree around it matters.
@@ -24,7 +30,7 @@ const user = (id: string, role: User['role'] = 'member'): User => ({ id, usernam
 
 let host: HTMLElement;
 let dispose: (() => void) | undefined;
-const mount = () => { dispose = render(() => <TreeView />, host); };
+const mount = () => { dispose = render(() => <><TreeView /><ContextMenuHost /></>, host); };
 
 beforeEach(() => {
   Object.values(nav).forEach((mock) => mock.mockClear());
@@ -111,4 +117,80 @@ it('only admins get the buttons that add a nest or a birdhouse, and everyone can
   expect(host.querySelector('.tree-add-text')).not.toBeNull();
   (host.querySelector('.tree-bar .nest-toggle') as HTMLElement).click();
   expect(nestView()).toBe(false);
+});
+
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+const dragEvent = (element: Element, type: string, transfer: DataTransfer) => {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', { value: transfer });
+  element.dispatchEvent(event);
+  return event;
+};
+
+it('right-clicking a bird in a nest opens the participant menu', async () => {
+  mount();
+  host.querySelector('.nest-bird')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await flush();
+  const menu = document.querySelector('[role="menu"]')!;
+  expect(menu.textContent).toContain('ann');
+  expect(menu.textContent).toContain('Mute for me');
+});
+
+it('right-clicking a bird on the wire opens the same menu without room actions', async () => {
+  setCurrentUser(user('me', 'admin'));
+  mount();
+  host.querySelector('.tree-wire-bird[title="bob"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await flush();
+  const menu = document.querySelector('[role="menu"]')!;
+  expect(menu.textContent).toContain('bob');
+  expect(menu.textContent).not.toContain('Move to…');
+  expect(menu.textContent).not.toContain('Remove from the room');
+});
+
+it('a moderator drags a participant into another nest, which moves them with their exact peer and nest', async () => {
+  setCurrentUser(user('me', 'admin'));
+  const move = vi.spyOn(api, 'moveVoice').mockResolvedValue();
+  mount();
+  const bird = host.querySelector('.nest-bird') as HTMLElement;
+  const atticNest = host.querySelector('.nest[aria-label^="attic"]') as HTMLElement;
+  const transfer = new DataTransfer();
+  dragEvent(bird, 'dragstart', transfer);
+  expect(dragEvent(atticNest, 'dragover', transfer).defaultPrevented).toBe(true);
+  expect(atticNest.classList.contains('drop-target')).toBe(true);
+  dragEvent(atticNest, 'drop', transfer);
+  await flush();
+  expect(move).toHaveBeenCalledWith('ann', 7, 'attic');
+  expect(atticNest.classList.contains('drop-target')).toBe(false);
+  move.mockRestore();
+});
+
+it('a_member_can_only_drag_themselves_between_nests', async () => {
+  setVoiceParticipants([
+    { user_id: 'ann', peer_id: 7, username: 'ann', channel_id: 'lounge' },
+    { user_id: 'me', peer_id: 8, username: 'me', channel_id: 'lounge' },
+  ]);
+  const move = vi.spyOn(api, 'moveVoice').mockResolvedValue();
+  mount();
+  const birdOf = (name: string) => host.querySelector(`.nest-bird[title="${name}"]`) as HTMLElement;
+  expect(birdOf('ann').getAttribute('draggable')).toBe('false');
+  expect(birdOf('me').getAttribute('draggable')).toBe('true');
+  const atticNest = host.querySelector('.nest[aria-label^="attic"]') as HTMLElement;
+  const transfer = new DataTransfer();
+  dragEvent(birdOf('me'), 'dragstart', transfer);
+  dragEvent(atticNest, 'drop', transfer);
+  await flush();
+  expect(nav.joinVoice).toHaveBeenCalledWith(attic);
+  expect(move).not.toHaveBeenCalled();
+  move.mockRestore();
+});
+
+it('a muted-for-me participant shows vol-off and a participant in a game shows the game', async () => {
+  mutes.muted.add('ann');
+  setGameActivity({ user_id: 'ann', game: 'Enshrouded' });
+  mount();
+  const bird = host.querySelector('.nest-bird') as HTMLElement;
+  expect(bird.querySelector('.nest-local-mute')!.getAttribute('aria-label')).toBe(t('You muted this person'));
+  expect(bird.querySelector('.nest-game')!.getAttribute('aria-label')).toBe(t('Playing {game}', { game: 'Enshrouded' }));
+  mutes.muted.clear();
+  setGameActivity({ user_id: 'ann', game: null });
 });

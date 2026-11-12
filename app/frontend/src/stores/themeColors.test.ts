@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { applyAppearance, DEFAULT_PREFS, parsePrefs, THEME_BLEND_MS } from './settingsStore';
 import {
-  contrast, DEFAULT_THEME_COLORS, mix, paletteFromPixels, parseThemeColors, readableOn, THEME_PRESETS, THEME_VARIABLE_NAMES, themeVariables,
+  BULLFINCH_COLORS, contrast, DEFAULT_THEME_COLORS, mix, paletteFromPixels, parseThemeColors, readableOn, THEME_PRESETS, THEME_VARIABLE_NAMES, themeVariables,
 } from './themeColors';
 
 afterEach(() => vi.useRealTimers());
@@ -18,10 +18,31 @@ it('mixes colors and measures contrast like WCAG', () => {
 it('saved colors are repaired, not trusted', () => {
   expect(parseThemeColors(null)).toEqual(DEFAULT_THEME_COLORS);
   expect(parseThemeColors({ background: '#ABCDEF', accent: 'red', text: '#12345' })).toEqual({ ...DEFAULT_THEME_COLORS, background: '#abcdef' });
-  const prefs = parsePrefs(JSON.stringify({ appearance: { theme: 'user', customColors: { signal: '#00ff00' } } }));
+  const prefs = parsePrefs(JSON.stringify({ appearance: { theme: 'user', brandTheme161: true, customColors: { signal: '#00ff00' } } }));
   expect(prefs.appearance.theme).toBe('user');
   expect(prefs.appearance.customColors.signal).toBe('#00ff00');
-  expect(parsePrefs(JSON.stringify({ appearance: { theme: 'neon' } })).appearance.theme).toBe('claude');
+  expect(parsePrefs(JSON.stringify({ appearance: { theme: 'neon', brandTheme161: true } })).appearance.theme).toBe('bullfinch');
+});
+
+it('bullfinch_text_contrast: the Снегирь theme keeps its text and accent readable', () => {
+  // WCAG 2.x relative luminance and contrast, written out here so the test does not lean on the code under test.
+  const lum = (hex: string) => {
+    const [r, g, b] = [1, 3, 5].map((i) => {
+      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const ratio = (a: string, b: string) => {
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  const { background, surface, text, accent } = BULLFINCH_COLORS;
+  const secondary = themeVariables(BULLFINCH_COLORS)['--text-2'];
+  expect(ratio(text, background)).toBeGreaterThanOrEqual(7);
+  expect(ratio(text, surface)).toBeGreaterThanOrEqual(7);
+  expect(ratio(accent, background)).toBeGreaterThanOrEqual(4.5);
+  expect(ratio(secondary, background)).toBeGreaterThanOrEqual(4.5);
 });
 
 it('every palette keeps its text readable and its buttons labelled clearly', () => {

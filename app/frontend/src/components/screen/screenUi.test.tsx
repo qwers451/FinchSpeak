@@ -1,3 +1,4 @@
+import { createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -26,6 +27,7 @@ const mount = (view: () => unknown) => {
 };
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 const button = (text: string) => Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes(text)) as HTMLButtonElement;
+const shareAudioToggle = () => document.querySelector<HTMLButtonElement>('[aria-label="Share system sound too"]')!;
 
 const sources = {
   monitors: [
@@ -106,9 +108,11 @@ it('unsupported Windows warns that viewers hear themselves, and sound is passed 
   const start = vi.spyOn(api, 'startScreenShare').mockResolvedValue();
   mount(() => <SharePickerModal open onClose={() => {}} />);
   await flush();
+  expect(shareAudioToggle().getAttribute('aria-checked')).toBe('false');
   expect(document.body.textContent).not.toContain('hear themselves');
-  (document.querySelector('[aria-label="Share system sound too"]') as HTMLElement).click();
+  shareAudioToggle().click();
   await flush();
+  expect(localStorage.getItem('finchspeak.shareAudio')).toBe('1');
   expect(document.body.textContent).toContain('This version of Windows cannot leave FinchSpeak out of the sound: people in the room will hear themselves with a delay. Update to Windows 10 2004 or newer.');
   button('Start sharing').click();
   await flush();
@@ -139,6 +143,30 @@ it('says so when there is nothing to share', async () => {
   await flush();
   expect(document.body.textContent).toContain('No screens found');
   expect(button('Start sharing').disabled).toBe(true);
+});
+
+it('a minimized window is listed with a Minimized placeholder instead of a picture, and can be shared', async () => {
+  (api.listScreenSources as ReturnType<typeof vi.fn>).mockResolvedValue({
+    monitors: [],
+    windows: [{ id: 12, title: 'Rocket League', app_name: 'RocketLeague.exe', width: 0, height: 0, is_minimized: true }],
+  });
+  const start = vi.spyOn(api, 'startScreenShare').mockResolvedValue();
+  mount(() => <SharePickerModal open onClose={() => {}} />);
+  await flush();
+  button('Windows').click();
+  await flush();
+  const tile = document.querySelector('[role="option"]') as HTMLElement;
+  expect(tile.textContent).toContain('Rocket League');
+  expect(tile.textContent).toContain('Minimized');
+  expect(tile.querySelector('img')).toBeNull();
+  expect(document.body.textContent).toContain('A minimized window shows up for viewers once you open it.');
+  tile.click();
+  await flush();
+  button('Start sharing').click();
+  await flush();
+  await flush();
+  expect(api.captureThumbnail).not.toHaveBeenCalledWith('window', 12, 320);
+  expect(start).toHaveBeenCalledWith('window', 12, false, 'system', 30);
 });
 
 const fpsButton = (value: string) =>
@@ -271,14 +299,61 @@ it('shows a monitor as DISPLAY1, not as a device path', () => {
   expect(monitorName('Built-in display')).toBe('Built-in display');
 });
 
-it('process loopback shares sound without an amber warning', async () => {
+it('process loopback shares sound by default without an amber warning', async () => {
+  vi.spyOn(api, 'processLoopbackSupported').mockResolvedValue(true);
+  const start = vi.spyOn(api, 'startScreenShare').mockResolvedValue();
+  mount(() => <SharePickerModal open onClose={() => {}} />);
+  await flush();
+  expect(shareAudioToggle().getAttribute('aria-checked')).toBe('true');
+  expect(localStorage.getItem('finchspeak.shareAudio')).toBeNull();
+  expect(document.body.textContent).toContain('Everything your computer plays goes out with the picture, except voices from FinchSpeak.');
+  expect(document.querySelector('.auth-banner.amber')).toBeNull();
+  fpsButton('60').click();
+  button('Start sharing').click();
+  await flush();
+  expect(start).toHaveBeenCalledWith('monitor', 1, true, 'system', 60);
+});
+
+it('stores an explicit choice to turn off the default audio', async () => {
   vi.spyOn(api, 'processLoopbackSupported').mockResolvedValue(true);
   mount(() => <SharePickerModal open onClose={() => {}} />);
   await flush();
-  (document.querySelector('[aria-label="Share system sound too"]') as HTMLElement).click();
+  shareAudioToggle().click();
+  expect(shareAudioToggle().getAttribute('aria-checked')).toBe('false');
+  expect(localStorage.getItem('finchspeak.shareAudio')).toBe('0');
+});
+
+it.each([
+  { supported: true, stored: '0', checked: 'false' },
+  { supported: false, stored: '1', checked: 'true' },
+])('reads stored audio choice $stored when reopening (loopback support: $supported)', async ({ supported, stored, checked }) => {
+  vi.spyOn(api, 'processLoopbackSupported').mockResolvedValue(supported);
+  const [open, setOpen] = createSignal(true);
+  mount(() => <SharePickerModal open={open()} onClose={() => setOpen(false)} />);
   await flush();
-  expect(document.body.textContent).toContain('Everything your computer plays goes out with the picture, except voices from FinchSpeak.');
-  expect(document.querySelector('.auth-banner.amber')).toBeNull();
+  button('Cancel').click();
+  localStorage.setItem('finchspeak.shareAudio', stored);
+  setOpen(true);
+  await flush();
+  expect(shareAudioToggle().getAttribute('aria-checked')).toBe(checked);
+});
+
+it('ignores a loopback check from an earlier opening', async () => {
+  let resolveFirstCheck!: (supported: boolean) => void;
+  const firstCheck = new Promise<boolean>((resolve) => { resolveFirstCheck = resolve; });
+  vi.spyOn(api, 'processLoopbackSupported').mockReturnValueOnce(firstCheck).mockResolvedValue(false);
+  const [open, setOpen] = createSignal(true);
+  mount(() => <SharePickerModal open={open()} onClose={() => setOpen(false)} />);
+  await flush();
+  expect(button('Start sharing').disabled).toBe(true);
+  button('Cancel').click();
+  setOpen(true);
+  await flush();
+  expect(button('Start sharing').disabled).toBe(false);
+  resolveFirstCheck(true);
+  await flush();
+  expect(shareAudioToggle().getAttribute('aria-checked')).toBe('false');
+  expect(document.body.textContent).toContain('Everything your speakers play goes out with the picture.');
 });
 
 it('warns about runtime device fallback while the share is active', () => {
@@ -294,8 +369,6 @@ it('offers window sound only for a supported window and sends the selected scope
   vi.spyOn(api, 'processLoopbackSupported').mockResolvedValue(true);
   const start = vi.spyOn(api, 'startScreenShare').mockResolvedValue();
   mount(() => <SharePickerModal open onClose={() => {}} />);
-  await flush();
-  (document.querySelector('[aria-label="Share system sound too"]') as HTMLElement).click();
   await flush();
   expect(button('Only this window')).toBeUndefined();
   button('Windows').click();
@@ -316,7 +389,7 @@ it('does not offer window scope on unsupported Windows', async () => {
   vi.spyOn(api, 'processLoopbackSupported').mockResolvedValue(false);
   mount(() => <SharePickerModal open onClose={() => {}} />);
   await flush();
-  (document.querySelector('[aria-label="Share system sound too"]') as HTMLElement).click();
+  shareAudioToggle().click();
   button('Windows').click();
   await flush();
   (document.querySelector('[role="option"]') as HTMLElement).click();

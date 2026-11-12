@@ -38,16 +38,22 @@ button:disabled { cursor:not-allowed; }
 ::selection { background:var(--yellow); color:var(--bg-deep); }
 .titlebar { height:38px; padding-left:18px; color:var(--text-3); font-size:11px; font-weight:500; letter-spacing:.02em; }
 .titlebar .wc button { height:38px; }
-.titlebar > img { width:17px; height:17px; }
+.titlebar > img { width:17px; height:auto; }
 .side { width:264px; border-right:0; }
 .brand { height:76px; padding:0 22px; gap:11px; border-bottom:0; font-size:18px; font-weight:650; letter-spacing:-.045em; }
-.brand img { width:29px; height:29px; }
+.brand img { width:29px; height:auto; }
 .nav { padding:0 12px 20px; gap:4px; overflow-y:auto; }
 .cat { margin-top:19px; margin-bottom:5px; color:var(--text-3); font-size:11px; font-weight:600; letter-spacing:.035em; }
 .ch { min-height:38px; height:auto; padding:8px 10px; color:var(--text-2); font-size:13px; font-weight:500; }
 .ch .ic { opacity:.65; }
 .ch.on { background:var(--bg-hover); box-shadow:none; color:var(--text); }
 .ch.on .ic { color:var(--yellow); opacity:1; }
+/* Bullfinch: the logo gradient on the primary button and the selected channel. */
+[data-theme="bullfinch"] .btn.primary:not(:disabled) { background:linear-gradient(135deg, #ffb74e, #ff741c); color:#111011; }
+[data-theme="bullfinch"] .btn.primary:hover:not(:disabled) { background:linear-gradient(135deg, #ffc76a, #ff8a3d); }
+[data-theme="bullfinch"] .btn.primary:active:not(:disabled) { background:linear-gradient(135deg, #e89a3e, #e0601a); }
+[data-theme="bullfinch"] .ch.on { background:linear-gradient(135deg, #ffb74e, #ff741c); color:#111011; }
+[data-theme="bullfinch"] .ch.on .ic { color:#111011; opacity:1; }
 .ch.unread { font-weight:650; }
 .vp { min-height:32px; height:auto; font-size:12px; font-weight:400; }
 .vstrip { background:var(--tint-signal); border:0; margin:0 12px 12px; padding:12px; }
@@ -60,6 +66,21 @@ button:disabled { cursor:not-allowed; }
 .mhead > .ic { width:20px; height:20px; }
 .members { width:232px; padding:22px 12px; background:var(--bg-app); border-left:1px solid var(--line-soft); }
 .members .sec-label { padding:0 10px; margin-bottom:9px; }
+.members .member-group-title { padding:16px 8px 8px; }
+.members .member-group-title.first { padding:0 8px 8px; }
+.voice-connection { color:var(--violet-text); }
+.vp .ic.tr { color:var(--red-text); }
+.vc .badges .server-muted-badge { color:var(--amber); }
+.participant-you { font-family:var(--font-ui); }
+.vc .q i:nth-child(1) { height:5px; }
+.vc .q i:nth-child(2) { height:8px; }
+.vc .q i:nth-child(3) { height:11px; }
+.vc .q i:nth-child(4) { height:14px; }
+.vc .q i { background:var(--line); }
+.vc .q i.lit { background:var(--amber); }
+.vc .q[data-quality="good"] i.lit { background:var(--teal); }
+.viewer-title { font-size:17px; }
+.viewer-description { max-width:300px; }
 .mem { min-height:46px; height:auto; padding:7px 9px; gap:10px; font-size:13px; font-weight:500; }
 .mem.off { opacity:.65; }
 .av { font-weight:550; }
@@ -185,18 +206,14 @@ button:disabled { cursor:not-allowed; }
 .splash { background:var(--bg-app); text-align:center; padding:32px; }
 .splash > img { width:180px; opacity:.85; }
 .splash h2 { font-weight:500; font-size:26px; letter-spacing:-.04em; }
-:is([data-theme="claude"],[data-theme="user"]) :is(.brand,.titlebar) > img { content:url('/custom/assets/brand/finch-mark.svg'); }
-:is([data-theme="claude"],[data-theme="user"]) .auth-mascot { content:url('/custom/assets/illustrations/mascot.svg'); }
-:is([data-theme="claude"],[data-theme="user"]) .splash > img { content:url('/custom/assets/illustrations/mascot.svg'); }
 /* Finch Custom retains the supplied kit's geometry, colour and assets. */
 [data-theme="custom"] body { font-size:12px; }
-[data-theme="custom"] :is(.brand,.titlebar) > img { content:url('/custom/assets/brand/finch-mark.svg'); }
-[data-theme="custom"] .auth-mascot { content:url('/custom/assets/illustrations/mascot.svg'); max-width:360px; }
-[data-theme="custom"] .splash > img { content:url('/custom/assets/illustrations/empty-voice.svg'); width:260px; }
+[data-theme="custom"] .auth-mascot { max-width:360px; }
+[data-theme="custom"] .splash > img { width:260px; }
 [data-theme="custom"] :is(h1,h2,h3,.head) { font-weight:700; letter-spacing:0; }
 [data-theme="custom"] :is(.sec-label,.cat,.field-label,.tag,.tab,.btn,.setnav .si,.modal-title) { text-transform:uppercase; letter-spacing:.07em; }
 [data-theme="custom"] .brand { height:72px; border-bottom:1px solid var(--line); font-size:19px; letter-spacing:-.045em; }
-[data-theme="custom"] .brand img { width:38px; height:38px; }
+[data-theme="custom"] .brand img { width:38px; height:auto; }
 [data-theme="custom"] .nav { padding:12px 8px; }
 [data-theme="custom"] .cat { font-size:10px; margin-top:12px; }
 [data-theme="custom"] .cat::after { content:''; height:1px; width:18px; background:var(--line); margin-left:6px; }
@@ -206,20 +223,20 @@ button:disabled { cursor:not-allowed; }
 [data-theme="custom"] .mhead h3 { text-transform:uppercase; font-size:14px!important; letter-spacing:.045em; }
 [data-theme="custom"] .members { background:var(--bg-panel); border-color:var(--line); }
 [data-theme="custom"] .upanel { background:var(--bg-deep); border-color:var(--line); }
-[data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker) {
+[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox) {
   --cut:8px; --plate:var(--bg-card); --edge:var(--line); --edge-width:1px;
   isolation:isolate; background:transparent; border:0; border-radius:0; box-shadow:none;
 }
-[data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.emoji-picker) { position:relative; }
+[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.emoji-picker) { position:relative; }
 [data-theme="custom"] :is(.search-results,.mention-menu) { position:absolute; }
 /* Clip background layers only. Menus, focus rings and status badges remain outside the panel. */
-[data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker)::before,
-[data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker)::after {
+[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox)::before,
+[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox)::after {
   content:''; position:absolute; pointer-events:none; z-index:-1;
   clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,var(--cut) 100%,0 calc(100% - var(--cut)));
 }
-[data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker)::before { inset:0; background:var(--edge); }
-[data-theme="custom"] :is(.btn,.ctl,.input,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker)::after { inset:var(--edge-width); background:var(--plate); --cut:7px; }
+[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox)::before { inset:0; background:var(--edge); }
+[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox)::after { inset:var(--edge-width); background:var(--plate); --cut:7px; }
 [data-theme="custom"] :is(.btn,.ctl):hover:not(:disabled) { --plate:var(--bg-hover); --edge:var(--text-3); }
 [data-theme="custom"] .btn { height:36px; padding:0 16px; font-size:11px; }
 [data-theme="custom"] .btn.sm { height:28px; padding:0 10px; font-size:10px; }
@@ -319,17 +336,13 @@ button:disabled { cursor:not-allowed; }
 .room-grid { min-height:calc(var(--rows,1) * 220px); flex-shrink:0; }
 .room-grid .vc { min-height:210px; padding:18px 14px; gap:10px; }
 .vc > .av,.vc > .nm,.vc > .tag,.vc > .vol { flex-shrink:0; }
-.vc .mod-actions { position:absolute; top:6px; left:6px; right:6px; justify-content:center; z-index:3; background:var(--bg-card); padding:4px; border-radius:var(--r-sm); }
-.vc .mod-actions:empty { display:none; }
 .room-grid.compact { min-height:96px; }
 .room-grid.compact .vc { min-height:80px; }
 [data-theme="custom"] .room-grid .vc { padding:18px 14px; gap:10px; }
-:is([data-theme="claude"],[data-theme="user"]) .empty-chat > img { content:url('/custom/assets/illustrations/mascot.svg'); }
-[data-theme="custom"] .empty-chat > img { content:url('/custom/assets/illustrations/empty-chat.svg'); }
 
 [data-theme="custom"] .modal[data-tone="danger"] { --edge:var(--red); --edge-width:2px; }
 
-:is([data-theme="claude"],[data-theme="user"]) .cat { text-transform:none; letter-spacing:.01em; font-size:12px; }
+:is([data-theme="claude"],[data-theme="user"],[data-theme="bullfinch"]) .cat { text-transform:none; letter-spacing:.01em; font-size:12px; }
 .cat-toggle { white-space:nowrap; }
 @media (max-width:940px) { .cat { font-size:10px; padding-left:4px; padding-right:4px; } }
 

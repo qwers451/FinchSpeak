@@ -111,6 +111,7 @@ export interface WindowSource {
   app_name: string;
   width: number;
   height: number;
+  is_minimized?: boolean;
 }
 
 export interface ScreenSources {
@@ -199,12 +200,16 @@ export interface AudioDevice {
 export type UserStatus = 'online' | 'idle' | 'donotdisturb' | 'offline';
 export interface SessionEvents {
   authenticated: {
+    session_generation?: number;
     session_peer_id: number;
     user_id: string;
     channels: { id: string; short_id: number }[];
     initial_state: {
+      features?: string[];
+      activities?: { user_id: string; game: string }[];
       channels: Channel[];
       online_users: User[];
+      offline_users?: User[];
       voice_states: (Omit<VoiceParticipant, 'is_muted' | 'is_deafened' | 'is_sharing'> & {
         muted: boolean; deafened: boolean; sharing_screen: boolean;
       })[];
@@ -212,8 +217,10 @@ export interface SessionEvents {
     };
   };
   'new-message': IncomingMessage;
+  'activity-changed': { user_id: string; game: string | null };
   'message-rejected': { client_msg_id: string; code: number; message: string };
   'user-speaking': { peer_id: number; is_speaking: boolean };
+  'voice-levels': { levels: [peerId: number, level: number][] };
   'local-speaking': boolean;
   'ping-rtt': { rtt_ms: number };
   'tofu-required': { hostname: string; fingerprint: string };
@@ -278,6 +285,7 @@ export interface AudioDevices {
 }
 
 export interface SessionSnapshot {
+  session_generation?: number;
   connected: boolean;
   user_id: string;
   session_peer_id: number;
@@ -286,4 +294,50 @@ export interface SessionSnapshot {
   deafened: boolean;
   pending_tofu: { hostname: string; fingerprint: string } | null;
   initial_state: SessionEvents['authenticated']['initial_state'] | null;
+}
+
+// Room music (mirrors finch-protocol MusicTrack, MusicRoomState and MusicCommand).
+export interface MusicTrack {
+  id: string;
+  uploader_id: string;
+  title: string;
+  artist: string | null;
+  duration_ms: number;
+  size_bytes: number;
+  format: string;
+  temporary: boolean;
+  created_at: number;
+}
+
+export interface MusicQueueEntry {
+  entry_id: string;
+  track: MusicTrack;
+  added_by: string;
+}
+
+export interface MusicPlaying {
+  entry: MusicQueueEntry;
+  position_ms: number;
+  at_server_ms: number;
+  paused: boolean;
+}
+
+export interface MusicRoomState {
+  queue: MusicQueueEntry[];
+  playing: MusicPlaying | null;
+}
+
+export type MusicCommand =
+  | { kind: 'enqueue'; track_id: string }
+  | { kind: 'pause' }
+  | { kind: 'resume' }
+  | { kind: 'skip' }
+  | { kind: 'seek'; position_ms: number }
+  | { kind: 'remove'; entry_id: string }
+  | { kind: 'clear' };
+
+/** Events for the room music player. Kept apart from `SessionEvents`, which every session handler must cover. */
+export interface MusicEvents {
+  'music-state': { channel_id: string; state: MusicRoomState; server_ms: number };
+  'music-error': { message: string };
 }

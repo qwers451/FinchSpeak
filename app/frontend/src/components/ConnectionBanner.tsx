@@ -11,7 +11,7 @@ import { describeError } from '../i18n/errors';
 export function Splash() {
   return (
     <div class="splash" role="status">
-      <img src="/custom/assets/illustrations/mascot.svg" alt="" width="240" />
+      <img src="/custom/assets/brand/finchspeak-tile.svg" alt="" width="240" />
       <span class="spin" />
       <span class="t2">{t('Starting FinchSpeak…')}</span>
     </div>

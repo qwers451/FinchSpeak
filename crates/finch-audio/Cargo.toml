@@ -13,6 +13,7 @@ cpal = "0.15"
 
 # Resampling
 rubato = "0.16"
+symphonia = { version = "=0.5.5", default-features = false, features = ["mp3", "flac", "vorbis", "ogg", "wav", "pcm"] }
 
 # Opus codec
 audiopus = "0.3.0-rc.0"

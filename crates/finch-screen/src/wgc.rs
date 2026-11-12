@@ -131,9 +131,18 @@ pub struct WgcCapture {
     control: Option<Control>,
 }
 
+/// The shortest time between two frames the OS delivers for a share at `max_fps`.
+///
+/// Without this limit WGC delivers a frame for every refresh of the monitor (180 per second on a
+/// 180 Hz display), and each one costs a GPU read-back and a copy. `0` counts as 30.
+pub fn min_update_interval(max_fps: u8) -> Duration {
+    let fps = if max_fps == 0 { 30 } else { max_fps };
+    Duration::from_micros(1_000_000 / u64::from(fps))
+}
+
 impl WgcCapture {
-    /// Start capturing. Errors (unsupported Windows, target not found, session refused) are returned, never panicked.
-    pub fn start(target: WgcTarget) -> Result<Self, ScreenCaptureError> {
+    /// Start capturing at most `max_fps` frames per second. Errors (unsupported Windows, target not found, session refused) are returned, never panicked.
+    pub fn start(target: WgcTarget, max_fps: u8) -> Result<Self, ScreenCaptureError> {
         let shared = Arc::new(Shared::new());
 
         let control = match target {
@@ -141,14 +150,14 @@ impl WgcCapture {
                 let handle = find_monitor_handle(id)?;
                 start_with_border_retry(|border| {
                     let monitor = Monitor::from_raw_hmonitor(handle);
-                    FrameHandler::start_free_threaded(settings(monitor, border, shared.clone()))
+                    FrameHandler::start_free_threaded(settings(monitor, border, shared.clone(), max_fps))
                 })?
             }
             WgcTarget::Window(id) => {
                 let handle = find_window_handle(id)?;
                 start_with_border_retry(|border| {
                     let window = Window::from_raw_hwnd(handle);
-                    FrameHandler::start_free_threaded(settings(window, border, shared.clone()))
+                    FrameHandler::start_free_threaded(settings(window, border, shared.clone(), max_fps))
                 })?
             }
         };
@@ -221,6 +230,7 @@ fn settings<T>(
     item: T,
     border: DrawBorderSettings,
     shared: Arc<Shared>,
+    max_fps: u8,
 ) -> Settings<Arc<Shared>, T>
 where
     T: windows_capture::settings::TryIntoCaptureItemWithType,
@@ -230,7 +240,7 @@ where
         CursorCaptureSettings::WithCursor,
         border,
         SecondaryWindowSettings::Default,
-        MinimumUpdateIntervalSettings::Default,
+        MinimumUpdateIntervalSettings::Custom(min_update_interval(max_fps)),
         DirtyRegionSettings::Default,
         ColorFormat::Bgra8,
         shared,
@@ -300,13 +310,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn min_update_interval_follows_the_share_fps() {
+        assert_eq!(min_update_interval(30), Duration::from_micros(33_333));
+        assert_eq!(min_update_interval(60), Duration::from_micros(16_666));
+        assert_eq!(min_update_interval(0), Duration::from_micros(33_333));
+    }
+
+    #[test]
     fn start_unknown_monitor_is_error() {
-        assert!(WgcCapture::start(WgcTarget::Monitor(u32::MAX)).is_err());
+        assert!(WgcCapture::start(WgcTarget::Monitor(u32::MAX), 60).is_err());
     }
 
     #[test]
     fn start_unknown_window_is_error() {
-        assert!(WgcCapture::start(WgcTarget::Window(u32::MAX)).is_err());
+        assert!(WgcCapture::start(WgcTarget::Window(u32::MAX), 60).is_err());
     }
 
     #[test]
@@ -318,7 +335,7 @@ mod tests {
             return;
         };
         // Headless machines cannot start a session; that is not a failure here.
-        let Ok(capture) = WgcCapture::start(WgcTarget::Monitor(primary.id)) else {
+        let Ok(capture) = WgcCapture::start(WgcTarget::Monitor(primary.id), 60) else {
             return;
         };
         if let Some(frame) = capture.take_frame(Duration::from_millis(500)) {

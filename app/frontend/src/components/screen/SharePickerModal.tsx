@@ -11,6 +11,7 @@ export const monitorName = (name: string) => name.replace(/^\\\\\.\\/, '');
 type Picked = { kind: 'monitor' | 'window'; id: number; label: string };
 
 const FPS_KEY = 'finchspeak.shareFps';
+const SHARE_AUDIO_KEY = 'finchspeak.shareAudio';
 
 /** The frame rate the sharer chose last time; 30 unless 60 was saved. */
 function savedFps(): 30 | 60 {
@@ -25,7 +26,18 @@ function savedFps(): 30 | 60 {
 const PREVIEW_REFRESH_MS = 1000;
 
 /** A live picture of a screen or window, refreshed about once a second while it is on screen. */
-function SourceThumb(props: { kind: 'monitor' | 'window'; id: number; index: number }) {
+function SourceThumb(props: { kind: 'monitor' | 'window'; id: number; index: number; minimized?: boolean }) {
+  // A minimized window has no picture to capture: it shows a placeholder and is not polled.
+  if (props.minimized) {
+    return (
+      <div class="thumb source-thumb">
+        <span class="source-placeholder minimized-placeholder">
+          <Icon name="box" size="xl" class="t3" />
+          <span class="t2 fs12">{t('Minimized')}</span>
+        </span>
+      </div>
+    );
+  }
   const [url, setUrl] = createSignal<string | null>(null);
   const [failed, setFailed] = createSignal(false);
   let alive = true;
@@ -56,7 +68,7 @@ function SourceThumb(props: { kind: 'monitor' | 'window'; id: number; index: num
 
   return (
     <div class="thumb source-thumb">
-      <Show when={url()} fallback={<span class={failed() ? 'thumb-fail' : 'skel pulse'} style={{ position: 'absolute', inset: '0', 'border-radius': '0' }}>{failed() ? t('No preview') : ''}</span>}>
+      <Show when={url()} fallback={<span class={`source-placeholder ${failed() ? 'thumb-fail' : 'skel pulse'}`}>{failed() ? t('No preview') : ''}</span>}>
         <img src={url()!} alt="" draggable={false} />
       </Show>
     </div>
@@ -67,9 +79,10 @@ function SourceThumb(props: { kind: 'monitor' | 'window'; id: number; index: num
 export function SharePickerModal(props: { open: boolean; onClose: () => void }) {
   const [tab, setTab] = createSignal<'monitor' | 'window'>('monitor');
   const [picked, setPicked] = createSignal<Picked | null>(null);
-  const [withAudio, setWithAudio] = createSignal(false);
-  const [loopbackSupported, setLoopbackSupported] = createSignal(false);
-  const excludesSelf = () => loopbackSupported() && screenAudioSource() !== 'device';
+  const [audioChoice, setAudioChoice] = createSignal<boolean>();
+  const [loopbackSupported, setLoopbackSupported] = createSignal<boolean>();
+  const withAudio = () => audioChoice() ?? loopbackSupported();
+  const excludesSelf = () => loopbackSupported() === true && screenAudioSource() !== 'device';
   const [audioScope, setAudioScope] = createSignal<'system' | 'window'>('system');
   const [starting, setStarting] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
@@ -95,22 +108,34 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
     }
   };
   createEffect(on(() => props.open, (open) => {
-    if (open) {
-      setError(null);
-      setPicked(null);
-      setAudioScope('system');
-      setLoopbackSupported(false);
-      void api.processLoopbackSupported().then(setLoopbackSupported).catch(() => setLoopbackSupported(false));
-      void load();
-    }
+    if (!open) return;
+    let current = true;
+    onCleanup(() => { current = false; });
+    setError(null);
+    setPicked(null);
+    setAudioScope('system');
+    let savedAudio: string | null = null;
+    try { savedAudio = localStorage.getItem(SHARE_AUDIO_KEY); } catch { /* storage unavailable */ }
+    setAudioChoice(savedAudio === '1' || savedAudio === '0' ? savedAudio === '1' : undefined);
+    setLoopbackSupported(undefined);
+    void api.processLoopbackSupported().catch(() => false).then((supported) => {
+      if (current) setLoopbackSupported(supported);
+    });
+    void load();
   }));
+
+  const changeAudio = (enabled: boolean) => {
+    setAudioChoice(enabled);
+    try { localStorage.setItem(SHARE_AUDIO_KEY, enabled ? '1' : '0'); } catch { /* storage unavailable */ }
+  };
 
   const start = async () => {
     const choice = picked();
-    if (!choice || starting()) return;
+    const audio = withAudio();
+    if (!choice || audio === undefined || starting()) return;
     setStarting(true);
     setError(null);
-    const failure = await startSharing(choice.kind, choice.id, withAudio(), choice.label, choice.kind === 'window' && excludesSelf() ? audioScope() : 'system', fps());
+    const failure = await startSharing(choice.kind, choice.id, audio, choice.label, choice.kind === 'window' && excludesSelf() ? audioScope() : 'system', fps());
     setStarting(false);
     if (failure) setError(failure);
     else props.onClose();
@@ -154,7 +179,7 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
                   <SourceThumb kind="monitor" id={monitor.id} index={index()} />
                   <div class="tmeta">
                     <Icon name="monitor" size="sm" class="t3" />
-                    <div class="col grow" style={{ 'min-width': 0 }}><strong class="fs13 trunc">{monitorName(monitor.name)}</strong><span class="t3 fs12">{monitor.width} × {monitor.height}</span></div>
+                    <div class="col grow"><strong class="fs13 trunc">{monitorName(monitor.name)}</strong><span class="t3 fs12">{monitor.width} × {monitor.height}</span></div>
                     <Show when={monitor.is_primary}><span class="tag admin">{t('Main')}</span></Show>
                   </div>
                 </div>
@@ -166,10 +191,10 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
               {(window, index) => (
                 <div role="option" tabindex="0" aria-selected={isPicked('window', window.id)} class={`source${isPicked('window', window.id) ? ' sel' : ''}`}
                   onClick={() => pickWindow(window)} onKeyDown={(event) => (event.key === 'Enter' || event.key === ' ') && (event.preventDefault(), pickWindow(window))}>
-                  <SourceThumb kind="window" id={window.id} index={index()} />
+                  <SourceThumb kind="window" id={window.id} index={index()} minimized={window.is_minimized} />
                   <div class="tmeta">
                     <Icon name="box" size="sm" class="t3" />
-                    <div class="col grow" style={{ 'min-width': 0 }}><strong class="fs13 trunc" title={window.title}>{window.title}</strong><span class="t3 fs12 trunc">{window.app_name}</span></div>
+                    <div class="col grow"><strong class="fs13 trunc" title={window.title}>{window.title}</strong><span class="t3 fs12 trunc">{window.app_name}</span></div>
                   </div>
                 </div>
               )}
@@ -179,12 +204,15 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
             <div class="col center g8 picker-empty">
               <Icon name="monitor" size="xl" class="t3" />
               <strong>{tab() === 'monitor' ? t('No screens found') : t('No windows to share')}</strong>
-              <span class="t2 fs13">{tab() === 'monitor' ? t('Check that a display is connected, then refresh.') : t('Minimised windows are not listed. Open the window you want and refresh.')}</span>
+              <span class="t2 fs13">{tab() === 'monitor' ? t('Check that a display is connected, then refresh.') : t('Open the window you want and refresh.')}</span>
             </div>
           </Show>
-          <Show when={loading() && monitors().length + windows().length === 0}><span class="skel pulse" style={{ height: '160px' }} /></Show>
+          <Show when={loading() && monitors().length + windows().length === 0}><span class="skel pulse picker-loading" /></Show>
         </div>
 
+        <Show when={tab() === 'window' && windows().some((window) => window.is_minimized)}>
+          <span class="t3 fs12">{t('A minimized window shows up for viewers once you open it.')}</span>
+        </Show>
         <div class="setrow">
           <strong class="fs13">{t('Frame rate')}</strong>
           <div class="tabs" role="group" aria-label={t('Frame rate')}>
@@ -200,7 +228,7 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
             <strong class="fs13">{t('Share system sound too')}</strong>
             <span class="t3 fs12">{withAudio() && picked()?.kind === 'window' && excludesSelf() && audioScope() === 'window' ? t('Only this window') : excludesSelf() ? t('Everything your computer plays goes out with the picture, except voices from FinchSpeak.') : t('Everything your speakers play goes out with the picture.')}</span>
           </div>
-          <Toggle label={t('Share system sound too')} checked={withAudio()} onChange={setWithAudio} />
+          <Toggle label={t('Share system sound too')} checked={withAudio() ?? false} onChange={changeAudio} />
         </div>
         <Show when={withAudio() && picked()?.kind === 'window' && excludesSelf()}>
           <div class="setrow">
@@ -219,9 +247,9 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
         </Show>
         <span class="t3 fs12">{t('Pictures larger than 4K are scaled down before they are sent.')}</span>
 
-        <div class="row g8" style={{ 'justify-content': 'flex-end' }}>
+        <div class="row g8 dialog-actions-primary">
           <Button variant="secondary" onClick={props.onClose}>{t('Cancel')}</Button>
-          <Button variant="primary" icon="share" loading={starting()} disabled={!picked()} onClick={() => void start()}>{t('Start sharing')}</Button>
+          <Button variant="primary" icon="share" loading={starting()} disabled={!picked() || withAudio() === undefined} onClick={() => void start()}>{t('Start sharing')}</Button>
         </div>
       </div>
     </Modal>

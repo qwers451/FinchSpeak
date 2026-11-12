@@ -19,12 +19,14 @@ import { CertChangedModal, TofuModal } from './components/TofuModal';
 import { ConnectionBanner, Splash } from './components/ConnectionBanner';
 import { Overlays, SessionEndedScreen } from './components/overlays/Overlays';
 import { sessionEnded } from './stores/sessionEnd';
+import { ContextMenuHost } from './ui/ContextMenu';
 import { IconSprite, Titlebar, ToastHost } from './ui';
 import { AdminModal } from './components/admin/AdminModal';
 import { SettingsModal } from './components/settings/SettingsModal';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { startUpdateChecks } from './stores/updateStore';
 import { startAutoIdle } from './stores/idleStore';
+import { startGameActivitySync } from './stores/activitySharing';
 import { t } from './i18n';
 import { describeError } from './i18n/errors';
 
@@ -34,6 +36,7 @@ export function App() {
   const [eventsReady, setEventsReady] = createSignal(false);
 
   onMount(async () => {
+    onCleanup(startGameActivitySync());
     startDesktopSync();
     try {
       const subscriptions = await subscribeSessionEvents();
@@ -88,7 +91,7 @@ export function App() {
             <Sidebar />
             <Show when={activeChannel()} fallback={
               <div class="splash" style={{ background: 'var(--bg-app)' }}>
-                <img src="/custom/assets/illustrations/mascot.svg" alt="" width="260" />
+                <img src="/custom/assets/brand/finchspeak-tile.svg" alt="" width="260" />
                 <h2>{t('Welcome to FinchSpeak')}</h2>
                 <p class="t2">{t('Pick a channel on the left to start chatting or talking.')}</p>
               </div>
@@ -109,6 +112,7 @@ export function App() {
       <AdminModal />
       <SettingsModal />
       <ToastHost />
+      <ContextMenuHost />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 // Generated from the design's icon sprite (24 px grid, 2 px stroke, round caps).
 export const ICONS = {
+  'gamepad': { d: 'M6 8h12a3 3 0 0 1 3 2.5l1 6a2 2 0 0 1-3.4 1.7L16 16H8l-2.6 2.2A2 2 0 0 1 2 16.5l1-6A3 3 0 0 1 6 8zM7 10v4M5 12h4M16 11h.01M19 13h.01' },
   'hash': { d: 'M5 9h14M5 15h14M10 4 8 20M16 4l-2 16' },
   'vol': { d: 'M4 10v4h4l5 4V6L8 10zM16.5 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11' },
   'vol-off': { d: 'M4 10v4h4l5 4V6L8 10zM17 9l5 6M22 9l-5 6' },
@@ -55,6 +56,7 @@ export const ICONS = {
   'at': { d: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM16 8v5a2.5 2.5 0 0 0 5 0v-1a9 9 0 1 0-3.5 7' },
   'min': { d: 'M6 12h12' },
   'box': { d: 'M6 6h12v12H6z' },
+  'music': { d: 'M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z' },
   'feather': { d: 'M20 4c-8 0-14 5-14 12v4M20 4c0 8-5 14-12 14M9 15l7-7' },
 } as const;
 

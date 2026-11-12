@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { AuditEntry, DeviceSession, Role, SearchHit, ServerOverview, UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot } from '../types';
+import type { AuditEntry, DeviceSession, Role, SearchHit, ServerOverview, UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot, MusicCommand, MusicEvents, MusicTrack } from '../types';
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -10,6 +10,9 @@ let browserServerUrl = 'https://127.0.0.1:8443';
 let browserUser: User | null = null;
 
 export const api = {
+  setActivitySharing: async (sessionGeneration: number, peerId: number, enabled: boolean, revision: number): Promise<void> => {
+    if (isTauri()) await invoke('set_activity_sharing', { sessionGeneration, peerId, enabled, revision });
+  },
   // Auth
   login: async (serverUrl: string, username: string, password: string, remember = false): Promise<User> => {
     if (isTauri()) {
@@ -529,7 +532,7 @@ export const api = {
     }
   },
 
-  setTrayState: async (state: 'idle' | 'voice' | 'muted' | 'live', language: 'ru' | 'en' = 'ru'): Promise<void> => {
+  setTrayState: async (state: 'idle' | 'voice' | 'speaking' | 'muted' | 'live', language: 'ru' | 'en' = 'ru'): Promise<void> => {
     if (isTauri()) return invoke('set_tray_state', { state, language });
   },
 
@@ -591,9 +594,36 @@ export const api = {
     }
   },
 
+  // Room music
+  musicLibrary: async (): Promise<MusicTrack[]> => {
+    if (isTauri()) return invoke<MusicTrack[]>('music_library');
+    return [];
+  },
+  /** The file goes up as raw bytes; the server reads its tags and length. `keep` = stays in the library. */
+  musicUpload: async (file: File, keep: boolean): Promise<MusicTrack> => {
+    if (!isTauri()) throw new Error('Music upload needs the desktop app');
+    const bytes = await file.arrayBuffer();
+    return invoke<MusicTrack>('music_upload', bytes, {
+      headers: { 'x-finch-file-name': encodeURIComponent(file.name), 'x-finch-keep': keep ? 'true' : 'false' },
+    });
+  },
+  musicDelete: async (trackId: string): Promise<void> => {
+    if (isTauri()) return invoke('music_delete_track', { trackId });
+  },
+  musicCommand: async (command: MusicCommand): Promise<void> => {
+    if (isTauri()) return invoke('music_command', { command });
+  },
+  musicSetVolume: async (volume: number): Promise<void> => {
+    if (isTauri()) return invoke('music_set_volume', { volume });
+  },
+
   // Event Listeners
   onSessionEvent: async <K extends keyof SessionEvents>(event: K, callback: (payload: SessionEvents[K]) => void): Promise<UnlistenFn> => {
     if (isTauri()) return listen<SessionEvents[K]>(event, ({ payload }) => callback(payload));
+    return () => {};
+  },
+  onMusicEvent: async <K extends keyof MusicEvents>(event: K, callback: (payload: MusicEvents[K]) => void): Promise<UnlistenFn> => {
+    if (isTauri()) return listen<MusicEvents[K]>(event, ({ payload }) => callback(payload));
     return () => {};
   },
   onNewMessage: async (cb: (msg: IncomingMessage) => void): Promise<UnlistenFn> => {

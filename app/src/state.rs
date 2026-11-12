@@ -154,6 +154,7 @@ struct ScreenShareLifecycle {
 
 #[derive(Clone)]
 pub struct AppState {
+    pub game_activity: Arc<Mutex<crate::activity::ActivityRuntime>>,
     /// REST client for the current server (set on login/register).
     pub api: Arc<RwLock<Option<ApiClient>>>,
     pub server_url: Arc<RwLock<Option<String>>>,
@@ -167,6 +168,8 @@ pub struct AppState {
     pub is_muted: Arc<AtomicBool>,
     pub is_deafened: Arc<AtomicBool>,
     pub mixer: Arc<Mutex<AudioMixer>>,
+    pub music: Arc<crate::music::MusicPlayer>,
+    pub ping_rtt_ms: Arc<AtomicU64>,
     pub audio_diagnostics: Arc<crate::audio_diagnostics::AudioDiagnostics>,
     /// Serialize explicit room changes with automatic reconnect membership restoration.
     pub voice_transition: Arc<Mutex<()>>,
@@ -304,6 +307,7 @@ impl AppState {
 
     pub fn new() -> Self {
         Self {
+            game_activity: Arc::new(Mutex::new(crate::activity::ActivityRuntime::default())),
             api: Arc::new(RwLock::new(None)),
             server_url: Arc::new(RwLock::new(None)),
             server_quic_addr: Arc::new(RwLock::new(None)),
@@ -333,6 +337,8 @@ impl AppState {
             video_channel: Arc::new(RwLock::new(None)),
             audio_engine: Arc::new(Mutex::new(crate::audio_engine::AudioEngine::new())),
             audio_devices: Arc::new(std::sync::RwLock::new(AudioDeviceSelection::default())),
+            music: Arc::new(crate::music::MusicPlayer::default()),
+            ping_rtt_ms: Arc::new(AtomicU64::new(0)),
             voice_settings: Arc::new(VoiceSettings::default()),
             pending_update: Arc::new(tokio::sync::Mutex::new(None)),
             quitting: Arc::new(std::sync::atomic::AtomicBool::new(false)),

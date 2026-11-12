@@ -1,8 +1,10 @@
-import { createMemo, createSignal, For, Show } from 'solid-js';
+import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { endedShare, watching } from '../stores/screenStore';
 import { localPeerId } from '../stores/sessionStore';
 import { activeVoiceChannel, pingRtt, speakingPeers, voiceParticipants } from '../stores/voiceStore';
-import { Avatar, Icon } from '../ui';
+import { Avatar, Icon, Modal } from '../ui';
+import { MusicPanel, formatClock } from './music/MusicPanel';
+import { musicAvailable, musicPanelOpen, musicPosition, musicState, setMusicPanelOpen } from '../stores/musicStore';
 import { SharePickerModal } from './screen/SharePickerModal';
 import { SharerPill } from './screen/SharerPill';
 import { EndedPanel, ViewerPanel } from './screen/ViewerPanel';
@@ -13,6 +15,8 @@ import { VoiceSettingsModal } from './voice/VoiceSettingsModal';
 import { SpatialStage } from './voice/SpatialStage';
 import { spatialEnabled } from '../stores/spatialStore';
 import { arrange, avatarSizeFor, gridColumns, gridRows } from './voice/voiceLayout';
+import { participantContextMenu, participantMenuKey } from './voice/participantMenu';
+import { tileOrder } from '../stores/tileOrderStore';
 import { t } from '../i18n';
 
 /** What the round-trip time to the server says about the link. */
@@ -26,18 +30,38 @@ function pingLabel(ms: number | null): { text: string; color: string } | null {
 export function VoicePanel() {
   const [picker, setPicker] = createSignal(false);
   const [settings, setSettings] = createSignal(false);
-  const arranged = createMemo(() => arrange(voiceParticipants(), localPeerId(), speakingPeers()));
+  const arranged = createMemo(() => arrange(voiceParticipants(), localPeerId(), speakingPeers(), tileOrder()));
   const tiles = () => arranged().grid.length;
   const ping = () => pingLabel(pingRtt());
   const showViewer = () => !!watching() || !!endedShare();
+  // Below 940 px the music panel is a dialog; wider, it is a 340 px column beside the room.
+  const [wide, setWide] = createSignal(window.innerWidth >= 940);
+  onMount(() => {
+    const onResize = () => setWide(window.innerWidth >= 940);
+    window.addEventListener('resize', onResize);
+    onCleanup(() => window.removeEventListener('resize', onResize));
+  });
+  const musicOpen = () => musicAvailable() && musicPanelOpen();
+  const sidePanel = () => musicOpen() && wide();
+  const closeMusic = () => setMusicPanelOpen(false);
 
   return (
-    <main class="main voice-room">
+    <main class={`main voice-room${sidePanel() ? ' music-open' : ''}`}>
+      <div class="room-column">
       <div class="mhead">
         <Icon name="vol" size="lg" class="t3" />
         <h3 style={{ 'font-size': '18px' }}>{activeVoiceChannel()?.name ?? t('Voice room')}</h3>
         <span class="tag violet">{t('{count} in room', { count: voiceParticipants().length })}</span>
         <span class="grow" />
+        <Show when={musicAvailable() && musicState()?.playing}>
+          {(now) => (
+            <button type="button" class="music-now-chip" title={t('Music')} onClick={() => setMusicPanelOpen(true)}>
+              <Icon name="music" size="sm" />
+              <span class="trunc">{now().entry.track.title}</span>
+              <span class="t3 fs12 tabular">{formatClock(musicPosition())}</span>
+            </button>
+          )}
+        </Show>
         <Show when={ping()}>
           {(p) => <span class="pill" style={{ 'border-color': p().color, color: p().color }}><Icon name="bars" size="sm" />{p().text}</span>}
         </Show>
@@ -77,8 +101,8 @@ export function VoicePanel() {
             <div class="roster-list">
               <For each={arranged().roster}>
                 {(participant) => (
-                  <div class="mem">
-                    <Avatar name={participant.username} id={participant.user_id} size={24} speaking={speakingPeers().has(participant.peer_id)} />
+                  <div class="mem" tabindex="0" onContextMenu={(event) => participantContextMenu(event, participant.user_id, participant)} onKeyDown={(event) => participantMenuKey(event, participant.user_id, participant)}>
+                    <Avatar name={participant.username} id={participant.user_id} size={24} speaking={speakingPeers().has(participant.peer_id)} levelPeerId={participant.peer_id} />
                     <span class="grow trunc">{participant.username}</span>
                     <Show when={participant.is_muted}><Icon name="mic-off" size="sm" class="tr" /></Show>
                   </div>
@@ -93,6 +117,13 @@ export function VoicePanel() {
       <Dock onShare={() => setPicker(true)} onSettings={() => setSettings(true)} />
       <SharePickerModal open={picker()} onClose={() => setPicker(false)} />
       <VoiceSettingsModal open={settings()} onClose={() => setSettings(false)} />
+      </div>
+      <Show when={sidePanel()}><MusicPanel onClose={closeMusic} /></Show>
+      <Show when={musicOpen() && !wide()}>
+        <Modal open onClose={closeMusic} title={t('Music')} width="340px">
+          <MusicPanel modal onClose={closeMusic} />
+        </Modal>
+      </Show>
     </main>
   );
 }

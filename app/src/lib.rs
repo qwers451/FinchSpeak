@@ -10,7 +10,10 @@ mod tray;
 pub mod hotkeys;
 pub mod connection;
 pub mod state;
+pub mod activity;
 pub mod credentials;
+pub mod music;
+mod music_clock;
 
 use state::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -232,6 +235,7 @@ pub fn run() {
             commands::chat::remove_join_sound,
             commands::chat::download_join_sound,
             commands::chat::set_status,
+            activity::set_activity_sharing,
             commands::chat::search_messages,
             commands::admin::audit_log,
             commands::admin::server_overview,
@@ -269,6 +273,11 @@ pub fn run() {
             commands::voice::set_speaker_pan,
             commands::voice::get_voice_settings,
             commands::voice::set_voice_settings,
+            commands::music::music_library,
+            commands::music::music_upload,
+            commands::music::music_delete_track,
+            commands::music::music_command,
+            commands::music::music_set_volume,
             commands::voice::set_hotkey,
             // Administration
             commands::admin::create_invite,

@@ -14,7 +14,7 @@ use finch_client_core::screen::ScreenViewer;
 use finch_protocol::media::{MediaHeader, MediaType, MEDIA_HEADER_SIZE};
 use finch_protocol::messages::{ClientMessage, ServerMessage};
 use quinn::Connection;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
@@ -33,6 +33,7 @@ const QUIT_CLOSE_FLUSH: Duration = Duration::from_millis(250);
 /// QUIC session, so the server drops us at once instead of after its 15 s idle timeout. Best effort
 /// and bounded by `QUIT_BOUND`, whatever the network or a stuck voice transition does.
 pub async fn shutdown_session(state: &AppState) {
+    state.game_activity.lock().await.disconnect();
     let routine = async {
         // Stop any reconnect first: the close below must not bring the session back. Lock-free on
         // purpose, so a stuck voice transition cannot hold this up.
@@ -56,7 +57,9 @@ pub async fn shutdown_session(state: &AppState) {
 }
 
 async fn supersede_session(state: &AppState) -> u64 {
+    state.game_activity.lock().await.disconnect();
     let _transition = state.voice_transition.lock().await;
+    state.music.set_room(None);
     let generation = state.session_generation.fetch_add(1, Ordering::SeqCst) + 1;
     *state.last_connect.write().await = None;
     if let Some(connection) = state.quic_connection.write().await.take() {
@@ -144,6 +147,13 @@ pub async fn refresh_token_once(state: &AppState, generation: u64) -> Result<(),
 
 /// Make `session` the active one in the app state and tell the UI.
 async fn activate_session(session: &Session, state: &AppState, app_handle: &tauri::AppHandle) {
+    let generation = state.session_generation.load(Ordering::SeqCst);
+    state.game_activity.lock().await.connect(
+        generation, session.session_peer_id, session.user_id, &session.initial_state, session.control_tx.clone(),
+    );
+    if session.initial_state.features.iter().any(|feature| feature == "activity") {
+        crate::activity::spawn_polling(state.clone(), generation, session.session_peer_id);
+    }
     // Peer ids and packet sequences belong to this session, not the previous server.
     *state.mixer.lock().await = finch_audio::AudioMixer::new();
     state
@@ -154,6 +164,7 @@ async fn activate_session(session: &Session, state: &AppState, app_handle: &taur
     let _ = app_handle.emit(
         "authenticated",
         serde_json::json!({
+            "session_generation": generation,
             "session_peer_id": session.session_peer_id,
             "user_id": session.user_id,
             "channels": session.channels,
@@ -166,6 +177,7 @@ async fn activate_session(session: &Session, state: &AppState, app_handle: &taur
 async fn stop_share_on_connection_loss(state: &AppState, generation: u64) -> bool {
     let _transition = state.voice_transition.lock().await;
     if state.session_generation.load(Ordering::SeqCst) != generation { return false; }
+    state.music.suspend();
     state.stop_screen_share();
     true
 }
@@ -182,6 +194,7 @@ async fn run_session(
             return;
         };
         if !stop_share_on_connection_loss(&state, generation).await { return; }
+        state.game_activity.lock().await.disconnect();
         *state.mixer.lock().await = finch_audio::AudioMixer::new();
         let _ = app_handle.emit("connection-lost", reason);
         match reconnect(&state, &app_handle, generation).await {
@@ -208,6 +221,22 @@ async fn forward_events(
                         sharer.request_keyframe();
                     }
                 }
+            }
+            SessionEvent::Control(ServerMessage::MusicState { channel_id, state: room_state, server_ms }) => {
+                let _transition = state.voice_transition.lock().await;
+                if state.session_generation.load(Ordering::SeqCst) != generation { return None; }
+                if let Some(api) = state.api.read().await.clone() {
+                    if let Ok(cache) = app_handle.path().app_cache_dir() {
+                        let app = app_handle.clone();
+                        let source = state.clone();
+                        state.music.receive(channel_id, room_state.clone(), server_ms, state.ping_rtt_ms.load(Ordering::Relaxed), api, cache.join("music"), std::sync::Arc::new(move |message| {
+                            if source.session_generation.load(Ordering::SeqCst) == generation {
+                                let _ = app.emit("music-error", serde_json::json!({ "message": message }));
+                            }
+                        }));
+                    }
+                }
+                emit_control(ServerMessage::MusicState { channel_id, state: room_state, server_ms }, app_handle);
             }
             SessionEvent::Control(msg) => handle_control(state, msg, |msg| emit_control(msg, app_handle)).await,
             SessionEvent::Datagram(bytes) => route_datagram(bytes, state, app_handle).await,
@@ -284,6 +313,7 @@ async fn restore_voice_membership(state: &AppState, session: &Session, generatio
         session.channels.iter().find(|channel| channel.short_id == short_id).map(|channel| channel.id));
     let Some(channel_id) = channel else { return false; };
     if session.control_tx.send(ClientMessage::JoinVoice { channel_id }).await.is_err() { return false; }
+    state.music.set_room(Some(channel_id));
     let _ = session.control_tx.send(ClientMessage::UpdateVoiceState {
         muted: state.is_muted.load(Ordering::SeqCst),
         deafened: state.is_deafened.load(Ordering::SeqCst),
@@ -293,6 +323,12 @@ async fn restore_voice_membership(state: &AppState, session: &Session, generatio
 
 fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
     match msg {
+        ServerMessage::ActivityChanged { user_id, game } => {
+            let _ = app_handle.emit("activity-changed", serde_json::json!({ "user_id": user_id, "game": game }));
+        }
+        ServerMessage::MusicState { channel_id, state, server_ms } => {
+            let _ = app_handle.emit("music-state", serde_json::json!({ "channel_id": channel_id, "state": state, "server_ms": server_ms }));
+        }
         ServerMessage::NewMessage {
             message_id,
             channel_id,
@@ -546,7 +582,14 @@ async fn route_datagram(bytes: Bytes, state: &AppState, app_handle: &tauri::AppH
 
 /// Bookkeeping for a control message (mixer and watched share), then the event goes to the UI.
 async fn handle_control(state: &AppState, msg: ServerMessage, emit: impl FnOnce(ServerMessage)) {
+    if let ServerMessage::PresenceUpdate { user_id, status, .. } = &msg {
+        state.game_activity.lock().await.set_status(*user_id, *status).await;
+    }
     match &msg {
+        ServerMessage::Pong { timestamp } => {
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |time| time.as_millis() as u64);
+            state.ping_rtt_ms.store(now.saturating_sub(*timestamp), Ordering::Relaxed);
+        }
         ServerMessage::UserLeftVoice { peer_id, .. } | ServerMessage::UserJoinedVoice { peer_id, .. } => {
             state.mixer.lock().await.remove_speaker(*peer_id);
         }

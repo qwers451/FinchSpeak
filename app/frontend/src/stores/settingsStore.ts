@@ -1,5 +1,5 @@
 import { createEffect, createRoot, createSignal } from 'solid-js';
-import { DEFAULT_THEME_COLORS, isLightTheme, parseThemeColors, THEME_VARIABLE_NAMES, themeVariables, type ThemeColors } from './themeColors';
+import { BULLFINCH_COLORS, DEFAULT_THEME_COLORS, isLightTheme, parseThemeColors, THEME_VARIABLE_NAMES, themeVariables, type ThemeColors } from './themeColors';
 
 // Settings that live on this computer only: notifications, looks.
 
@@ -20,17 +20,21 @@ export interface NotificationPrefs {
 }
 
 export interface AppearancePrefs {
-  /** `user` paints the interface with `customColors`. */
-  theme: 'claude' | 'custom' | 'user';
+  /** `user` paints the interface with `customColors`; `bullfinch` with the logo colours. */
+  theme: 'bullfinch' | 'claude' | 'custom' | 'user';
+  /** Set once the Bullfinch theme became the default for this person; saved prefs without it switch over once. */
+  brandTheme161: boolean;
   customColors: ThemeColors;
   language: 'ru' | 'en';
   density: 'comfortable' | 'compact';
   textSize: 'small' | 'medium' | 'large';
   reduceMotion: boolean;
+  speakingStyle: 'pulse' | 'ring' | 'waves' | 'bars' | 'glow';
   showMembers: boolean;
 }
 
 export interface Prefs {
+  privacy: { shareActivity: boolean };
   notifications: NotificationPrefs;
   appearance: AppearancePrefs;
   /** Channel id -> muted until (ms since 1970; Infinity as null = until turned back on). */
@@ -38,8 +42,9 @@ export interface Prefs {
 }
 
 export const DEFAULT_PREFS: Prefs = {
+  privacy: { shareActivity: true },
   notifications: { mentions: true, allMessages: false, voiceJoin: true, sounds: true, voiceSounds: true, soundVolume: 0.6, flash: true },
-  appearance: { theme: 'claude', customColors: DEFAULT_THEME_COLORS, language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, showMembers: true },
+  appearance: { theme: 'bullfinch', brandTheme161: true, customColors: DEFAULT_THEME_COLORS, language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, speakingStyle: 'pulse', showMembers: true },
   mutedChannels: {},
 };
 
@@ -67,6 +72,7 @@ export function parsePrefs(raw: string | null): Prefs {
     if (until === null || (typeof until === 'number' && Number.isFinite(until))) muted[id] = until as number | null;
   }
   return {
+    privacy: { shareActivity: bool(saved.privacy?.shareActivity, d.privacy.shareActivity) },
     notifications: {
       mentions: bool(n.mentions, d.notifications.mentions),
       allMessages: bool(n.allMessages, d.notifications.allMessages),
@@ -77,12 +83,17 @@ export function parsePrefs(raw: string | null): Prefs {
       flash: bool(n.flash, d.notifications.flash),
     },
     appearance: {
-      theme: pick(a.theme, ['claude', 'custom', 'user'] as const, d.appearance.theme),
+      // Bullfinch became the default with the 1.6.1 brand: saved prefs from before it switch over once; a later choice is kept.
+      theme: a.brandTheme161 === true
+        ? pick(a.theme, ['bullfinch', 'claude', 'custom', 'user'] as const, d.appearance.theme)
+        : d.appearance.theme,
+      brandTheme161: true,
       customColors: parseThemeColors(a.customColors),
       language: pick(a.language, ['ru', 'en'] as const, d.appearance.language),
       density: pick(a.density, ['comfortable', 'compact'] as const, d.appearance.density),
       textSize: pick(a.textSize, ['small', 'medium', 'large'] as const, d.appearance.textSize),
       reduceMotion: bool(a.reduceMotion, d.appearance.reduceMotion),
+      speakingStyle: pick(a.speakingStyle, ['pulse', 'ring', 'waves', 'bars', 'glow'], d.appearance.speakingStyle),
       showMembers: bool(a.showMembers, d.appearance.showMembers),
     },
     mutedChannels: muted,
@@ -98,6 +109,10 @@ function load(): Prefs {
 }
 
 export const [prefs, setPrefs] = createSignal<Prefs>(load());
+
+export function updatePrivacy(change: Partial<Prefs['privacy']>) {
+  setPrefs((previous) => ({ ...previous, privacy: { ...previous.privacy, ...change } }));
+}
 
 export function updateNotifications(change: Partial<NotificationPrefs>) {
   setPrefs((previous) => ({ ...previous, notifications: { ...previous.notifications, ...change } }));
@@ -142,14 +157,16 @@ function blendColors(root: HTMLElement, appearance: AppearancePrefs) {
 
 /** Put the looks on the page (called when they change). */
 export function applyAppearance(appearance: AppearancePrefs, root: HTMLElement = document.documentElement) {
-  const colors = appearance.theme === 'user' ? JSON.stringify(appearance.customColors) : null;
+  const palette = appearance.theme === 'bullfinch' ? BULLFINCH_COLORS : appearance.customColors;
+  const painted = appearance.theme === 'user' || appearance.theme === 'bullfinch';
+  const colors = painted ? JSON.stringify(palette) : null;
   const firstPaint = !root.dataset.theme;
   const changed = root.dataset.theme !== appearance.theme || colors !== paintedColors;
   if (changed && !firstPaint) blendColors(root, appearance);
   paintedColors = colors;
-  if (appearance.theme === 'user') {
-    for (const [name, value] of Object.entries(themeVariables(appearance.customColors))) root.style.setProperty(name, value);
-    root.style.colorScheme = isLightTheme(appearance.customColors) ? 'light' : 'dark';
+  if (painted) {
+    for (const [name, value] of Object.entries(themeVariables(palette))) root.style.setProperty(name, value);
+    root.style.colorScheme = isLightTheme(palette) ? 'light' : 'dark';
   } else {
     for (const name of THEME_VARIABLE_NAMES) root.style.removeProperty(name);
     root.style.removeProperty('color-scheme');
@@ -158,6 +175,7 @@ export function applyAppearance(appearance: AppearancePrefs, root: HTMLElement =
   root.lang = appearance.language;
   root.dataset.density = appearance.density;
   root.dataset.reduceMotion = String(appearance.reduceMotion);
+  root.dataset.speakingStyle = appearance.speakingStyle;
   root.style.setProperty('--zoom', String(TEXT_ZOOM[appearance.textSize]));
 }
 

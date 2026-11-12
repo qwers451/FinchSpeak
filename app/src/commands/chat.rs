@@ -242,6 +242,12 @@ pub async fn set_status(status: String, text: Option<String>, state: State<'_, A
         other => return Err(format!("Unknown status \"{other}\"")),
     };
     let tx = state.control_tx.read().await.clone().ok_or_else(|| "Not connected via QUIC Control Stream".to_string())?;
+    if status == UserStatus::DoNotDisturb
+        && let Some(user) = state.current_user.read().await.as_ref()
+        && let Ok(user_id) = user.id.parse()
+    {
+        state.game_activity.lock().await.set_status(user_id, status).await;
+    }
     tx.send(ClientMessage::SetStatus { status, text }).await.map_err(|e| format!("Failed to queue status: {e}"))
 }
 

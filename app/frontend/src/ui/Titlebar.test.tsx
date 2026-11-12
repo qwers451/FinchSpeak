@@ -53,6 +53,14 @@ afterEach(() => {
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
 });
 
+it('keeps all three window buttons without repeating the sidebar branding', async () => {
+  const host = mount();
+  await flush();
+  expect(host.textContent).not.toContain('FinchSpeak');
+  expect(host.querySelector('img')).toBeNull();
+  expect(buttons(host)).toHaveLength(3);
+});
+
 it('gives each window button a hint equal to its label', async () => {
   const host = mount();
   await flush();

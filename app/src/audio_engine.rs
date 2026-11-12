@@ -15,8 +15,9 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::Stream;
 use finch_audio::{
     open_input_device, open_output_device, AudioMixer, DeviceChoice, InputResampler, OutputResampler, ReferenceFeeder, VadDecision, VoiceCapture,
-    VoiceCaptureConfig, FRAME_SIZE_48K,
+    VoiceActivityDetector, VoiceCaptureConfig, FRAME_SIZE_48K,
 };
+use finch_audio::mixer::{VoiceLevelPeak, VOICE_LEVEL_FRAMES};
 use finch_audio::quality::QualityTracker;
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
@@ -335,6 +336,44 @@ fn mix_next_frame(
     now: Instant,
 ) -> Vec<(u32, bool)> {
     mixer.blocking_lock().mix_frame_stereo(left, right, now)
+}
+
+const VOICE_LEVEL_INTERVAL: Duration = Duration::from_millis(20 * VOICE_LEVEL_FRAMES as u64);
+
+struct VoiceLevelReports {
+    next: Instant,
+    reported: bool,
+}
+
+impl VoiceLevelReports {
+    fn new(now: Instant) -> Self {
+        Self {
+            next: now + VOICE_LEVEL_INTERVAL,
+            reported: false,
+        }
+    }
+
+    fn due(&mut self, now: Instant) -> bool {
+        if now < self.next {
+            return false;
+        }
+        // Capture and playback can refill in different batches. Use one reporting clock and
+        // skip missed deadlines so a delayed worker never emits a burst of old reports.
+        self.next = now + VOICE_LEVEL_INTERVAL;
+        true
+    }
+
+    fn should_emit(&mut self, levels: &[(u32, u8)]) -> bool {
+        let active = !levels.is_empty();
+        let emit = active || self.reported;
+        self.reported = active;
+        emit
+    }
+}
+
+#[derive(Clone, serde::Serialize)]
+struct VoiceLevels<'a> {
+    levels: &'a [(u32, u8)],
 }
 
 /// Render paired samples without allowing local monitoring into the AEC reference.
@@ -702,6 +741,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 let mut is_currently_speaking = false;
                 // Meter and link quality for the UI, and the "test my microphone" loop.
                 let mut level_frames: u32 = 0;
+                let mut voice_reports = VoiceLevelReports::new(Instant::now());
+                let mut voice_levels = Vec::new();
+                let mut local_peak: Option<(u32, VoiceLevelPeak)> = None;
                 let mut quality_tracker = QualityTracker::new();
                 let mut last_quality_report = Instant::now();
                 let mut mic_test: Option<MicTest> = None;
@@ -731,7 +773,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         }
                         Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                             is_running.store(false, Ordering::SeqCst);
-                            return;
+                            break;
                         }
                         Err(std::sync::mpsc::TryRecvError::Empty) => {}
                     }
@@ -871,6 +913,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             } else {
                                 mix_next_frame(&state.mixer, &mut playback_frame_48k, &mut playback_right_48k, Instant::now())
                             };
+                            if !local_only {
+                                state.music.mix_frame(&mut playback_frame_48k, &mut playback_right_48k, state.is_deafened.load(Ordering::Relaxed));
+                            }
                             if let Some(test) = &mut mic_test {
                                 if let Some(recorded) = test.next_playback_frame() {
                                     for ((left, right), mine) in playback_frame_48k.iter_mut().zip(playback_right_48k.iter_mut()).zip(recorded.iter()) {
@@ -961,6 +1006,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     let (generation, requested_gate) = state.voice_settings.privacy_snapshot();
                     if observed_generation != generation {
                         observed_generation = generation;
+                        local_peak = None;
                         capture_cons.clear();
                         capture_raw_buf.clear();
                         if let Some(resampler) = &mut input_resampler { resampler.reset(); }
@@ -990,6 +1036,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     }
 
                                     if state.is_muted.load(Ordering::Relaxed) {
+                                        local_peak = None;
                                         if let Some(capture) = &mut voice_capture {
                                             capture.set_transmit_gate(false);
                                         }
@@ -1106,6 +1153,23 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         }
                                     }
 
+                                    if !local_only
+                                        && is_currently_speaking
+                                        && frame_gate
+                                        && ptt_open
+                                        && state.voice_settings.privacy_snapshot() == (generation, true)
+                                    {
+                                        let (peer_id, peak) = local_peak
+                                            .get_or_insert_with(|| (sender_id, VoiceLevelPeak::default()));
+                                        if *peer_id != sender_id {
+                                            *peer_id = sender_id;
+                                            *peak = VoiceLevelPeak::default();
+                                        }
+                                        peak.push_db(VoiceActivityDetector::compute_rms_dbfs(&capture_frame_48k));
+                                    } else {
+                                        local_peak = None;
+                                    }
+
                                     if !local_only && !output.packets.is_empty()
                                         && state.voice_settings.privacy_snapshot() == (generation, true) {
                                         if let Ok(conn_guard) = state.quic_connection.try_read() {
@@ -1126,9 +1190,30 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         diagnostics.maximum_at(batch_epoch, Metric::CaptureBatchMaxFrames, batch_frames);
                         diagnostics.maximum_at(batch_epoch, Metric::CaptureBatchMaxUs, started.elapsed().as_micros() as u64);
                     }
+                    if !local_only && voice_reports.due(Instant::now()) {
+                        voice_levels.clear();
+                        if output.is_some() {
+                            voice_levels.extend(state.mixer.blocking_lock().speaker_levels());
+                        }
+                        if let Some((peer_id, mut peak)) = local_peak.take() {
+                            if is_currently_speaking
+                                && !state.is_muted.load(Ordering::Relaxed)
+                                && state.voice_settings.privacy_snapshot() == (generation, true)
+                                && state.session_peer_id.load(Ordering::Relaxed) == peer_id
+                            {
+                                voice_levels.push((peer_id, peak.take()));
+                            }
+                        }
+                        if voice_reports.should_emit(&voice_levels) {
+                            let _ = app_handle.emit("voice-levels", VoiceLevels { levels: &voice_levels });
+                        }
+                    }
                     std::thread::sleep(Duration::from_millis(5));
                 }
 
+                if voice_reports.should_emit(&[]) {
+                    let _ = app_handle.emit("voice-levels", VoiceLevels { levels: &[] });
+                }
                 if is_currently_speaking {
                     let _ = app_handle.emit("local-speaking", false);
                 }
@@ -1161,6 +1246,22 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn voice_levels_publish_every_sixty_milliseconds_and_clear_once() {
+        let start = Instant::now();
+        let mut reports = VoiceLevelReports::new(start);
+        let at = |ms| start + Duration::from_millis(ms);
+        assert!(!reports.should_emit(&[]));
+        assert!(!reports.due(at(59)));
+        assert!(reports.due(at(60)));
+        assert!(reports.should_emit(&[(7, 80)]));
+        assert!(!reports.due(at(119)));
+        assert!(reports.due(at(120)));
+        assert!(reports.should_emit(&[]));
+        assert!(reports.due(at(180)));
+        assert!(!reports.should_emit(&[]));
+    }
 
     #[test]
     fn device_render_outputs_monitor_but_references_only_remote_and_test() {

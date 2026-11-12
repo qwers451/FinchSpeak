@@ -21,6 +21,9 @@ export const DEFAULT_THEME_COLORS: ThemeColors = {
   background: '#262624', sidebar: '#20201e', surface: '#30302e', text: '#f0eee6', accent: '#d9987e', signal: '#a8c6b2',
 };
 
+/** The "Снегирь" (Bullfinch) theme: the colours of the FinchSpeak logo, dark. */
+export const BULLFINCH_COLORS: ThemeColors = { background: '#171516', sidebar: '#111011', surface: '#232021', text: '#fff3e7', accent: '#ff7a1f', signal: '#ffc46b' };
+
 export const THEME_PRESETS: { id: string; name: string; colors: ThemeColors }[] = [
   { id: 'ember', name: 'Ember', colors: DEFAULT_THEME_COLORS },
   { id: 'ocean', name: 'Ocean', colors: { background: '#0f1b2a', sidebar: '#0b1521', surface: '#16263a', text: '#e6eef8', accent: '#4ea8de', signal: '#5ce1c6' } },

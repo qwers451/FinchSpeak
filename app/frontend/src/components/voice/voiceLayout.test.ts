@@ -22,6 +22,18 @@ describe('grid shape', () => {
 });
 
 describe('arrange', () => {
+  it('applies saved user order with self first and new participants after saved users', () => {
+    const result = arrange(room(5), 3, new Set(), ['u5', 'u3', 'u2']);
+    expect(result.grid.map((p) => p.peer_id)).toEqual([3, 5, 2, 1, 4]);
+  });
+
+  it('keeps the saved order within speaking priority in a crowded room', () => {
+    const result = arrange(room(16), 1, new Set([15, 16]), ['u16', 'u13', 'u15', 'u2']);
+    expect(result.grid.map((p) => p.peer_id).slice(0, 6)).toEqual([1, 16, 15, 13, 2, 3]);
+    expect(result.grid).toHaveLength(MAX_GRID_TILES);
+    expect(result.roster).toHaveLength(4);
+  });
+
   it('puts me first and keeps everyone in a small room on the grid', () => {
     const result = arrange(room(5), 3, new Set());
     expect(result.grid.map((p) => p.peer_id)).toEqual([3, 1, 2, 4, 5]);

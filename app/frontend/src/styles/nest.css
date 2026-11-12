@@ -2,7 +2,7 @@
    everyone online but not in a room sits on the wire, and your own controls are on the perch at the bottom. */
 .tree-layout { --bark:color-mix(in srgb, var(--yellow) 22%, var(--line)); flex:1; display:flex; flex-direction:column; min-height:0; min-width:0; background:var(--bg-app); }
 .tree-bar { flex:none; display:flex; align-items:center; gap:8px; height:52px; padding:0 16px; border-bottom:1px solid var(--line-soft); }
-.tree-bar img { width:28px; height:28px; object-fit:contain; }
+.tree-bar img { width:28px; height:auto; object-fit:contain; }
 .tree-title { font:800 16px var(--font-head); }
 .tree-bar .grow { flex:1; }
 .tree-bar .btn { flex:none; }
@@ -53,7 +53,13 @@
 .nest-birds { position:absolute; z-index:1; left:0; right:0; top:14%; display:flex; justify-content:center; align-items:center; }
 .nest-bird { position:relative; display:flex; flex:none; }
 .nest-bird + .nest-bird { margin-left:-5px; }
-.nest-muted { position:absolute; right:-3px; top:-3px; width:14px; height:14px; padding:1px; border-radius:50%; background:var(--bg-deep); color:var(--red-text); }
+.nest-badge { position:absolute; width:14px; height:14px; padding:1px; border-radius:50%; background:var(--bg-deep); }
+.nest-muted { right:-3px; top:-3px; color:var(--red-text); }
+.nest-local-mute { left:-3px; top:-3px; color:var(--text-2); }
+.nest-game { right:-3px; bottom:-3px; color:var(--teal); }
+.nest-bird:focus-visible { outline:2px solid var(--yellow); outline-offset:2px; border-radius:50%; }
+.nest-bird[draggable="true"] { cursor:grab; }
+.nest.drop-target { box-shadow:0 0 0 2px var(--yellow); }
 .nest-more { flex:none; align-self:flex-start; display:grid; place-items:center; min-width:20px; height:20px; margin-left:3px; padding:0 3px; border-radius:10px; background:var(--bg-card); color:var(--text-2); font:700 11px/1 var(--font-ui); }
 .nest-count { flex:none; font:500 11px/1 var(--font-ui); color:var(--text-3); }
 .nest-eq { flex:none; display:inline-flex; align-items:flex-end; gap:2px; height:12px; }

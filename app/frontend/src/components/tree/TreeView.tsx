@@ -10,12 +10,14 @@ import { isSharing } from '../../stores/screenState';
 import { connectionStatus, knownUsers, myStatus as ownStatus, presence, statusTexts } from '../../stores/sessionStore';
 import { currentUser } from '../../stores/authStore';
 import { branchPlan, setNestView } from '../../stores/nestView';
+import { musicAvailable, musicState, setMusicPanelOpen } from '../../stores/musicStore';
 import type { Channel, User, UserStatus } from '../../types';
 import { Avatar, Button, Icon } from '../../ui';
 import { locale, t } from '../../i18n';
 import { ChannelActions, ChannelDialogs, type ChannelDialog } from '../Sidebar';
 import { ChatArea } from '../ChatArea';
 import { VoicePanel } from '../VoicePanel';
+import { participantContextMenu, participantMenuKey } from '../voice/participantMenu';
 import { Nest } from './Nest';
 
 const NEST_SPACE = 176; // px one nest takes on a branch, gap included
@@ -103,7 +105,7 @@ export function TreeView() {
   return (
     <div class={`tree-layout${activeChannel() ? ' has-content' : ''}${folded() && activeChannel() ? ' folded' : ''}`}>
       <header class="tree-bar">
-        <img src="/custom/assets/brand/finch-mark.svg" alt="" />
+        <img src="/custom/assets/brand/finchspeak-tile-small.svg" alt="" />
         <span class="tree-title">FinchSpeak</span>
         <span class="grow" />
         <Show when={isAdmin()}>
@@ -122,7 +124,8 @@ export function TreeView() {
           <span class="sec-label tree-wire-label">{t('On the wire — {count}', { count: onWire().length })}</span>
           <For each={onWire()}>
             {(user) => (
-              <span class="tree-wire-bird" role="listitem" title={statusTexts()[user.id] ? `${nameOf(user)} — ${statusTexts()[user.id]}` : nameOf(user)}>
+              <span class="tree-wire-bird" role="listitem" tabindex="0" title={statusTexts()[user.id] ? `${nameOf(user)} — ${statusTexts()[user.id]}` : nameOf(user)}
+                onContextMenu={(event) => participantContextMenu(event, user.id)} onKeyDown={(event) => participantMenuKey(event, user.id)}>
                 <Avatar name={nameOf(user)} id={user.id} size={32} src={user.avatar_url} status={statusClass(statusOf(user))} />
               </span>
             )}
@@ -170,6 +173,9 @@ export function TreeView() {
         </Show>
         <Button iconOnly size="sm" variant={isMuted() ? 'danger' : 'ghost'} icon={isMuted() ? 'mic-off' : 'mic'} label={isMuted() ? t('Unmute') : t('Mute')} onClick={() => void toggleMute()} />
         <Button iconOnly size="sm" variant={isDeafened() ? 'danger' : 'ghost'} icon={isDeafened() ? 'phones-off' : 'phones'} label={isDeafened() ? t('Undeafen') : t('Deafen')} onClick={() => void toggleDeafen()} />
+        <Show when={musicAvailable() && musicState()?.playing}>
+          <button type="button" class="music-note" aria-label={t('Music is playing')} title={t('Music')} onClick={() => setMusicPanelOpen(true)}><Icon name="music" size="sm" /></button>
+        </Show>
         <Show when={activeVoiceChannel()}>
           <Button iconOnly size="sm" variant="danger" icon="hangup" class="tree-leave" label={t('Fly out of the nest')} onClick={() => void leaveVoice()} />
         </Show>

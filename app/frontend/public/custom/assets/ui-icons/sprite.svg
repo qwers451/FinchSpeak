@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="fi-gamepad" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><path d="M5 8h14l3 10-2 2-5-4H9l-5 4-2-2zM7 10v4M5 12h4M16 11h.01M19 13h.01"/></symbol>
   <symbol id="fi-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><path d="M10 2h4l1 1v9l-2 2h-2l-2-2V3zM5 10v2l4 4h6l4-4v-2M12 16v5M8 21h8"/></symbol>
   <symbol id="fi-mic-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><path d="M10 2h4l1 1v9l-2 2h-2l-2-2V3zM5 10v2l4 4h6l4-4v-2M12 16v5M8 21h8M3 3l18 18"/></symbol>
   <symbol id="fi-headphones" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><path d="M4 14V8l4-4h8l4 4v6M3 14h5v7H4l-1-1zM16 14h5v6l-1 1h-4z"/></symbol>
@@ -68,4 +69,5 @@
   <symbol id="fi-crown" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><path d="M3 18V6l5 5 4-4 4 4 5-5v12zM3 21h18"/></symbol>
   <symbol id="fi-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><path d="M2 12l5-5h10l5 5-5 5H7z"/><path d="M10 10h4v4h-4z" fill="currentColor" stroke="none"/></symbol>
   <symbol id="fi-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><path d="M2 12l5-5h10l5 5-5 5H7zM3 3l18 18"/></symbol>
+  <symbol id="fi-music" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><path d="M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/></symbol>
 </svg>

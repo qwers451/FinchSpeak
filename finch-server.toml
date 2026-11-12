@@ -17,3 +17,13 @@ max_file_size_mb = 50
 # No jwt_secret here: a random one is generated on first start and kept in jwt_secret_file.
 jwt_secret_file = "./data/jwt_secret"
 jwt_expiration_hours = 720
+
+[music]
+enabled = true
+# storage_dir = "/mnt/music" # optional dedicated mounted disk
+max_track_mb = 30
+library_quota_mb = 2048
+temp_quota_mb_total = 512
+temp_quota_mb_per_user = 200
+max_queue = 100
+max_track_minutes = 180

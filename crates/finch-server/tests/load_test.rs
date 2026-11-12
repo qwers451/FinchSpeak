@@ -225,7 +225,7 @@ async fn test_full_sfu_load_and_screen_share_suite() -> anyhow::Result<()> {
         let (mut control_send, mut control_recv) = connection.open_bi().await?;
 
         // Authenticate with JWT
-        let auth_msg = ClientMessage::Authenticate { token: jwt_token, supports_voice_extensions: false };
+        let auth_msg = ClientMessage::Authenticate { token: jwt_token, supports_voice_extensions: false, client_level: 0 };
         control_send.write_all(&encode_message(&auth_msg)?).await?;
 
         // Read Authenticated response

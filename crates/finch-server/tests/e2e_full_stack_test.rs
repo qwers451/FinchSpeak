@@ -227,7 +227,7 @@ async fn test_full_system_autotest() -> anyhow::Result<()> {
     let alice_conn = client_endpoint.connect(server_addr, "localhost")?.await?;
     let (mut alice_send, mut alice_recv) = alice_conn.open_bi().await?;
 
-    let auth_msg = ClientMessage::Authenticate { token: member_token.clone(), supports_voice_extensions: false };
+    let auth_msg = ClientMessage::Authenticate { token: member_token.clone(), supports_voice_extensions: false, client_level: 0 };
     alice_send.write_all(&encode_message(&auth_msg)?).await?;
 
     let mut stream_buf = BytesMut::new();
@@ -247,7 +247,7 @@ async fn test_full_system_autotest() -> anyhow::Result<()> {
     let admin_conn = admin_client_endpoint.connect(server_addr, "localhost")?.await?;
     let (mut admin_send, mut admin_recv) = admin_conn.open_bi().await?;
 
-    let admin_auth_msg = ClientMessage::Authenticate { token: admin_token.clone(), supports_voice_extensions: false };
+    let admin_auth_msg = ClientMessage::Authenticate { token: admin_token.clone(), supports_voice_extensions: false, client_level: 0 };
     admin_send.write_all(&encode_message(&admin_auth_msg)?).await?;
 
     let mut admin_buf = BytesMut::new();
