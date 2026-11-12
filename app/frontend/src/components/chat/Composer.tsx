@@ -2,10 +2,11 @@ import { createMemo, createSignal, For, Show } from 'solid-js';
 import { notifyTyping } from '../../stores/activityStore';
 import { attachFiles, formatSize, pendingFiles, removePending, retryUpload, takePending } from '../../stores/attachmentStore';
 import { activeChannel, MAX_MESSAGE_CHARS, replyingTo, sendMessage, setReplyingTo } from '../../stores/chatStore';
-import { connectionStatus, knownUsers } from '../../stores/sessionStore';
+import { connectionStatus, knownUsers, serverFeatures } from '../../stores/sessionStore';
 import { currentUser } from '../../stores/authStore';
 import { Avatar, Button, Icon } from '../../ui';
 import { EmojiPicker } from './EmojiPicker';
+import { inApp, isRecording, VoiceRecordButton, voiceMessagesAvailable } from './VoiceNote';
 import { t } from '../../i18n';
 
 /** The `@word` the caret is in, if any: where it starts and what has been typed of it. */
@@ -26,6 +27,7 @@ export function Composer() {
   let fileInput: HTMLInputElement | undefined;
 
   const offline = () => connectionStatus() !== 'connected';
+  const voiceAvailable = () => voiceMessagesAvailable(serverFeatures(), inApp());
   const over = () => Math.max(0, text().length - MAX_MESSAGE_CHARS);
   const hasReady = () => pendingFiles().some((entry) => entry.status === 'ready');
   const busyUploading = () => pendingFiles().some((entry) => entry.status === 'uploading');
@@ -152,6 +154,7 @@ export function Composer() {
         <div class={`composer${over() > 0 ? ' is-error' : ''}${offline() ? ' is-offline' : ''}`}>
           <input ref={fileInput} type="file" multiple hidden onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; void attachFiles(files); }} />
           <Button iconOnly size="sm" variant="ghost" icon="clip" label={t('Attach a file')} disabled={offline()} onClick={() => fileInput?.click()} />
+          <Show when={!isRecording()}>
           <textarea
             ref={box}
             class="txt"
@@ -173,8 +176,10 @@ export function Composer() {
             onClick={syncCaret}
             onPaste={onPaste}
           />
+          </Show>
           <Show when={over() > 0}><span class="tr fs12 b fit">{t('{count} over', { count: over() })}</span></Show>
           <Button iconOnly size="sm" variant="ghost" icon="smile" label={t('Emoji')} disabled={offline()} onClick={() => setEmoji(!emoji())} />
+          <Show when={voiceAvailable()}><VoiceRecordButton disabled={offline()} /></Show>
           <Button iconOnly size="sm" variant="primary" icon="send" label={t('Send')} disabled={!canSend()} onClick={() => void submit()} />
         </div>
       </div>

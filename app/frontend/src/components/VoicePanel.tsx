@@ -7,6 +7,8 @@ import { channels } from '../stores/chatStore';
 import { callFlock } from '../stores/flockStore';
 import { openContextMenu, type MenuItem } from '../ui/ContextMenu';
 import { MusicPanel, formatClock } from './music/MusicPanel';
+import { SoundboardPanel } from './voice/SoundboardPanel';
+import { soundboardAvailable } from '../stores/soundboardStore';
 import { musicAvailable, musicPanelOpen, musicPosition, musicState, setMusicPanelOpen } from '../stores/musicStore';
 import { SharePickerModal } from './screen/SharePickerModal';
 import { SharerPill } from './screen/SharerPill';
@@ -132,6 +134,7 @@ export function VoicePanel() {
       <VoiceSettingsModal open={settings()} onClose={() => setSettings(false)} />
       </div>
       <Show when={sidePanel()}><MusicPanel onClose={closeMusic} /></Show>
+      <Show when={soundboardAvailable()}><SoundboardPanel /></Show>
       <Show when={musicOpen() && !wide()}>
         <Modal open onClose={closeMusic} title={t('Music')} width="340px">
           <MusicPanel modal onClose={closeMusic} />

@@ -4,6 +4,10 @@ export type TranslationParams = Record<string, string | number>;
 
 /** Russian UI copy keyed by its English source. User and server supplied strings stay untouched. */
 export const ru: Readonly<Record<string, string>> = {
+  'Soundboard': 'Саундборд', 'Search sounds': 'Поиск звуков', 'No sounds yet': 'Звуков пока нет', 'Remove sound': 'Удалить звук',
+  'Sound name': 'Название звука', 'Emoji (optional)': 'Эмодзи (необязательно)', 'Add a sound': 'Добавить звук', 'Up to 5 seconds': 'До 5 секунд',
+  'Soundboard volume': 'Громкость саундборда', "Don't play the soundboard for me": 'Не слышать саундборд', 'Name the sound first': 'Сначала укажите название звука',
+  'The soundboard needs the desktop app': 'Саундборд работает в настольном приложении',
   'Playing {game}': 'Играет в {game}',
   'Could not update game activity sharing': 'Не удалось изменить настройку игровой активности',
   "Show what I'm playing": 'Показывать, во что я играю',
@@ -244,6 +248,10 @@ export const ru: Readonly<Record<string, string>> = {
   'Tree of rooms': 'Дерево комнат', 'On the wire — {count}': 'На проводе — {count}',
   'You are on the wire. Pick a nest to talk.': 'Вы на проводе. Выберите гнездо, чтобы поговорить.',
   'In the nest: {channel}': 'В гнезде: {channel}', 'Fly out of the nest': 'Вылететь из гнезда',
+  'Hold to record a voice message': 'Удерживайте, чтобы записать голосовое', 'Release to send': 'Отпустите, чтобы отправить',
+  'Tap again to send': 'Нажмите ещё раз, чтобы отправить', 'Voice message': 'Голосовое сообщение', 'Cancel recording': 'Отменить запись',
+  'Send voice message': 'Отправить голосовое', 'Playback speed': 'Скорость воспроизведения',
+  'Recording failed: {error}': 'Не удалось записать: {error}',
 };
 
 /** Russian plural forms, keyed by the English `other` form that `plural()` is called with. */

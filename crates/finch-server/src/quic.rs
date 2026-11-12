@@ -556,6 +556,36 @@ async fn call_user(sessions: &SessionManager, peer_id: u32, user_id: Uuid, usern
     sessions.send_control_to_peer(callee_peer, &call);
 }
 
+/// One soundboard sound per person every 3 seconds.
+const SOUND_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Soundboard: the sound goes to everybody in my voice room, me included. Nothing is mixed into voice.
+async fn play_sound(sessions: &SessionManager, pool: &SqlitePool, peer_id: u32, user_id: Uuid, sound_id: Uuid) {
+    if !crate::api::soundboard::is_enabled(sessions) {
+        return refuse_call(sessions, peer_id, 404, "Soundboard is unavailable");
+    }
+    let room = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
+    let Some(room) = room else {
+        return refuse_call(sessions, peer_id, 400, "Join a voice room first");
+    };
+    if sessions.sessions.get(&peer_id).is_some_and(|s| s.server_muted) {
+        return refuse_call(sessions, peer_id, 403, "A moderator has muted you");
+    }
+    let exists = sqlx::query_scalar::<_, i64>("SELECT 1 FROM soundboard_sounds WHERE id = ?")
+        .bind(sound_id.to_string())
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
+    if exists.is_none() {
+        return refuse_call(sessions, peer_id, 404, "Unknown sound");
+    }
+    if let Err(seconds) = sessions.allow_action(user_id, "sound", 1, SOUND_WINDOW) {
+        return refuse_call(sessions, peer_id, 429, format!("Wait {seconds} s before the next sound"));
+    }
+    sessions.broadcast_voice(room, ServerMessage::SoundPlayed { sound_id, user_id }, None).await;
+}
+
 /// Handle a single incoming ClientMessage on the Control Stream.
 async fn handle_client_message(
     msg: ClientMessage,
@@ -605,7 +635,7 @@ async fn handle_client_message(
                 return;
             }
             let content = content.trim().to_string();
-            if content.is_empty() || content.chars().count() > MAX_MESSAGE_CHARS {
+            if (content.is_empty() && attachments.is_empty()) || content.chars().count() > MAX_MESSAGE_CHARS {
                 reject_message(
                     sessions,
                     peer_id,
@@ -850,6 +880,10 @@ async fn handle_client_message(
 
         ClientMessage::CallUser { user_id: callee } => {
             call_user(sessions, peer_id, user_id, username, callee).await;
+        }
+
+        ClientMessage::PlaySound { sound_id } => {
+            play_sound(sessions, pool, peer_id, user_id, sound_id).await;
         }
 
         ClientMessage::Typing { channel_id } => {

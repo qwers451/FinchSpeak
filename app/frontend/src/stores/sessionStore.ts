@@ -19,6 +19,7 @@ import { applySavedVolume } from './volumeStore';
 import { pushToast } from '../ui/toastStore';
 import { updateVoiceLevels } from './levelStore';
 import { receiveFlockCall } from './flockStore';
+import { handleSoundPlayed } from './soundboardStore';
 export { appError, setAppError } from './notificationStore';
 
 export const [connectionStatus, setConnectionStatus] = createSignal<'connected' | 'disconnected' | 'reconnecting' | 'failed'>('disconnected');
@@ -117,6 +118,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'activity-changed': setGameActivity,
   // A lambda, not the function itself: flockStore may still be loading when this table is built.
   'flock-call': (call) => receiveFlockCall(call),
+  'sound-played': (event) => handleSoundPlayed(event),
   'message-edited': handleMessageEdited,
   'message-deleted': handleMessageDeleted,
   'reaction-changed': handleReactionChanged,

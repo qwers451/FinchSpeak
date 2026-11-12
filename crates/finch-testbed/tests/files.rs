@@ -101,3 +101,70 @@ async fn attachments_are_delivered_and_cannot_be_stolen() -> anyhow::Result<()> 
     assert!(attachments_of("mine now").is_empty());
     Ok(())
 }
+
+/// A voice message keeps its length and waveform through upload, delivery and history; a plain
+/// file upload carries neither (an old client sees an ordinary attachment).
+#[tokio::test]
+async fn voice_note_keeps_length_and_waveform() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let a = TestClient::register(&server, "alice").await?;
+    let mut b = TestClient::register(&server, "bob").await?;
+    let (text_id, _) = a.channel(ChannelType::Text);
+    let waveform: Vec<u8> = (0..64u8).map(|i| i * 4).collect();
+
+    let note = a.api.upload_voice_note(b"OggS-test".to_vec(), 2_500, &waveform).await?;
+    assert_eq!(note.duration_ms, Some(2_500));
+    assert_eq!(note.waveform.as_deref(), Some(waveform.as_slice()));
+    let plain = a.api.upload_file("plain.ogg", b"OggS-test".to_vec(), "audio/ogg").await?;
+    assert_eq!((plain.duration_ms, plain.waveform.clone()), (None, None));
+
+    a.send(ClientMessage::SendMessage {
+        client_msg_id: None,
+        channel_id: text_id,
+        content: "voice".to_string(),
+        attachments: vec![note.id],
+        reply_to: None,
+    })
+    .await?;
+    let delivered = b
+        .expect_control(WAIT, |m| match m {
+            ServerMessage::NewMessage { content, attachments, .. } if content == "voice" => Some(attachments.clone()),
+            _ => None,
+        })
+        .await?;
+    assert_eq!(delivered[0].duration_ms, Some(2_500));
+    assert_eq!(delivered[0].waveform.as_deref(), Some(waveform.as_slice()));
+
+    let history = a.api.fetch_messages(text_id, None, 50).await?;
+    let stored = history.messages.iter().find(|m| m.content == "voice").expect("the voice message is in history");
+    assert_eq!(stored.attachments[0].waveform.as_deref(), Some(waveform.as_slice()));
+    Ok(())
+}
+
+/// A waveform that is not 64 bytes is refused, and the message is not stored.
+#[tokio::test]
+async fn voice_note_waveform_must_be_64_bytes() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let a = TestClient::register(&server, "alice").await?;
+    assert!(a.api.upload_voice_note(b"OggS-test".to_vec(), 1_000, &[7u8; 63]).await.is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_message_with_only_an_attachment_needs_no_text() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let mut alice = TestClient::register(&server, "alice").await?;
+    let channel = alice.session.initial_state.channels.iter().find(|c| c.channel_type == finch_protocol::models::ChannelType::Text).map(|c| c.id).expect("a text channel");
+    let file = alice.api.upload_file("note.txt", b"hello".to_vec(), "text/plain").await?;
+    alice.send(ClientMessage::SendMessage { channel_id: channel, content: "   ".to_string(), attachments: vec![file.id], client_msg_id: None, reply_to: None }).await?;
+    let attachments = alice
+        .expect_control(WAIT, |m| match m {
+            ServerMessage::NewMessage { content, attachments, .. } if content.is_empty() => Some(attachments.clone()),
+            _ => None,
+        })
+        .await?;
+    assert_eq!(attachments.len(), 1);
+    alice.send(ClientMessage::SendMessage { channel_id: channel, content: "  ".to_string(), attachments: vec![], client_msg_id: None, reply_to: None }).await?;
+    alice.expect_control(WAIT, |m| matches!(m, ServerMessage::Error { .. }).then_some(())).await?;
+    Ok(())
+}

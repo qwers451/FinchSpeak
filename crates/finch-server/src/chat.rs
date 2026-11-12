@@ -85,10 +85,21 @@ pub async fn reply_ref(pool: &SqlitePool, reference: Uuid) -> ReplyRef {
     }
 }
 
-type AttachmentRow = (String, String, String, i64, String, Option<i64>, Option<i64>, Option<String>);
+type AttachmentRow = (
+    String,
+    String,
+    String,
+    i64,
+    String,
+    Option<i64>,
+    Option<i64>,
+    Option<String>,
+    Option<i64>,
+    Option<Vec<u8>>,
+);
 
 pub fn attachment_info(row: AttachmentRow) -> Option<(String, AttachmentInfo)> {
-    let (message_id, id, filename, size_bytes, content_type, width, height, thumb_path) = row;
+    let (message_id, id, filename, size_bytes, content_type, width, height, thumb_path, duration_ms, waveform) = row;
     let uuid = Uuid::parse_str(&id).ok()?;
     Some((
         message_id,
@@ -101,6 +112,8 @@ pub fn attachment_info(row: AttachmentRow) -> Option<(String, AttachmentInfo)> {
             width: width.map(|w| w as u32),
             height: height.map(|h| h as u32),
             has_thumb: thumb_path.is_some(),
+            duration_ms: duration_ms.map(|ms| ms as u64),
+            waveform,
         },
     ))
 }
@@ -112,7 +125,7 @@ pub async fn attachments_for(pool: &SqlitePool, message_ids: &[String]) -> Resul
         return Ok(grouped);
     }
     let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-        "SELECT message_id, id, filename, size_bytes, content_type, width, height, thumb_path FROM attachments WHERE message_id IN (",
+        "SELECT message_id, id, filename, size_bytes, content_type, width, height, thumb_path, duration_ms, waveform FROM attachments WHERE message_id IN (",
     );
     let mut ids = query.separated(", ");
     for id in message_ids {

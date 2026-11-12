@@ -14,6 +14,7 @@ pub mod activity;
 pub mod credentials;
 pub mod music;
 mod music_clock;
+pub mod voice_note;
 
 use state::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -228,6 +229,10 @@ pub fn run() {
             commands::auth::server_info,
             commands::window::take_invite_link,
             commands::chat::mark_channel_read,
+            commands::chat::voice_note_start,
+            commands::chat::voice_note_stop,
+            commands::chat::voice_note_cancel,
+            commands::chat::upload_voice_note,
             commands::chat::upload_avatar,
             commands::chat::remove_avatar,
             commands::chat::download_avatar,
@@ -276,6 +281,11 @@ pub fn run() {
             commands::voice::set_speaker_pan,
             commands::voice::get_voice_settings,
             commands::voice::set_voice_settings,
+            commands::soundboard::soundboard,
+            commands::soundboard::upload_board_sound,
+            commands::soundboard::delete_board_sound,
+            commands::soundboard::download_board_sound,
+            commands::soundboard::play_board_sound,
             commands::music::music_library,
             commands::music::music_upload,
             commands::music::music_delete_track,

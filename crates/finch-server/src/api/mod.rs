@@ -11,6 +11,7 @@ pub mod invites;
 pub mod messages;
 pub mod music;
 pub mod search;
+pub mod soundboard;
 pub mod state;
 
 use axum::extract::DefaultBodyLimit;
@@ -59,6 +60,9 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .route("/api/music/tracks", get(music::library).post(music::upload).layer(DefaultBodyLimit::max(music_upload_limit)))
         .route("/api/music/tracks/{id}/file", get(music::download))
         .route("/api/music/tracks/{id}", axum::routing::delete(music::delete))
+        .route("/api/soundboard", get(soundboard::list_handler).post(soundboard::upload_handler).layer(DefaultBodyLimit::max(soundboard::MAX_SOUND_BYTES + 64 * 1024)))
+        .route("/api/soundboard/{id}/file", get(soundboard::file_handler))
+        .route("/api/soundboard/{id}", axum::routing::delete(soundboard::delete_handler))
         .route("/api/search", get(search::search_handler))
         // Moderation (admins)
         .route("/api/admin/users", get(admin::list_users_handler))

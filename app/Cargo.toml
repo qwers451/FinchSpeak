@@ -46,6 +46,8 @@ dashmap = "6"
 # Audio I/O
 cpal = "0.15"
 ringbuf = "0.5"
+# Ogg container for voice messages (Opus packets come from finch_audio)
+ogg = "0.9"
 
 # Logging
 tracing = { workspace = true }

@@ -184,7 +184,7 @@ async function deliver(pending: Message, attachmentIds: string[], replyToId: str
 export async function sendMessage(content: string, attachments?: string[]) {
   const current = activeChannel();
   const text = content.trim();
-  if (!current || !text) return;
+  if (!current || (!text && !attachments?.length)) return;
   const user = currentUser();
   const replied = replyingTo();
   // The server echoes this id in the stored message and in a rejection, so the pending message is

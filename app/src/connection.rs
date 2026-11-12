@@ -326,6 +326,9 @@ fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
         ServerMessage::FlockCall { from_user_id, from_name, channel_id } => {
             let _ = app_handle.emit("flock-call", serde_json::json!({ "from_user_id": from_user_id, "from_name": from_name, "channel_id": channel_id }));
         }
+        ServerMessage::SoundPlayed { sound_id, user_id } => {
+            let _ = app_handle.emit("sound-played", serde_json::json!({ "sound_id": sound_id, "user_id": user_id }));
+        }
         ServerMessage::ActivityChanged { user_id, game } => {
             let _ = app_handle.emit("activity-changed", serde_json::json!({ "user_id": user_id, "game": game }));
         }

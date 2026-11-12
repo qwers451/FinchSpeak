@@ -10,6 +10,8 @@ fn flock_calls_need_client_level_1_7() {
     assert_eq!(CLIENT_LEVEL_1_7, 170);
     let call = ServerMessage::FlockCall { from_user_id: Uuid::nil(), from_name: "a".into(), channel_id: Uuid::nil() };
     assert_eq!(call.minimum_client_level(), CLIENT_LEVEL_1_7);
+    let played = ServerMessage::SoundPlayed { sound_id: Uuid::nil(), user_id: Uuid::nil() };
+    assert_eq!(played.minimum_client_level(), CLIENT_LEVEL_1_7);
 }
 
 #[tokio::test]

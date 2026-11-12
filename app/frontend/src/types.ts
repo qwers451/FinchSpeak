@@ -33,6 +33,16 @@ export interface AttachmentInfo {
   height?: number | null;
   /** The server made a 320 px preview. */
   has_thumb?: boolean;
+  /** A voice message: its length in milliseconds and its 64-value waveform (0 to 255). */
+  duration_ms?: number | null;
+  waveform?: number[] | null;
+}
+
+/** A recorded voice message, before it is uploaded (Ogg/Opus bytes). */
+export interface VoiceNote {
+  bytes: number[];
+  duration_ms: number;
+  waveform: number[];
 }
 
 /** The message a reply answers (as the server quotes it). */
@@ -226,6 +236,14 @@ export interface AudioDevice {
 }
 
 export type UserStatus = 'online' | 'idle' | 'donotdisturb' | 'offline';
+/** A soundboard sound as the server lists it. */
+export interface SoundInfo {
+  id: string;
+  name: string;
+  emoji: string | null;
+  uploader_id: string;
+  duration_ms: number;
+}
 /** Someone calls me to a voice room ("Позвать за собой" or "Позвать сюда"). */
 export interface FlockCall {
   from_user_id: string;
@@ -254,6 +272,7 @@ export interface SessionEvents {
   'new-message': IncomingMessage;
   'activity-changed': { user_id: string; game: string | null };
   'flock-call': FlockCall;
+  'sound-played': { sound_id: string; user_id: string };
   'message-rejected': { client_msg_id: string; code: number; message: string };
   'user-speaking': { peer_id: number; is_speaking: boolean };
   'voice-levels': { levels: [peerId: number, level: number][] };
