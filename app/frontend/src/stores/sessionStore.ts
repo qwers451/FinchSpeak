@@ -1,4 +1,5 @@
 import { createSignal } from 'solid-js';
+import { restoreGameActivities, setGameActivity } from './activityGameStore';
 import type { DeviceSession, SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
 import { setPendingMismatch, setPendingTofu } from './tofuStore';
 import { receiveInviteLink, setPendingInvite } from './inviteLink';
@@ -24,6 +25,7 @@ export const [connectionError, setConnectionError] = createSignal<string | null>
 /** Failed reconnect tries so far and the wait before the next one. */
 export const [reconnectInfo, setReconnectInfo] = createSignal<{ attempt: number; retryInSecs: number } | null>(null);
 export const [localPeerId, setLocalPeerId] = createSignal<number | null>(null);
+export const [nativeSessionGeneration, setNativeSessionGeneration] = createSignal<number | null>(null);
 export const [sessionUserId, setSessionUserId] = createSignal<string | null>(null);
 export const [knownUsers, setKnownUsers] = createSignal<User[]>([]);
 export const [presence, setPresence] = createSignal<Record<string, UserStatus>>({});
@@ -51,6 +53,8 @@ export function currentSessionGeneration(): number {
 
 export function resetSessionState() {
   updateVoiceLevels({ levels: [] });
+  setNativeSessionGeneration(null);
+  restoreGameActivities();
   setServerFeatures([]);
   sessionGeneration++;
   clearJoinSounds();
@@ -76,6 +80,8 @@ export function resetSessionState() {
 export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEvents[K]) => void } = {
   authenticated: (data) => {
     const { online_users, offline_users = [] } = data.initial_state;
+    setNativeSessionGeneration(data.session_generation ?? null);
+    restoreGameActivities(data.initial_state.features?.includes('activity') ? data.initial_state.activities : []);
     setServerFeatures(data.initial_state.features ?? []);
     setSessionUserId(data.user_id);
     setLocalPeerId(data.session_peer_id);
@@ -107,6 +113,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     noteIncoming(incoming);
     reactToMessage(incoming, isMentioned(incoming));
   },
+  'activity-changed': setGameActivity,
   'message-edited': handleMessageEdited,
   'message-deleted': handleMessageDeleted,
   'reaction-changed': handleReactionChanged,
@@ -187,6 +194,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   },
   'join-sound-changed': ({ user_id }) => invalidateJoinSound(user_id),
   'connection-lost': (reason) => {
+    restoreGameActivities();
     setServerFeatures([]);
     resetMicPreview();
     const ended = classifyEnd(reason);
@@ -210,6 +218,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     if (channel?.channel_type === 'text') void selectChannel(channel);
   },
   'reconnect-failed': (reason) => {
+    restoreGameActivities();
     setServerFeatures([]);
     setConnectionStatus('failed');
     setConnectionError(reason);
@@ -252,9 +261,10 @@ export function appendMissingProfiles({ online_users, offline_users = [] }: Sess
 
 export function restoreSessionSnapshot(snapshot: SessionSnapshot) {
   if (snapshot.connected && snapshot.initial_state) {
-    sessionHandlers.authenticated({ user_id: snapshot.user_id, session_peer_id: snapshot.session_peer_id,
+    sessionHandlers.authenticated({ user_id: snapshot.user_id, session_peer_id: snapshot.session_peer_id, session_generation: snapshot.session_generation,
       channels: snapshot.initial_state.channels, initial_state: snapshot.initial_state });
   } else {
+    restoreGameActivities();
     setServerFeatures([]);
     resetMicPreview();
     setConnectionStatus('disconnected');

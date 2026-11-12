@@ -18,6 +18,7 @@ pub struct PendingFingerprint {
 
 #[derive(serde::Serialize)]
 pub struct SessionSnapshot {
+    session_generation: u64,
     connected: bool,
     user_id: String,
     session_peer_id: u32,
@@ -43,6 +44,7 @@ pub async fn get_session_snapshot(state: State<'_, AppState>) -> Result<Option<S
     let pending_tofu = state.pending_fingerprint.read().await.clone()
         .map(|(hostname, fingerprint)| PendingFingerprint { hostname, fingerprint });
     Ok(Some(SessionSnapshot {
+        session_generation: generation,
         connected, user_id: user.id,
         session_peer_id: state.session_peer_id.load(Ordering::SeqCst),
         current_voice_channel: *state.current_voice_channel.read().await,
@@ -263,6 +265,7 @@ pub async fn end_other_sessions(state: State<'_, AppState>) -> Result<(), String
 /// First half of ending a session on this device: bumps the session generation first, so the token
 /// refresher and any reconnect loop stop before anything else is torn down.
 async fn stop_session_activity(state: &AppState) {
+    state.game_activity.lock().await.disconnect();
     state.session_generation.fetch_add(1, Ordering::SeqCst);
     *state.last_connect.write().await = None;
     state.audio_engine.lock().await.stop();

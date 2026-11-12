@@ -150,7 +150,8 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 .room-grid.compact { flex: none; gap: 10px; }
 .room-grid .vc { min-height: 120px; }
 .room-grid.compact .vc { padding: 10px; flex-direction: row; justify-content: flex-start; min-height: 0; }
-.room-grid.compact .vc .vol, .room-grid.compact .vc .tag { display: none; }
+.room-grid.compact .vc .vol, .room-grid.compact .vc .tag, .room-grid.compact .vc .game-activity { display: none; }
+.game-activity { max-width: 100%; }
 .vc .badges:empty { display: none; }
 .vc .vol { gap: 8px; }
 .vc .vol .range { flex: 1; min-width: 0; }

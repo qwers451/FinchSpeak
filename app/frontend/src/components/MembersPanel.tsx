@@ -1,7 +1,8 @@
 import { For, Index, Show } from 'solid-js';
 import { knownUsers, presence, statusTexts } from '../stores/sessionStore';
 import { participantContextMenu, participantMenuKey } from './voice/participantMenu';
-import { Avatar } from '../ui';
+import { Avatar, Icon } from '../ui';
+import { gameOf } from '../stores/activityGameStore';
 import type { User, UserStatus } from '../types';
 import { locale, t } from '../i18n';
 
@@ -27,9 +28,13 @@ export function MembersPanel() {
   const Row = (props: { user: User }) => (
     <div class={`mem${statusOf(props.user) === 'offline' ? ' off' : ''}`} tabindex="0" onContextMenu={(event) => participantContextMenu(event, props.user.id)} onKeyDown={(event) => participantMenuKey(event, props.user.id)}>
       <Avatar name={props.user.display_name || props.user.username} id={props.user.id} size={32} src={props.user.avatar_url} status={statusClass(statusOf(props.user))} />
-      <div class="col grow">
+      <div class="col grow" title={statusTexts()[props.user.id]}>
         <span class="trunc">{props.user.display_name || props.user.username}</span>
-        <Show when={statusTexts()[props.user.id]}><span class="t3 fs12 trunc">{statusTexts()[props.user.id]}</span></Show>
+        <Show when={gameOf(props.user.id)} fallback={
+          <Show when={statusTexts()[props.user.id]}><span class="t3 fs12 trunc">{statusTexts()[props.user.id]}</span></Show>
+        }>
+          <span class="row g4 t3 fs12 trunc"><Icon name="gamepad" size="sm" />{t('Playing {game}', { game: gameOf(props.user.id)! })}</span>
+        </Show>
       </div>
     </div>
   );

@@ -28,6 +28,8 @@ pub struct ClientSession {
     /// Accepts `VoiceMoved` and `JoinSoundChanged` on the control stream.
     pub supports_voice_extensions: bool,
     pub client_level: u16,
+    pub activity: Option<String>,
+    pub last_activity_update: Option<std::time::Instant>,
     pub connection: quinn::Connection,
     pub control_tx: Sender<ServerMessage>,
 }
@@ -48,6 +50,8 @@ type HashMapStreamers = std::collections::HashMap<u32, HashSet<u32>>;
 pub struct SessionManager {
     /// Configured before the API/QUIC listeners begin accepting clients.
     pub music: Arc<std::sync::OnceLock<Arc<crate::music::MusicService>>>,
+    /// One active reporting device per user. Serializes updates, clears and snapshots.
+    activities: Arc<std::sync::Mutex<std::collections::HashMap<Uuid, (u32, String)>>>,
     next_peer_id: Arc<AtomicU32>,
     /// Map session_peer_id -> ClientSession
     pub sessions: Arc<DashMap<u32, ClientSession>>,
@@ -92,6 +96,7 @@ impl SessionManager {
     pub fn new() -> Self {
         Self {
             music: Arc::new(std::sync::OnceLock::new()),
+            activities: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             next_peer_id: Arc::new(AtomicU32::new(1001)),
             sessions: Arc::new(DashMap::new()),
             user_to_peer: Arc::new(DashMap::new()),
@@ -143,7 +148,12 @@ impl SessionManager {
 
     /// Unregister a session upon disconnection.
     pub fn unregister_session(&self, peer_id: u32) {
+        let mut activities = self.activities.lock().unwrap_or_else(|error| error.into_inner());
         if let Some((_, session)) = self.sessions.remove(&peer_id) {
+            if activities.get(&session.user_id).is_some_and(|(owner, _)| *owner == peer_id) {
+                activities.remove(&session.user_id);
+                self.broadcast_control(&ServerMessage::ActivityChanged { user_id: session.user_id, game: None });
+            }
             if let dashmap::mapref::entry::Entry::Occupied(mut entry) = self.user_to_peer.entry(session.user_id)
                 && *entry.get() == peer_id
             {
@@ -160,6 +170,38 @@ impl SessionManager {
             if let Some(short_id) = session.current_voice_channel {
                 self.leave_voice(peer_id, short_id);
             }
+        }
+    }
+
+    pub fn activities(&self) -> Vec<finch_protocol::models::UserActivity> {
+        self.activities.lock().unwrap_or_else(|error| error.into_inner()).iter()
+            .map(|(&user_id, (_, game))| finch_protocol::models::UserActivity { user_id, game: game.clone() })
+            .collect()
+    }
+
+    /// Clears always bypass the nonempty update cooldown so privacy changes take effect at once.
+    pub fn set_activity(&self, peer_id: u32, game: Option<&str>, now: std::time::Instant) {
+        let game = game.map(|title| title.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(64).collect::<String>())
+            .filter(|title| !title.is_empty());
+        let mut activities = self.activities.lock().unwrap_or_else(|error| error.into_inner());
+        let Some(mut session) = self.sessions.get_mut(&peer_id) else { return; };
+        if game.is_some() {
+            if session.last_activity_update.is_some_and(|last| now.saturating_duration_since(last) < std::time::Duration::from_secs(5)) {
+                return;
+            }
+            session.last_activity_update = Some(now);
+        }
+        session.activity = game.clone();
+        let user_id = session.user_id;
+        drop(session);
+        let previous = activities.get(&user_id).map(|(_, game)| game.clone());
+        match &game {
+            Some(game) => { activities.insert(user_id, (peer_id, game.clone())); }
+            None if activities.get(&user_id).is_some_and(|(owner, _)| *owner == peer_id) => { activities.remove(&user_id); }
+            None => return,
+        }
+        if previous != game {
+            self.broadcast_control(&ServerMessage::ActivityChanged { user_id, game });
         }
     }
 
@@ -271,13 +313,17 @@ impl SessionManager {
 
     /// Broadcast a Control Stream message to all connected sessions.
     pub async fn broadcast_all(&self, msg: ServerMessage) {
+        self.broadcast_control(&msg);
+    }
+
+    fn broadcast_control(&self, msg: &ServerMessage) {
         let targets: Vec<_> = self
             .sessions
             .iter()
-            .filter(|session| Self::accepts_message(session, &msg))
+            .filter(|session| Self::accepts_message(session, msg))
             .map(|entry| (*entry.key(), entry.value().control_tx.clone(), entry.value().connection.clone()))
             .collect();
-        deliver(targets, &msg);
+        deliver(targets, msg);
     }
 
     /// Broadcast to everybody except the sessions of `user_id`.
@@ -339,7 +385,7 @@ mod tests {
                 token_id: String::new(), peer_id, user_id: Uuid::new_v4(),
                 username: "client".into(), role: "member".into(), current_voice_channel: None,
                 muted: false, deafened: false, sharing_screen: false, server_muted: false,
-                supports_voice_extensions: true, client_level,
+                supports_voice_extensions: true, client_level, activity: None, last_activity_update: None,
                 connection: connection.clone(), control_tx,
             });
             manager.join_voice(peer_id, room);
@@ -388,7 +434,7 @@ mod tests {
                 token_id: String::new(),
                 peer_id, user_id, username: "alice".into(), role: "member".into(),
                 current_voice_channel: None, muted: false, deafened: false, sharing_screen: false, server_muted: false,
-                supports_voice_extensions: false, client_level: 0,
+                supports_voice_extensions: false, client_level: 0, activity: None, last_activity_update: None,
                 connection: connection.clone(), control_tx,
             });
         }
@@ -400,6 +446,28 @@ mod tests {
         let (manager, user, _server, _client, _remote) = registered_twice().await;
         manager.unregister_session(1001);
         assert_eq!(manager.user_to_peer.get(&user).map(|peer| *peer), Some(1002));
+    }
+
+    #[tokio::test]
+    async fn activity_cooldown_is_per_session_and_clear_does_not_reopen_it() {
+        let (manager, user, _server, _client, _remote) = registered_twice().await;
+        let now = std::time::Instant::now();
+        manager.set_activity(1001, Some("Portal"), now);
+        assert_eq!(manager.activities()[0].game, "Portal");
+        manager.set_activity(1001, Some("Hades"), now + std::time::Duration::from_secs(4));
+        assert_eq!(manager.activities()[0].game, "Portal");
+        manager.set_activity(1001, None, now + std::time::Duration::from_secs(4));
+        assert!(manager.activities().is_empty());
+        manager.set_activity(1001, Some("Hades"), now + std::time::Duration::from_secs(4));
+        assert!(manager.activities().is_empty());
+        manager.set_activity(1001, Some("Hades"), now + std::time::Duration::from_secs(5));
+        assert_eq!(manager.activities()[0].game, "Hades");
+        manager.set_activity(1002, Some("Other device"), now);
+        assert_eq!(manager.activities()[0].game, "Other device");
+        manager.unregister_session(1001);
+        assert_eq!(manager.activities()[0].game, "Other device");
+        manager.unregister_session(1002);
+        assert!(!manager.activities().iter().any(|activity| activity.user_id == user));
     }
 
     #[tokio::test]

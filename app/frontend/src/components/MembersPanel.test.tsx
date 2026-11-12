@@ -1,6 +1,6 @@
 import { render } from 'solid-js/web';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { resetSessionState, sessionHandlers, setKnownUsers, setPresence } from '../stores/sessionStore';
+import { resetSessionState, sessionHandlers, setKnownUsers, setPresence, setStatusTexts } from '../stores/sessionStore';
 import { DEFAULT_PREFS, setPrefs } from '../stores/settingsStore';
 import type { Role, User } from '../types';
 import { MembersPanel } from './MembersPanel';
@@ -14,6 +14,19 @@ const mount = () => {
   return host;
 };
 const setLanguage = (language: 'ru' | 'en') => setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language } });
+
+it('shows the game instead of status text and retains the status as a tooltip', () => {
+  setKnownUsers([user('mia', 'member', 'Mia')]);
+  setPresence({ mia: 'online' });
+  setStatusTexts({ mia: 'On a break' });
+  sessionHandlers['activity-changed']({ user_id: 'mia', game: 'Portal' });
+  const host = mount();
+  expect(host.textContent).toContain('Playing Portal');
+  expect(host.querySelector('[title="On a break"]')).not.toBeNull();
+  sessionHandlers['activity-changed']({ user_id: 'mia', game: null });
+  expect(host.textContent).toContain('On a break');
+  expect(host.textContent).not.toContain('Playing');
+});
 /** Section headings and the names under them, in screen order. */
 const layout = (host: HTMLElement) =>
   Array.from(host.querySelectorAll('.sec-label, .mem')).map((el) => (el.classList.contains('sec-label') ? `# ${el.textContent}` : el.querySelector('.trunc')!.textContent));

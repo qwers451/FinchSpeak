@@ -5,9 +5,9 @@ import { channels } from '../../stores/chatStore';
 import {
   deleteAvatar, endOtherSessions, endSession, loadSessions, profileMessage, profileOpen, saveDisplayName, savePassword, saveStatus, setProfileMessage, setProfileOpen, sessions, STATUS_TEXT_MAX,
 } from '../../stores/profileStore';
-import { presence, statusTexts } from '../../stores/sessionStore';
+import { presence, serverFeatures, statusTexts } from '../../stores/sessionStore';
 import {
-  isChannelMuted, muteChannel, prefs, unmuteChannel, updateAppearance, updateNotifications,
+  isChannelMuted, muteChannel, prefs, unmuteChannel, updateAppearance, updateNotifications, updatePrivacy,
 } from '../../stores/settingsStore';
 import { availableUpdate, setAvailableUpdate } from '../../stores/updateStore';
 import { activeVoiceChannel } from '../../stores/voiceStore';
@@ -83,6 +83,11 @@ function ProfilePage() {
 
   return (
     <div class="col g24">
+      <Show when={serverFeatures().includes('activity')}>
+        <Row title={t("Show what I'm playing")}
+          hint={t('FinchSpeak notices the game in front and shows its name to everyone on the server.')}
+          control={<Toggle label={t("Show what I'm playing")} checked={prefs().privacy.shareActivity} onChange={(shareActivity) => updatePrivacy({ shareActivity })} />} />
+      </Show>
       <div class="row g20">
         <Avatar name={me()?.display_name} id={me()?.id} src={me()?.avatar_url} size={96} status={myStatus() === 'idle' ? 'idle' : myStatus() === 'donotdisturb' ? 'dnd' : 'on'} />
         <div class="col g8">

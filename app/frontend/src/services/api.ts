@@ -10,6 +10,9 @@ let browserServerUrl = 'https://127.0.0.1:8443';
 let browserUser: User | null = null;
 
 export const api = {
+  setActivitySharing: async (sessionGeneration: number, peerId: number, enabled: boolean, revision: number): Promise<void> => {
+    if (isTauri()) await invoke('set_activity_sharing', { sessionGeneration, peerId, enabled, revision });
+  },
   // Auth
   login: async (serverUrl: string, username: string, password: string, remember = false): Promise<User> => {
     if (isTauri()) {

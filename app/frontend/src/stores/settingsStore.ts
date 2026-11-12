@@ -32,6 +32,7 @@ export interface AppearancePrefs {
 }
 
 export interface Prefs {
+  privacy: { shareActivity: boolean };
   notifications: NotificationPrefs;
   appearance: AppearancePrefs;
   /** Channel id -> muted until (ms since 1970; Infinity as null = until turned back on). */
@@ -39,6 +40,7 @@ export interface Prefs {
 }
 
 export const DEFAULT_PREFS: Prefs = {
+  privacy: { shareActivity: true },
   notifications: { mentions: true, allMessages: false, voiceJoin: true, sounds: true, voiceSounds: true, soundVolume: 0.6, flash: true },
   appearance: { theme: 'claude', customColors: DEFAULT_THEME_COLORS, language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, speakingStyle: 'pulse', showMembers: true },
   mutedChannels: {},
@@ -68,6 +70,7 @@ export function parsePrefs(raw: string | null): Prefs {
     if (until === null || (typeof until === 'number' && Number.isFinite(until))) muted[id] = until as number | null;
   }
   return {
+    privacy: { shareActivity: bool(saved.privacy?.shareActivity, d.privacy.shareActivity) },
     notifications: {
       mentions: bool(n.mentions, d.notifications.mentions),
       allMessages: bool(n.allMessages, d.notifications.allMessages),
@@ -100,6 +103,10 @@ function load(): Prefs {
 }
 
 export const [prefs, setPrefs] = createSignal<Prefs>(load());
+
+export function updatePrivacy(change: Partial<Prefs['privacy']>) {
+  setPrefs((previous) => ({ ...previous, privacy: { ...previous.privacy, ...change } }));
+}
 
 export function updateNotifications(change: Partial<NotificationPrefs>) {
   setPrefs((previous) => ({ ...previous, notifications: { ...previous.notifications, ...change } }));

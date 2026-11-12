@@ -24,6 +24,7 @@ import { SettingsModal } from './components/settings/SettingsModal';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { startUpdateChecks } from './stores/updateStore';
 import { startAutoIdle } from './stores/idleStore';
+import { startGameActivitySync } from './stores/activitySharing';
 import { t } from './i18n';
 import { describeError } from './i18n/errors';
 
@@ -33,6 +34,7 @@ export function App() {
   const [eventsReady, setEventsReady] = createSignal(false);
 
   onMount(async () => {
+    onCleanup(startGameActivitySync());
     startDesktopSync();
     try {
       const subscriptions = await subscribeSessionEvents();

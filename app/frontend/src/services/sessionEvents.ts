@@ -12,7 +12,7 @@ export async function subscribeSessionEvents(): Promise<{ dispose: UnlistenFn; r
   let disposed = false;
   let pending: { scope: RefreshScope; full: boolean; updates: (() => void)[]; done: Promise<void> } | undefined;
   let profiles: { scope: RefreshScope; queued: Set<string>; attempted: Map<string, number> } | undefined;
-  const stateEvents = new Set<keyof SessionEvents>(['authenticated', 'presence-update', 'channel-created', 'user-joined-voice', 'user-left-voice', 'user-voice-state-changed', 'connection-lost', 'reconnecting', 'reconnect-failed']);
+  const stateEvents = new Set<keyof SessionEvents>(['authenticated', 'activity-changed', 'presence-update', 'channel-created', 'user-joined-voice', 'user-left-voice', 'user-voice-state-changed', 'connection-lost', 'reconnecting', 'reconnect-failed']);
   const expectedUser = () => currentUser()?.id ?? sessionUserId();
   const currentScope = (): RefreshScope | undefined => {
     const userId = expectedUser();

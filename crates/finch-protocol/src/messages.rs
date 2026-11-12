@@ -60,6 +60,9 @@ pub enum ClientMessage {
         text: Option<String>,
     },
 
+    /// Share only a short game title, or clear this device's report.
+    SetActivity { game: Option<String> },
+
     /// Update own voice state (mute/deafen).
     UpdateVoiceState {
         muted: bool,

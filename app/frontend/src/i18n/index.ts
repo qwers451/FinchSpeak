@@ -4,6 +4,10 @@ export type TranslationParams = Record<string, string | number>;
 
 /** Russian UI copy keyed by its English source. User and server supplied strings stay untouched. */
 export const ru: Readonly<Record<string, string>> = {
+  'Playing {game}': 'Играет в {game}',
+  'Could not update game activity sharing': 'Не удалось изменить настройку игровой активности',
+  "Show what I'm playing": 'Показывать, во что я играю',
+  'FinchSpeak notices the game in front and shows its name to everyone on the server.': 'FinchSpeak замечает запущенную игру и показывает её название всем на сервере.',
   'Settings': 'Настройки', 'Profile': 'Профиль', 'Notifications': 'Уведомления', 'Appearance': 'Внешний вид', 'Keys and about': 'Клавиши и о программе',
   'Theme': 'Тема', 'Claude Dark': 'Claude Dark', 'Finch Custom': 'Finch Custom', 'Language': 'Язык', 'Russian': 'Русский', 'English': 'Английский',
   'Density': 'Плотность', 'Comfortable': 'Свободная', 'Compact': 'Компактная', 'Compact fits more messages on the screen.': 'Компактный режим показывает больше сообщений на экране.',

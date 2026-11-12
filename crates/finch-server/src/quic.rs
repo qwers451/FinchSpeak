@@ -238,23 +238,14 @@ pub async fn handle_connection(
     let (control_tx, mut control_rx) = mpsc::channel::<ServerMessage>(128);
 
     // 5. Build Initial Server State
-    let initial_state = crate::api::state::server_state(&pool, &sessions, Some(user_id), Some(user_id)).await?;
+    let mut initial_state = crate::api::state::server_state(&pool, &sessions, Some(user_id), Some(user_id)).await?;
     let mut channel_mappings = Vec::new();
     for channel in &initial_state.channels {
         channel_mappings.push(ChannelMapping { id: channel.id, short_id: channel.short_id });
         sessions.register_channel(channel.id, channel.short_id);
     }
 
-    // 6. Send Authenticated response
-    let auth_ack = ServerMessage::Authenticated {
-        user_id,
-        session_peer_id: peer_id,
-        channels: channel_mappings,
-        initial_state,
-    };
-    send_stream.write_all(&encode_message(&auth_ack)?).await?;
-
-    // 7. Register session and broadcast PresenceUpdate
+    // Register before the activity snapshot, so any subsequent change is queued after the snapshot.
     let session = ClientSession {
         token_id: claims.jti.clone(),
         peer_id,
@@ -268,10 +259,27 @@ pub async fn handle_connection(
         server_muted: false,
         supports_voice_extensions,
         client_level,
+        activity: None,
+        last_activity_update: None,
         connection: conn.clone(),
         control_tx: control_tx.clone(),
     };
     sessions.register_session(session);
+    initial_state.activities = sessions.activities();
+    let auth_ack = ServerMessage::Authenticated {
+        user_id, session_peer_id: peer_id, channels: channel_mappings, initial_state,
+    };
+    let encoded = match encode_message(&auth_ack) {
+        Ok(encoded) => encoded,
+        Err(error) => {
+            sessions.unregister_session(peer_id);
+            return Err(error.into());
+        }
+    };
+    if let Err(error) = send_stream.write_all(&encoded).await {
+        sessions.unregister_session(peer_id);
+        return Err(error.into());
+    }
 
     let (pref, pref_text): (String, Option<String>) = sqlx::query_as("SELECT status_pref, status_text FROM users WHERE id = ?")
         .bind(user_id.to_string())
@@ -749,6 +757,15 @@ async fn handle_client_message(
             if saved.is_ok() {
                 sessions.broadcast_all(ServerMessage::PresenceUpdate { user_id, status, status_text: text }).await;
             }
+        }
+
+        ClientMessage::SetActivity { game } => {
+            let dnd = if game.is_some() {
+                sqlx::query_scalar::<_, String>("SELECT status_pref FROM users WHERE id = ?")
+                    .bind(user_id.to_string()).fetch_optional(pool).await.ok().flatten()
+                    .is_none_or(|status| status == "dnd")
+            } else { false };
+            sessions.set_activity(peer_id, if dnd { None } else { game.as_deref() }, std::time::Instant::now());
         }
 
         ClientMessage::Typing { channel_id } => {

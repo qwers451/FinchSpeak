@@ -205,9 +205,17 @@ pub struct ChannelMapping {
     pub short_id: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UserActivity {
+    pub user_id: Uuid,
+    pub game: String,
+}
+
 /// Full server state sent to the client upon authentication.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ServerState {
+    #[serde(default)]
+    pub activities: Vec<UserActivity>,
     /// Optional server functionality, absent on legacy servers.
     #[serde(default)]
     pub features: Vec<String>,

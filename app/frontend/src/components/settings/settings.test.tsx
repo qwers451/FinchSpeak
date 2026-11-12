@@ -5,7 +5,7 @@ import { avatarSrc, clearAvatarCache, userIdOf } from '../../stores/avatarCache'
 import { setCurrentUser, currentUser } from '../../stores/authStore';
 import { logoutUser } from '../../stores/authStore';
 import { endSession, loadSessions, profileOpen, setProfileMessage, setProfileOpen } from '../../stores/profileStore';
-import { resetSessionState, sessionHandlers, setKnownUsers } from '../../stores/sessionStore';
+import { resetSessionState, sessionHandlers, setKnownUsers, setServerFeatures } from '../../stores/sessionStore';
 import { DEFAULT_PREFS, prefs, setPrefs } from '../../stores/settingsStore';
 import { setChannels } from '../../stores/chatStore';
 import { clearToasts } from '../../ui';
@@ -52,6 +52,18 @@ it('saves a new display name', async () => {
   await flush();
   expect(save).toHaveBeenCalledWith('Alice C.');
   expect(currentUser()?.display_name).toBe('Alice C.');
+});
+
+it('only offers game sharing on a server with activity support and preserves an opt-out', () => {
+  expect(document.querySelector('[aria-label="Show what I\'m playing"]')).toBeNull();
+  setServerFeatures(['activity']);
+  const sharing = document.querySelector<HTMLButtonElement>('[aria-label="Show what I\'m playing"]')!;
+  expect(sharing.getAttribute('aria-checked')).toBe('true');
+  sharing.click();
+  expect(prefs().privacy.shareActivity).toBe(false);
+  expect(JSON.parse(localStorage.getItem('finchspeak.prefs')!).privacy.shareActivity).toBe(false);
+  setServerFeatures([]);
+  expect(document.querySelector('[aria-label="Show what I\'m playing"]')).toBeNull();
 });
 
 it('choosing a status sends it with the text, trimmed', async () => {

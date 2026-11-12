@@ -9,6 +9,7 @@ import { openParticipantMenu, participantContextMenu, participantMenuKey } from 
 import { Avatar, Button, Icon, Slider } from '../../ui';
 import { draggedTile, setDraggedTile, moveTile } from '../../stores/tileOrderStore';
 import { t } from '../../i18n';
+import { gameOf } from '../../stores/activityGameStore';
 
 type Props = {
   participant: VoiceParticipant;
@@ -93,6 +94,11 @@ export function ParticipantTile(props: Props) {
         <Show when={props.isMe}> <span class="t3 fs12 participant-you">{t('(you)')}</span></Show>
         <Show when={user()?.role === 'admin'}> <span class="tag admin">{t('Admin')}</span></Show>
       </span>
+      <Show when={gameOf(p().user_id)}>
+        <span class="game-activity row g4 fs12 t3 trunc" title={t('Playing {game}', { game: gameOf(p().user_id)! })}>
+          <Icon name="gamepad" size="sm" />{t('Playing {game}', { game: gameOf(p().user_id)! })}
+        </span>
+      </Show>
       <Show when={speaking()}><span class="tag cyan">{t('Speaking')}</span></Show>
       <Show when={poor()}><span class="tag amber">{t('Poor connection')}</span></Show>
       <Show when={!props.isMe}>

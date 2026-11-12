@@ -131,13 +131,14 @@ mod tests {
         }).unwrap();
         let snapshot: ServerState = decode_message(&mut BytesMut::from(frame.as_slice())).unwrap();
         assert!(snapshot.features.is_empty());
+        assert!(snapshot.activities.is_empty());
     }
 
     #[test]
     fn legacy_clients_can_decode_a_snapshot_with_features() {
         let frame = encode_message(&ServerState {
             channels: vec![], online_users: vec![], voice_states: vec![], unread: vec![],
-            features: vec!["activity".into()],
+            features: vec!["activity".into()], activities: vec![],
         }).unwrap();
         let snapshot: LegacyServerState = decode_message(&mut BytesMut::from(frame.as_slice())).unwrap();
         assert!(snapshot.channels.is_empty());

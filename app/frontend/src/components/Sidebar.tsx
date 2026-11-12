@@ -24,6 +24,7 @@ import { isMeParticipant } from './voice/ParticipantTile';
 import { connectionStatus, localPeerId, knownUsers, myStatus as ownStatus, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
 import { currentUser } from '../stores/authStore';
+import { gameOf } from '../stores/activityGameStore';
 import type { Channel, VoiceParticipant } from '../types';
 import { api } from '../services/api';
 import { moveChannel, removeChannel, renameChannel } from '../stores/channelAdminStore';
@@ -231,7 +232,7 @@ export function Sidebar() {
                     <div class="vp" tabindex="0" draggable={canDrag(participant)}
                       onDragStart={(event) => dragStart(event, participant)} onDragEnd={() => { setDragged(null); setDropChannel(null); }} onContextMenu={(event) => participantContextMenu(event, participant.user_id, participant)} onKeyDown={(event) => participantMenuKey(event, participant.user_id, participant)}>
                       <Avatar name={participant.username} id={participant.user_id} size={24} src={knownUsers().find((user) => user.id === participant.user_id)?.avatar_url} speaking={speakingPeers().has(participant.peer_id) || (isMeParticipant(participant, localPeerId()) && !isMuted() && isLocalSpeaking())} levelPeerId={participant.peer_id} />
-                      <span class="grow trunc">{participant.username}</span>
+                      <span class="grow trunc">{participant.username}</span><Show when={gameOf(participant.user_id)}><Icon name="gamepad" title={t('Playing {game}', { game: gameOf(participant.user_id)! })} /></Show>
                       <Show when={!isMeParticipant(participant, localPeerId()) && isLocallyMuted(participant.user_id)}><Icon name="vol-off" title={t('You muted this person')} /></Show>
                       <Show when={participant.is_muted}><Icon name="mic-off" title={t('Muted')} class="tr" /></Show>
                       <Show when={participant.is_deafened}><Icon name="phones-off" title={t('Deafened')} class="tr" /></Show>
