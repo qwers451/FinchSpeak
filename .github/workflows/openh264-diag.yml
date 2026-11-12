@@ -1,0 +1,158 @@
+name: Diagnose OpenH264 assembly
+
+# Push a tag such as v1.0.0 to build the installer and the server package and publish them.
+# The updater signing key is a repository secret that only the owner sets:
+#   TAURI_SIGNING_PRIVATE_KEY (the content of the private key file) and TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['ci/openh264-diag']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.3'
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - uses: actions/cache@v4
+        with:
+          path: target/native-cache
+          key: native-release-v2-${{ runner.os }}-${{ env.VCToolsVersion }}-${{ hashFiles('native/webrtc/dependencies.lock.json', 'scripts/prepare-webrtc.ps1', 'native/webrtc/meson.build') }}
+      - name: Prepare and verify original C++ audio
+        shell: pwsh
+        run: |
+          ./scripts/prepare-webrtc.ps1 -Configuration Release
+          "FINCH_WEBRTC_ROOT=$env:FINCH_WEBRTC_ROOT" >> $env:GITHUB_ENV
+          ./native/webrtc/probe/prepare-tests.ps1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - name: The tag must match the version in the code
+        shell: pwsh
+        run: |
+          $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart('v') } else { (Get-Content app/tauri.conf.json | ConvertFrom-Json).version }
+          "FINCH_RELEASE_TAG=v$tag" >> $env:GITHUB_ENV
+          $cargo = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          $tauri = (Get-Content app/tauri.conf.json | ConvertFrom-Json).version
+          if ($tag -ne $cargo -or $tag -ne $tauri) { throw "Tag $tag, Cargo.toml $cargo, tauri.conf.json $tauri must be the same" }
+
+      - name: Frontend dependencies
+        working-directory: app/frontend
+        run: npm ci
+
+      - name: Frontend tests
+        working-directory: app/frontend
+        run: npm test
+
+      - name: Frontend type check and build
+        working-directory: app/frontend
+        run: npm run build
+
+      - name: Check NASM for the screen encoder
+        shell: pwsh
+        run: nasm -v
+
+      - name: Installer
+        working-directory: app
+        run: ./frontend/node_modules/.bin/tauri build --bundles nsis
+
+      - name: Verify OpenH264 x64 assembly
+        shell: pwsh
+        run: |
+          Get-Command nasm | Format-List Source
+          foreach ($d in Get-ChildItem -Path target/release/build -Directory -Filter 'openh264-sys2-*') {
+            "=== $($d.Name)"
+            foreach ($f in 'output', 'stderr') { $path = Join-Path $d.FullName $f; if (Test-Path $path) { "--- $f"; Get-Content $path | Select-String -NotMatch '^cargo:rerun-if' } }
+            $out = Join-Path $d.FullName 'out'
+            if (Test-Path $out) { "--- objects"; Get-ChildItem $out -Filter '*.o' | Select-Object -First 400 -ExpandProperty Name | Sort-Object | Out-String -Width 400 }
+          }
+      - name: Server package
+        shell: pwsh
+        run: |
+          ./scripts/build-server-release.ps1
+          ./scripts/package-release.ps1
+
+      - name: Client and installer artwork
+        shell: pwsh
+        run: |
+          $version = $env:FINCH_RELEASE_TAG.TrimStart('v')
+          ./scripts/test-release-icons.ps1 -Executable target/release/finch-app.exe -Installer "target/release/bundle/nsis/FinchSpeak_${version}_x64-setup.exe"
+
+      - name: Packaged server smoke test
+        shell: pwsh
+        run: |
+          ./scripts/test-server-launcher.ps1
+          ./scripts/test-release-package.ps1
+          ./scripts/test-server-launcher.ps1 -Archive dist/FinchSpeak-windows.zip
+
+      - name: Sign the installer and write latest.json
+        shell: pwsh
+        working-directory: app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "The secret TAURI_SIGNING_PRIVATE_KEY is not set: updates cannot be signed" }
+          $version = $env:FINCH_RELEASE_TAG.TrimStart('v')
+          $installer = Get-Item "../target/release/bundle/nsis/FinchSpeak_${version}_x64-setup.exe"
+          ./frontend/node_modules/.bin/tauri signer sign $installer.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node ../scripts/make-latest-json.mjs $installer.FullName "$env:FINCH_RELEASE_TAG" "${{ github.repository }}" ../dist/latest.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run --release -p finch-app --features tauri/custom-protocol --example verify-release -- $installer.FullName ../dist/latest.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($file in @($installer.FullName, "$($installer.FullName).sig", "../dist/latest.json")) {
+            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $(Split-Path -Leaf $file)" | Add-Content ../dist/SHA256SUMS.txt -Encoding ascii
+          }
+
+      - name: Runtime and isolated install/upgrade
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          ./scripts/test-client-runtime.ps1 -Executable target/release/finch-app.exe
+          ./scripts/test-client-install.ps1 -PreviousVersion 1.4.1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate
+          path: |
+            dist/*.zip
+            dist/*.txt
+            dist/*.json
+            target/release/bundle/nsis/*
+            target/install-qa/report.json
+            target/native/Release/provenance.json
+
+      - name: Publish
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:FINCH_RELEASE_TAG.TrimStart('v')
+          $installer = Get-Item "target/release/bundle/nsis/FinchSpeak_${version}_x64-setup.exe"
+          gh release create "${{ github.ref_name }}" --title "FinchSpeak ${{ github.ref_name }}" --notes-file "docs/RELEASE-NOTES-$version.md" `
+            $installer.FullName "$($installer.FullName).sig" dist/FinchSpeak-server-windows.zip dist/FinchSpeak-windows.zip dist/latest.json dist/SHA256SUMS.txt
