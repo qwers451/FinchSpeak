@@ -71,6 +71,18 @@ jobs:
         working-directory: app/frontend
         run: npm run build
 
+      # The NASM that comes with Strawberry Perl on the runner silently fails for OpenH264, which
+      # then falls back to plain C (several times slower). Install a known NASM first on PATH.
+      - uses: ilammy/setup-nasm@v1
+      - name: Check NASM for the screen encoder
+        shell: pwsh
+        run: |
+          (Get-Command nasm).Source
+          nasm -v
+          "global probe`nsection .text`nprobe: ret" | Set-Content -Encoding ascii "$env:RUNNER_TEMP/probe.asm"
+          nasm -f win64 "$env:RUNNER_TEMP/probe.asm" -o "$env:RUNNER_TEMP/probe.obj"
+          if ($LASTEXITCODE -ne 0) { throw "NASM cannot assemble a win64 object" }
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
@@ -79,10 +91,6 @@ jobs:
           RUST_BACKTRACE: 1
         # Keep wall-clock media checks independent of CPU-heavy signal metrics.
         run: cargo test --workspace --locked -- --test-threads=1
-
-      - name: Check NASM for the screen encoder
-        shell: pwsh
-        run: nasm -v
 
       - name: Installer
         working-directory: app
