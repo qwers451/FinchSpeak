@@ -239,6 +239,7 @@ pub fn run() {
             commands::chat::search_messages,
             commands::admin::audit_log,
             commands::admin::server_overview,
+            commands::admin::server_health,
             commands::admin::set_registration,
             commands::admin::backup_now,
             commands::admin::moderate_voice,
@@ -265,6 +266,8 @@ pub fn run() {
             // Voice
             commands::voice::join_voice_channel,
             commands::voice::leave_voice_channel,
+            commands::voice::call_flock,
+            commands::voice::call_user,
             commands::voice::set_voice_state,
             commands::voice::get_audio_devices,
             commands::voice::set_audio_devices,

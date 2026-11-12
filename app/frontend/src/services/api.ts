@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { AuditEntry, DeviceSession, Role, SearchHit, ServerOverview, UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot, MusicCommand, MusicEvents, MusicTrack } from '../types';
+import type { AuditEntry, DeviceSession, Role, SearchHit, ServerHealth, ServerOverview,UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot, MusicCommand, MusicEvents, MusicTrack } from '../types';
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -424,6 +424,11 @@ export const api = {
     throw new Error('The server page needs the desktop app');
   },
 
+  serverHealth: async (): Promise<ServerHealth> => {
+    if (isTauri()) return invoke('server_health');
+    throw new Error('The health panel needs the desktop app');
+  },
+
   setRegistration: async (mode: 'open' | 'invite'): Promise<void> => {
     if (isTauri()) return invoke('set_registration', { mode });
   },
@@ -612,6 +617,12 @@ export const api = {
   },
   musicCommand: async (command: MusicCommand): Promise<void> => {
     if (isTauri()) return invoke('music_command', { command });
+  },
+  callFlock: async (targetChannel: string): Promise<void> => {
+    if (isTauri()) return invoke('call_flock', { targetChannel });
+  },
+  callUser: async (userId: string): Promise<void> => {
+    if (isTauri()) return invoke('call_user', { userId });
   },
   musicSetVolume: async (volume: number): Promise<void> => {
     if (isTauri()) return invoke('music_set_volume', { volume });

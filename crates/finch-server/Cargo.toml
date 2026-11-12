@@ -59,6 +59,9 @@ bytes = { workspace = true }
 # Config
 toml = "0.8"
 
+# Health panel: CPU and memory of this process, system memory, free disk
+sysinfo = { version = "0.33", default-features = false, features = ["system", "disk"] }
+
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

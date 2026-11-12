@@ -11,8 +11,9 @@ import { api } from '../../services/api';
 import { buildInviteLink } from '../../stores/inviteLink';
 import { Avatar, Button, ConfirmDialog, Field, Icon, type IconName, Modal, pushToast, Toggle } from '../../ui';
 import { formatBytes, formatDuration, locale, t } from '../../i18n';
+import { HealthTab } from './HealthTab';
 
-type Tab = 'members' | 'invites' | 'channels' | 'server' | 'log';
+type Tab = 'members' | 'invites' | 'channels' | 'server' | 'health' | 'log';
 
 const when = (seconds: number | null | undefined) => (seconds ? new Date(seconds * 1000).toLocaleString(locale() === 'ru' ? 'ru-RU' : 'en-GB') : t('never'));
 const ago = (seconds: number | null | undefined, now = Date.now()) => {
@@ -320,7 +321,7 @@ export function AdminModal() {
   const isAdmin = () => currentUser()?.role === 'admin';
   const tabs = (): { id: Tab; label: string; icon: IconName }[] => [
     { id: 'members', label: 'Members', icon: 'users' },
-    ...(isAdmin() ? [{ id: 'invites' as const, label: 'Invitations', icon: 'ticket' as const }, { id: 'channels' as const, label: 'Channels', icon: 'hash' as const }, { id: 'server' as const, label: 'Server', icon: 'db' as const }] : []),
+    ...(isAdmin() ? [{ id: 'invites' as const, label: 'Invitations', icon: 'ticket' as const }, { id: 'channels' as const, label: 'Channels', icon: 'hash' as const }, { id: 'server' as const, label: 'Server', icon: 'db' as const }, { id: 'health' as const, label: 'Health', icon: 'bars' as const }] : []),
     { id: 'log', label: 'Log', icon: 'clock' },
   ];
   // Load what a tab shows when it is opened.
@@ -344,6 +345,7 @@ export function AdminModal() {
           <Show when={tab() === 'invites' && isAdmin()}><InvitesTab /></Show>
           <Show when={tab() === 'channels' && isAdmin()}><ChannelsTab /></Show>
           <Show when={tab() === 'server' && isAdmin()}><ServerTab /></Show>
+          <Show when={tab() === 'health' && isAdmin()}><HealthTab /></Show>
           <Show when={tab() === 'log'}><LogTab /></Show>
         </div>
       </div>

@@ -148,7 +148,7 @@ pub async fn connect(
     let encoded = encode_message(&ClientMessage::Authenticate {
         token: params.token,
         supports_voice_extensions: true,
-        client_level: finch_protocol::CLIENT_LEVEL_1_5,
+        client_level: finch_protocol::CLIENT_LEVEL_1_7,
     })?;
     send_stream
         .write_all(&encoded)

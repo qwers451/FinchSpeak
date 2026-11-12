@@ -51,6 +51,8 @@ type HashMapStreamers = std::collections::HashMap<u32, HashSet<u32>>;
 pub struct SessionManager {
     /// Configured before the API/QUIC listeners begin accepting clients.
     pub music: Arc<std::sync::OnceLock<Arc<crate::music::MusicService>>>,
+    /// Soundboard settings, set with the router; unset means the default (enabled).
+    pub soundboard: Arc<std::sync::OnceLock<crate::config::SoundboardConfig>>,
     /// One active reporting device per user. Serializes updates, clears and snapshots.
     activities: Arc<std::sync::Mutex<std::collections::HashMap<Uuid, (u32, String)>>>,
     next_peer_id: Arc<AtomicU32>,
@@ -97,6 +99,7 @@ impl SessionManager {
     pub fn new() -> Self {
         Self {
             music: Arc::new(std::sync::OnceLock::new()),
+            soundboard: Arc::new(std::sync::OnceLock::new()),
             activities: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             next_peer_id: Arc::new(AtomicU32::new(1001)),
             sessions: Arc::new(DashMap::new()),

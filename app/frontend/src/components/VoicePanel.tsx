@@ -1,8 +1,11 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { endedShare, watching } from '../stores/screenStore';
-import { localPeerId } from '../stores/sessionStore';
+import { localPeerId, serverFeatures } from '../stores/sessionStore';
 import { activeVoiceChannel, pingRtt, speakingPeers, voiceParticipants } from '../stores/voiceStore';
-import { Avatar, Icon, Modal } from '../ui';
+import { Avatar, Button, Icon, Modal } from '../ui';
+import { channels } from '../stores/chatStore';
+import { callFlock } from '../stores/flockStore';
+import { openContextMenu, type MenuItem } from '../ui/ContextMenu';
 import { MusicPanel, formatClock } from './music/MusicPanel';
 import { musicAvailable, musicPanelOpen, musicPosition, musicState, setMusicPanelOpen } from '../stores/musicStore';
 import { SharePickerModal } from './screen/SharePickerModal';
@@ -34,6 +37,11 @@ export function VoicePanel() {
   const tiles = () => arranged().grid.length;
   const ping = () => pingLabel(pingRtt());
   const showViewer = () => !!watching() || !!endedShare();
+  /** Rooms I could call everybody to: every voice room but the one I am in. */
+  const otherRooms = () => channels().filter((room) => room.channel_type === 'voice' && room.id !== activeVoiceChannel()?.id);
+  const openFlockMenu = (anchor: HTMLElement) => openContextMenu(anchor, otherRooms().map((room): MenuItem => ({
+    kind: 'item', label: room.name, icon: 'vol', onSelect: () => void callFlock(room),
+  })));
   // Below 940 px the music panel is a dialog; wider, it is a 340 px column beside the room.
   const [wide, setWide] = createSignal(window.innerWidth >= 940);
   onMount(() => {
@@ -53,6 +61,11 @@ export function VoicePanel() {
         <h3 style={{ 'font-size': '18px' }}>{activeVoiceChannel()?.name ?? t('Voice room')}</h3>
         <span class="tag violet">{t('{count} in room', { count: voiceParticipants().length })}</span>
         <span class="grow" />
+        <Show when={serverFeatures().includes('flock')}>
+          <Button size="sm" variant="ghost" icon="vol" disabled={otherRooms().length === 0} onClick={(event) => openFlockMenu(event.currentTarget)}>
+            {t('Call everyone along')}
+          </Button>
+        </Show>
         <Show when={musicAvailable() && musicState()?.playing}>
           {(now) => (
             <button type="button" class="music-now-chip" title={t('Music')} onClick={() => setMusicPanelOpen(true)}>

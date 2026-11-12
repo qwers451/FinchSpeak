@@ -39,6 +39,29 @@ pub struct AudioDevicesDto {
     pub selected_output: Option<String>,
 }
 
+/// Sends a flock call from my current room (the frontend joins the target room itself).
+async fn send_call(state: &AppState, message: ClientMessage) -> Result<(), String> {
+    if state.current_voice_channel.read().await.is_none() {
+        return Err("Not in a voice channel".into());
+    }
+    let sender = state.control_tx.read().await.clone().ok_or("Not connected via QUIC")?;
+    sender.send(message).await.map_err(|e| e.to_string())
+}
+
+/// "Позвать за собой": everybody in my room is called to `target_channel`.
+#[tauri::command]
+pub async fn call_flock(target_channel: String, state: State<'_, AppState>) -> Result<(), String> {
+    let target_channel = Uuid::parse_str(&target_channel).map_err(|e| format!("Invalid channel UUID: {}", e))?;
+    send_call(&state, ClientMessage::CallFlock { target_channel }).await
+}
+
+/// "Позвать сюда": one person is called to my room.
+#[tauri::command]
+pub async fn call_user(user_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let user_id = Uuid::parse_str(&user_id).map_err(|e| format!("Invalid user UUID: {}", e))?;
+    send_call(&state, ClientMessage::CallUser { user_id }).await
+}
+
 #[tauri::command]
 pub async fn join_voice_channel(
     channel_id: String,

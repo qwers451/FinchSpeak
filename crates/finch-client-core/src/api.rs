@@ -107,6 +107,36 @@ pub struct ServerOverviewDto {
     pub log_dir: String,
 }
 
+/// One measurement of the server's health (see `GET /api/admin/health`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthSampleDto {
+    pub at: i64,
+    pub cpu_percent: f32,
+    pub rss_bytes: u64,
+    pub system_used_bytes: u64,
+    pub system_total_bytes: u64,
+    pub container_limit_bytes: Option<u64>,
+    pub disk_free_bytes: u64,
+    pub sessions: u32,
+    pub voice_users: u32,
+    pub bytes_in_per_sec: u64,
+    pub bytes_out_per_sec: u64,
+    pub datagrams_dropped: u64,
+}
+
+/// The server's health panel: the newest sample, the last hour and the folder sizes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthReportDto {
+    pub now: HealthSampleDto,
+    pub history: Vec<HealthSampleDto>,
+    pub db_bytes: u64,
+    pub uploads_bytes: u64,
+    pub music_bytes: u64,
+    pub uptime_secs: u64,
+    /// Codes such as `memory-high` and `disk-low`.
+    pub warnings: Vec<String>,
+}
+
 /// An invitation code as listed by the server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InviteDto {
@@ -410,6 +440,11 @@ impl ApiClient {
 
     pub async fn server_overview(&self) -> Result<ServerOverviewDto, ClientError> {
         parse_json(self.send(self.authorized(self.http.get(self.url("/api/admin/server")))).await?).await
+    }
+
+    /// Admin: CPU, memory, disk, traffic and the last hour of samples.
+    pub async fn server_health(&self) -> Result<HealthReportDto, ClientError> {
+        parse_json(self.send(self.authorized(self.http.get(self.url("/api/admin/health")))).await?).await
     }
 
     pub async fn set_registration(&self, mode: &str) -> Result<(), ClientError> {

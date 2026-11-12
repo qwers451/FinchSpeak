@@ -20,6 +20,7 @@ import { ConnectionBanner, Splash } from './components/ConnectionBanner';
 import { Overlays, SessionEndedScreen } from './components/overlays/Overlays';
 import { sessionEnded } from './stores/sessionEnd';
 import { ContextMenuHost } from './ui/ContextMenu';
+import { FlockCallCards } from './components/voice/FlockCallCard';
 import { IconSprite, Titlebar, ToastHost } from './ui';
 import { AdminModal } from './components/admin/AdminModal';
 import { SettingsModal } from './components/settings/SettingsModal';
@@ -112,6 +113,7 @@ export function App() {
       <AdminModal />
       <SettingsModal />
       <ToastHost />
+      <FlockCallCards />
       <ContextMenuHost />
     </div>
   );

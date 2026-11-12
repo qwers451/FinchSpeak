@@ -23,6 +23,22 @@ pub struct ServerConfig {
     pub logging: LoggingConfig,
     #[serde(default)]
     pub music: MusicConfig,
+    #[serde(default)]
+    pub soundboard: SoundboardConfig,
+}
+
+/// The shared soundboard: sounds are stored in the database; `enabled = false` hides the feature.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SoundboardConfig {
+    pub enabled: bool,
+    pub max_sounds: usize,
+}
+
+impl Default for SoundboardConfig {
+    fn default() -> Self {
+        Self { enabled: true, max_sounds: 48 }
+    }
 }
 
 /// Music files live under uploads/music unless a dedicated disk is configured.

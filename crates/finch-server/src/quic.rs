@@ -497,6 +497,65 @@ async fn reject_message(
     send_to(sessions, peer_id, reply).await;
 }
 
+/// Both kinds of flock call share one budget: one call per person per 10 seconds.
+const FLOCK_CALL_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+
+fn refuse_call(sessions: &SessionManager, peer_id: u32, code: u16, message: impl Into<String>) {
+    sessions.send_control_to_peer(peer_id, &ServerMessage::Error { code, message: message.into() });
+}
+
+async fn is_voice_channel(pool: &SqlitePool, channel_id: Uuid) -> bool {
+    sqlx::query_scalar::<_, String>("SELECT channel_type FROM channels WHERE id = ?")
+        .bind(channel_id.to_string())
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|kind| kind == "voice")
+}
+
+/// "Позвать за собой": everybody in my room (except me) gets a call to `target`. I fly there myself.
+async fn call_flock(sessions: &SessionManager, pool: &SqlitePool, peer_id: u32, user_id: Uuid, username: &str, target: Uuid) {
+    let room = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
+    let Some(room) = room else {
+        return refuse_call(sessions, peer_id, 400, "Join a voice room first");
+    };
+    if !is_voice_channel(pool, target).await {
+        return refuse_call(sessions, peer_id, 400, "Unknown voice room");
+    }
+    if let Err(seconds) = sessions.allow_action(user_id, "flock", 1, FLOCK_CALL_WINDOW) {
+        return refuse_call(sessions, peer_id, 429, format!("Wait {seconds} s before calling again"));
+    }
+    let call = ServerMessage::FlockCall { from_user_id: user_id, from_name: username.to_string(), channel_id: target };
+    sessions.broadcast_voice(room, call, Some(peer_id)).await;
+}
+
+/// "Позвать сюда": one online person who is not in my room gets a call to my room.
+async fn call_user(sessions: &SessionManager, peer_id: u32, user_id: Uuid, username: &str, callee: Uuid) {
+    let room = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
+    let Some(room) = room else {
+        return refuse_call(sessions, peer_id, 400, "Join a voice room first");
+    };
+    let Some(channel_id) = sessions.short_to_channel.get(&room).map(|id| *id) else {
+        return refuse_call(sessions, peer_id, 400, "Unknown voice room");
+    };
+    if callee == user_id {
+        return refuse_call(sessions, peer_id, 400, "You cannot call yourself");
+    }
+    let Some(callee_peer) = sessions.user_to_peer.get(&callee).map(|peer| *peer) else {
+        return refuse_call(sessions, peer_id, 404, "That person is offline");
+    };
+    let callee_room = sessions.sessions.get(&callee_peer).and_then(|s| s.current_voice_channel);
+    if callee_room == Some(room) {
+        return refuse_call(sessions, peer_id, 400, "They are already in this room");
+    }
+    if let Err(seconds) = sessions.allow_action(user_id, "flock", 1, FLOCK_CALL_WINDOW) {
+        return refuse_call(sessions, peer_id, 429, format!("Wait {seconds} s before calling again"));
+    }
+    let call = ServerMessage::FlockCall { from_user_id: user_id, from_name: username.to_string(), channel_id };
+    sessions.send_control_to_peer(callee_peer, &call);
+}
+
 /// Handle a single incoming ClientMessage on the Control Stream.
 async fn handle_client_message(
     msg: ClientMessage,
@@ -783,6 +842,14 @@ async fn handle_client_message(
                     .is_none_or(|status| status == "dnd")
             } else { false };
             sessions.set_activity(peer_id, if dnd { None } else { game.as_deref() }, std::time::Instant::now());
+        }
+
+        ClientMessage::CallFlock { target_channel } => {
+            call_flock(sessions, pool, peer_id, user_id, username, target_channel).await;
+        }
+
+        ClientMessage::CallUser { user_id: callee } => {
+            call_user(sessions, peer_id, user_id, username, callee).await;
         }
 
         ClientMessage::Typing { channel_id } => {

@@ -161,6 +161,34 @@ export interface ServerOverview {
   log_dir: string;
 }
 
+/** One measurement of the server's health, taken every 5 seconds. */
+export interface HealthSample {
+  at: number;
+  cpu_percent: number;
+  rss_bytes: number;
+  system_used_bytes: number;
+  system_total_bytes: number;
+  container_limit_bytes: number | null;
+  disk_free_bytes: number;
+  sessions: number;
+  voice_users: number;
+  bytes_in_per_sec: number;
+  bytes_out_per_sec: number;
+  datagrams_dropped: number;
+}
+
+export interface ServerHealth {
+  now: HealthSample;
+  /** The last hour, oldest first. */
+  history: HealthSample[];
+  db_bytes: number;
+  uploads_bytes: number;
+  music_bytes: number;
+  uptime_secs: number;
+  /** Codes such as `memory-high` and `disk-low`. */
+  warnings: string[];
+}
+
 export interface SearchHit {
   message_id: string;
   channel_id: string;
@@ -198,6 +226,13 @@ export interface AudioDevice {
 }
 
 export type UserStatus = 'online' | 'idle' | 'donotdisturb' | 'offline';
+/** Someone calls me to a voice room ("Позвать за собой" or "Позвать сюда"). */
+export interface FlockCall {
+  from_user_id: string;
+  from_name: string;
+  channel_id: string;
+}
+
 export interface SessionEvents {
   authenticated: {
     session_generation?: number;
@@ -218,6 +253,7 @@ export interface SessionEvents {
   };
   'new-message': IncomingMessage;
   'activity-changed': { user_id: string; game: string | null };
+  'flock-call': FlockCall;
   'message-rejected': { client_msg_id: string; code: number; message: string };
   'user-speaking': { peer_id: number; is_speaking: boolean };
   'voice-levels': { levels: [peerId: number, level: number][] };

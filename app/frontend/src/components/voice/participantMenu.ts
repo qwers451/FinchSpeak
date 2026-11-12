@@ -1,6 +1,7 @@
 import { currentUser } from '../../stores/authStore';
-import { knownUsers, localPeerId } from '../../stores/sessionStore';
-import { allVoiceParticipants, isMuted, isDeafened, toggleMute, toggleDeafen } from '../../stores/voiceStore';
+import { knownUsers, localPeerId, onlineUsers, serverFeatures } from '../../stores/sessionStore';
+import { activeVoiceChannel, allVoiceParticipants, isMuted, isDeafened, toggleMute, toggleDeafen } from '../../stores/voiceStore';
+import { callUserHere } from '../../stores/flockStore';
 import { channels } from '../../stores/chatStore';
 import { mayModerate, moderateVoice, moveVoice } from '../../stores/adminStore';
 import { volumeFor, setVolume } from '../../stores/volumeStore';
@@ -15,6 +16,8 @@ export function openParticipantMenu(anchor: PopoverAnchor, userId: string, parti
   const voice = () => allVoiceParticipants().find((p) => p.user_id === userId && (participant ? p.peer_id === participant.peer_id : true));
   const self = () => participant ? participant.peer_id === localPeerId() || (localPeerId() === null && userId === currentUser()?.id) : userId === currentUser()?.id;
   const name = user()?.display_name || participant?.username || user()?.username || '';
+  const canCallHere = () => serverFeatures().includes('flock') && !!activeVoiceChannel()
+    && onlineUsers().some((online) => online.id === userId) && voice()?.channel_id !== activeVoiceChannel()?.id;
   const items: MenuItem[] = self() ? [
     { kind: 'item', label: t(isMuted() ? 'Unmute' : 'Mute'), icon: 'mic', onSelect: () => void toggleMute() },
     { kind: 'item', label: t(isDeafened() ? 'Undeafen' : 'Deafen'), icon: 'phones', onSelect: () => void toggleDeafen() },
@@ -25,6 +28,8 @@ export function openParticipantMenu(anchor: PopoverAnchor, userId: string, parti
       onChange: (value) => void setVolume(userId, voice()?.peer_id, value) },
     { kind: 'item', label: t('Mute for me'), icon: 'vol-off', checked: isLocallyMuted(userId),
       onSelect: () => void toggleLocalMute(userId, voice()?.peer_id) },
+    // "Позвать сюда": someone online who is not in the room I am in.
+    ...(canCallHere() ? [{ kind: 'item' as const, label: t('Call here'), icon: 'vol' as const, onSelect: () => void callUserHere(userId) }] : []),
   ];
   const canModerate = () => !self() && !!voice() && mayModerate(userId);
   if (canModerate()) {

@@ -1,6 +1,6 @@
 //! Moderation: member list, roles, kick, ban, the action log and the server page.
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 use axum::Json;
@@ -288,7 +288,7 @@ pub struct ServerOverview {
     pub log_dir: String,
 }
 
-fn dir_size(path: &std::path::Path) -> u64 {
+pub(crate) fn dir_size(path: &std::path::Path) -> u64 {
     std::fs::read_dir(path)
         .map(|entries| {
             entries
@@ -332,6 +332,15 @@ pub async fn overview_handler(auth: AuthUser, State(state): State<ArcSharedState
         uploads_bytes: dir_size(std::path::Path::new(&state.config.storage.upload_dir)),
         log_dir: state.config.logging.dir.clone(),
     }))
+}
+
+/// GET /api/admin/health: CPU, memory, disk, sessions, traffic and folder sizes (administrators only).
+pub async fn health_handler(
+    auth: AuthUser,
+    Extension(monitor): Extension<std::sync::Arc<crate::health::HealthMonitor>>,
+) -> Result<Json<crate::health::HealthReport>, ServerError> {
+    require(&auth, Permission::ManageServer)?;
+    Ok(Json(monitor.report().await))
 }
 
 #[derive(Debug, Deserialize)]

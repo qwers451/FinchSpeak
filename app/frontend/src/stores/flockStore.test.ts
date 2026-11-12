@@ -1,0 +1,81 @@
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { api } from '../services/api';
+import { setChannels } from './chatStore';
+import { activeVoiceChannel, setActiveVoiceChannel } from './voiceStore';
+import { acceptCall, callFlock, callUserHere, dismissCall, FLOCK_CALL_TTL_MS, pendingCalls, receiveFlockCall } from './flockStore';
+import { sessionHandlers } from './sessionStore';
+
+const home = { id: 'home', short_id: 1, name: 'Home', channel_type: 'voice' as const, position: 0, bitrate_kbps: 64 };
+const lounge = { id: 'lounge', short_id: 2, name: 'Lounge', channel_type: 'voice' as const, position: 1, bitrate_kbps: 64 };
+const call = { from_user_id: 'alice', from_name: 'Alice', channel_id: 'lounge' };
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  setChannels([home, lounge]);
+  setActiveVoiceChannel(home);
+  vi.spyOn(api, 'joinVoiceChannel').mockResolvedValue();
+  vi.spyOn(api, 'callFlock').mockResolvedValue();
+  vi.spyOn(api, 'callUser').mockResolvedValue();
+});
+
+afterEach(() => {
+  for (const pending of pendingCalls()) dismissCall(pending.id);
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+it('a call waits for an answer and closes by itself after 30 seconds', () => {
+  receiveFlockCall(call);
+  expect(pendingCalls()).toHaveLength(1);
+  vi.advanceTimersByTime(FLOCK_CALL_TTL_MS - 1);
+  expect(pendingCalls()).toHaveLength(1);
+  vi.advanceTimersByTime(1);
+  expect(pendingCalls()).toHaveLength(0);
+});
+
+it('a new call from the same person replaces their card', () => {
+  receiveFlockCall(call);
+  receiveFlockCall({ ...call, channel_id: 'home' });
+  expect(pendingCalls().map((pending) => pending.channel_id)).toEqual(['home']);
+});
+
+it('the session event opens a card', () => {
+  sessionHandlers['flock-call'](call);
+  expect(pendingCalls()).toHaveLength(1);
+});
+
+it('Fly joins the room it was called to', async () => {
+  receiveFlockCall(call);
+  await acceptCall(pendingCalls()[0].id);
+  expect(api.joinVoiceChannel).toHaveBeenCalledWith('lounge', 2);
+  expect(pendingCalls()).toHaveLength(0);
+  expect(activeVoiceChannel()?.id).toBe('lounge');
+});
+
+it('Fly does nothing when I am already in that room', async () => {
+  setActiveVoiceChannel(lounge);
+  receiveFlockCall(call);
+  await acceptCall(pendingCalls()[0].id);
+  expect(api.joinVoiceChannel).not.toHaveBeenCalled();
+  expect(pendingCalls()).toHaveLength(0);
+});
+
+it('Stay only closes the card', () => {
+  receiveFlockCall(call);
+  dismissCall(pendingCalls()[0].id);
+  expect(pendingCalls()).toHaveLength(0);
+  expect(api.joinVoiceChannel).not.toHaveBeenCalled();
+});
+
+it('calling my room to another room moves me there too', async () => {
+  await callFlock(lounge);
+  expect(api.callFlock).toHaveBeenCalledWith('lounge');
+  expect(api.joinVoiceChannel).toHaveBeenCalledWith('lounge', 2);
+  expect(activeVoiceChannel()?.id).toBe('lounge');
+});
+
+it('calling one person sends the call without moving me', async () => {
+  await callUserHere('bob');
+  expect(api.callUser).toHaveBeenCalledWith('bob');
+  expect(api.joinVoiceChannel).not.toHaveBeenCalled();
+});

@@ -29,7 +29,9 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
     let upload_limit = files::upload_body_limit(config.storage.max_file_size_mb);
     let music_upload_limit = config.music.max_track_mb.saturating_mul(crate::music::MIB).saturating_add(64 * 1024).min(usize::MAX as u64) as usize;
     sessions.music.get_or_init(|| std::sync::Arc::new(crate::music::MusicService::new(pool.clone(), &config)));
+    sessions.soundboard.get_or_init(|| config.soundboard.clone());
     health::mark_started();
+    let monitor = crate::health::HealthMonitor::start(pool.clone(), &config, sessions.clone());
     let shared_state = ArcSharedState { pool, config, sessions, login_guard: Default::default(), register_hits: Default::default(), avatar_hits: Default::default() };
 
     let cors = CorsLayer::new()
@@ -68,6 +70,7 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .route("/api/admin/users/{id}/voice", post(admin::moderate_voice_handler))
         .route("/api/admin/audit", get(admin::audit_handler))
         .route("/api/admin/server", get(admin::overview_handler))
+        .route("/api/admin/health", get(admin::health_handler).layer(axum::Extension(monitor)))
         .route("/api/admin/registration", axum::routing::put(admin::set_registration_handler))
         .route("/api/admin/backup", post(admin::backup_now_handler))
         // Invitations
