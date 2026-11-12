@@ -38,7 +38,7 @@ pub fn classify(exe_path: &str, covers_monitor: bool) -> Option<String> {
         "finch-app",
         "finchspeak",
     ];
-    if stem.is_empty() || matches!(name.as_str(), "msedgewebview2" | "finch-app" | "finchspeak") {
+    if stem.is_empty() || excluded.contains(&name.as_str()) {
         return None;
     }
     let segments = [
@@ -56,7 +56,7 @@ pub fn classify(exe_path: &str, covers_monitor: bool) -> Option<String> {
         "\\rockstar games\\",
     ];
     let known_directory = segments.iter().any(|segment| lower.contains(segment));
-    let fullscreen_game = covers_monitor && !excluded.contains(&name.as_str()) && !name.starts_with("potplayer");
+    let fullscreen_game = covers_monitor && !name.starts_with("potplayer");
     if !known_directory && !fullscreen_game {
         return None;
     }
@@ -158,10 +158,37 @@ mod tests {
         }
         assert_eq!(
             classify("C:/Epic Games/Launcher/epicgameslauncher.exe", false),
-            Some("epicgameslauncher".into())
+            None
         );
-        assert_eq!(classify("C:/Epic Games/browser.exe", false), Some("browser".into()));
+        assert_eq!(classify("C:/Epic Games/browser.exe", false), None);
         assert_eq!(classify("C:/Epic Games/msedgewebview2.exe", false), None);
+    }
+
+    #[test]
+    fn launchers_in_game_directories_are_not_games() {
+        assert_eq!(
+            classify(r"C:\Program Files (x86)\Battle.net\Battle.net.exe", false),
+            None
+        );
+        assert_eq!(
+            classify(
+                r"C:\Program Files\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe",
+                false
+            ),
+            None
+        );
+        assert_eq!(
+            classify(r"C:\Riot Games\Riot Client\RiotClientServices.exe", false),
+            None
+        );
+        assert_eq!(
+            classify(r"C:\Program Files (x86)\Steam\steam.exe", true),
+            None
+        );
+        assert_eq!(
+            classify(r"D:\SteamLibrary\steamapps\common\Enshrouded\enshrouded.exe", false),
+            Some("Enshrouded".into())
+        );
     }
 
     #[test]
