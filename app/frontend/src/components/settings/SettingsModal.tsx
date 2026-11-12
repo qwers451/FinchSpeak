@@ -1,13 +1,13 @@
-import { createMemo, createSignal, For, onMount, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { api } from '../../services/api';
 import { currentUser, logoutUser } from '../../stores/authStore';
 import { channels } from '../../stores/chatStore';
 import {
   deleteAvatar, endOtherSessions, endSession, loadSessions, profileMessage, profileOpen, saveDisplayName, savePassword, saveStatus, setProfileMessage, setProfileOpen, sessions, STATUS_TEXT_MAX,
 } from '../../stores/profileStore';
-import { presence, statusTexts } from '../../stores/sessionStore';
+import { presence, serverFeatures, statusTexts } from '../../stores/sessionStore';
 import {
-  isChannelMuted, muteChannel, prefs, unmuteChannel, updateAppearance, updateNotifications,
+  isChannelMuted, muteChannel, prefs, unmuteChannel, updateAppearance, updateNotifications, updatePrivacy,
 } from '../../stores/settingsStore';
 import { nestView, setNestView } from '../../stores/nestView';
 import { availableUpdate, setAvailableUpdate } from '../../stores/updateStore';
@@ -84,6 +84,11 @@ function ProfilePage() {
 
   return (
     <div class="col g24">
+      <Show when={serverFeatures().includes('activity')}>
+        <Row title={t("Show what I'm playing")}
+          hint={t('FinchSpeak notices the game in front and shows its name to everyone on the server.')}
+          control={<Toggle label={t("Show what I'm playing")} checked={prefs().privacy.shareActivity} onChange={(shareActivity) => updatePrivacy({ shareActivity })} />} />
+      </Show>
       <div class="row g20">
         <Avatar name={me()?.display_name} id={me()?.id} src={me()?.avatar_url} size={96} status={myStatus() === 'idle' ? 'idle' : myStatus() === 'donotdisturb' ? 'dnd' : 'on'} />
         <div class="col g8">
@@ -273,6 +278,34 @@ function NotificationsPage() {
   );
 }
 
+function SpeakingPreview() {
+  const me = currentUser;
+  const query = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  const [systemReduced, setSystemReduced] = createSignal(query?.matches ?? false);
+  const onChange = (event: MediaQueryListEvent) => setSystemReduced(event.matches);
+  query?.addEventListener?.('change', onChange);
+  onCleanup(() => query?.removeEventListener?.('change', onChange));
+
+  let avatar!: HTMLSpanElement;
+  const playing = createMemo(() => profileOpen() && !prefs().appearance.reduceMotion && !systemReduced());
+  createEffect(() => {
+    if (!playing()) return;
+    let phase = 0;
+    const tick = () => {
+      avatar.style.setProperty('--lvl', String(0.6 + 0.4 * Math.sin(phase)));
+      phase += 0.32;
+    };
+    tick();
+    const timer = setInterval(tick, 80);
+    onCleanup(() => {
+      clearInterval(timer);
+      avatar.style.removeProperty('--lvl');
+    });
+  });
+
+  return <Avatar ref={(el) => { avatar = el; }} name={me()?.display_name || me()?.username} id={me()?.id} src={me()?.avatar_url} size={56} speaking />;
+}
+
 function AppearancePage() {
   const a = () => prefs().appearance;
   const [autostart, setAutostart] = createSignal(false);
@@ -300,6 +333,16 @@ function AppearancePage() {
       <Row title={t('Language')} control={seg(t('Language'), a().language, [['ru', 'Русский'], ['en', 'English']], (language) => updateAppearance({ language }))} />
       <Row title={t('Density')} hint={t('Compact fits more messages on the screen.')} control={seg(t('Density'), a().density, [['comfortable', t('Comfortable')], ['compact', t('Compact')]], (density) => updateAppearance({ density }))} />
       <Row title={t('Text size')} control={seg(t('Text size'), a().textSize, [['small', t('Small')], ['medium', t('Medium')], ['large', t('Large')]], (textSize) => updateAppearance({ textSize }))} />
+      <Row
+        title={t('Speaking animation')}
+        hint={t("How your avatar and others' react to voice.")}
+        control={
+          <div class="row g12 speaking-animation-control">
+            {seg(t('Speaking animation'), a().speakingStyle, [['pulse', t('Pulse')], ['ring', t('Ring')], ['waves', t('Waves')], ['bars', t('Equalizer')], ['glow', t('Glow')]], (speakingStyle) => updateAppearance({ speakingStyle }))}
+            <SpeakingPreview />
+          </div>
+        }
+      />
       <Row title={t('Reduce motion')} hint={t('Turns off pulsing rings and slides.')} control={<Toggle label={t('Reduce motion')} checked={a().reduceMotion} onChange={(v) => updateAppearance({ reduceMotion: v })} />} />
       <Row title={t('Start with Windows')} hint={t('Starts hidden in the tray and signs you in.')} control={<Toggle label={t('Start with Windows')} checked={autostart()} onChange={(v) => void changeAutostart(v)} />} />
       <Row title={t('Members panel')} hint={t('The list of people on the right.')} control={<Toggle label={t('Members panel')} checked={a().showMembers} onChange={(v) => updateAppearance({ showMembers: v })} />} />

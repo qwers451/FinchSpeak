@@ -33,6 +33,7 @@ const QUIT_CLOSE_FLUSH: Duration = Duration::from_millis(250);
 /// QUIC session, so the server drops us at once instead of after its 15 s idle timeout. Best effort
 /// and bounded by `QUIT_BOUND`, whatever the network or a stuck voice transition does.
 pub async fn shutdown_session(state: &AppState) {
+    state.game_activity.lock().await.disconnect();
     let routine = async {
         // Stop any reconnect first: the close below must not bring the session back. Lock-free on
         // purpose, so a stuck voice transition cannot hold this up.
@@ -56,6 +57,7 @@ pub async fn shutdown_session(state: &AppState) {
 }
 
 async fn supersede_session(state: &AppState) -> u64 {
+    state.game_activity.lock().await.disconnect();
     let _transition = state.voice_transition.lock().await;
     let generation = state.session_generation.fetch_add(1, Ordering::SeqCst) + 1;
     *state.last_connect.write().await = None;
@@ -144,6 +146,13 @@ pub async fn refresh_token_once(state: &AppState, generation: u64) -> Result<(),
 
 /// Make `session` the active one in the app state and tell the UI.
 async fn activate_session(session: &Session, state: &AppState, app_handle: &tauri::AppHandle) {
+    let generation = state.session_generation.load(Ordering::SeqCst);
+    state.game_activity.lock().await.connect(
+        generation, session.session_peer_id, session.user_id, &session.initial_state, session.control_tx.clone(),
+    );
+    if session.initial_state.features.iter().any(|feature| feature == "activity") {
+        crate::activity::spawn_polling(state.clone(), generation, session.session_peer_id);
+    }
     // Peer ids and packet sequences belong to this session, not the previous server.
     *state.mixer.lock().await = finch_audio::AudioMixer::new();
     state
@@ -154,6 +163,7 @@ async fn activate_session(session: &Session, state: &AppState, app_handle: &taur
     let _ = app_handle.emit(
         "authenticated",
         serde_json::json!({
+            "session_generation": generation,
             "session_peer_id": session.session_peer_id,
             "user_id": session.user_id,
             "channels": session.channels,
@@ -182,6 +192,7 @@ async fn run_session(
             return;
         };
         if !stop_share_on_connection_loss(&state, generation).await { return; }
+        state.game_activity.lock().await.disconnect();
         *state.mixer.lock().await = finch_audio::AudioMixer::new();
         let _ = app_handle.emit("connection-lost", reason);
         match reconnect(&state, &app_handle, generation).await {
@@ -293,6 +304,9 @@ async fn restore_voice_membership(state: &AppState, session: &Session, generatio
 
 fn emit_control(msg: ServerMessage, app_handle: &tauri::AppHandle) {
     match msg {
+        ServerMessage::ActivityChanged { user_id, game } => {
+            let _ = app_handle.emit("activity-changed", serde_json::json!({ "user_id": user_id, "game": game }));
+        }
         ServerMessage::NewMessage {
             message_id,
             channel_id,
@@ -546,6 +560,9 @@ async fn route_datagram(bytes: Bytes, state: &AppState, app_handle: &tauri::AppH
 
 /// Bookkeeping for a control message (mixer and watched share), then the event goes to the UI.
 async fn handle_control(state: &AppState, msg: ServerMessage, emit: impl FnOnce(ServerMessage)) {
+    if let ServerMessage::PresenceUpdate { user_id, status, .. } = &msg {
+        state.game_activity.lock().await.set_status(*user_id, *status).await;
+    }
     match &msg {
         ServerMessage::UserLeftVoice { peer_id, .. } | ServerMessage::UserJoinedVoice { peer_id, .. } => {
             state.mixer.lock().await.remove_speaker(*peer_id);

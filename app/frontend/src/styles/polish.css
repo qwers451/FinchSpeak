@@ -2,6 +2,7 @@
 .main,.side,.members,.mhead,.room-body,.settings,.setnav { min-width:0; }
 .side,.members { flex-shrink:0; }
 /* The member list scrolls inside its own column so every member stays reachable at any window height. */
+.sidebar .col.grow,.members .col.grow,.source .col.grow { min-width:0; }
 .members { min-height:0; overflow-y:auto; scrollbar-gutter:stable; overscroll-behavior:contain; }
 .mhead h3 { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .mhead > .ic,.mhead > .tag,.mhead > .pill { flex-shrink:0; }
@@ -53,6 +54,9 @@
 .setrow > .col.grow { min-width:0; }
 .setrow .toggle { flex-shrink:0; }
 .setrow .seg { max-width:100%; }
+.setrow .speaking-animation-control { min-width:0; }
+.setrow .speaking-animation-control > .seg { flex:0 1 auto; min-width:0; }
+.speaking-animation-control > .av { margin:12px; }
 .seg { gap:2px; }
 .seg span { min-height:32px; height:auto; padding:6px 10px; line-height:1.4; justify-content:center; text-align:center; }
 .field,.field .input { min-width:0; }
@@ -82,7 +86,7 @@
 .members-table td:first-child .trunc { white-space:normal; }
 
 @container (max-width:540px) {
-  .setrow:has(> .seg) { flex-direction:column; align-items:stretch; gap:12px; }
+  .setrow:has(> .seg, > .speaking-animation-control) { flex-direction:column; align-items:stretch; gap:12px; }
   .setrow > .seg { align-self:flex-start; }
   .settings-page .row:has(> .btn):has(> .col) { flex-wrap:wrap; }
 }
@@ -110,8 +114,6 @@
 .room-grid .vc .nm { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:4px; width:100%; white-space:normal; overflow-wrap:anywhere; text-align:center; line-height:1.4; }
 .room-grid .vc .nm > .tag { font-size:8px; }
 .room-grid .vc .vol { width:100%; max-width:220px; }
-.vc .mod-actions { flex-wrap:wrap; gap:4px; }
-.vc .mod-actions .btn { max-width:100%; height:auto; min-height:28px; white-space:normal; line-height:1.35; }
 .room-grid.compact { flex:none; min-height:0; margin:0; }
 .room-grid.compact .vc { min-height:88px; }
 .room-grid.compact .vc > .av { width:40px; height:40px; font-size:18px; }
@@ -169,4 +171,3 @@
   .dock,[data-theme="custom"] .dock { padding:6px; }
   .ctl,[data-theme="custom"] .ctl { width:44px; height:42px; }
 }
-.vc .mod-actions select.move-to { font-size:12px; max-width:140px; }

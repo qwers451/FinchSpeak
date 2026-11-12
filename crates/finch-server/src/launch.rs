@@ -44,6 +44,9 @@ pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
         .context("Failed to initialize database")?;
 
     let sessions = SessionManager::new();
+    let music = std::sync::Arc::new(crate::music::MusicService::new(pool.clone(), &config));
+    music.startup_cleanup().await.context("Failed to clean up music storage")?;
+    let _ = sessions.music.set(music);
 
     let quic_bind: SocketAddr = format!("{}:{}", config.server.host, config.server.quic_port)
         .parse()
@@ -77,7 +80,7 @@ pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
     let (http_shutdown, http_shutdown_rx) = oneshot::channel::<()>();
     let http_task = tokio::spawn(https::serve(listener, https_config, app, http_shutdown_rx));
 
-    let cleanup_task = crate::cleanup::spawn(pool.clone());
+    let cleanup_task = crate::cleanup::spawn_with_music(pool.clone(), sessions.music.get().cloned());
     let backup_task = config.backup.enabled.then(|| crate::backup::spawn(pool.clone(), config.backup.clone()));
 
     let quic_endpoint = endpoint.clone();

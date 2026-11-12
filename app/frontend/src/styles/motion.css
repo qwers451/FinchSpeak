@@ -16,7 +16,7 @@
 .overlay[data-exiting="true"] .modal { opacity:0; transform:translateY(6px) scale(.98); transition-duration:var(--motion-exit); transition-timing-function:var(--ease-in); }
 /* Transitions can reverse without replaying keyframes. */
 .toast { animation:none; opacity:1; transform:none; transition:opacity var(--motion-enter) var(--ease-out),transform var(--motion-enter) var(--ease-out); }
-.emoji-picker,.search-results,.mention-menu {
+.emoji-picker,.search-results,.mention-menu,.ctx-menu,.select-listbox {
   animation:none; opacity:1; transform:none; transform-origin:top right;
   transition:opacity var(--motion-panel) var(--ease-out),transform var(--motion-panel) var(--ease-out);
 }
@@ -26,22 +26,65 @@
   .overlay { opacity:0; }
   .modal { opacity:0; transform:translateY(6px) scale(.98); }
   .toast { opacity:0; transform:translateX(12px); }
-  .emoji-picker,.search-results { opacity:0; transform:translateY(-4px) scale(.98); }
+  .emoji-picker,.search-results,.ctx-menu,.select-listbox { opacity:0; transform:translateY(-4px) scale(.98); }
   .composer-picker .emoji-picker,.picker-anchor.up .emoji-picker,.mention-menu { opacity:0; transform:translateY(4px) scale(.98); }
 }
 .vc,.toggle { transition:none; }
 .toggle::after { transition:transform var(--motion-panel) var(--ease-out); }
 .av.speaking,.typing i { animation:none; }
 .btn::after,.ctl::after { transition:none; }
-/* Persistent, non-interactive layer: reversible speech feedback without a loop. */
+/* The persistent ring is also the fallback when either motion preference is reduced. */
 .av .av-speaking-ring {
+  --speaking-shadow:0 0 0 2px var(--cyan),0 0 10px var(--cyan);
   position:absolute; inset:-3px; border-radius:inherit; pointer-events:none;
-  box-shadow:0 0 0 2px var(--cyan),0 0 10px var(--cyan);
+  box-shadow:var(--speaking-shadow);
   opacity:0; transform:scale(.96);
   transition:opacity var(--motion-panel) var(--ease-out),transform var(--motion-panel) var(--ease-out);
 }
-.av.speaking .av-speaking-ring { opacity:1; transform:scale(1); }
+.av.speaking .av-speaking-ring,
+[data-speaking-style="ring"] .av.speaking .av-speaking-ring { opacity:1; transform:scale(1); }
 [data-theme] .av.speaking:has(> .av-speaking-ring) { box-shadow:none; outline:none; }
+.av-speaking-glow,.av-bars { display:none; }
+@media (prefers-reduced-motion:no-preference) {
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="pulse"] .av.speaking .av-speaking-ring,
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="bars"] .av.speaking:is(.s16,.s24,.s32) .av-speaking-ring {
+    transform:scale(calc(1 + var(--lvl, 0) * .14)); opacity:calc(.55 + var(--lvl, 0) * .45);
+    transition:transform 90ms linear,opacity 90ms linear;
+  }
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="waves"] .av.speaking .av-speaking-ring { box-shadow:none; }
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="waves"] .av.speaking .av-speaking-ring::before,
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="waves"] .av.speaking .av-speaking-ring::after {
+    content:""; position:absolute; inset:0; border-radius:inherit;
+    box-shadow:var(--speaking-shadow); opacity:0;
+    animation:speaking-wave 1.4s ease-out infinite;
+  }
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="waves"] .av.speaking .av-speaking-ring::after { animation-delay:.7s; }
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="bars"] .av.speaking .av-bars {
+    position:absolute; inset-inline:0; bottom:-7px; margin-inline:auto; width:max-content;
+    display:flex; gap:2px; pointer-events:none;
+  }
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="bars"] .av.speaking .av-bars i {
+    width:3px; height:12px; border-radius:2px; background:var(--cyan);
+    transform:scaleY(calc(.25 + var(--lvl, 0) * var(--bar-gain)));
+    transform-origin:bottom; transition:transform var(--bar-time) linear;
+  }
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="bars"] .av.speaking .av-bars i:nth-child(1) { --bar-gain:.6; --bar-time:70ms; }
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="bars"] .av.speaking .av-bars i:nth-child(2) { --bar-gain:1; --bar-time:110ms; }
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="bars"] .av.speaking .av-bars i:nth-child(3) { --bar-gain:.8; --bar-time:90ms; }
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="bars"] .av.speaking .av-bars i:nth-child(4) { --bar-gain:.5; --bar-time:130ms; }
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="glow"] .av.speaking { isolation:isolate; }
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="glow"] .av.speaking .av-speaking-ring { opacity:0; }
+  :where(:not([data-reduce-motion="true"]))[data-speaking-style="glow"] .av.speaking .av-speaking-glow {
+    display:block; position:absolute; inset:-3px; z-index:-1; border-radius:inherit; pointer-events:none;
+    box-shadow:var(--glow-speak),0 0 14px var(--cyan);
+    opacity:calc(.25 + var(--lvl, 0) * .75); transform:scale(calc(1 + var(--lvl, 0) * .25));
+    transition:opacity 120ms linear,transform 120ms linear;
+  }
+}
+@keyframes speaking-wave {
+  from { transform:scale(1); opacity:.6; }
+  to { transform:scale(1.45); opacity:0; }
+}
 /* Small controls give feedback without moving the surrounding row. */
 .icon-close,.link-btn,.cat-add,.ch .acts button,.msg .hover-tools button {
   transition:transform var(--motion-small) var(--ease-out),opacity var(--motion-small) var(--ease-out);

@@ -1,4 +1,4 @@
-import { createEffect, createRoot } from 'solid-js';
+import { createEffect, createMemo, createRoot, createSignal, onCleanup, untrack, type Accessor } from 'solid-js';
 import { api } from '../services/api';
 import type { Message } from '../types';
 import { currentUser } from './authStore';
@@ -7,7 +7,7 @@ import { myStatus } from './sessionStore';
 import { unread } from './activityStore';
 import { isChannelMuted, prefs } from './settingsStore';
 import { isSharing } from './screenState';
-import { activeVoiceChannel, isMuted } from './voiceStore';
+import { activeVoiceChannel, isDeafened, isLocalSpeaking, isMuted } from './voiceStore';
 import { t } from '../i18n';
 import { playTone } from './tones';
 import { playJoinSound } from './joinSound';
@@ -88,13 +88,30 @@ export function reactToVoiceMovement(kind: 'join' | 'leave', name: string, userI
 
 // ---- tray and window --------------------------------------------------------------------------
 
-export type TrayState = 'idle' | 'voice' | 'muted' | 'live';
+export type TrayState = 'idle' | 'voice' | 'speaking' | 'muted' | 'live';
 
-/** The tray icon follows the call: idle, in a room, muted, or live (sharing). */
+/** The tray icon follows the current call and screen sharing state. */
 export function trayStateNow(): TrayState {
   if (isSharing()) return 'live';
   if (!activeVoiceChannel()) return 'idle';
-  return isMuted() ? 'muted' : 'voice';
+  if (isMuted() || isDeafened()) return 'muted';
+  return isLocalSpeaking() ? 'speaking' : 'voice';
+}
+
+/** Hold the speaking icon through brief pauses, but apply mute, live and idle immediately. */
+function createTrayStateHysteresis(readState: Accessor<TrayState>): Accessor<TrayState> {
+  const requested = createMemo(readState);
+  const [effective, setEffective] = createSignal(requested());
+  createEffect(() => {
+    const next = requested();
+    if (next !== 'voice' || untrack(effective) !== 'speaking') {
+      setEffective(next);
+      return;
+    }
+    const release = setTimeout(() => setEffective('voice'), 400);
+    onCleanup(() => clearTimeout(release));
+  });
+  return effective;
 }
 
 /** Mentions in channels that are not muted (the taskbar badge). */
@@ -120,9 +137,11 @@ export function startDesktopSync() {
   if (started) return;
   started = true;
   createRoot(() => {
+    const state = createTrayStateHysteresis(trayStateNow);
+    // A language change also refreshes the native tooltip and menu.
+    const language = createMemo(() => prefs().appearance.language);
     createEffect(() => {
-      const state = trayStateNow();
-      void api.setTrayState(state, prefs().appearance.language).catch(() => {});
+      void api.setTrayState(state(), language()).catch(() => {});
     });
     createEffect(() => {
       void api.setAttention(mentionCount(), prefs().appearance.language).catch(() => {});

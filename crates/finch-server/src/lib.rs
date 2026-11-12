@@ -13,6 +13,7 @@ pub mod error;
 pub mod https;
 pub mod launch;
 pub mod limits;
+pub mod music;
 pub mod permissions;
 pub mod quic;
 pub mod session;

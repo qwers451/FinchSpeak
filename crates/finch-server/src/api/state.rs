@@ -11,11 +11,17 @@ use crate::error::ServerError;
 use crate::session::SessionManager;
 
 pub async fn state_handler(auth: AuthUser, State(state): State<ArcSharedState>) -> Result<Json<ServerState>, ServerError> {
-    Ok(Json(server_state(&state.pool, &state.sessions, Some(auth.user_id)).await?))
+    Ok(Json(server_state(&state.pool, &state.sessions, Some(auth.user_id), None).await?))
 }
 
 /// `for_user` adds the unread counts of that user.
-pub async fn server_state(pool: &SqlitePool, sessions: &SessionManager, for_user: Option<Uuid>) -> Result<ServerState, ServerError> {
+/// `connecting_user` has authenticated over QUIC and receives the snapshot before session registration.
+pub async fn server_state(
+    pool: &SqlitePool,
+    sessions: &SessionManager,
+    for_user: Option<Uuid>,
+    connecting_user: Option<Uuid>,
+) -> Result<ServerState, ServerError> {
     let rows = sqlx::query_as::<_, (String, i64, String, String, i64, Option<String>, i64)>(
         "SELECT id, short_id, name, channel_type, position, topic, bitrate_kbps FROM channels ORDER BY position, id",
     ).fetch_all(pool).await?;
@@ -32,24 +38,29 @@ pub async fn server_state(pool: &SqlitePool, sessions: &SessionManager, for_user
         session.user_id, session.peer_id, session.username.clone(),
         session.current_voice_channel, session.muted, session.deafened, session.sharing_screen, session.server_muted,
     )).collect();
-    let online_ids: HashSet<_> = peers.iter().map(|peer| peer.0).collect();
+    let mut online_ids: HashSet<_> = peers.iter().map(|peer| peer.0).collect();
+    online_ids.extend(connecting_user);
+    let profiles = sqlx::query_as::<_, (String, String, String, Option<i64>, String, String, Option<String>)>(
+        "SELECT id, username, COALESCE(NULLIF(TRIM(display_name), ''), username), \
+                avatar_version, role, status_pref, status_text \
+         FROM users WHERE banned_at IS NULL ORDER BY username",
+    ).fetch_all(pool).await?;
     let mut online_users = Vec::with_capacity(online_ids.len());
-    if !online_ids.is_empty() {
-        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-            "SELECT id, username, COALESCE(NULLIF(TRIM(display_name), ''), username), avatar_version, role, status_pref, status_text FROM users WHERE id IN (",
-        );
-        let mut ids = query.separated(", ");
-        for id in &online_ids { ids.push_bind(id.to_string()); }
-        ids.push_unseparated(") ORDER BY username");
-        let profiles = query.build_query_as::<(String, String, String, Option<i64>, String, String, Option<String>)>().fetch_all(pool).await?;
-        for (id, username, display_name, avatar_version, role, status_pref, status_text) in profiles {
-            if let Ok(id) = Uuid::parse_str(&id) {
-                let avatar_url = crate::api::avatars::avatar_url(&id.to_string(), avatar_version);
-                online_users.push(User { id, username, display_name, avatar_url,
-                    status: status_from_pref(&status_pref), status_text,
-                    role: match role.as_str() { "admin" => UserRole::Admin, "moderator" => UserRole::Moderator, _ => UserRole::Member } });
-            }
-        }
+    let mut offline_users = Vec::new();
+    for (id, username, display_name, avatar_version, role, status_pref, status_text) in profiles {
+        let Ok(id) = Uuid::parse_str(&id) else { continue };
+        let avatar_url = crate::api::avatars::avatar_url(&id.to_string(), avatar_version);
+        let role = match role.as_str() {
+            "admin" => UserRole::Admin,
+            "moderator" => UserRole::Moderator,
+            _ => UserRole::Member,
+        };
+        let (users, status, status_text) = if online_ids.contains(&id) {
+            (&mut online_users, status_from_pref(&status_pref), status_text)
+        } else {
+            (&mut offline_users, UserStatus::Offline, None)
+        };
+        users.push(User { id, username, display_name, avatar_url, status, status_text, role });
     }
     let voice_states = peers.into_iter().filter_map(|(user_id, peer_id, username, short_id, muted, deafened, sharing_screen, server_muted)| {
         let channel = channels.iter().find(|channel| Some(channel.short_id) == short_id)?;
@@ -59,7 +70,9 @@ pub async fn server_state(pool: &SqlitePool, sessions: &SessionManager, for_user
         Some(user_id) => crate::chat::unread_for(pool, user_id).await?,
         None => Vec::new(),
     };
-    Ok(ServerState { channels, online_users, voice_states, unread })
+    let mut features = vec!["activity".into()];
+    if sessions.music.get().is_some_and(|music| music.config.enabled) { features.push("music".into()); }
+    Ok(ServerState { channels, online_users, offline_users, voice_states, unread, features, activities: sessions.activities() })
 }
 
 /// The status stored for a user (`online`, `idle`, `dnd`); anything else counts as online.

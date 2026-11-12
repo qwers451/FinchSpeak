@@ -5,7 +5,7 @@ import { avatarSrc, clearAvatarCache, userIdOf } from '../../stores/avatarCache'
 import { setCurrentUser, currentUser } from '../../stores/authStore';
 import { logoutUser } from '../../stores/authStore';
 import { endSession, loadSessions, profileOpen, setProfileMessage, setProfileOpen } from '../../stores/profileStore';
-import { resetSessionState, sessionHandlers, setKnownUsers } from '../../stores/sessionStore';
+import { resetSessionState, sessionHandlers, setKnownUsers, setServerFeatures } from '../../stores/sessionStore';
 import { DEFAULT_PREFS, prefs, setPrefs } from '../../stores/settingsStore';
 import { setChannels } from '../../stores/chatStore';
 import { nestView, setNestView } from '../../stores/nestView';
@@ -39,6 +39,8 @@ beforeEach(() => {
 afterEach(() => {
   dispose?.();
   document.body.innerHTML = '';
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 it('saves a new display name', async () => {
@@ -51,6 +53,18 @@ it('saves a new display name', async () => {
   await flush();
   expect(save).toHaveBeenCalledWith('Alice C.');
   expect(currentUser()?.display_name).toBe('Alice C.');
+});
+
+it('only offers game sharing on a server with activity support and preserves an opt-out', () => {
+  expect(document.querySelector('[aria-label="Show what I\'m playing"]')).toBeNull();
+  setServerFeatures(['activity']);
+  const sharing = document.querySelector<HTMLButtonElement>('[aria-label="Show what I\'m playing"]')!;
+  expect(sharing.getAttribute('aria-checked')).toBe('true');
+  sharing.click();
+  expect(prefs().privacy.shareActivity).toBe(false);
+  expect(JSON.parse(localStorage.getItem('finchspeak.prefs')!).privacy.shareActivity).toBe(false);
+  setServerFeatures([]);
+  expect(document.querySelector('[aria-label="Show what I\'m playing"]')).toBeNull();
 });
 
 it('choosing a status sends it with the text, trimmed', async () => {
@@ -126,6 +140,40 @@ it('appearance switches the interface between Classic and Finch', async () => {
     setNestView(false);
     localStorage.removeItem('finchspeak.nestView');
   }
+});
+
+it('previews the selected speaking style and stops updating when reduced or closed', () => {
+  vi.useFakeTimers();
+  button('Appearance').click();
+  const choices = document.querySelector('[aria-label="Speaking animation"]')!;
+  const avatar = choices.parentElement!.querySelector<HTMLElement>('.av.s56.speaking')!;
+  Array.from(choices.querySelectorAll<HTMLElement>('[role="radio"]')).find((choice) => choice.textContent === 'Glow')!.click();
+  expect(document.documentElement.dataset.speakingStyle).toBe('glow');
+  const initial = Number(avatar.style.getPropertyValue('--lvl'));
+  expect(initial).toBeGreaterThan(0);
+  vi.advanceTimersByTime(80);
+  expect(Number(avatar.style.getPropertyValue('--lvl'))).toBeGreaterThan(initial);
+
+  document.querySelector<HTMLElement>('[aria-label="Reduce motion"]')!.click();
+  expect(avatar.style.getPropertyValue('--lvl')).toBe('');
+  vi.advanceTimersByTime(80);
+  expect(avatar.style.getPropertyValue('--lvl')).toBe('');
+
+  document.querySelector<HTMLElement>('[aria-label="Reduce motion"]')!.click();
+  expect(Number(avatar.style.getPropertyValue('--lvl'))).toBeGreaterThan(0);
+  setProfileOpen(false);
+  vi.advanceTimersByTime(80);
+  expect(avatar.style.getPropertyValue('--lvl')).toBe('');
+});
+
+it('keeps the speaking preview static when the system prefers reduced motion', () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('matchMedia', () => ({ matches: true }));
+  button('Appearance').click();
+  const avatar = document.querySelector<HTMLElement>('.speaking-animation-control .av')!;
+  expect(avatar.classList.contains('speaking')).toBe(true);
+  vi.advanceTimersByTime(160);
+  expect(avatar.style.getPropertyValue('--lvl')).toBe('');
 });
 
 it('autostart toggle reflects and changes the OS setting', async () => {

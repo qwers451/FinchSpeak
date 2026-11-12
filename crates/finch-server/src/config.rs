@@ -21,6 +21,37 @@ pub struct ServerConfig {
     pub backup: BackupConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub music: MusicConfig,
+}
+
+/// Music files live under uploads/music unless a dedicated disk is configured.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MusicConfig {
+    pub enabled: bool,
+    pub storage_dir: Option<String>,
+    pub max_track_mb: u64,
+    pub library_quota_mb: u64,
+    pub temp_quota_mb_per_user: u64,
+    pub temp_quota_mb_total: u64,
+    pub max_queue: usize,
+    pub max_track_minutes: u64,
+}
+
+impl Default for MusicConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            storage_dir: None,
+            max_track_mb: 30,
+            library_quota_mb: 2048,
+            temp_quota_mb_per_user: 200,
+            temp_quota_mb_total: 512,
+            max_queue: 100,
+            max_track_minutes: 180,
+        }
+    }
 }
 
 /// Periodic copies of the database (SQLite `VACUUM INTO`, consistent while the server runs).

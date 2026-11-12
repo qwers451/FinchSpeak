@@ -162,11 +162,13 @@ it('lists every device, marks the default and the one in use, and applies a chan
   setSelectedDevices({ input: null, output: null });
   const host = mount(() => <VoiceSettingsModal open onClose={() => {}} />);
   await flush();
-  const [input, output] = Array.from(document.querySelectorAll('select')) as HTMLSelectElement[];
-  expect(Array.from(input.options).map((o) => o.textContent)).toEqual(['System default', 'Built-in mic (default)', 'Headset mic']);
-  expect(output.value).toBe('Headset');
-  input.value = 'Headset mic';
-  input.dispatchEvent(new Event('change', { bubbles: true }));
+  const [input, output] = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="combobox"]'));
+  expect(output.textContent).toContain('Headset');
+  input.click();
+  await flush();
+  const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+  expect(options.map((option) => option.textContent?.replace('✓', ''))).toEqual(['System default', 'Built-in mic (default)', 'Headset mic']);
+  options[2].click();
   await flush();
   expect(apply).toHaveBeenCalledWith('Headset mic', 'Headset');
   expect(host).toBeTruthy();
@@ -178,6 +180,7 @@ it('warns when the chosen device is gone and the default is used instead', async
   await flush();
   expect(document.body.textContent).toContain('This device is not connected; the system default is used instead.');
   expect(availableDevices().inputs).toHaveLength(2);
+  expect(document.querySelector('[role="combobox"]')?.textContent).toContain('Old USB mic');
 });
 
 it('the meter follows the microphone and the threshold line follows the slider', async () => {

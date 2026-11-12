@@ -11,7 +11,7 @@ pub fn take_invite_link() -> Option<String> {
     crate::take_pending_invite()
 }
 
-/// What the tray icon shows: `idle`, `voice`, `muted` or `live`.
+/// What the tray icon shows: `idle`, `voice`, `speaking`, `muted` or `live`.
 #[tauri::command]
 pub async fn set_tray_state(state: TrayState, language: Option<String>, app: AppHandle, app_state: State<'_, AppState>) -> Result<(), String> {
     if let Some(language) = language.as_deref() {

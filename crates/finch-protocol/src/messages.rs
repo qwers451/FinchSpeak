@@ -7,8 +7,20 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::models::{
-    AttachmentInfo, Channel, ChannelMapping, HistoryMessage, ReplyRef, ServerState, ShareEndReason, UserStatus, VideoCodec,
+    AttachmentInfo, Channel, ChannelMapping, HistoryMessage, MusicRoomState, ReplyRef, ServerState, ShareEndReason, UserStatus, VideoCodec,
 };
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MusicCommand {
+    Enqueue { track_id: Uuid },
+    Pause,
+    Resume,
+    Skip,
+    Seek { position_ms: u64 },
+    Remove { entry_id: Uuid },
+    Clear,
+}
 
 // ─── Client → Server ────────────────────────────────────────────────────────
 
@@ -16,12 +28,16 @@ use crate::models::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum ClientMessage {
+    MusicCommand { command: MusicCommand },
     /// First message after QUIC handshake — authenticate with a JWT token.
     Authenticate {
         token: String,
         /// Understands the `VoiceMoved` and `JoinSoundChanged` server messages.
         #[serde(default)]
         supports_voice_extensions: bool,
+        /// Highest control protocol level understood by this client.
+        #[serde(default)]
+        client_level: u16,
     },
 
     /// Join a voice channel. The client can only be in one voice channel at a time.
@@ -43,6 +59,9 @@ pub enum ClientMessage {
         #[serde(default)]
         text: Option<String>,
     },
+
+    /// Share only a short game title, or clear this device's report.
+    SetActivity { game: Option<String> },
 
     /// Update own voice state (mute/deafen).
     UpdateVoiceState {
@@ -114,6 +133,7 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
+    MusicState { channel_id: Uuid, state: MusicRoomState, server_ms: u64 },
     /// Authentication succeeded. Contains session peer ID, channel mappings, and initial server state.
     Authenticated {
         user_id: Uuid,
@@ -292,10 +312,26 @@ pub enum ServerMessage {
         user_id: Uuid,
     },
 
+    /// The most recently reporting device's game activity.
+    ActivityChanged {
+        user_id: Uuid,
+        game: Option<String>,
+    },
+
     /// Heartbeat pong — echo of the client's timestamp.
     Pong {
         timestamp: u64,
     },
+}
+
+impl ServerMessage {
+    /// Control variants introduced after legacy clients must be filtered before delivery.
+    pub fn minimum_client_level(&self) -> u16 {
+        match self {
+            Self::ActivityChanged { .. } | Self::MusicState { .. } => crate::CLIENT_LEVEL_1_5,
+            _ => 0,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -68,7 +68,7 @@ export function SpatialStage() {
                 }
               }}
             >
-              <Avatar name={seat().participant.username} id={seat().participant.user_id} size={24} speaking={speakingPeers().has(seat().participant.peer_id)} />
+              <Avatar name={seat().participant.username} id={seat().participant.user_id} size={24} speaking={speakingPeers().has(seat().participant.peer_id)} levelPeerId={seat().participant.peer_id} />
               <span class="seat-name trunc">{seat().participant.username}</span>
             </button>
             );

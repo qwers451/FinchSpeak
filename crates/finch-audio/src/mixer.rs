@@ -14,9 +14,31 @@ use finch_protocol::media::MediaHeader;
 
 use crate::jitter::{JitterBuffer, PlayoutResult};
 use crate::resampler::FRAME_SIZE_48K;
+use crate::vad::VoiceActivityDetector;
 
 /// Timeout after which a speaker is considered silent if no packets arrive (250 ms).
 pub const SPEECH_TIMEOUT: Duration = Duration::from_millis(250);
+
+/// Number of 20 ms frames used for an avatar level.
+pub const VOICE_LEVEL_FRAMES: usize = 3;
+
+/// The last three 20 ms levels since the previous UI report.
+#[derive(Default)]
+pub struct VoiceLevelPeak([u8; VOICE_LEVEL_FRAMES]);
+
+impl VoiceLevelPeak {
+    pub fn push_db(&mut self, db: f32) {
+        let normalized = ((db + 50.0) / 40.0).clamp(0.0, 1.0);
+        let level = (normalized * 100.0).round() as u8;
+        self.0.rotate_left(1);
+        self.0[VOICE_LEVEL_FRAMES - 1] = level;
+    }
+
+    pub fn take(&mut self) -> u8 {
+        let levels = std::mem::take(&mut self.0);
+        levels.into_iter().max().unwrap_or(0)
+    }
+}
 
 /// Mixer key of the screen-share sound of `peer_id`: separate from the person's voice so it gets
 /// its own volume and never counts as speech.
@@ -45,6 +67,23 @@ pub struct RemoteSpeaker {
     pub jitter_buffer: JitterBuffer,
     pub last_packet_time: Instant,
     pub is_speaking: bool,
+    voice_peak: VoiceLevelPeak,
+}
+
+impl RemoteSpeaker {
+    fn pop_frame(&mut self, frame: &mut [f32; FRAME_SIZE_48K]) -> bool {
+        let result = self.jitter_buffer.pop_frame(frame);
+        let decoded = matches!(result, PlayoutResult::Normal | PlayoutResult::Concealed);
+        if self.is_speaking && self.peer_id & SCREEN_AUDIO_FLAG == 0 {
+            let db = if decoded {
+                VoiceActivityDetector::compute_rms_dbfs(frame)
+            } else {
+                f32::NEG_INFINITY
+            };
+            self.voice_peak.push_db(db);
+        }
+        decoded
+    }
 }
 
 /// Multi-speaker audio mixer.
@@ -147,6 +186,13 @@ impl AudioMixer {
             .collect()
     }
 
+    /// Drain the recent peak levels for active voices. Screen-share sound has no avatar.
+    pub fn speaker_levels(&mut self) -> impl Iterator<Item = (u32, u8)> + '_ {
+        self.speakers.values_mut()
+            .filter(|speaker| speaker.is_speaking && speaker.peer_id & SCREEN_AUDIO_FLAG == 0)
+            .map(|speaker| (speaker.peer_id, speaker.voice_peak.take()))
+    }
+
     /// Feed an incoming audio packet from the network into the appropriate speaker's jitter buffer.
     /// Returns `Some((peer_id, speaking))` if a UI speech state transition occurred.
     pub fn on_audio_packet(
@@ -178,6 +224,7 @@ impl AudioMixer {
                     jitter_buffer,
                     last_packet_time: now,
                     is_speaking: false,
+                    voice_peak: VoiceLevelPeak::default(),
                 })
             }
         };
@@ -188,6 +235,7 @@ impl AudioMixer {
         if is_silence {
             if speaker.is_speaking {
                 speaker.is_speaking = false;
+                speaker.voice_peak = VoiceLevelPeak::default();
                 return Some((peer_id, false));
             }
         } else if !speaker.is_speaking {
@@ -223,14 +271,14 @@ impl AudioMixer {
             // Check for 250 ms silence timeout
             if speaker.is_speaking && now.saturating_duration_since(speaker.last_packet_time) > SPEECH_TIMEOUT {
                 speaker.is_speaking = false;
+                speaker.voice_peak = VoiceLevelPeak::default();
                 if speaker.peer_id & SCREEN_AUDIO_FLAG == 0 {
                     speech_events.push((speaker.peer_id, false));
                 }
             }
 
             // Pop next decoded 20 ms frame
-            let result = speaker.jitter_buffer.pop_frame(&mut self.scratch_buf);
-            if result == PlayoutResult::Normal || result == PlayoutResult::Concealed {
+            if speaker.pop_frame(&mut self.scratch_buf) {
                 let vol = speaker.volume;
                 for (out_sample, &in_sample) in output.iter_mut().zip(self.scratch_buf.iter()) {
                     *out_sample += in_sample * vol;
@@ -262,13 +310,13 @@ impl AudioMixer {
         for speaker in self.speakers.values_mut() {
             if speaker.is_speaking && now.saturating_duration_since(speaker.last_packet_time) > SPEECH_TIMEOUT {
                 speaker.is_speaking = false;
+                speaker.voice_peak = VoiceLevelPeak::default();
                 if speaker.peer_id & SCREEN_AUDIO_FLAG == 0 {
                     speech_events.push((speaker.peer_id, false));
                 }
             }
 
-            let result = speaker.jitter_buffer.pop_frame(&mut self.scratch_buf);
-            if result == PlayoutResult::Normal || result == PlayoutResult::Concealed {
+            if speaker.pop_frame(&mut self.scratch_buf) {
                 let pan = if self.spatial { self.pans.get(&speaker.peer_id).copied().unwrap_or(0.0) } else { 0.0 };
                 let (left_gain, right_gain) = pan_gains(pan);
                 let (left_gain, right_gain) = (left_gain * speaker.volume, right_gain * speaker.volume);
@@ -291,6 +339,44 @@ impl AudioMixer {
 mod tests {
     use super::*;
     use crate::opus::OpusVoiceEncoder;
+
+    #[test]
+    fn voice_peak_uses_only_the_three_most_recent_frames_and_resets_on_read() {
+        let mut peak = VoiceLevelPeak::default();
+        for db in [-5.0, -40.0, -30.0, -60.0] {
+            peak.push_db(db);
+        }
+        assert_eq!(peak.take(), 50);
+        assert_eq!(peak.take(), 0);
+        peak.push_db(-5.0);
+        assert_eq!(peak.take(), 100);
+    }
+
+    #[test]
+    fn speaker_levels_report_decoded_voice_but_not_screen_sound_or_departed_peers() {
+        let mut mixer = AudioMixer::new();
+        let mut encoder = OpusVoiceEncoder::new(64).unwrap();
+        let mut right = [0.0; FRAME_SIZE_48K];
+        let mut left = [0.0; FRAME_SIZE_48K];
+        let tone = std::array::from_fn(|i| (i as f32 * std::f32::consts::TAU / 48.0).sin() * 0.3);
+        let now = Instant::now();
+        for seq in 0..3 {
+            let payload = encoder.encode(&tone).unwrap();
+            let voice = MediaHeader::new_audio(1, 7, seq, seq as u32 * 20, false, false);
+            let screen = MediaHeader::new_audio(1, 8, seq, seq as u32 * 20, false, false);
+            mixer.on_audio_packet(&voice, payload.clone(), now);
+            mixer.on_screen_audio_packet(&screen, payload, now);
+        }
+        for _ in 0..3 {
+            mixer.mix_frame_stereo(&mut left, &mut right, now);
+        }
+        let levels: Vec<_> = mixer.speaker_levels().collect();
+        assert_eq!(levels.len(), 1);
+        assert_eq!(levels[0].0, 7);
+        assert!(levels[0].1 > 0);
+        mixer.remove_speaker(7);
+        assert_eq!(mixer.speaker_levels().next(), None);
+    }
 
     #[test]
     fn leaving_peer_discards_both_voice_and_screen_audio() {

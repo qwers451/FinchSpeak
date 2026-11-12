@@ -1,10 +1,11 @@
 import { createSignal, For, Show } from 'solid-js';
-import { setAdminOpen } from '../stores/adminStore';
+import { mayModerate, moveVoice, setAdminOpen } from '../stores/adminStore';
 import { markRead, unread } from '../stores/activityStore';
 import { setProfileOpen } from '../stores/profileStore';
 import { channels, activeChannel, selectChannel, loadChannels } from '../stores/chatStore';
 import {
   activeVoiceChannel,
+  allVoiceParticipants,
   joinVoice,
   leaveVoice,
   isMuted,
@@ -16,18 +17,34 @@ import {
   participantsForChannel,
   speakingPeers,
 } from '../stores/voiceStore';
+import { isLocallyMuted } from '../stores/localMuteStore';
 import { isSharing } from '../stores/screenState';
+import { participantContextMenu, participantMenuKey } from './voice/participantMenu';
 import { isMeParticipant } from './voice/ParticipantTile';
 import { setNestView } from '../stores/nestView';
 import { connectionStatus, localPeerId, knownUsers, myStatus as ownStatus, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
 import { currentUser } from '../stores/authStore';
-import type { Channel } from '../types';
+import { gameOf } from '../stores/activityGameStore';
+import type { Channel, VoiceParticipant } from '../types';
 import { api } from '../services/api';
 import { moveChannel, removeChannel, renameChannel } from '../stores/channelAdminStore';
 import { Avatar, Button, ConfirmDialog, Field, Icon, Modal } from '../ui';
 import { t } from '../i18n';
 import { describeError } from '../i18n/errors';
+
+const VOICE_USER_DRAG = 'application/x-finch-voice-user';
+type VoiceDrag = { userId: string; peerId: number; from: string };
+
+function readVoiceDrag(transfer: DataTransfer | null): VoiceDrag | null {
+  if (!transfer?.types.includes(VOICE_USER_DRAG) || transfer.types.includes('Files')) return null;
+  try {
+    const value: unknown = JSON.parse(transfer.getData(VOICE_USER_DRAG));
+    if (value && typeof value === 'object' && 'userId' in value && typeof value.userId === 'string' &&
+      'peerId' in value && Number.isSafeInteger(value.peerId) && 'from' in value && typeof value.from === 'string') return value as VoiceDrag;
+  } catch { /* a different or malformed drag */ }
+  return null;
+}
 
 export type ChannelDialog =
   | { kind: 'create'; type: 'text' | 'voice' }
@@ -85,7 +102,7 @@ function ChannelNameDialog(props: { dialog: Extract<ChannelDialog, { kind: 'crea
     <Modal open onClose={props.onClose} title={title()} width="420px">
       <form class="col g16" onSubmit={submit}>
         <Field label={t('Channel name')} value={name()} onInput={setName} placeholder={props.dialog.kind === 'create' && props.dialog.type === 'voice' ? t('Quiet corner') : t('general')} autofocus />
-        <div class="row g8" style={{ 'justify-content': 'flex-end' }}>
+        <div class="row g8 dialog-actions-primary">
           <Button variant="secondary" onClick={props.onClose}>{t('Cancel')}</Button>
           <Button type="submit" variant="primary" loading={busy()} disabled={!name().trim()}>{props.dialog.kind === 'rename' ? t('Save') : t('Create')}</Button>
         </div>
@@ -119,6 +136,37 @@ export function ChannelDialogs(props: { dialog: ChannelDialog; onClose: () => vo
 }
 
 export function Sidebar() {
+  const [dragged, setDragged] = createSignal<VoiceDrag | null>(null);
+  const [dropChannel, setDropChannel] = createSignal<string | null>(null);
+  const canDrag = (participant: VoiceParticipant) => isMeParticipant(participant, localPeerId()) || mayModerate(participant.user_id);
+  const validDrop = (payload: VoiceDrag | null, channel: Channel) => {
+    if (!payload || channel.channel_type !== 'voice' || channel.id === payload.from) return undefined;
+    const participant = allVoiceParticipants().find((person) => person.user_id === payload.userId && person.peer_id === payload.peerId && person.channel_id === payload.from);
+    return participant && canDrag(participant) ? participant : undefined;
+  };
+  const dragStart = (event: DragEvent, participant: VoiceParticipant) => {
+    if (!canDrag(participant) || !event.dataTransfer) { event.preventDefault(); return; }
+    const payload = { userId: participant.user_id, peerId: participant.peer_id, from: participant.channel_id };
+    event.dataTransfer.setData(VOICE_USER_DRAG, JSON.stringify(payload));
+    event.dataTransfer.effectAllowed = 'move';
+    setDragged(payload);
+  };
+  const dragOver = (event: DragEvent, channel: Channel) => {
+    if (!event.dataTransfer?.types.includes(VOICE_USER_DRAG) || event.dataTransfer.types.includes('Files') || !validDrop(dragged(), channel)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDropChannel(channel.id);
+  };
+  const drop = (event: DragEvent, channel: Channel) => {
+    const participant = validDrop(readVoiceDrag(event.dataTransfer), channel);
+    setDropChannel(null);
+    setDragged(null);
+    if (!participant) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (isMeParticipant(participant, localPeerId())) void joinVoice(channel);
+    else void moveVoice(participant.user_id, participant.peer_id, channel.id);
+  };
   const [dialog, setDialog] = createSignal<ChannelDialog>(null);
   const [collapsed, setCollapsed] = createSignal<{ text: boolean; voice: boolean }>({ text: false, voice: false });
   const textChannels = () => channels().filter((c) => c.channel_type === 'text');
@@ -163,7 +211,7 @@ export function Sidebar() {
                 <ChannelActions channel={channel} onDialog={setDialog} />
                 <Show when={unread()[channel.id]}>
                   {(entry) => (
-                    <span class={`badge${entry().mention ? ' mention' : ''}`} style={{ 'margin-left': 'auto' }} title={entry().mention ? t('You were mentioned') : t('Unread messages')}>
+                    <span class={`badge${entry().mention ? ' mention' : ''}`} title={entry().mention ? t('You were mentioned') : t('Unread messages')}>
                       {entry().count > 99 ? '99+' : entry().count}
                     </span>
                   )}
@@ -185,9 +233,10 @@ export function Sidebar() {
         <Show when={!collapsed().voice}>
           <For each={voiceChannels()}>
             {(channel) => (
-              <>
+              <div class="voice-channel-group" onDragOver={(event) => dragOver(event, channel)} onDrop={(event) => drop(event, channel)}
+                onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropChannel(null); }}>
                 <div
-                  class={`ch channel-item${activeVoiceChannel()?.id === channel.id ? ' on' : ''}`}
+                  class={`ch channel-item${activeVoiceChannel()?.id === channel.id ? ' on' : ''}${dropChannel() === channel.id ? ' drop-target' : ''}`}
                   role="button"
                   tabindex="0"
                   onClick={() => { void selectChannel(channel); if (activeVoiceChannel()?.id !== channel.id) void joinVoice(channel); }}
@@ -197,24 +246,28 @@ export function Sidebar() {
                   <span class="trunc" title={channel.name}>{channel.name}</span>
                   <ChannelActions channel={channel} onDialog={setDialog} />
                   <Show when={participantsForChannel(channel.id).some((participant) => participant.is_sharing)}>
-                    <span class="tag live" style={{ 'margin-left': 'auto' }}>{t('LIVE')}</span>
+                    <span class="tag live channel-live">{t('LIVE')}</span>
                   </Show>
                   <Show when={participantsForChannel(channel.id).length > 0}>
-                    <span class="tag violet" style={{ 'margin-left': participantsForChannel(channel.id).some((participant) => participant.is_sharing) ? '0' : 'auto' }}>{participantsForChannel(channel.id).length}</span>
+                    <span class="tag violet channel-count" classList={{ 'with-live': participantsForChannel(channel.id).some((participant) => participant.is_sharing) }}>{participantsForChannel(channel.id).length}</span>
                   </Show>
                 </div>
+                <div class="voice-people" classList={{ 'drop-target': dropChannel() === channel.id }}>
                 <For each={participantsForChannel(channel.id)}>
                   {(participant) => (
-                    <div class="vp">
-                      <Avatar name={participant.username} id={participant.user_id} size={24} src={knownUsers().find((user) => user.id === participant.user_id)?.avatar_url} speaking={speakingPeers().has(participant.peer_id) || (isMeParticipant(participant, localPeerId()) && !isMuted() && isLocalSpeaking())} />
-                      <span class="grow trunc">{participant.username}</span>
-                      <Show when={participant.is_muted}><Icon name="mic-off" title={t('Muted')} style={{ color: 'var(--red-text)' }} /></Show>
-                      <Show when={participant.is_deafened}><Icon name="phones-off" title={t('Deafened')} style={{ color: 'var(--red-text)' }} /></Show>
+                    <div class="vp" tabindex="0" draggable={canDrag(participant)}
+                      onDragStart={(event) => dragStart(event, participant)} onDragEnd={() => { setDragged(null); setDropChannel(null); }} onContextMenu={(event) => participantContextMenu(event, participant.user_id, participant)} onKeyDown={(event) => participantMenuKey(event, participant.user_id, participant)}>
+                      <Avatar name={participant.username} id={participant.user_id} size={24} src={knownUsers().find((user) => user.id === participant.user_id)?.avatar_url} speaking={speakingPeers().has(participant.peer_id) || (isMeParticipant(participant, localPeerId()) && !isMuted() && isLocalSpeaking())} levelPeerId={participant.peer_id} />
+                      <span class="grow trunc">{participant.username}</span><Show when={gameOf(participant.user_id)}><Icon name="gamepad" title={t('Playing {game}', { game: gameOf(participant.user_id)! })} /></Show>
+                      <Show when={!isMeParticipant(participant, localPeerId()) && isLocallyMuted(participant.user_id)}><Icon name="vol-off" title={t('You muted this person')} /></Show>
+                      <Show when={participant.is_muted}><Icon name="mic-off" title={t('Muted')} class="tr" /></Show>
+                      <Show when={participant.is_deafened}><Icon name="phones-off" title={t('Deafened')} class="tr" /></Show>
                       <Show when={participant.is_sharing}><span class="tag live" title={t('Sharing screen')}><Icon name="share" size="sm" /> {t('LIVE')}</span></Show>
                     </div>
                   )}
                 </For>
-              </>
+                </div>
+              </div>
             )}
           </For>
         </Show>
@@ -223,12 +276,12 @@ export function Sidebar() {
       <Show when={activeVoiceChannel()}>
         {(channel) => (
           <div class="vstrip voice-banner">
-            <div class="col grow" style={{ 'min-width': 0 }}>
-                <span class="row g6 b fs13" style={{ color: '#A39CFF' }}>
+            <div class="col grow">
+                <span class="row g6 b fs13 voice-connection">
                 <Icon name="bars" size="sm" />{connectionStatus() === 'connected' ? t('Voice connected') : t('Voice disconnected')}
               </span>
               <span class="t2 fs12 trunc">{channel().name}{pingRtt() !== null ? ` · ${pingRtt()} ms` : ''}</span>
-              <Show when={isSharing()}><span class="row g6 fs12" style={{ color: 'var(--red-text)' }}><Icon name="share" size="sm" />{t('You are sharing your screen')}</span></Show>
+              <Show when={isSharing()}><span class="row g6 fs12 tr"><Icon name="share" size="sm" />{t('You are sharing your screen')}</span></Show>
             </div>
             <Button iconOnly size="sm" variant="danger" icon="hangup" label={t('Disconnect from voice')} title={t('Disconnect')} onClick={() => void leaveVoice()} />
           </div>
@@ -236,9 +289,9 @@ export function Sidebar() {
       </Show>
 
       <div class="upanel user-panel">
-        <button type="button" class="row g12 grow profile-open" style={{ gap: '10px', 'min-width': 0 }} aria-label={t('Open profile')} title={currentUser()?.display_name || currentUser()?.username} onClick={() => setProfileOpen(true)}>
-          <Avatar name={currentUser()?.display_name || currentUser()?.username} id={currentUser()?.id} size={40} status={myStatus()} speaking={isLocalSpeaking()} src={currentUser()?.avatar_url} />
-          <div class="col grow" style={{ 'min-width': 0, 'text-align': 'left' }}>
+        <button type="button" class="row g12 grow profile-open" aria-label={t('Open profile')} title={currentUser()?.display_name || currentUser()?.username} onClick={() => setProfileOpen(true)}>
+          <Avatar name={currentUser()?.display_name || currentUser()?.username} id={currentUser()?.id} size={40} status={myStatus()} speaking={isLocalSpeaking()} src={currentUser()?.avatar_url} levelPeerId={localPeerId() ?? undefined} />
+          <div class="col grow">
             <span class="b trunc fs13">{currentUser()?.display_name || currentUser()?.username}</span>
             <span class="t3 fs12 trunc">{(currentUser() && statusTexts()[currentUser()!.id]) || statusLabel()}</span>
           </div>

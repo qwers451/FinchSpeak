@@ -1,4 +1,5 @@
 import { createSignal } from 'solid-js';
+import { restoreGameActivities, setGameActivity } from './activityGameStore';
 import type { DeviceSession, SessionEvents, SessionSnapshot, User, UserStatus } from '../types';
 import { setPendingMismatch, setPendingTofu } from './tofuStore';
 import { receiveInviteLink, setPendingInvite } from './inviteLink';
@@ -16,6 +17,7 @@ import { resetScreenState, resetScreenStateOnDisconnect, setWatching, watching }
 import { endWatching, screenHandlers } from './screenStore';
 import { applySavedVolume } from './volumeStore';
 import { pushToast } from '../ui/toastStore';
+import { updateVoiceLevels } from './levelStore';
 export { appError, setAppError } from './notificationStore';
 
 export const [connectionStatus, setConnectionStatus] = createSignal<'connected' | 'disconnected' | 'reconnecting' | 'failed'>('disconnected');
@@ -23,11 +25,13 @@ export const [connectionError, setConnectionError] = createSignal<string | null>
 /** Failed reconnect tries so far and the wait before the next one. */
 export const [reconnectInfo, setReconnectInfo] = createSignal<{ attempt: number; retryInSecs: number } | null>(null);
 export const [localPeerId, setLocalPeerId] = createSignal<number | null>(null);
+export const [nativeSessionGeneration, setNativeSessionGeneration] = createSignal<number | null>(null);
 export const [sessionUserId, setSessionUserId] = createSignal<string | null>(null);
 export const [knownUsers, setKnownUsers] = createSignal<User[]>([]);
 export const [presence, setPresence] = createSignal<Record<string, UserStatus>>({});
 /** What people wrote next to their status. */
 export const [statusTexts, setStatusTexts] = createSignal<Record<string, string>>({});
+export const [serverFeatures, setServerFeatures] = createSignal<string[]>([]);
 export const onlineUsers = () => knownUsers().filter((user) => (presence()[user.id] ?? user.status) !== 'offline');
 /**
  * My own status. The presence map wins: the server's self presence-update can arrive before the
@@ -48,6 +52,10 @@ export function currentSessionGeneration(): number {
 }
 
 export function resetSessionState() {
+  updateVoiceLevels({ levels: [] });
+  setNativeSessionGeneration(null);
+  restoreGameActivities();
+  setServerFeatures([]);
   sessionGeneration++;
   clearJoinSounds();
   resetMicPreview();
@@ -71,12 +79,19 @@ export function resetSessionState() {
 
 export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEvents[K]) => void } = {
   authenticated: (data) => {
+    const { online_users, offline_users = [] } = data.initial_state;
+    setNativeSessionGeneration(data.session_generation ?? null);
+    restoreGameActivities(data.initial_state.features?.includes('activity') ? data.initial_state.activities : []);
+    setServerFeatures(data.initial_state.features ?? []);
     setSessionUserId(data.user_id);
     setLocalPeerId(data.session_peer_id);
     setChannels(data.initial_state.channels);
-    setKnownUsers(data.initial_state.online_users);
-    setPresence(Object.fromEntries(data.initial_state.online_users.map((user) => [user.id, user.status ?? 'online'])));
-    setStatusTexts(Object.fromEntries(data.initial_state.online_users.flatMap((user) => (user.status_text ? [[user.id, user.status_text]] : []))));
+    setKnownUsers([...online_users, ...offline_users]);
+    setPresence(Object.fromEntries([
+      ...online_users.map((user) => [user.id, user.status ?? 'online'] as const),
+      ...offline_users.map((user) => [user.id, 'offline'] as const),
+    ]));
+    setStatusTexts(Object.fromEntries(online_users.flatMap((user) => (user.status_text ? [[user.id, user.status_text]] : []))));
     setVoiceParticipants(data.initial_state.voice_states.map(({ muted, deafened, sharing_screen, ...participant }) => ({
       ...participant, is_muted: muted, is_deafened: deafened, is_sharing: sharing_screen,
     })));
@@ -98,6 +113,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     noteIncoming(incoming);
     reactToMessage(incoming, isMentioned(incoming));
   },
+  'activity-changed': setGameActivity,
   'message-edited': handleMessageEdited,
   'message-deleted': handleMessageDeleted,
   'reaction-changed': handleReactionChanged,
@@ -114,6 +130,7 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'local-speaking': setIsLocalSpeaking,
   'ping-rtt': (data) => setPingRtt(data.rtt_ms),
   'mic-level': handleMicLevel,
+  'voice-levels': updateVoiceLevels,
   'mic-test': handleMicTest,
   hotkey: (action) => void handleHotkey(action),
   'voice-quality': handleVoiceQuality,
@@ -177,6 +194,8 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   },
   'join-sound-changed': ({ user_id }) => invalidateJoinSound(user_id),
   'connection-lost': (reason) => {
+    restoreGameActivities();
+    setServerFeatures([]);
     resetMicPreview();
     const ended = classifyEnd(reason);
     if (ended) {
@@ -199,6 +218,8 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     if (channel?.channel_type === 'text') void selectChannel(channel);
   },
   'reconnect-failed': (reason) => {
+    restoreGameActivities();
+    setServerFeatures([]);
     setConnectionStatus('failed');
     setConnectionError(reason);
     // Keep the more specific reason we may already have (banned, kicked).
@@ -225,11 +246,26 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     setAppError(t('"{wanted}" is not available; using the system default {kind} device instead.', { wanted, kind: t(kind) })),
 };
 
+export function appendMissingProfiles({ online_users, offline_users = [] }: SessionEvents['authenticated']['initial_state']) {
+  setKnownUsers((previous) => {
+    const knownIds = new Set(previous.map((user) => user.id));
+    const added: User[] = [];
+    for (const user of [...online_users, ...offline_users]) {
+      if (knownIds.has(user.id)) continue;
+      knownIds.add(user.id);
+      added.push(user);
+    }
+    return added.length ? [...previous, ...added] : previous;
+  });
+}
+
 export function restoreSessionSnapshot(snapshot: SessionSnapshot) {
   if (snapshot.connected && snapshot.initial_state) {
-    sessionHandlers.authenticated({ user_id: snapshot.user_id, session_peer_id: snapshot.session_peer_id,
+    sessionHandlers.authenticated({ user_id: snapshot.user_id, session_peer_id: snapshot.session_peer_id, session_generation: snapshot.session_generation,
       channels: snapshot.initial_state.channels, initial_state: snapshot.initial_state });
   } else {
+    restoreGameActivities();
+    setServerFeatures([]);
     resetMicPreview();
     setConnectionStatus('disconnected');
   }

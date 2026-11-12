@@ -23,6 +23,8 @@ pub enum TrayState {
     Idle,
     /// In a voice room, microphone open.
     Voice,
+    /// Speaking in a voice room.
+    Speaking,
     /// In a voice room and muted.
     Muted,
     /// Sharing the screen (the window may be hidden: the red dot says so).
@@ -54,12 +56,14 @@ impl TrayState {
         if language != "en" { return match self {
             TrayState::Idle => "FinchSpeak",
             TrayState::Voice => "FinchSpeak: в голосовой комнате",
+            TrayState::Speaking => "FinchSpeak: вы говорите",
             TrayState::Muted => "FinchSpeak: микрофон выключен",
             TrayState::Live => "FinchSpeak: идёт демонстрация экрана",
         }; }
         match self {
             TrayState::Idle => "FinchSpeak",
             TrayState::Voice => "FinchSpeak: in a voice room",
+            TrayState::Speaking => "FinchSpeak: you are speaking",
             TrayState::Muted => "FinchSpeak: in a voice room, muted",
             TrayState::Live => "FinchSpeak: you are sharing your screen",
         }
@@ -70,6 +74,7 @@ impl TrayState {
         match self {
             TrayState::Idle => None,
             TrayState::Voice => Some([0x00, 0xB8, 0xBC]),
+            TrayState::Speaking => Some([0x2E, 0xCC, 0x71]),
             TrayState::Muted => Some([0xFF, 0xAB, 0x00]),
             TrayState::Live => Some([0xFF, 0x33, 0x00]),
         }
@@ -80,6 +85,7 @@ fn bird_icon_bytes(state: TrayState) -> &'static [u8] {
     match state {
         TrayState::Idle => include_bytes!("../frontend/public/custom/assets/tray-icons/png/tray-01-online-32@2x.png"),
         TrayState::Voice | TrayState::Live => include_bytes!("../frontend/public/custom/assets/tray-icons/png/tray-02-voice-32@2x.png"),
+        TrayState::Speaking => include_bytes!("../frontend/public/custom/assets/tray-icons/png/tray-03-speaking-32@2x.png"),
         TrayState::Muted => include_bytes!("../frontend/public/custom/assets/tray-icons/png/tray-04-muted-32@2x.png"),
     }
 }
@@ -309,21 +315,32 @@ mod tests {
 
     #[test]
     fn every_state_has_a_tooltip_and_only_idle_has_no_dot() {
-        for state in [TrayState::Idle, TrayState::Voice, TrayState::Muted, TrayState::Live] {
+        for state in [TrayState::Idle, TrayState::Voice, TrayState::Speaking, TrayState::Muted, TrayState::Live] {
             assert!(state.tooltip("en").starts_with("FinchSpeak"));
             assert_eq!(state.dot().is_none(), state == TrayState::Idle);
         }
+        assert_eq!(TrayState::Speaking.tooltip("ru"), "FinchSpeak: вы говорите");
+        assert_eq!(TrayState::Speaking.tooltip("en"), "FinchSpeak: you are speaking");
+        assert_eq!(TrayState::Speaking.dot(), Some([0x2E, 0xCC, 0x71]));
+    }
+
+    #[test]
+    fn speaking_deserializes_from_the_tray_command_payload() {
+        assert_eq!(serde_json::from_str::<TrayState>(r#""speaking""#).unwrap(), TrayState::Speaking);
     }
 
     #[test]
     fn tray_states_use_the_supplied_bird_artwork() {
         let idle = Image::from_bytes(bird_icon_bytes(TrayState::Idle)).unwrap();
         let voice = Image::from_bytes(bird_icon_bytes(TrayState::Voice)).unwrap();
+        let speaking = Image::from_bytes(bird_icon_bytes(TrayState::Speaking)).unwrap();
         let muted = Image::from_bytes(bird_icon_bytes(TrayState::Muted)).unwrap();
         assert_eq!((idle.width(), idle.height()), (64, 64));
         assert_eq!((voice.width(), voice.height()), (64, 64));
+        assert_eq!((speaking.width(), speaking.height()), (64, 64));
         assert_eq!((muted.width(), muted.height()), (64, 64));
         assert_ne!(idle.rgba(), voice.rgba());
+        assert_ne!(voice.rgba(), speaking.rgba());
         assert_ne!(voice.rgba(), muted.rgba());
     }
 }

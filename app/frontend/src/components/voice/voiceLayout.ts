@@ -37,10 +37,12 @@ export interface Arranged {
  * Splits the room into LIVE cards, tiles and roster. I am always the first tile. When there are
  * more people than tiles, the ones who are speaking come first so nobody who talks is hidden.
  */
-export function arrange(participants: VoiceParticipant[], localPeerId: number | null, speaking: ReadonlySet<number>): Arranged {
+export function arrange(participants: VoiceParticipant[], localPeerId: number | null, speaking: ReadonlySet<number>, tileOrder: readonly string[] = []): Arranged {
   const shares = participants.filter((participant) => participant.is_sharing && participant.peer_id !== localPeerId);
   const me = participants.find((participant) => participant.peer_id === localPeerId);
-  const others = participants.filter((participant) => participant.peer_id !== localPeerId);
+  const positions = new Map(tileOrder.map((id, index) => [id, index]));
+  const others = participants.filter((participant) => participant.peer_id !== localPeerId)
+    .sort((a, b) => (positions.get(a.user_id) ?? Infinity) - (positions.get(b.user_id) ?? Infinity));
   // Sharers keep a tile as well (the LIVE card is about the picture, the tile about the person).
   const room = me ? [me, ...others] : others;
   if (room.length <= MAX_GRID_TILES) return { grid: room, roster: [], shares };

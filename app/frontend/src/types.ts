@@ -199,12 +199,16 @@ export interface AudioDevice {
 export type UserStatus = 'online' | 'idle' | 'donotdisturb' | 'offline';
 export interface SessionEvents {
   authenticated: {
+    session_generation?: number;
     session_peer_id: number;
     user_id: string;
     channels: { id: string; short_id: number }[];
     initial_state: {
+      features?: string[];
+      activities?: { user_id: string; game: string }[];
       channels: Channel[];
       online_users: User[];
+      offline_users?: User[];
       voice_states: (Omit<VoiceParticipant, 'is_muted' | 'is_deafened' | 'is_sharing'> & {
         muted: boolean; deafened: boolean; sharing_screen: boolean;
       })[];
@@ -212,8 +216,10 @@ export interface SessionEvents {
     };
   };
   'new-message': IncomingMessage;
+  'activity-changed': { user_id: string; game: string | null };
   'message-rejected': { client_msg_id: string; code: number; message: string };
   'user-speaking': { peer_id: number; is_speaking: boolean };
+  'voice-levels': { levels: [peerId: number, level: number][] };
   'local-speaking': boolean;
   'ping-rtt': { rtt_ms: number };
   'tofu-required': { hostname: string; fingerprint: string };
@@ -278,6 +284,7 @@ export interface AudioDevices {
 }
 
 export interface SessionSnapshot {
+  session_generation?: number;
   connected: boolean;
   user_id: string;
   session_peer_id: number;

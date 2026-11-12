@@ -86,22 +86,62 @@ pub fn decode_message<T: DeserializeOwned>(buf: &mut BytesMut) -> Result<T, Code
 mod tests {
     use super::*;
     use crate::messages::ClientMessage;
+    use crate::models::ServerState;
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    #[serde(tag = "type")]
+    enum LegacyClientMessage {
+        Authenticate { token: String, supports_voice_extensions: bool },
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct LegacyServerState {
+        channels: Vec<crate::models::Channel>,
+        online_users: Vec<crate::models::User>,
+        voice_states: Vec<crate::models::VoiceState>,
+    }
 
     #[test]
-    fn authentication_with_voice_extensions_is_readable_by_a_legacy_server() {
-        #[derive(serde::Deserialize)]
-        #[serde(tag = "type")]
-        enum LegacyClientMessage {
-            Authenticate { token: String },
-        }
-
+    fn level_150_authentication_is_readable_by_a_legacy_server() {
         let frame = encode_message(&ClientMessage::Authenticate {
             token: "token".into(),
             supports_voice_extensions: true,
+            client_level: 150,
         }).unwrap();
         let mut buf = BytesMut::from(frame.as_slice());
-        let LegacyClientMessage::Authenticate { token } = decode_message(&mut buf).unwrap();
+        let LegacyClientMessage::Authenticate { token, supports_voice_extensions } = decode_message(&mut buf).unwrap();
         assert_eq!(token, "token");
+        assert!(supports_voice_extensions);
+    }
+
+    #[test]
+    fn legacy_authentication_defaults_to_level_zero() {
+        let frame = encode_message(&LegacyClientMessage::Authenticate {
+            token: "token".into(),
+            supports_voice_extensions: true,
+        }).unwrap();
+        let message: ClientMessage = decode_message(&mut BytesMut::from(frame.as_slice())).unwrap();
+        assert!(matches!(message, ClientMessage::Authenticate { client_level: 0, supports_voice_extensions: true, .. }));
+    }
+
+    #[test]
+    fn legacy_snapshot_defaults_to_no_features() {
+        let frame = encode_message(&LegacyServerState {
+            channels: vec![], online_users: vec![], voice_states: vec![],
+        }).unwrap();
+        let snapshot: ServerState = decode_message(&mut BytesMut::from(frame.as_slice())).unwrap();
+        assert!(snapshot.features.is_empty());
+        assert!(snapshot.activities.is_empty());
+    }
+
+    #[test]
+    fn legacy_clients_can_decode_a_snapshot_with_features() {
+        let frame = encode_message(&ServerState {
+            channels: vec![], online_users: vec![], offline_users: vec![], voice_states: vec![], unread: vec![],
+            features: vec!["activity".into()], activities: vec![],
+        }).unwrap();
+        let snapshot: LegacyServerState = decode_message(&mut BytesMut::from(frame.as_slice())).unwrap();
+        assert!(snapshot.channels.is_empty());
     }
 
     #[test]
