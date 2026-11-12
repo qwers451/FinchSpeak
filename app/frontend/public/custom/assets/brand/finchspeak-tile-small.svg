@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1248 1248"><title>FinchSpeak</title>
+<defs>
+<linearGradient id="dark" x1="0" y1="0" x2=".8" y2="1" gradientUnits="objectBoundingBox"><stop stop-color="#343233"/><stop offset="1" stop-color="#111011"/></linearGradient>
+<linearGradient id="cream" x2=".8" y2="1"><stop stop-color="#fff3e7"/><stop offset="1" stop-color="#ead5c2"/></linearGradient>
+<linearGradient id="orange" x2=".3" y2="1"><stop stop-color="#ffb74e"/><stop offset="1" stop-color="#ff741c"/></linearGradient>
+<linearGradient id="cheek" x2=".7" y2="1"><stop stop-color="#ff8d32"/><stop offset="1" stop-color="#ef4814"/></linearGradient>
+<linearGradient id="tile" x2=".7" y2="1"><stop stop-color="#f6ebdf"/><stop offset="1" stop-color="#e6d3c0"/></linearGradient><clipPath id="tileClip"><rect x="64" y="64" width="1120" height="1120" rx="250"/></clipPath></defs>
+<rect x="64" y="64" width="1120" height="1120" rx="250" fill="url(#tile)"/>
+<g clip-path="url(#tileClip)"><g transform="translate(73 38) scale(1.05)"><!-- Headband -->
+<path fill="url(#dark)" d="M247 466C281 299 402 183 545 165C651 148 752 207 780 313C697 254 608 253 526 294C454 330 409 393 389 455Z"/>
+<path fill="url(#orange)" d="M322 423C363 296 449 199 550 175C613 160 680 179 731 223C650 184 568 205 505 254C452 295 419 356 402 430Z"/>
+<!-- Body and head -->
+<path fill="url(#cream)" d="M130 993C193 885 241 794 313 718L405 463C475 352 582 288 683 295C766 300 815 365 839 465L921 495L840 594C885 665 905 758 881 861C854 1000 755 1135 605 1135H383C266 1135 179 1080 130 993Z"/>
+<path fill="url(#dark)" d="M405 463C472 350 581 288 683 295C763 300 815 365 839 465L817 480C765 408 711 389 650 400C593 410 551 444 521 478Z"/>
+<path fill="url(#cheek)" d="M499 733C529 647 560 574 618 527C660 493 706 475 744 492C787 513 755 580 718 616C659 673 578 703 499 733Z"/>
+<path fill="url(#dark)" d="M130 993C181 898 237 794 314 718L489 731C364 777 227 869 130 993Z"/>
+<path fill="url(#dark)" d="M149 1022C272 896 411 800 544 774C649 753 711 805 701 893C689 989 619 1074 537 1135H383C279 1135 198 1094 149 1022Z"/>
+<!-- Beak and eye -->
+<path fill="url(#orange)" d="M817 480L839 465Q881 477 921 495L797 550Z"/>
+<path fill="url(#dark)" d="M797 550L921 495L840 594Z"/>
+<ellipse fill="url(#dark)" cx="720" cy="495" rx="39" ry="52" transform="rotate(-26 720 495)"/>
+<!-- Headphone cup -->
+<path fill="url(#dark)" d="M353 420C464 405 557 467 561 581C565 690 489 752 370 756C270 759 196 694 190 590C184 490 254 428 353 420Z"/>
+<path fill="url(#cream)" d="M375 438C469 432 533 491 535 586C537 678 474 743 361 750C445 718 488 660 489 584C489 515 448 461 375 438Z"/>
+<ellipse fill="url(#dark)" cx="341" cy="585" rx="159" ry="166"/>
+<ellipse fill="url(#cream)" cx="337" cy="581" rx="118" ry="128"/></g></g>
+</svg>

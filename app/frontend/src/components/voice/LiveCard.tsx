@@ -13,7 +13,7 @@ export function LiveCard(props: { participant: VoiceParticipant }) {
   return (
     <div class="vc live-card" data-peer-id={p().peer_id}>
       <div class="live-art" aria-hidden="true">
-        <img src="/custom/assets/brand/finchspeak.svg" alt="" width="64" />
+        <img src="/custom/assets/brand/finchspeak-tile.svg" alt="" width="64" />
         <span class="tag live"><span class="dot live" style={{ background: 'var(--bg-app)', width: '6px', height: '6px' }} />{t('Live')}</span>
       </div>
       <div class="row g8 live-foot">

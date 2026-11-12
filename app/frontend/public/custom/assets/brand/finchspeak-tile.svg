@@ -1,11 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="110 140 830 1010"><title>FinchSpeak</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1248 1248"><title>FinchSpeak</title>
 <defs>
 <linearGradient id="dark" x1="0" y1="0" x2=".8" y2="1" gradientUnits="objectBoundingBox"><stop stop-color="#343233"/><stop offset="1" stop-color="#111011"/></linearGradient>
 <linearGradient id="cream" x2=".8" y2="1"><stop stop-color="#fff3e7"/><stop offset="1" stop-color="#ead5c2"/></linearGradient>
 <linearGradient id="orange" x2=".3" y2="1"><stop stop-color="#ffb74e"/><stop offset="1" stop-color="#ff741c"/></linearGradient>
 <linearGradient id="cheek" x2=".7" y2="1"><stop stop-color="#ff8d32"/><stop offset="1" stop-color="#ef4814"/></linearGradient>
-</defs>
-<!-- Headband -->
+<linearGradient id="tile" x2=".7" y2="1"><stop stop-color="#f6ebdf"/><stop offset="1" stop-color="#e6d3c0"/></linearGradient><clipPath id="tileClip"><rect x="64" y="64" width="1120" height="1120" rx="250"/></clipPath></defs>
+<rect x="64" y="64" width="1120" height="1120" rx="250" fill="url(#tile)"/>
+<g clip-path="url(#tileClip)"><g transform="translate(-14 118) scale(0.98)"><!-- Headband -->
 <path fill="url(#dark)" d="M247 466C281 299 402 183 545 165C651 148 752 207 780 313C697 254 608 253 526 294C454 330 409 393 389 455Z"/>
 <path fill="url(#orange)" d="M322 423C363 296 449 199 550 175C613 160 680 179 731 223C650 184 568 205 505 254C452 295 419 356 402 430Z"/>
 <!-- Body and head -->
@@ -23,4 +24,6 @@
 <path fill="url(#cream)" d="M375 438C469 432 533 491 535 586C537 678 474 743 361 750C445 718 488 660 489 584C489 515 448 461 375 438Z"/>
 <ellipse fill="url(#dark)" cx="341" cy="585" rx="159" ry="166"/>
 <ellipse fill="url(#cream)" cx="337" cy="581" rx="118" ry="128"/>
+<!-- Sound waves -->
+<g fill="none" stroke="url(#dark)" stroke-width="56" stroke-linecap="round"><path d="M947 428Q1036 519 964 624"/><path d="M1001 350Q1172 506 1038 685"/></g></g></g>
 </svg>

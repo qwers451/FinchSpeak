@@ -105,7 +105,7 @@ export function TreeView() {
   return (
     <div class={`tree-layout${activeChannel() ? ' has-content' : ''}${folded() && activeChannel() ? ' folded' : ''}`}>
       <header class="tree-bar">
-        <img src="/custom/assets/brand/finchspeak-mark.svg" alt="" />
+        <img src="/custom/assets/brand/finchspeak-tile-small.svg" alt="" />
         <span class="tree-title">FinchSpeak</span>
         <span class="grow" />
         <Show when={isAdmin()}>
