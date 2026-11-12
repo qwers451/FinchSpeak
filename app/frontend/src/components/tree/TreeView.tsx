@@ -10,6 +10,7 @@ import { isSharing } from '../../stores/screenState';
 import { connectionStatus, knownUsers, myStatus as ownStatus, presence, statusTexts } from '../../stores/sessionStore';
 import { currentUser } from '../../stores/authStore';
 import { branchPlan, setNestView } from '../../stores/nestView';
+import { musicAvailable, musicState, setMusicPanelOpen } from '../../stores/musicStore';
 import type { Channel, User, UserStatus } from '../../types';
 import { Avatar, Button, Icon } from '../../ui';
 import { locale, t } from '../../i18n';
@@ -172,6 +173,9 @@ export function TreeView() {
         </Show>
         <Button iconOnly size="sm" variant={isMuted() ? 'danger' : 'ghost'} icon={isMuted() ? 'mic-off' : 'mic'} label={isMuted() ? t('Unmute') : t('Mute')} onClick={() => void toggleMute()} />
         <Button iconOnly size="sm" variant={isDeafened() ? 'danger' : 'ghost'} icon={isDeafened() ? 'phones-off' : 'phones'} label={isDeafened() ? t('Undeafen') : t('Deafen')} onClick={() => void toggleDeafen()} />
+        <Show when={musicAvailable() && musicState()?.playing}>
+          <button type="button" class="music-note" aria-label={t('Music is playing')} title={t('Music')} onClick={() => setMusicPanelOpen(true)}><Icon name="music" size="sm" /></button>
+        </Show>
         <Show when={activeVoiceChannel()}>
           <Button iconOnly size="sm" variant="danger" icon="hangup" class="tree-leave" label={t('Fly out of the nest')} onClick={() => void leaveVoice()} />
         </Show>

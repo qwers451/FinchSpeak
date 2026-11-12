@@ -17,6 +17,9 @@ const [clock, setClock] = createSignal(Date.now());
 let timer: ReturnType<typeof setInterval> | undefined;
 let volumeBeforeMute: number | null = null;
 
+/** Whether the room music panel is open (the dock button, the strips and the room header open it). */
+export const [musicPanelOpen, setMusicPanelOpen] = createSignal(false);
+
 const clampUnit = (value: number) => (Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : DEFAULT_MUSIC_VOLUME);
 
 function startClock() {
@@ -115,4 +118,5 @@ export async function toggleMusicMute(): Promise<void> {
 export function resetMusic() {
   stopClock();
   setSnapshot(null);
+  setMusicPanelOpen(false);
 }

@@ -1,5 +1,6 @@
 import { Show } from 'solid-js';
 import { isSharing, stopSharing } from '../../stores/screenStore';
+import { musicAvailable, musicPanelOpen, musicState, setMusicPanelOpen } from '../../stores/musicStore';
 import { isDeafened, isMuted, leaveVoice, pushToTalkKey, toggleDeafen, toggleMute, voiceSettings } from '../../stores/voiceStore';
 import { Icon, type IconName } from '../../ui';
 import { t } from '../../i18n';
@@ -29,6 +30,9 @@ export function Dock(props: { onShare: () => void; onSettings: () => void }) {
         <Ctl label={t(isMuted() ? 'Unmute' : 'Mute')} icon={isMuted() ? 'mic-off' : 'mic'} class={isMuted() ? 'active' : ''} pressed={isMuted()} onClick={() => void toggleMute()} />
         <Ctl label={t(isDeafened() ? 'Undeafen' : 'Deafen')} icon={isDeafened() ? 'phones-off' : 'phones'} class={isDeafened() ? 'active' : ''} pressed={isDeafened()} onClick={() => void toggleDeafen()} />
         <Ctl label={t(isSharing() ? 'Stop sharing' : 'Share your screen')} icon="share" class={isSharing() ? 'live' : ''} pressed={isSharing()} onClick={() => (isSharing() ? void stopSharing() : props.onShare())} />
+        <Show when={musicAvailable()}>
+          <Ctl label={t('Music')} icon="music" class={musicState()?.playing ? 'live' : ''} pressed={musicPanelOpen()} onClick={() => setMusicPanelOpen(!musicPanelOpen())} />
+        </Show>
         <Ctl label={t('Voice settings')} icon="sliders" onClick={props.onSettings} />
         <Ctl label={t('Leave the room')} icon="hangup" class="leave" onClick={() => void leaveVoice()} />
       </div>
