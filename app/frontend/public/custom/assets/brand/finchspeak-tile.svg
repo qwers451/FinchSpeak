@@ -4,9 +4,9 @@
 <linearGradient id="cream" x2=".8" y2="1"><stop stop-color="#fff3e7"/><stop offset="1" stop-color="#ead5c2"/></linearGradient>
 <linearGradient id="orange" x2=".3" y2="1"><stop stop-color="#ffb74e"/><stop offset="1" stop-color="#ff741c"/></linearGradient>
 <linearGradient id="cheek" x2=".7" y2="1"><stop stop-color="#ff8d32"/><stop offset="1" stop-color="#ef4814"/></linearGradient>
-<linearGradient id="tile" x2=".7" y2="1"><stop stop-color="#f6ebdf"/><stop offset="1" stop-color="#e6d3c0"/></linearGradient><clipPath id="tileClip"><rect x="64" y="64" width="1120" height="1120" rx="250"/></clipPath></defs>
+<linearGradient id="tile" x2=".7" y2="1"><stop stop-color="#efd6bd"/><stop offset="1" stop-color="#d9b693"/></linearGradient><clipPath id="tileClip"><rect x="64" y="64" width="1120" height="1120" rx="250"/></clipPath><filter id="lift" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#5a3a1e" flood-opacity="0.35"/></filter></defs>
 <rect x="64" y="64" width="1120" height="1120" rx="250" fill="url(#tile)"/>
-<g clip-path="url(#tileClip)"><g transform="translate(-14 118) scale(0.98)"><!-- Headband -->
+<g clip-path="url(#tileClip)"><g filter="url(#lift)" transform="translate(-14 118) scale(0.98)"><!-- Headband -->
 <path fill="url(#dark)" d="M247 466C281 299 402 183 545 165C651 148 752 207 780 313C697 254 608 253 526 294C454 330 409 393 389 455Z"/>
 <path fill="url(#orange)" d="M322 423C363 296 449 199 550 175C613 160 680 179 731 223C650 184 568 205 505 254C452 295 419 356 402 430Z"/>
 <!-- Body and head -->
