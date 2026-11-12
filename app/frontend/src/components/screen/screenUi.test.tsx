@@ -145,6 +145,30 @@ it('says so when there is nothing to share', async () => {
   expect(button('Start sharing').disabled).toBe(true);
 });
 
+it('a minimized window is listed with a Minimized placeholder instead of a picture, and can be shared', async () => {
+  (api.listScreenSources as ReturnType<typeof vi.fn>).mockResolvedValue({
+    monitors: [],
+    windows: [{ id: 12, title: 'Rocket League', app_name: 'RocketLeague.exe', width: 0, height: 0, is_minimized: true }],
+  });
+  const start = vi.spyOn(api, 'startScreenShare').mockResolvedValue();
+  mount(() => <SharePickerModal open onClose={() => {}} />);
+  await flush();
+  button('Windows').click();
+  await flush();
+  const tile = document.querySelector('[role="option"]') as HTMLElement;
+  expect(tile.textContent).toContain('Rocket League');
+  expect(tile.textContent).toContain('Minimized');
+  expect(tile.querySelector('img')).toBeNull();
+  expect(document.body.textContent).toContain('A minimized window shows up for viewers once you open it.');
+  tile.click();
+  await flush();
+  button('Start sharing').click();
+  await flush();
+  await flush();
+  expect(api.captureThumbnail).not.toHaveBeenCalledWith('window', 12, 320);
+  expect(start).toHaveBeenCalledWith('window', 12, false, 'system', 30);
+});
+
 const fpsButton = (value: string) =>
   Array.from(document.querySelectorAll<HTMLButtonElement>('[aria-label="Frame rate"] button')).find((b) => b.textContent === value) as HTMLButtonElement;
 

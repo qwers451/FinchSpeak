@@ -575,6 +575,15 @@ impl FrameSource for WindowSource {
     }
 }
 
+/// What a capture session showed while its first picture was awaited.
+pub enum FirstFrame {
+    Frame(RawFrame),
+    /// The session runs but has no picture yet (a minimized window, a still screen).
+    NotYet,
+    /// The session ended before it produced a picture.
+    Closed,
+}
+
 /// Captures a monitor or a window through a Windows Graphics Capture session: frames arrive as
 /// the picture changes, so a still screen (or a minimized window) is idle, not failing.
 #[cfg(windows)]
@@ -591,6 +600,18 @@ impl WgcSource {
     const FIRST_FRAME: Duration = Duration::from_secs(2);
     /// How long one poll waits for a new frame.
     const POLL: Duration = Duration::from_millis(100);
+
+    /// Waits up to `wait` for the first picture. The frame is kept, so the share starts with it.
+    pub fn first_frame(&mut self, wait: Duration) -> FirstFrame {
+        match self.capture.take_frame(wait) {
+            Some(frame) => {
+                self.primed = Some(frame.clone());
+                FirstFrame::Frame(frame)
+            }
+            None if self.capture.is_closed() => FirstFrame::Closed,
+            None => FirstFrame::NotYet,
+        }
+    }
 
     /// A session that delivers at most `fps` frames per second.
     pub fn monitor(id: u32, fps: u8) -> Result<Self, String> {
@@ -628,9 +649,15 @@ impl FrameSource for WgcSource {
     }
 }
 
-/// Consecutive capture failures (window closed, display off) before the share ends. A shared window that
-/// is minimized yields no frames, so this is about 30 seconds (at 33 ms per try): enough to restore it.
+/// Consecutive capture failures (window closed, display off) before the share ends. A minimized window
+/// is not a failure: a Windows Graphics Capture session just stays idle until the window is restored.
 const MAX_CAPTURE_FAILURES: u32 = 900;
+
+/// Whether a picture that arrives after `paused` without any new frame starts a fresh stream: viewers
+/// then need a key frame to decode it.
+pub fn resumed_after_pause(paused: Duration) -> bool {
+    paused >= Duration::from_secs(1)
+}
 
 /// The newest captured frame, handed from the capture thread to the encoder thread.
 #[derive(Default)]
@@ -753,6 +780,8 @@ impl ScreenSharer {
                     let mut next = Instant::now();
                     let mut last_frame: Option<RawFrame> = None;
                     let mut last_sent = Instant::now();
+                    // When the picture last changed: a new one after a pause starts with a key frame.
+                    let mut last_fresh = Instant::now();
                     let mut stats = StatsWindow::default();
                     let mut stats_since = Instant::now();
                     let mut log_since = Instant::now();
@@ -791,12 +820,16 @@ impl ScreenSharer {
                         };
                         let key_requested = key_flag.swap(false, Ordering::Relaxed);
                         let send = fresh.is_some() || resend_last(key_requested, last_sent.elapsed());
+                        let resumed = fresh.is_some() && resumed_after_pause(last_fresh.elapsed());
+                        if fresh.is_some() {
+                            last_fresh = Instant::now();
+                        }
                         if let Some(frame) = fresh {
                             last_frame = Some(frame);
                         }
                         let to_send = if send { last_frame.as_ref() } else { None };
                         if let Some(frame) = to_send {
-                            if key_requested {
+                            if key_requested || resumed {
                                 packetizer.request_keyframe();
                             }
                             let Some(max_datagram) = connection.max_datagram_size() else {
@@ -1132,6 +1165,13 @@ mod tests {
         assert!(!resend_last(false, Duration::from_millis(500)));
         assert!(resend_last(true, Duration::ZERO));
         assert!(resend_last(false, Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn a_picture_after_a_pause_of_a_second_asks_for_a_key_frame() {
+        assert!(!resumed_after_pause(Duration::from_millis(33)));
+        assert!(!resumed_after_pause(Duration::from_millis(999)));
+        assert!(resumed_after_pause(Duration::from_secs(1)));
     }
 
     #[test]

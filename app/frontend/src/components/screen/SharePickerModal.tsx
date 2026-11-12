@@ -26,7 +26,18 @@ function savedFps(): 30 | 60 {
 const PREVIEW_REFRESH_MS = 1000;
 
 /** A live picture of a screen or window, refreshed about once a second while it is on screen. */
-function SourceThumb(props: { kind: 'monitor' | 'window'; id: number; index: number }) {
+function SourceThumb(props: { kind: 'monitor' | 'window'; id: number; index: number; minimized?: boolean }) {
+  // A minimized window has no picture to capture: it shows a placeholder and is not polled.
+  if (props.minimized) {
+    return (
+      <div class="thumb source-thumb">
+        <span class="source-placeholder minimized-placeholder">
+          <Icon name="box" size="xl" class="t3" />
+          <span class="t2 fs12">{t('Minimized')}</span>
+        </span>
+      </div>
+    );
+  }
   const [url, setUrl] = createSignal<string | null>(null);
   const [failed, setFailed] = createSignal(false);
   let alive = true;
@@ -180,7 +191,7 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
               {(window, index) => (
                 <div role="option" tabindex="0" aria-selected={isPicked('window', window.id)} class={`source${isPicked('window', window.id) ? ' sel' : ''}`}
                   onClick={() => pickWindow(window)} onKeyDown={(event) => (event.key === 'Enter' || event.key === ' ') && (event.preventDefault(), pickWindow(window))}>
-                  <SourceThumb kind="window" id={window.id} index={index()} />
+                  <SourceThumb kind="window" id={window.id} index={index()} minimized={window.is_minimized} />
                   <div class="tmeta">
                     <Icon name="box" size="sm" class="t3" />
                     <div class="col grow"><strong class="fs13 trunc" title={window.title}>{window.title}</strong><span class="t3 fs12 trunc">{window.app_name}</span></div>
@@ -193,12 +204,15 @@ export function SharePickerModal(props: { open: boolean; onClose: () => void }) 
             <div class="col center g8 picker-empty">
               <Icon name="monitor" size="xl" class="t3" />
               <strong>{tab() === 'monitor' ? t('No screens found') : t('No windows to share')}</strong>
-              <span class="t2 fs13">{tab() === 'monitor' ? t('Check that a display is connected, then refresh.') : t('Minimised windows are not listed. Open the window you want and refresh.')}</span>
+              <span class="t2 fs13">{tab() === 'monitor' ? t('Check that a display is connected, then refresh.') : t('Open the window you want and refresh.')}</span>
             </div>
           </Show>
           <Show when={loading() && monitors().length + windows().length === 0}><span class="skel pulse picker-loading" /></Show>
         </div>
 
+        <Show when={tab() === 'window' && windows().some((window) => window.is_minimized)}>
+          <span class="t3 fs12">{t('A minimized window shows up for viewers once you open it.')}</span>
+        </Show>
         <div class="setrow">
           <strong class="fs13">{t('Frame rate')}</strong>
           <div class="tabs" role="group" aria-label={t('Frame rate')}>
