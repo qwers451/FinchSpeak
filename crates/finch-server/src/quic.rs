@@ -510,6 +510,22 @@ async fn handle_client_message(
     let current_name = sessions.sessions.get(&peer_id).map(|s| s.username.clone());
     let username = current_name.as_deref().unwrap_or(username);
     match msg {
+        ClientMessage::MusicCommand { command } => {
+            let result = match sessions.music.get() {
+                Some(music) => music.command(sessions, peer_id, command).await,
+                None => Err(crate::error::ServerError::NotFound("Music is unavailable".into())),
+            };
+            if let Err(error) = result {
+                let code = match error {
+                    crate::error::ServerError::Forbidden => 403,
+                    crate::error::ServerError::Unauthorized => 401,
+                    crate::error::ServerError::NotFound(_) => 404,
+                    crate::error::ServerError::TooManyRequests(_) => 429,
+                    _ => 400,
+                };
+                sessions.send_control_to_peer(peer_id, &ServerMessage::Error { code, message: error.to_string() });
+            }
+        }
         ClientMessage::Ping { timestamp } => {
             // Clone the sender so no DashMap guard is held across the `.await`.
             let tx = sessions.sessions.get(&peer_id).map(|s| s.control_tx.clone());
@@ -656,6 +672,7 @@ async fn handle_client_message(
                     channel_id,
                 };
                 sessions.broadcast_all(event).await;
+                if let Some(music) = sessions.music.get() { music.send_state(sessions, peer_id); }
             }
         }
 

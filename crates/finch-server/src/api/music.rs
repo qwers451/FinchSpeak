@@ -180,8 +180,9 @@ pub async fn download(
 ) -> Result<Response, ServerError> {
     let music = service(&state)?;
     let record = music.record(id).await?;
+    let queued_in = record.queued_in;
     let track = record.track()?;
-    if track.temporary && track.uploader_id != auth.user_id {
+    if track.temporary && !music.can_download_temporary(&state.sessions, auth.user_id, &track, queued_in) {
         return Err(ServerError::NotFound("Music track not found".into()));
     }
     let path = music.file_path(id, &track.format)?;
@@ -214,6 +215,7 @@ pub async fn delete(
     {
         return Err(ServerError::Forbidden);
     }
+    music.evict_track(&state.sessions, id);
     music.delete_file(&track).await?;
     Ok(StatusCode::NO_CONTENT)
 }

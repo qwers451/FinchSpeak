@@ -37,6 +37,7 @@ pub struct ClientSession {
 /// A voice room tracking active participants.
 #[derive(Default)]
 pub struct VoiceRoom {
+    pub music: crate::music::queue::RoomMusic,
     /// Peer IDs of users currently in this voice room.
     pub participants: HashSet<u32>,
     /// Streamers in this room and their active viewers (streamer_peer_id -> set of viewer_peer_ids).
@@ -207,13 +208,15 @@ impl SessionManager {
 
     /// Remove peer from voice room state without touching sessions map.
     fn remove_peer_from_voice_room(&self, peer_id: u32, short_id: u32) {
-        if let Some(mut room) = self.voice_rooms.get_mut(&short_id) {
+        let removed = if let Some(mut room) = self.voice_rooms.get_mut(&short_id) {
             room.participants.remove(&peer_id);
             room.screen_subscribers.remove(&peer_id);
             for viewers in room.screen_subscribers.values_mut() {
                 viewers.remove(&peer_id);
             }
-        }
+            if room.participants.is_empty() { room.music.clear() } else { Vec::new() }
+        } else { Vec::new() };
+        if let Some(music) = self.music.get() { music.dispose_tracks(removed); }
     }
 
     /// Join a voice room by short_id.
@@ -226,7 +229,7 @@ impl SessionManager {
             None
         };
 
-        if let Some(old) = old_short {
+        if let Some(old) = old_short.filter(|old| *old != short_id) {
             self.remove_peer_from_voice_room(peer_id, old);
         }
 
@@ -272,7 +275,9 @@ impl SessionManager {
                 evicted.push((peer_id, user_id, was_sharing));
             }
         }
-        self.voice_rooms.remove(&short_id);
+        if let Some((_, mut room)) = self.voice_rooms.remove(&short_id)
+            && let Some(music) = self.music.get()
+        { music.dispose_tracks(room.music.clear()); }
         if let Some((_, channel_id)) = self.short_to_channel.remove(&short_id) {
             self.channel_to_short.remove(&channel_id);
         }

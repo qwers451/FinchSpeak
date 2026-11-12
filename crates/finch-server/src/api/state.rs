@@ -70,7 +70,9 @@ pub async fn server_state(
         Some(user_id) => crate::chat::unread_for(pool, user_id).await?,
         None => Vec::new(),
     };
-    Ok(ServerState { channels, online_users, offline_users, voice_states, unread, features: vec!["activity".into()], activities: sessions.activities() })
+    let mut features = vec!["activity".into()];
+    if sessions.music.get().is_some_and(|music| music.config.enabled) { features.push("music".into()); }
+    Ok(ServerState { channels, online_users, offline_users, voice_states, unread, features, activities: sessions.activities() })
 }
 
 /// The status stored for a user (`online`, `idle`, `dnd`); anything else counts as online.

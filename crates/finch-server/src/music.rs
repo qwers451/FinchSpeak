@@ -1,4 +1,5 @@
 //! Room music storage. The server stores and forwards files without decoding audio.
+pub mod queue;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -28,6 +29,7 @@ pub struct MusicService {
     pub catalogue: Mutex<()>,
     pending: DashMap<Uuid, Reservation>,
     pub upload_hits: WindowLimiter,
+    pub command_hits: WindowLimiter,
 }
 
 #[derive(Clone, Copy)]
@@ -81,6 +83,7 @@ impl MusicService {
             catalogue: Mutex::new(()),
             pending: DashMap::new(),
             upload_hits: WindowLimiter::default(),
+            command_hits: WindowLimiter::default(),
         }
     }
 
