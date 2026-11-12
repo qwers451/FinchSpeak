@@ -16,6 +16,7 @@ import { locale, t } from '../../i18n';
 import { ChannelActions, ChannelDialogs, type ChannelDialog } from '../Sidebar';
 import { ChatArea } from '../ChatArea';
 import { VoicePanel } from '../VoicePanel';
+import { participantContextMenu, participantMenuKey } from '../voice/participantMenu';
 import { Nest } from './Nest';
 
 const NEST_SPACE = 176; // px one nest takes on a branch, gap included
@@ -122,7 +123,8 @@ export function TreeView() {
           <span class="sec-label tree-wire-label">{t('On the wire — {count}', { count: onWire().length })}</span>
           <For each={onWire()}>
             {(user) => (
-              <span class="tree-wire-bird" role="listitem" title={statusTexts()[user.id] ? `${nameOf(user)} — ${statusTexts()[user.id]}` : nameOf(user)}>
+              <span class="tree-wire-bird" role="listitem" tabindex="0" title={statusTexts()[user.id] ? `${nameOf(user)} — ${statusTexts()[user.id]}` : nameOf(user)}
+                onContextMenu={(event) => participantContextMenu(event, user.id)} onKeyDown={(event) => participantMenuKey(event, user.id)}>
                 <Avatar name={nameOf(user)} id={user.id} size={32} src={user.avatar_url} status={statusClass(statusOf(user))} />
               </span>
             )}

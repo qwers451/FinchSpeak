@@ -1,11 +1,10 @@
 import { createSignal, For, Show } from 'solid-js';
-import { mayModerate, moveVoice, setAdminOpen } from '../stores/adminStore';
+import { moveVoice, setAdminOpen } from '../stores/adminStore';
 import { markRead, unread } from '../stores/activityStore';
 import { setProfileOpen } from '../stores/profileStore';
 import { channels, activeChannel, selectChannel, loadChannels } from '../stores/chatStore';
 import {
   activeVoiceChannel,
-  allVoiceParticipants,
   joinVoice,
   leaveVoice,
   isMuted,
@@ -21,6 +20,7 @@ import { isLocallyMuted } from '../stores/localMuteStore';
 import { isSharing } from '../stores/screenState';
 import { participantContextMenu, participantMenuKey } from './voice/participantMenu';
 import { isMeParticipant } from './voice/ParticipantTile';
+import { VOICE_USER_DRAG, canDrag, dropTarget, readVoiceDrag, type VoiceDrag } from './voice/voiceDrag';
 import { setNestView } from '../stores/nestView';
 import { connectionStatus, localPeerId, knownUsers, myStatus as ownStatus, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
@@ -32,19 +32,6 @@ import { moveChannel, removeChannel, renameChannel } from '../stores/channelAdmi
 import { Avatar, Button, ConfirmDialog, Field, Icon, Modal } from '../ui';
 import { t } from '../i18n';
 import { describeError } from '../i18n/errors';
-
-const VOICE_USER_DRAG = 'application/x-finch-voice-user';
-type VoiceDrag = { userId: string; peerId: number; from: string };
-
-function readVoiceDrag(transfer: DataTransfer | null): VoiceDrag | null {
-  if (!transfer?.types.includes(VOICE_USER_DRAG) || transfer.types.includes('Files')) return null;
-  try {
-    const value: unknown = JSON.parse(transfer.getData(VOICE_USER_DRAG));
-    if (value && typeof value === 'object' && 'userId' in value && typeof value.userId === 'string' &&
-      'peerId' in value && Number.isSafeInteger(value.peerId) && 'from' in value && typeof value.from === 'string') return value as VoiceDrag;
-  } catch { /* a different or malformed drag */ }
-  return null;
-}
 
 export type ChannelDialog =
   | { kind: 'create'; type: 'text' | 'voice' }
@@ -138,12 +125,6 @@ export function ChannelDialogs(props: { dialog: ChannelDialog; onClose: () => vo
 export function Sidebar() {
   const [dragged, setDragged] = createSignal<VoiceDrag | null>(null);
   const [dropChannel, setDropChannel] = createSignal<string | null>(null);
-  const canDrag = (participant: VoiceParticipant) => isMeParticipant(participant, localPeerId()) || mayModerate(participant.user_id);
-  const validDrop = (payload: VoiceDrag | null, channel: Channel) => {
-    if (!payload || channel.channel_type !== 'voice' || channel.id === payload.from) return undefined;
-    const participant = allVoiceParticipants().find((person) => person.user_id === payload.userId && person.peer_id === payload.peerId && person.channel_id === payload.from);
-    return participant && canDrag(participant) ? participant : undefined;
-  };
   const dragStart = (event: DragEvent, participant: VoiceParticipant) => {
     if (!canDrag(participant) || !event.dataTransfer) { event.preventDefault(); return; }
     const payload = { userId: participant.user_id, peerId: participant.peer_id, from: participant.channel_id };
@@ -152,13 +133,13 @@ export function Sidebar() {
     setDragged(payload);
   };
   const dragOver = (event: DragEvent, channel: Channel) => {
-    if (!event.dataTransfer?.types.includes(VOICE_USER_DRAG) || event.dataTransfer.types.includes('Files') || !validDrop(dragged(), channel)) return;
+    if (!event.dataTransfer?.types.includes(VOICE_USER_DRAG) || event.dataTransfer.types.includes('Files') || !dropTarget(dragged(), channel)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
     setDropChannel(channel.id);
   };
   const drop = (event: DragEvent, channel: Channel) => {
-    const participant = validDrop(readVoiceDrag(event.dataTransfer), channel);
+    const participant = dropTarget(readVoiceDrag(event.dataTransfer), channel);
     setDropChannel(null);
     setDragged(null);
     if (!participant) return;
