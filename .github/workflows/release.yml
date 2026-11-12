@@ -99,12 +99,15 @@ jobs:
       - name: Verify OpenH264 x64 assembly
         shell: pwsh
         run: |
-          $codecBuilds = Get-ChildItem -Path target/release/build -Directory -Filter 'openh264-sys2-*'
-          $optimized = $codecBuilds | Where-Object {
-            (Test-Path (Join-Path $_.FullName 'out/cpuid.o')) -and
-            (Test-Path (Join-Path $_.FullName 'out/coeff.o'))
+          # Rust 1.100 moved build-script output under target/release/build/<package>/<hash>/out,
+          # older toolchains used target/release/build/<package>-<hash>/out: look for both.
+          $objects = Get-ChildItem -Path target/release/build -Recurse -File -Include 'cpuid.o', 'coeff.o' |
+            Where-Object { $_.FullName -match 'openh264-sys2' }
+          $optimized = $objects | Group-Object DirectoryName | Where-Object {
+            ($_.Group.Name -contains 'cpuid.o') -and ($_.Group.Name -contains 'coeff.o')
           }
           if (!$optimized) { throw 'OpenH264 was built without the expected NASM objects' }
+          "NASM objects found in $($optimized[0].Name)"
 
       - name: Server package
         shell: pwsh
