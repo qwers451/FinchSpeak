@@ -7,6 +7,7 @@ import { logoutUser } from '../../stores/authStore';
 import { endSession, loadSessions, profileOpen, setProfileMessage, setProfileOpen } from '../../stores/profileStore';
 import { resetSessionState, sessionHandlers, setKnownUsers, setServerFeatures } from '../../stores/sessionStore';
 import { DEFAULT_PREFS, prefs, setPrefs } from '../../stores/settingsStore';
+import { playTone } from '../../stores/tones';
 import { setChannels } from '../../stores/chatStore';
 import { nestView, setNestView } from '../../stores/nestView';
 import { clearToasts } from '../../ui';
@@ -111,23 +112,59 @@ it('notification choices are remembered', async () => {
   expect(document.body.textContent).toContain('Turn on');
 });
 
+/** A press the way a user makes it: pointer down, mouse down, mouse up, click. */
+const pressLikeUser = (element: HTMLElement) => {
+  for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click']) element.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
+};
+
 it('the sound set picked in the settings modal is applied and remembered', async () => {
   button('Notifications').click();
   await flush();
-  const press = (element: HTMLElement) => {
-    element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  };
-  const trigger = document.querySelector<HTMLElement>('[role="combobox"][aria-label="Sound set"]')!;
-  press(trigger);
+  pressLikeUser(document.querySelector<HTMLElement>('[role="combobox"][aria-label="Sound set"]')!);
   await flush();
   const soft = Array.from(document.querySelectorAll<HTMLElement>('[role="listbox"] [role="option"]')).find((o) => o.textContent?.includes('Soft'))!;
-  press(soft);
+  pressLikeUser(soft);
   await flush();
   expect(prefs().notifications.soundSet).toBe('soft');
   expect(JSON.parse(localStorage.getItem('finchspeak.prefs') ?? '{}').notifications.soundSet).toBe('soft');
+
+  // The next tone uses the soft set: a mention is two notes at 741 Hz and 989 Hz (birds would be 2000 Hz).
+  const started: number[] = [];
+  class FakeAudioContext {
+    currentTime = 0;
+    destination = {};
+    createOscillator() {
+      return {
+        type: '',
+        frequency: { set value(hz: number) { started.push(hz); }, get value() { return 0; }, exponentialRampToValueAtTime() {} },
+        connect(node: unknown) { return node; },
+        start() {},
+        stop() {},
+      };
+    }
+    createGain() {
+      return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect(node: unknown) { return node; } };
+    }
+    createBiquadFilter() {
+      return { type: '', frequency: { value: 0 }, connect(node: unknown) { return node; } };
+    }
+  }
+  vi.stubGlobal('AudioContext', FakeAudioContext);
+  playTone('mention', 1);
+  expect(started).toEqual([741, 989]);
+});
+
+it('the microphone select inside the voice page opens in the same popover layer as the sound set select', async () => {
+  vi.spyOn(api, 'getAudioDevices').mockResolvedValue({ inputs: [], outputs: [], selected_input: null, selected_output: null });
+  button('Voice and audio').click();
+  await flush();
+  pressLikeUser(document.querySelector<HTMLElement>('[role="combobox"][aria-label="Microphone"]')!);
+  await flush();
+  const list = document.querySelector<HTMLElement>('[role="listbox"][aria-label="Microphone"]');
+  expect(list).not.toBeNull();
+  // Portalled out of the modal overlay, and styled as a floating panel (its z-index comes from --z-popover).
+  expect(list!.closest('.overlay')).toBeNull();
+  expect(list!.classList.contains('floating-panel')).toBe(true);
 });
 
 it('a select list opened inside the settings modal paints above the modal overlay in the default theme', () => {
@@ -141,6 +178,8 @@ it('a select list opened inside the settings modal paints above the modal overla
   const overlayZ = app.match(/\.overlay\s*\{[^}]*?z-index:\s*(\d+)/)?.[1];
   expect(popoverZ, 'the default theme defines --z-popover').toBeDefined();
   expect(Number(popoverZ)).toBeGreaterThan(Number(overlayZ));
+  // The floating panel must take its z-index from the token, not a hard-coded value.
+  expect(declarationsFor(app, '.floating-panel').join('\n')).toMatch(/z-index:\s*var\(--z-popover\)/);
 });
 
 it('appearance changes reach the page', async () => {
