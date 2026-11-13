@@ -1,8 +1,8 @@
-name: FinchSpeak Linux 1.6.1
+name: FinchSpeak Linux 1.7.0
 
 on:
   push:
-    branches: ['deploy/linux-1.6.1']
+    branches: ['deploy/linux-1.7.0']
 
 permissions:
   contents: read
@@ -14,19 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: v1.6.1
+          ref: v1.7.0
           persist-credentials: false
 
       - name: Build the locked Linux amd64 image
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = cf178b4c3ac6d95242bcb96d5fb8c000f7ee2bb4
+          test "$(git rev-parse HEAD)" = c227fa1f3a705b0b6010944e96323c97bd1c0c55
           context="$(mktemp -d)"
           git archive HEAD Cargo.toml Cargo.lock crates app deploy/Dockerfile | tar -x -C "$context"
           sed -i 's/cargo build --release -p finch-server/cargo build --release --locked -p finch-server/' "$context/deploy/Dockerfile"
-          docker build --platform linux/amd64 -f "$context/deploy/Dockerfile" -t finchspeak-server:1.6.1 "$context"
-          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}} {{.Config.User}}' finchspeak-server:1.6.1)" = 'linux/amd64 finch:finch'
+          docker build --platform linux/amd64 -f "$context/deploy/Dockerfile" -t finchspeak-server:1.7.0 "$context"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}} {{.Config.User}}' finchspeak-server:1.7.0)" = 'linux/amd64 finch:finch'
 
       - name: Test HTTPS health and persistence under the VPS resource limit
         shell: bash
@@ -40,10 +40,10 @@ jobs:
             docker run -d --name "$name" --memory 256m --cpus 1 \
               --mount "type=volume,source=$volume,target=/app/data" \
               --mount "type=bind,source=$GITHUB_WORKSPACE/deploy/finch-server.toml,target=/app/finch-server.toml,readonly" \
-              --publish 127.0.0.1:18443:8443 finchspeak-server:1.6.1
+              --publish 127.0.0.1:18443:8443 finchspeak-server:1.7.0
             for attempt in {1..40}; do
               if curl -kfsS --max-time 3 https://127.0.0.1:18443/health > "$RUNNER_TEMP/health.json" 2>/dev/null; then
-                python3 -c 'import json,sys; h=json.load(open(sys.argv[1])); assert h["status"]=="ok" and h["version"]=="1.6.1"; print(h)' "$RUNNER_TEMP/health.json"
+                python3 -c 'import json,sys; h=json.load(open(sys.argv[1])); assert h["status"]=="ok" and h["version"]=="1.7.0"; print(h)' "$RUNNER_TEMP/health.json"
                 return
               fi
               sleep 2
@@ -65,8 +65,9 @@ jobs:
           token="$(curl -kfSs --max-time 10 -H 'Content-Type: application/json' \
             -d "$credentials" https://127.0.0.1:18443/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
           curl -kfSs --max-time 10 -H "Authorization: Bearer $token" https://127.0.0.1:18443/api/music/tracks | python3 -c 'import json,sys; assert json.load(sys.stdin) == []; print("PASS music library endpoint")'
+          curl -kfSs --max-time 10 -H "Authorization: Bearer $token" https://127.0.0.1:18443/api/soundboard | python3 -c 'import json,sys; assert json.load(sys.stdin) == []; print("PASS soundboard endpoint")'
           docker stats --no-stream "$name" --format 'CPU={{.CPUPerc}} memory={{.MemUsage}}'
-          echo 'PASS Linux 1.6.1 health, SQLite persistence and TLS identity after recreation'
+          echo 'PASS Linux 1.7.0 health, SQLite persistence and TLS identity after recreation'
 
       - name: Export the tested image with its checksum
         shell: bash
@@ -74,14 +75,14 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           cd dist
-          docker save finchspeak-server:1.6.1 | gzip -1 > finchspeak-server-1.6.1-linux-amd64.tar.gz
-          sha256sum finchspeak-server-1.6.1-linux-amd64.tar.gz > SHA256SUMS.txt
+          docker save finchspeak-server:1.7.0 | gzip -1 > finchspeak-server-1.7.0-linux-amd64.tar.gz
+          sha256sum finchspeak-server-1.7.0-linux-amd64.tar.gz > SHA256SUMS.txt
           git rev-parse HEAD > source-commit.txt
-          docker image inspect --format '{{.Id}}' finchspeak-server:1.6.1 > image-id.txt
+          docker image inspect --format '{{.Id}}' finchspeak-server:1.7.0 > image-id.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: finchspeak-server-1.6.1-linux-amd64
+          name: finchspeak-server-1.7.0-linux-amd64
           path: dist/
           if-no-files-found: error
           retention-days: 14
