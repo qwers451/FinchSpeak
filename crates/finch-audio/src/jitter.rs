@@ -19,6 +19,9 @@ pub const MIN_BUFFER_PACKETS: usize = 2;
 /// Maximum jitter buffer delay and queue bound (10 packets = 200 ms).
 pub const MAX_BUFFER_PACKETS: usize = 10;
 
+/// Smallest queue bound (6 packets = 120 ms), used while the network is calm.
+const MIN_QUEUE_PACKETS: usize = 6;
+
 /// Arrival-jitter samples behind the target depth: 100 packets = 2 s of 20 ms frames.
 const JITTER_WINDOW: usize = 100;
 
@@ -136,14 +139,13 @@ impl JitterBuffer {
             }
         };
 
-        // Ignore old/duplicate arrivals before they can change timing estimates.
-        if self.next_playout_seq.or(self.retired_before).is_some_and(|next| extended_seq < next)
-            || self.queue.contains_key(&extended_seq)
-        {
+        // A duplicate of a queued packet carries no new timing information.
+        if self.queue.contains_key(&extended_seq) {
             return;
         }
 
-        // RFC 3550 inter-arrival jitter calculation
+        // RFC 3550 inter-arrival jitter over every non-duplicate arrival, late ones included:
+        // a packet that missed its playout slot is exactly the lateness the target must absorb.
         if let Some((last_arrival, last_timestamp)) = self.last_transit {
             let arrival_diff_ms = now.duration_since(last_arrival).as_secs_f64() * 1000.0;
             // MediaHeader timestamps are in milliseconds.
@@ -160,6 +162,11 @@ impl JitterBuffer {
         }
         self.last_transit = Some((now, header.timestamp));
 
+        // Ignore old arrivals for playout: their slot has already been played or concealed.
+        if self.next_playout_seq.or(self.retired_before).is_some_and(|next| extended_seq < next) {
+            return;
+        }
+
         // Insert into queue
         self.queue.insert(
             extended_seq,
@@ -172,7 +179,8 @@ impl JitterBuffer {
 
         // Bound latency: if the sender runs ahead of playout, drop the oldest packets.
         let mut removed = 0u64;
-        while self.queue.len() > MAX_BUFFER_PACKETS {
+        let bound = self.queue_bound();
+        while self.queue.len() > bound {
             self.queue.pop_first();
             removed += 1;
         }
@@ -202,6 +210,12 @@ impl JitterBuffer {
     fn record_jitter_sample(&mut self, jitter_ms: f64) {
         self.jitter_window[self.jitter_window_next] = jitter_ms;
         self.jitter_window_next = (self.jitter_window_next + 1) % JITTER_WINDOW;
+    }
+
+    /// Queue bound: the target plus three packets of headroom, never below the 120 ms floor
+    /// and never above the 200 ms ceiling. A calm network therefore keeps the old short queue.
+    fn queue_bound(&self) -> usize {
+        (self.target_packets + 3).clamp(MIN_QUEUE_PACKETS, MAX_BUFFER_PACKETS)
     }
 
     /// Target depth in packets: `ceil(p95 / 20 ms) + 1`, clamped to the buffer limits.
@@ -644,6 +658,37 @@ mod tests {
         assert!(buffer.target_packets >= 4, "target {} frames for Wi-Fi jitter", buffer.target_packets);
     }
 
+    /// Playout every 20 ms with Wi-Fi-like arrivals: 0..=20 ms jitter (mean 10 ms) and every tenth
+    /// packet held back 60 ms. Spikes beyond the current depth are still measured and raise the target.
+    #[test]
+    fn spikes_beyond_the_current_depth_still_raise_the_target() {
+        let payload = opus_frame();
+        let start = Instant::now();
+        let mut buffer = JitterBuffer::new().unwrap();
+        let mut out = [0.0f32; FRAME_SIZE_48K];
+        let mut arrivals: Vec<(u64, u16)> = (0..300u16)
+            .map(|seq| {
+                let jitter = (seq as u64 * 7) % 21;
+                let peak = if seq % 10 == 9 { 60 } else { 0 };
+                (seq as u64 * 20 + jitter + peak, seq)
+            })
+            .collect();
+        arrivals.sort();
+        let mut next = 0;
+        let mut deepest_target = 0;
+        for tick in 0..340u64 {
+            while next < arrivals.len() && arrivals[next].0 <= tick * 20 {
+                let (at, seq) = arrivals[next];
+                let header = MediaHeader::new_audio(1, 1, seq, seq as u32 * 20, false, false);
+                buffer.push(&header, payload.clone(), start + std::time::Duration::from_millis(at));
+                next += 1;
+            }
+            buffer.pop_frame(&mut out);
+            deepest_target = deepest_target.max(buffer.target_packets);
+        }
+        assert!(deepest_target >= 4, "target reached only {deepest_target} packets under playout");
+    }
+
     /// Target = ceil(p95 / 20 ms) + 1 frames over the 100-sample window, within 2..=10 packets.
     #[test]
     fn target_is_the_ceiling_of_p95_plus_one_frame_capped_at_two_hundred_ms() {
@@ -791,8 +836,7 @@ mod tests {
         let mut buffer = JitterBuffer::new().unwrap();
         let payload = opus_frame();
         let mut out = [0.0f32; FRAME_SIZE_48K];
-        // Twelve packets overflow the ten-packet bound, so the buffer skips ahead past 2.
-        for seq in (0u16..=12).filter(|seq| *seq != 2) {
+        for seq in [0u16, 1, 3, 4, 5, 6, 7] {
             push_seq(&mut buffer, seq, false, &payload); // 2 is lost
         }
         buffer.pop_frame(&mut out);
@@ -896,10 +940,10 @@ mod tests {
         let payload = opus_frame();
         let mut buffer = JitterBuffer::new().unwrap();
         for seq in 0..50 { push_seq(&mut buffer, seq, false, &payload); }
-        assert_eq!(buffer.counters(), (40, 0), "discarded real packets are counted as played");
+        assert_eq!(buffer.counters(), (44, 0), "discarded real packets are counted as played");
         let mut buffer = JitterBuffer::new().unwrap();
         push_seq(&mut buffer, 0, false, &payload);
-        for seq in 10..=20 { push_seq(&mut buffer, seq, false, &payload); }
+        for seq in 10..=16 { push_seq(&mut buffer, seq, false, &payload); }
         assert_eq!(buffer.counters(), (11, 9), "missing slots 1 through 9 are still losses");
     }
 

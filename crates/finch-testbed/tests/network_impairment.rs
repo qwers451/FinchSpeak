@@ -12,7 +12,8 @@ use finch_testbed::voice::run_voice_link_with;
 use tokio::net::UdpSocket;
 
 const SR: usize = 48_000;
-/// The jitter buffer ceiling: 10 packets = 200 ms.
+/// The jitter buffer hard ceiling: 10 packets = 200 ms. The live queue bound is
+/// max(6, target + 3) capped here, so an impaired run may hold up to target + 3 packets.
 const MAX_BUFFER_PACKETS: usize = 10;
 
 #[path = "support/latency_probes.rs"]

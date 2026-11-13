@@ -687,6 +687,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
     let mut restart_times: std::collections::VecDeque<Instant> = std::collections::VecDeque::new();
     // Feeds processed frames to a voice message being recorded; kept across device restarts.
     let mut note_feed = crate::voice_note::TapFeed::default();
+    // Packet timestamps stay monotonic across device restarts: the counter lives as long as the thread.
+    let mut frame_clock = FrameClock::default();
 
     loop {
         let cmd = match pending_cmd.take() {
@@ -855,8 +857,6 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     }
                 };
 
-                // Packet timestamps come from the sample counter of this stream, not the wall clock.
-                let mut frame_clock = FrameClock::default();
                 let mut observed_generation = 0;
                 let mut input_boundary = InputBoundary::default();
                 let mut capture_tagged_buf = Vec::with_capacity(4096);
