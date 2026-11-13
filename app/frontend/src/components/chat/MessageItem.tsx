@@ -74,9 +74,10 @@ export function MessageItem(props: Props) {
 
   return (
     <div
-      class={`msg${mine() ? ' own' : ''}${mentioned() ? ' mention' : ''}${msg().state === 'sending' ? ' sending' : ''}${msg().state === 'failed' ? ' failed' : ''}${props.compact ? ' compact' : ''}`}
+      // msg-enter is part of the class string, not classList: a later change of this string (sending -> stored)
+      // rewrites the whole className and would strip a classList class mid-animation.
+      class={`msg${mine() ? ' own' : ''}${mentioned() ? ' mention' : ''}${msg().state === 'sending' ? ' sending' : ''}${msg().state === 'failed' ? ' failed' : ''}${props.compact ? ' compact' : ''}${props.enter !== undefined ? ' msg-enter' : ''}`}
       data-message-id={msg().id}
-      classList={{ 'msg-enter': props.enter !== undefined }}
       style={{ '--i': String(props.enter ?? 0) }}
       ref={row}
     >

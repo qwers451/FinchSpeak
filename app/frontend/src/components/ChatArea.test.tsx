@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../services/api';
 import { setCurrentUser } from '../stores/authStore';
 import { setUnread, resetActivity } from '../stores/activityStore';
-import { replyingTo, setActiveChannel, setChatLoading, setMessages, setReplyingTo } from '../stores/chatStore';
+import { handleIncomingMessage, messages, replyingTo, sendMessage, setActiveChannel, setChatLoading, setMessages, setReplyingTo } from '../stores/chatStore';
 import { setPendingFiles } from '../stores/attachmentStore';
 import { DEFAULT_PREFS, setPrefs } from '../stores/settingsStore';
 import { setConnectionStatus, setKnownUsers } from '../stores/sessionStore';
@@ -337,4 +337,39 @@ it('an open emoji picker and an unsaved edit survive the clock ticking and new m
   } finally {
     vi.useRealTimers();
   }
+});
+
+it('a sent message is one row: the confirmed copy replaces the pending one in place and does not animate again', async () => {
+  vi.spyOn(api, 'sendTextMessage').mockResolvedValue();
+  setMessages([msg('a', bob, 0)]);
+  const host = mount();
+  await sendMessage('hello there');
+  await flush();
+  const pending = host.querySelector<HTMLElement>('.msg.sending')!;
+  expect(pending).not.toBeNull();
+  expect(pending.classList.contains('msg-enter')).toBe(true);
+  const clientMsgId = messages()[1].client_msg_id!;
+
+  handleIncomingMessage({ message_id: 'srv-1', client_msg_id: clientMsgId, channel_id: 'c1', author_id: 'me', author_name: 'Alice Cooper', content: 'hello there', attachments: [], timestamp: Math.floor(Date.now() / 1000) });
+  await flush();
+
+  const rows = host.querySelectorAll<HTMLElement>('.msg');
+  expect(rows).toHaveLength(2);
+  expect(rows[1]).toBe(pending); // same DOM node: nothing was unmounted, so nothing animates a second time
+  expect(rows[1].dataset.messageId).toBe('srv-1');
+  expect(rows[1].classList.contains('sending')).toBe(false);
+  expect(rows[1].classList.contains('msg-enter')).toBe(true);
+  expect(rows[1].style.getPropertyValue('--i')).toBe('0');
+});
+
+it('scrolls to our own message once it is rendered', async () => {
+  vi.spyOn(api, 'sendTextMessage').mockResolvedValue();
+  setMessages([msg('a', bob, 0)]);
+  const host = mount();
+  const list = host.querySelector<HTMLElement>('.message-list')!;
+  Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => 1000 });
+  Object.defineProperty(list, 'clientHeight', { configurable: true, get: () => 200 });
+  await sendMessage('mine');
+  await flush();
+  expect(list.scrollTop).toBe(1000);
 });

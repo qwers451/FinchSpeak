@@ -18,6 +18,13 @@ const STICK_TO_BOTTOM_PX = 96;
 /** Loading older messages starts when the list is scrolled this close to the top. */
 const LOAD_OLDER_PX = 160;
 
+/**
+ * A row's identity. A message we sent is listed as pending (`local-<client_msg_id>`) and then replaced by the
+ * server's copy with its own id; keying by the client id keeps one row (one DOM node, one enter animation)
+ * across that replacement.
+ */
+const rowKey = (message: Message) => message.client_msg_id ?? message.id;
+
 function Skeleton() {
   return (
     <div class="col g16" style={{ padding: '16px 20px' }} aria-label={t('Loading messages')} role="status">
@@ -61,11 +68,11 @@ export function ChatArea() {
   createEffect(() => {
     const channelId = activeChannel()?.id ?? null;
     const all = messages();
-    const newest = all[all.length - 1]?.id;
+    const newest = all[all.length - 1] && rowKey(all[all.length - 1]);
     if (channelId !== waveChannel || waveNewest === undefined) {
       waveChannel = channelId;
       waveNewest = newest;
-      setEntering(new Map(all.slice(-MAX_WAVE_ITEMS).map((message, index) => [message.id, index])));
+      setEntering(new Map(all.slice(-MAX_WAVE_ITEMS).map((message, index) => [rowKey(message), index])));
       return;
     }
     if (newest !== undefined && newest !== waveNewest) {
@@ -73,8 +80,8 @@ export function ChatArea() {
       if (!loadingOlder()) setEntering(new Map([[newest, 0]]));
     }
   });
-  const byId = createMemo(() => new Map(messages().map((message) => [message.id, message])));
-  const ids = createMemo(() => messages().map((message) => message.id));
+  const byId = createMemo(() => new Map(messages().map((message) => [rowKey(message), message])));
+  const ids = createMemo(() => messages().map(rowKey));
   const lastStored = () => [...messages()].reverse().find((message) => !message.state)?.id ?? null;
   const nearBottom = () => !list || list.scrollHeight - list.scrollTop - list.clientHeight < STICK_TO_BOTTOM_PX;
   const toBottom = () => { if (list) list.scrollTop = list.scrollHeight; setUnseen(0); };
@@ -98,8 +105,8 @@ export function ChatArea() {
     const newest = all[all.length - 1];
     const channel = activeChannel();
     if (!newest || !channel) { knownLast = null; return; }
-    const isNew = knownLast !== null && newest.id !== knownLast && !loadingOlder();
-    knownLast = newest.id;
+    const isNew = knownLast !== null && rowKey(newest) !== knownLast && !loadingOlder();
+    knownLast = rowKey(newest);
     if (!isNew) return;
     const ours = newest.author_id === currentUser()?.id;
     if (ours || nearBottom()) {
