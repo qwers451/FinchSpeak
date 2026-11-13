@@ -331,6 +331,29 @@ it('createPresence with no hold removes at once', () => {
   dispose();
 });
 
+it('createPresence cancels the exit when the key comes back within the hold', () => {
+  vi.useFakeTimers();
+  const [items, setItems] = createSignal([{ id: 'a' }, { id: 'b' }]);
+  let list!: ReturnType<typeof createPresence<{ id: string }>>;
+  const dispose = createRoot((done) => {
+    list = createPresence(items, (item) => item.id, 140);
+    return done;
+  });
+  setItems([{ id: 'a' }]);
+  expect(list().find((entry) => entry.key === 'b')?.leaving()).toBe(true);
+
+  vi.advanceTimersByTime(50);
+  setItems([{ id: 'a' }, { id: 'b' }]);
+  expect(list().find((entry) => entry.key === 'b')?.leaving()).toBe(false);
+  expect(list().map((entry) => entry.key)).toEqual(['a', 'b']);
+
+  // The old exit timer was cleared: the entry is still there after the original 140 ms.
+  vi.advanceTimersByTime(140);
+  expect(list().map((entry) => entry.key)).toEqual(['a', 'b']);
+  expect(list().find((entry) => entry.key === 'b')?.leaving()).toBe(false);
+  dispose();
+});
+
 it('createPresence keeps a leaving item in its slot until its exit ends, so the others do not jump past it', () => {
   vi.useFakeTimers();
   const [items, setItems] = createSignal([{ id: 'a' }, { id: 'b' }, { id: 'c' }]);

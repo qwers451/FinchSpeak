@@ -83,3 +83,21 @@ it('keeps the flock strip, the ripple and the name bubble in their own rules', (
   expect(declarationsFor(css, '.ripple-dot').join()).toContain('pointer-events:none');
   expect(declarationsFor(css, '.vc .sb-said').join()).toContain('said-float 1.2s');
 });
+
+const spatial = readStyle('spatial.css');
+
+it('moves a spatial seat with transform only, never with a transition on left or top', () => {
+  const seat = declarationsFor(spatial, '.seat').join(';');
+  expect(seat).toMatch(/transition:transform 260ms var\(--ease-out\)/);
+  expect(seat).not.toMatch(/transition:[^;]*\b(left|top)\b/);
+  expect(declarationsFor(spatial, '.seat.moving').join(';')).not.toMatch(/transition:[^;]*transform/);
+});
+
+it('measures the stage as a size container, so a seat moves sideways in cqw inside a transform', () => {
+  expect(declarationsFor(spatial, '.stage-area').join(';')).toMatch(/container-type:inline-size/);
+});
+
+it('switches the spatial seat movement off with the app setting and with the system preference', () => {
+  expect(spatial).toMatch(/@media \(prefers-reduced-motion:reduce\) \{ \.seat \{ transition:none; \} \}/);
+  expect(spatial).toMatch(/\[data-reduce-motion="true"\] \.seat \{ transition:none; \}/);
+});

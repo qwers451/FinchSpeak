@@ -32,7 +32,8 @@ Audit in code (no client run, no frame capture: the controller takes the capture
 | 17. Finch nest: sway and hop | sway removed mid-way on mouse-out snaps back by at most 1.2 degrees; accepted as too small to justify a rule | good |
 | 18. Server health sparkline | none; `pathLength="1"` makes the dash offset draw the line, refresh does not replay it | good |
 | 19. Loading skeletons | none; opacity only | good |
+| 20. Spatial stage: seats move between places | seats transitioned `left` and `top` (layout properties, re-laid out each frame of the 260 ms move); fixed: the seat is placed with a `translate` (sideways in cqw of the stage, which is a size container), the transition is on `transform` only, a dragged seat has no transition so it follows the pointer, reduce motion (app setting and system) switches the transition off | fixed |
 
-Counts: 16 good, 3 fixed (rows 5, 6, 7), 0 removed.
+Counts: 16 good, 4 fixed (rows 5, 6, 7, 20), 0 removed.
 
 Open concern (not changed): when the room has more people than tiles, the speaking set decides which tiles show, so a change of who is speaking reorders the grid and the tiles glide each time. This is by design of `arrange`; no frame capture was taken to judge how often it happens.

@@ -8,10 +8,13 @@ import { t } from '../../i18n';
 const REACH = 0.44;
 const STEP = 0.1;
 
-/** Left/right position on the stage for a pan, in percent. */
-export const seatLeft = (pan: number) => `${50 + pan * REACH * 100}%`;
-/** Voices at the sides sit a little lower, so the row reads as an arc around you. */
-export const seatTop = (pan: number) => `${10 + Math.abs(pan) ** 1.6 * 30}px`;
+/**
+ * Where a seat sits, as a transform: the centre is at 50% of the stage, moved sideways by the pan in cqw
+ * (the stage is a size container), and lowered by px at the sides so the row reads as an arc. A transform
+ * (not left/top) keeps a move off the layout pass.
+ */
+export const seatTransform = (pan: number) =>
+  `translate(calc(-50% + ${(pan * REACH * 100).toFixed(3)}cqw), ${(10 + Math.abs(pan) ** 1.6 * 30).toFixed(2)}px)`;
 
 /** Drag a person left or right to hear them from there; you sit in the middle. */
 export function SpatialStage() {
@@ -47,7 +50,7 @@ export function SpatialStage() {
               type="button"
               class="seat"
               classList={{ moving: dragging() === seat().participant.user_id, pinned: seat().pinned }}
-              style={{ left: seatLeft(seat().pan), top: seatTop(seat().pan) }}
+              style={{ transform: seatTransform(seat().pan) }}
               aria-label={t('{name}: drag or use the arrow keys to move left or right', { name: seat().participant.username })}
               aria-valuetext={seat().pan < -0.05 ? t('left') : seat().pan > 0.05 ? t('right') : t('centre')}
               title={t('Double-click to put back')}
