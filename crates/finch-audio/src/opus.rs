@@ -74,6 +74,16 @@ impl OpusVoiceDecoder {
         Ok(decoded)
     }
 
+    /// Rebuild the frame that immediately precedes `next_payload` from the in-band FEC
+    /// carried by the next packet. Call this only for a lost slot whose successor arrived.
+    pub fn decode_fec(&mut self, next_payload: &[u8], output: &mut [f32; FRAME_SIZE_48K]) -> Result<usize, AudioOpusError> {
+        let packet: Packet = next_payload.try_into().map_err(|_| AudioOpusError::SignalConversion)?;
+        let signals: MutSignals<f32> = (&mut output[..]).try_into().map_err(|_| AudioOpusError::SignalConversion)?;
+        let decoded = self.decoder.decode_float(Some(packet), signals, true)?;
+        output[decoded..].fill(0.0);
+        Ok(decoded)
+    }
+
     pub fn decode_plc(&mut self, output: &mut [f32; FRAME_SIZE_48K]) -> Result<usize, AudioOpusError> {
         let signals: MutSignals<f32> = (&mut output[..]).try_into().map_err(|_| AudioOpusError::SignalConversion)?;
         let decoded = self.decoder.decode_float(None::<Packet>, signals, false)?;
@@ -120,5 +130,29 @@ mod tests {
         let mut plc_out = [0.0f32; FRAME_SIZE_48K];
         let plc_samples = decoder.decode_plc(&mut plc_out).unwrap();
         assert_eq!(plc_samples, FRAME_SIZE_48K);
+    }
+
+    #[test]
+    fn decode_fec_returns_one_frame_rebuilt_from_the_next_packet() {
+        let mut encoder = OpusVoiceEncoder::new(24).unwrap();
+        let mut decoder = OpusVoiceDecoder::new().unwrap();
+        let packets: Vec<Bytes> = (0..8usize)
+            .map(|k| {
+                let frame: [f32; FRAME_SIZE_48K] = std::array::from_fn(|i| {
+                    let t = (k * FRAME_SIZE_48K + i) as f32 / 48_000.0;
+                    0.3 * (t * 300.0 * 2.0 * std::f32::consts::PI).sin()
+                        + 0.2 * (t * 1200.0 * 2.0 * std::f32::consts::PI).sin()
+                });
+                encoder.encode(&frame).unwrap()
+            })
+            .collect();
+        let mut out = [0.0f32; FRAME_SIZE_48K];
+        for packet in &packets[..5] {
+            decoder.decode(packet, &mut out).unwrap();
+        }
+        // Slot 5 is lost; packet 6 carries its in-band FEC.
+        let decoded = decoder.decode_fec(&packets[6], &mut out).unwrap();
+        assert_eq!(decoded, FRAME_SIZE_48K);
+        assert!(out.iter().any(|sample| sample.abs() > 1e-3), "FEC output must not be silent");
     }
 }

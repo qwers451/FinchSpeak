@@ -267,9 +267,15 @@ impl JitterBuffer {
                 self.conceal(output)
             }
         } else {
-            // Packet loss: call Opus PLC to smooth over the gap
+            // Packet loss. If the next packet is already queued, its in-band FEC rebuilds this
+            // slot. It stays queued and is decoded normally at its own playout slot.
             self.total_lost += 1;
             self.next_playout_seq = Some(playout_seq + 1);
+
+            let rebuilt = match self.queue.get(&(playout_seq + 1)) {
+                Some(next) => self.decoder.decode_fec(&next.payload, output).is_ok(),
+                None => false,
+            };
 
             // If we have fallen too far behind incoming packets, resynchronize
             if let Some(&newest_seq) = self.queue.keys().next_back()
@@ -279,7 +285,13 @@ impl JitterBuffer {
                 self.next_playout_seq = Some(oldest_queued);
             }
 
-            self.conceal(output)
+            if rebuilt {
+                self.concealed_frames += 1;
+                PlayoutResult::Concealed
+            } else {
+                // No usable successor: fall back to Opus PLC to smooth over the gap
+                self.conceal(output)
+            }
         }
     }
 
@@ -446,6 +458,122 @@ mod tests {
         // Playout packet 2 (arrived)
         let r2 = buffer.pop_frame(&mut out);
         assert_eq!(r2, PlayoutResult::Normal);
+    }
+
+    /// Speech-like test signal: a few voice-band partials under a slow syllable envelope.
+    fn speech_like(frame_index: usize) -> [f32; FRAME_SIZE_48K] {
+        let tau = 2.0 * std::f32::consts::PI;
+        std::array::from_fn(|i| {
+            let t = (frame_index * FRAME_SIZE_48K + i) as f32 / 48_000.0;
+            let envelope = 0.55 + 0.45 * (tau * 3.0 * t).sin();
+            let voice = (tau * 200.0 * t).sin()
+                + 0.6 * (tau * 700.0 * t).sin()
+                + 0.4 * (tau * 1500.0 * t).sin()
+                + 0.25 * (tau * 3000.0 * t).sin();
+            0.25 * envelope * voice
+        })
+    }
+
+    fn correlation(a: &[f32], b: &[f32]) -> f32 {
+        let n = a.len() as f32;
+        let mean_a = a.iter().sum::<f32>() / n;
+        let mean_b = b.iter().sum::<f32>() / n;
+        let (mut cov, mut var_a, mut var_b) = (0.0f32, 0.0f32, 0.0f32);
+        for (x, y) in a.iter().zip(b) {
+            cov += (x - mean_a) * (y - mean_b);
+            var_a += (x - mean_a).powi(2);
+            var_b += (y - mean_b).powi(2);
+        }
+        cov / (var_a.sqrt() * var_b.sqrt())
+    }
+
+    /// Plays `packets` through a fresh jitter buffer at one packet per 20 ms tick, leaving out
+    /// the sequence numbers in `lost`. Returns each decoded or concealed slot by playout index.
+    fn play_stream(packets: &[Bytes], lost: &[usize]) -> std::collections::HashMap<u64, (PlayoutResult, [f32; FRAME_SIZE_48K])> {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let start = Instant::now();
+        let arrive = |buffer: &mut JitterBuffer, seq: usize| {
+            if lost.contains(&seq) {
+                return;
+            }
+            let header = MediaHeader::new_audio(1, 1, seq as u16, seq as u32 * 20, false, false);
+            buffer.push(&header, packets[seq].clone(), start + std::time::Duration::from_millis(seq as u64 * 20));
+        };
+        let mut played = std::collections::HashMap::new();
+        for seq in 0..5 {
+            arrive(&mut buffer, seq);
+        }
+        for tick in 5..packets.len() + 5 {
+            if tick < packets.len() {
+                arrive(&mut buffer, tick);
+            }
+            let slot = buffer.next_playout_seq;
+            let mut out = [0.0f32; FRAME_SIZE_48K];
+            let result = buffer.pop_frame(&mut out);
+            if let (true, Some(slot)) = (matches!(result, PlayoutResult::Normal | PlayoutResult::Concealed), slot) {
+                played.insert(slot, (result, out));
+            }
+        }
+        played
+    }
+
+    /// Encoder used by the FEC tests. The production 5 % setting emits no LBRR for this
+    /// signal at 24 kbps, so these tests assume a higher expected loss rate.
+    fn fec_encoder() -> OpusVoiceEncoder {
+        let mut encoder = OpusVoiceEncoder::new(24).unwrap();
+        encoder.set_packet_loss_perc(20).unwrap();
+        encoder
+    }
+
+    #[test]
+    fn a_lost_frame_is_rebuilt_from_the_next_packet() {
+        let frames: Vec<[f32; FRAME_SIZE_48K]> = (0..40).map(speech_like).collect();
+        let mut encoder = fec_encoder();
+        let packets: Vec<Bytes> = frames.iter().map(|frame| encoder.encode(frame).unwrap()).collect();
+
+        let with_next = play_stream(&packets, &[25]);
+        let (result, fec_frame) = &with_next[&25];
+        assert_eq!(*result, PlayoutResult::Concealed);
+        // Packet 26 is also missing here, so slot 25 has no FEC source and falls back to PLC.
+        let plc_frame = &play_stream(&packets, &[25, 26])[&25].1;
+
+        // Opus output trails its source by the codec lookahead. Find that delay from a clean
+        // decode of the same stream, then compare the rebuilt frame with the source at that delay.
+        let source: Vec<f32> = frames.iter().flat_map(|frame| frame.iter().copied()).collect();
+        let source_at = |delay: usize| &source[25 * FRAME_SIZE_48K + delay..26 * FRAME_SIZE_48K + delay];
+        let mut clean_decoder = OpusVoiceDecoder::new().unwrap();
+        let mut clean = [0.0f32; FRAME_SIZE_48K];
+        for packet in &packets[..=25] {
+            clean_decoder.decode(packet, &mut clean).unwrap();
+        }
+        let delay = (0..=FRAME_SIZE_48K)
+            .max_by(|&a, &b| correlation(&clean, source_at(a)).total_cmp(&correlation(&clean, source_at(b))))
+            .unwrap();
+        assert!(correlation(&clean, source_at(delay)) > 0.8, "clean decode must track the source");
+
+        let fec_corr = correlation(fec_frame, source_at(delay));
+        let plc_corr = correlation(plc_frame, source_at(delay));
+        assert!(fec_corr > 0.7, "FEC-rebuilt frame correlates {fec_corr:.3} with the original");
+        assert!(fec_corr > plc_corr, "FEC {fec_corr:.3} must beat PLC {plc_corr:.3}");
+        assert_eq!(with_next[&26].0, PlayoutResult::Normal, "packet 26 must still decode normally");
+    }
+
+    #[test]
+    fn two_lost_frames_fall_back_to_plc() {
+        let frames: Vec<[f32; FRAME_SIZE_48K]> = (0..40).map(speech_like).collect();
+        let mut encoder = fec_encoder();
+        let packets: Vec<Bytes> = frames.iter().map(|frame| encoder.encode(frame).unwrap()).collect();
+
+        let played = play_stream(&packets, &[25, 26]);
+        assert_eq!(played[&25].0, PlayoutResult::Concealed, "slot 25 has no successor, so PLC");
+        assert_eq!(played[&26].0, PlayoutResult::Concealed, "slot 26 is rebuilt from 27 or PLC");
+        for slot in 25..=34u64 {
+            assert!(played.contains_key(&slot), "slot {slot} missing: playout indexes must stay consecutive");
+        }
+        for slot in 27..=34u64 {
+            assert_eq!(played[&slot].0, PlayoutResult::Normal, "slot {slot} must decode normally");
+        }
+        assert!(played.values().all(|(_, out)| out.iter().all(|sample| sample.is_finite())));
     }
 
     fn opus_frame() -> Bytes {
