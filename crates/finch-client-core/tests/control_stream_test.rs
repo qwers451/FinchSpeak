@@ -25,7 +25,7 @@ async fn run_corrupting_server(endpoint: quinn::Endpoint) -> anyhow::Result<()> 
         let n = recv.read(&mut chunk).await?.ok_or_else(|| anyhow::anyhow!("closed"))?;
         buf.extend_from_slice(&chunk[..n]);
         if let Ok(ClientMessage::Authenticate { client_level, supports_voice_extensions, .. }) = decode_message::<ClientMessage>(&mut buf) {
-            assert_eq!(client_level, 150);
+            assert_eq!(client_level, finch_protocol::CLIENT_LEVEL_1_7);
             assert!(supports_voice_extensions);
             break;
         }
