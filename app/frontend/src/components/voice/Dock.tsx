@@ -25,7 +25,7 @@ export function Dock(props: { onShare: () => void; onSettings: () => void }) {
     <div class="row center g16 voice-controls">
       <Show when={voiceSettings().push_to_talk && pushToTalkKey()}>
         <span class="pill" style={talking() ? { 'border-color': 'var(--cyan)', color: 'var(--cyan)' } : undefined} role="status">
-          <span class="dot" style={{ background: talking() ? 'var(--cyan)' : 'var(--text-3)' }} />
+          <span class={`dot${talking() ? ' talk' : ''}`} />
           {pushToTalkKey()} · {t(talking() ? 'talking' : 'push to talk')}
         </span>
       </Show>

@@ -114,7 +114,7 @@ export function ThemeEditor() {
             {(preset) => (
               <button type="button" class="theme-preset" aria-pressed={sameColors(colors(), preset.colors)} onClick={() => updateAppearance({ customColors: preset.colors })}>
                 <span class="chips" aria-hidden="true">
-                  <For each={['sidebar', 'background', 'surface', 'accent', 'signal'] as const}>{(key) => <i style={{ 'background-color': preset.colors[key] }} />}</For>
+                  <For each={['sidebar', 'background', 'surface', 'accent', 'signal'] as const}>{(key) => <i style={{ '--swatch-color': preset.colors[key] }} />}</For>
                 </span>
                 {t(preset.name)}
               </button>

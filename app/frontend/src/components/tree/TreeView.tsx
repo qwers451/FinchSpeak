@@ -157,17 +157,17 @@ export function TreeView() {
       <footer class="tree-perch">
         <button type="button" class="profile-open tree-me" aria-label={t('Open profile')} title={currentUser()?.display_name || currentUser()?.username} onClick={() => setProfileOpen(true)}>
           <Avatar name={currentUser()?.display_name || currentUser()?.username} id={currentUser()?.id} size={40} status={myStatus()} speaking={isLocalSpeaking()} src={currentUser()?.avatar_url} />
-          <span class="col" style={{ 'min-width': 0, 'text-align': 'left' }}>
+          <span class="col tree-label">
             <span class="b trunc fs13">{currentUser()?.display_name || currentUser()?.username}</span>
             <span class="t3 fs12 trunc">{(currentUser() && statusTexts()[currentUser()!.id]) || statusLabel()}</span>
           </span>
         </button>
         <Show when={activeVoiceChannel()} fallback={<span class="t3 fs12 grow trunc">{t('You are on the wire. Pick a nest to talk.')}</span>}>
           {(channel) => (
-            <span class="col grow tree-voice" style={{ 'min-width': 0 }}>
+            <span class="col grow tree-voice">
               <span class="row g6 b fs13 tree-voice-state"><Icon name="bars" size="sm" />{connectionStatus() === 'connected' ? t('Voice connected') : t('Voice disconnected')}</span>
               <span class="t2 fs12 trunc">{t('In the nest: {channel}', { channel: channel().name })}{pingRtt() !== null ? ` · ${pingRtt()} ms` : ''}</span>
-              <Show when={isSharing()}><span class="row g6 fs12" style={{ color: 'var(--red-text)' }}><Icon name="share" size="sm" />{t('You are sharing your screen')}</span></Show>
+              <Show when={isSharing()}><span class="row g6 fs12 sharing-note"><Icon name="share" size="sm" />{t('You are sharing your screen')}</span></Show>
             </span>
           )}
         </Show>

@@ -25,10 +25,10 @@ import { tileOrder } from '../stores/tileOrderStore';
 import { t } from '../i18n';
 
 /** What the round-trip time to the server says about the link. */
-function pingLabel(ms: number | null): { text: string; color: string } | null {
+function pingLabel(ms: number | null): { text: string; tone: 'good' | 'slow' } | null {
   if (ms === null) return null;
   const quality = ms < 60 ? 'excellent' : ms < 120 ? 'good' : ms < 250 ? 'fair' : 'poor';
-  return { text: t('{count} ms · {quality}', { count: ms, quality: t(quality) }), color: ms < 120 ? 'var(--teal)' : 'var(--amber)' };
+  return { text: t('{count} ms · {quality}', { count: ms, quality: t(quality) }), tone: ms < 120 ? 'good' : 'slow' };
 }
 
 /** D1/D2: the voice room: LIVE cards, the grid of people, the roster, the dock. */
@@ -60,7 +60,7 @@ export function VoicePanel() {
       <div class="room-column">
       <div class="mhead">
         <Icon name="vol" size="lg" class="t3" />
-        <h3 style={{ 'font-size': '18px' }}>{activeVoiceChannel()?.name ?? t('Voice room')}</h3>
+        <h3 class="room-title">{activeVoiceChannel()?.name ?? t('Voice room')}</h3>
         <span class="tag violet">{t('{count} in room', { count: voiceParticipants().length })}</span>
         <span class="grow" />
         <Show when={serverFeatures().includes('flock')}>
@@ -78,7 +78,7 @@ export function VoicePanel() {
           )}
         </Show>
         <Show when={ping()}>
-          {(p) => <span class="pill" style={{ 'border-color': p().color, color: p().color }}><Icon name="bars" size="sm" />{p().text}</span>}
+          {(p) => <span class={`pill ping-${p().tone}`}><Icon name="bars" size="sm" />{p().text}</span>}
         </Show>
       </div>
 

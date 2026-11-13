@@ -5,7 +5,7 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
-  max-width: 340px;
+  max-width: min(340px, 100%);
   padding: 8px 12px 8px 8px;
   border-radius: var(--r-pill);
   background: var(--bg-card);

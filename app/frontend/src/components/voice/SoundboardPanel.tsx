@@ -4,7 +4,7 @@ import { boardSounds, canRemove, loadBoard, playBoardSound, removeBoardSound, se
 import { setAppError } from '../../stores/notificationStore';
 import { setVolume, SOUNDBOARD_VOLUME_KEY, volumeFor } from '../../stores/volumeStore';
 import type { SoundInfo } from '../../types';
-import { Button, Icon, Modal, Slider } from '../../ui';
+import { Button, Icon, Modal, Slider, Toggle } from '../../ui';
 import { t } from '../../i18n';
 
 const NAME_MAX = 32;
@@ -88,10 +88,10 @@ export function SoundboardPanel() {
           <span class="t3 fs12">{t('Up to 5 seconds')}</span>
         </div>
         <Slider value={Math.round(volumeFor(SOUNDBOARD_VOLUME_KEY) * 100)} min={0} max={200} cool label={t('Soundboard volume')} onChange={(value) => void setVolume(SOUNDBOARD_VOLUME_KEY, undefined, value / 100)} />
-        <label class="row g8 fs13">
-          <input type="checkbox" checked={soundboardHidden()} onChange={(event) => setSoundboardHidden(event.currentTarget.checked)} />
-          {t("Don't play the soundboard for me")}
-        </label>
+        <div class="row g8 between fs13">
+          <span>{t("Don't play the soundboard for me")}</span>
+          <Toggle checked={soundboardHidden()} label={t("Don't play the soundboard for me")} onChange={(next) => setSoundboardHidden(next)} />
+        </div>
       </div>
     </Modal>
   );

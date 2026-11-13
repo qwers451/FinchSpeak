@@ -106,7 +106,9 @@
 }
 
 /* Participant cards yield to the window; sliders and the dock stay reachable. */
-.voice-room { container-type:inline-size; }
+.room-column { container-type:inline-size; }
+.mhead > .btn { flex:none; }
+.music-now-chip { flex:0 1 auto; }
 .room-grid:not(.compact) { flex:none; min-height:0; max-height:none; margin:auto 0; grid-template-rows:auto!important; grid-auto-rows:minmax(190px,auto); }
 .room-grid .vc { min-height:190px; gap:8px; padding:16px 12px; }
 .room-grid:not(.compact) > .vc:only-child { width:100%; max-width:420px; justify-self:center; }
