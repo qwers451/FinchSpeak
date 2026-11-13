@@ -12,6 +12,7 @@ import { nestView, setNestView } from '../../stores/nestView';
 import { clearToasts } from '../../ui';
 import { checkAvatarFile, CROP_SIDE, placement } from './AvatarCropDialog';
 import { SettingsModal } from './SettingsModal';
+import { declarationsFor, readStyle } from '../../styles/cssTest';
 
 vi.mock('../../stores/authStore', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../stores/authStore')>()), logoutUser: vi.fn().mockResolvedValue(undefined) }));
 
@@ -108,6 +109,38 @@ it('notification choices are remembered', async () => {
   await flush();
   expect(Object.keys(prefs().mutedChannels)).toEqual(['c1']);
   expect(document.body.textContent).toContain('Turn on');
+});
+
+it('the sound set picked in the settings modal is applied and remembered', async () => {
+  button('Notifications').click();
+  await flush();
+  const press = (element: HTMLElement) => {
+    element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  };
+  const trigger = document.querySelector<HTMLElement>('[role="combobox"][aria-label="Sound set"]')!;
+  press(trigger);
+  await flush();
+  const soft = Array.from(document.querySelectorAll<HTMLElement>('[role="listbox"] [role="option"]')).find((o) => o.textContent?.includes('Soft'))!;
+  press(soft);
+  await flush();
+  expect(prefs().notifications.soundSet).toBe('soft');
+  expect(JSON.parse(localStorage.getItem('finchspeak.prefs') ?? '{}').notifications.soundSet).toBe('soft');
+});
+
+it('a select list opened inside the settings modal paints above the modal overlay in the default theme', () => {
+  // The list is portalled to <body> with class floating-panel (z-index: var(--z-popover)); the modal is .overlay (z-index: 50).
+  // If the token is undefined for the default theme the list falls back to z-index auto and sits under the overlay,
+  // so clicks land on the overlay (which closes the settings) instead of the option.
+  const app = readStyle('app.css');
+  const defaultTheme = ['app.css', 'themes.css', 'custom-tokens.css'].map(readStyle)
+    .flatMap((css) => [...declarationsFor(css, ':root'), ...declarationsFor(css, '[data-theme="claude"]')]).join('\n');
+  const popoverZ = defaultTheme.match(/--z-popover:\s*(\d+)/)?.[1];
+  const overlayZ = app.match(/\.overlay\s*\{[^}]*?z-index:\s*(\d+)/)?.[1];
+  expect(popoverZ, 'the default theme defines --z-popover').toBeDefined();
+  expect(Number(popoverZ)).toBeGreaterThan(Number(overlayZ));
 });
 
 it('appearance changes reach the page', async () => {

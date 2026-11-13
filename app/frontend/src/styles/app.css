@@ -1,4 +1,7 @@
 /* Base and app-level rules on top of the design tokens/components in finch.css. */
+/* Depth scale for every theme (custom-tokens.css repeats it for the custom theme). Without --z-popover a select list
+   falls back to z-index: auto and paints under the modal overlay (z-index: 50). */
+:root { --z-base: 0; --z-panel: 10; --z-popover: 100; --z-overlay: 200; --z-modal: 300; --z-toast: 400; --z-titlebar: 500; }
 html, body, #root { height: 100%; margin: 0; }
 body { overflow: hidden; user-select: none; background: var(--bg-app); color: var(--text); font-family: var(--font-ui); }
 input, textarea, [contenteditable] { user-select: text; }
