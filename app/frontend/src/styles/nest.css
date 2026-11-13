@@ -9,6 +9,8 @@
 
 .tree-scene { flex:1 1 0; min-height:0; overflow-y:auto; display:flex; flex-direction:column; }
 .tree-layout.has-content .tree-scene { flex:0 1 auto; max-height:46%; }
+/* A short window (900x600 at Large text): the tree leaves the chat room for messages and the composer. */
+@media (max-height: 700px) { .tree-layout.has-content .tree-scene { max-height:30%; } }
 .tree-layout.folded .tree-scene { display:none; }
 .tree-content { flex:1 1 0; min-height:0; min-width:0; display:flex; border-top:1px solid var(--line-soft); }
 
@@ -30,7 +32,7 @@
 .tree-houses { display:flex; align-items:flex-start; gap:18px; min-height:14px; padding:0 20px 0 52px; }
 
 /* A nest. */
-.nest { position:relative; flex:none; width:150px; display:flex; flex-direction:column; min-width:0; cursor:pointer; color:var(--text-3); border-radius:var(--r-sm); }
+.nest { position:relative; flex:none; width:150px; display:flex; flex-direction:column; min-width:0; cursor:pointer; color:var(--text-2); border-radius:var(--r-sm); }
 .nest-top { position:relative; display:flex; align-items:center; justify-content:center; gap:6px; min-width:0; height:20px; padding:0 2px; }
 .nest-top .trunc { min-width:0; font:600 13px/1.2 var(--font-ui); }
 .nest.lit { color:var(--text); }

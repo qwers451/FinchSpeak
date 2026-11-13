@@ -75,7 +75,20 @@ fn screens_of(window: &WebviewWindow) -> tauri::Result<Vec<Screen>> {
 }
 
 fn create(app: &AppHandle, dir: Option<PathBuf>) -> tauri::Result<WebviewWindow> {
-    let window = WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App(PathBuf::from("index.html?view=overlay")))
+    // WebView2 refuses a second webview whose browser arguments differ from the first one
+    // (error 0x8007139F), so the overlay takes the main window's arguments and policies.
+    let main_config = app.config().app.windows.iter().find(|window| window.label == "main");
+    let mut builder = WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App(PathBuf::from("index.html?view=overlay")));
+    if let Some(args) = main_config.and_then(|window| window.additional_browser_args.as_deref()) {
+        builder = builder.additional_browser_args(args);
+    }
+    if let Some(policy) = main_config.and_then(|window| window.background_throttling.clone()) {
+        builder = builder.background_throttling(policy);
+    }
+    if main_config.is_some_and(|window| !window.drag_drop_enabled) {
+        builder = builder.disable_drag_drop_handler();
+    }
+    let window = builder
         .title("FinchSpeak")
         .inner_size(WIDTH, HEIGHT)
         .decorations(false)

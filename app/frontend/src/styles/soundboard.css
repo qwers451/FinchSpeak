@@ -8,3 +8,5 @@
 .soundboard-play .trunc { min-width: 0; }
 .soundboard-add { display: grid; grid-template-columns: minmax(0, 1fr) 90px; gap: 8px; align-items: center; }
 .soundboard-add .btn { grid-column: 1 / -1; }
+/* The emoji field is a 90px column: a long localized placeholder gets an ellipsis instead of a hard cut. */
+.soundboard-add .input { min-width: 0; text-overflow: ellipsis; }
