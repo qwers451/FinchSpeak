@@ -183,6 +183,12 @@ impl VoiceCapture {
         Ok(())
     }
 
+    /// Change the expected packet loss (percent) in place, so the encoder adds FEC for the measured loss.
+    pub fn set_expected_loss(&mut self, percent: u8) -> Result<(), CaptureError> {
+        self.encoder.set_expected_loss(percent)?;
+        Ok(())
+    }
+
     /// Toggle natural speech leveling without restarting capture.
     pub fn set_voice_enhancement(&mut self, enabled: bool) -> Result<(), ProcessingError> { self.gain.set_enabled(enabled) }
 

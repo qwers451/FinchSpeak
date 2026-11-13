@@ -42,7 +42,7 @@ pub use devices::{
 pub use jitter::{JitterBuffer, PlayoutResult};
 pub use mixer::{screen_audio_key, AudioMixer};
 pub use noise::NoiseSuppressor;
-pub use opus::{AudioOpusError, OpusVoiceDecoder, OpusVoiceEncoder};
+pub use opus::{loss_to_fec_percent, AudioOpusError, OpusVoiceDecoder, OpusVoiceEncoder};
 pub use reference::ReferenceFeeder;
 pub use resampler::{InputResampler, OutputResampler, FRAME_SIZE_48K, INTERNAL_SAMPLE_RATE};
 pub use speech::SpeechClassifier;

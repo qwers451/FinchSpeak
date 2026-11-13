@@ -109,6 +109,7 @@ pub async fn join_voice_channel(
     if let Err(e) = engine.start(short_id, (*state).clone(), app_handle) {
         return Err(format!("Failed to start audio engine: {}", e));
     }
+    crate::audio_engine::spawn_expected_loss_sampler((*state).clone(), short_id);
 
     info!("Joined voice channel {} (short_id: {}, {} kbit/s)", channel_id, short_id, bitrate_kbps);
     Ok(())

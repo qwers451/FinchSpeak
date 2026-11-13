@@ -17,6 +17,17 @@ pub enum AudioOpusError {
     SignalConversion,
 }
 
+/// Packet-loss percentage to give the Opus encoder for in-band FEC, from the loss measured on the
+/// sender's connection: 1.5 times the measured loss, kept within 2..=30. Without samples (`sent == 0`)
+/// the encoder keeps its default of 5.
+pub fn loss_to_fec_percent(lost: u64, sent: u64) -> i32 {
+    if sent == 0 {
+        return 5;
+    }
+    let percent = (lost as f64 * 150.0 / sent as f64).round();
+    percent.clamp(2.0, 30.0) as i32
+}
+
 pub struct OpusVoiceEncoder {
     encoder: Encoder,
     output_buf: [u8; MAX_OPUS_PACKET_SIZE],
@@ -56,6 +67,17 @@ impl OpusVoiceEncoder {
     pub fn set_packet_loss_perc(&mut self, loss_perc: u8) -> Result<(), AudioOpusError> {
         self.encoder.set_packet_loss_perc(loss_perc)?;
         Ok(())
+    }
+
+    /// Change the expected packet loss (percent) in place; the encoder keeps its state. Drives how much
+    /// in-band FEC redundancy it emits.
+    pub fn set_expected_loss(&mut self, percent: u8) -> Result<(), AudioOpusError> {
+        self.set_packet_loss_perc(percent)
+    }
+
+    /// Expected packet loss (percent) the encoder currently assumes.
+    pub fn packet_loss_perc(&self) -> Result<u8, AudioOpusError> {
+        Ok(self.encoder.packet_loss_perc()?)
     }
 
     pub fn encode(&mut self, samples: &[f32; FRAME_SIZE_48K]) -> Result<Bytes, AudioOpusError> {
@@ -111,6 +133,32 @@ mod tests {
         assert_eq!(encoder.bitrate_bps().unwrap(), 16_000);
         encoder.set_bitrate(128).unwrap();
         assert_eq!(encoder.bitrate_bps().unwrap(), 128_000);
+    }
+
+    #[test]
+    fn loss_to_fec_percent_scales_measured_loss_by_one_and_a_half_within_bounds() {
+        assert_eq!(loss_to_fec_percent(0, 1000), 2);
+        assert_eq!(loss_to_fec_percent(1, 100), 2);
+        assert_eq!(loss_to_fec_percent(10, 100), 15);
+        assert_eq!(loss_to_fec_percent(50, 100), 30);
+        assert_eq!(loss_to_fec_percent(90, 100), 30);
+    }
+
+    #[test]
+    fn loss_to_fec_percent_defaults_to_five_without_samples() {
+        assert_eq!(loss_to_fec_percent(0, 0), 5);
+        assert_eq!(loss_to_fec_percent(7, 0), 5);
+    }
+
+    #[test]
+    fn expected_loss_is_applied_in_place_without_a_new_encoder() {
+        let mut encoder = OpusVoiceEncoder::new(24).unwrap();
+        assert_eq!(encoder.packet_loss_perc().unwrap(), 5);
+        encoder.set_expected_loss(15).unwrap();
+        assert_eq!(encoder.packet_loss_perc().unwrap(), 15);
+        encoder.set_expected_loss(2).unwrap();
+        assert_eq!(encoder.packet_loss_perc().unwrap(), 2);
+        assert!(!encoder.encode(&[0.1f32; FRAME_SIZE_48K]).unwrap().is_empty());
     }
 
     #[test]

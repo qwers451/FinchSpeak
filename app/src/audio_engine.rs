@@ -249,6 +249,44 @@ pub(crate) fn voice_bitrate_kbps(channel_bitrate: Option<u32>) -> u32 {
     channel_bitrate.map_or(64, |kbps| kbps.clamp(16, 128))
 }
 
+/// How often the voice connection's packet loss is measured for the encoder's FEC.
+const LOSS_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Starts the sampler that tracks the packet loss of the voice connection for the channel `short_id`.
+/// Every 2 s it takes the loss and sent counts since the previous sample and stores the FEC percentage
+/// for the audio worker. It stops when the user is no longer in that channel or a newer sampler starts.
+pub(crate) fn spawn_expected_loss_sampler(state: AppState, short_id: u32) {
+    state.voice_expected_loss_pct.store(5, Ordering::Relaxed);
+    let generation = state.voice_loss_sampler_generation.fetch_add(1, Ordering::SeqCst) + 1;
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(LOSS_SAMPLE_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut previous: Option<(u64, u64)> = None;
+        loop {
+            interval.tick().await;
+            if state.voice_loss_sampler_generation.load(Ordering::SeqCst) != generation {
+                break;
+            }
+            if *state.current_voice_channel.read().await != Some(short_id) {
+                break;
+            }
+            let path = match state.quic_connection.read().await.as_ref() {
+                Some(connection) => connection.stats().path,
+                None => continue,
+            };
+            let (lost, sent) = (path.lost_packets, path.sent_packets);
+            if let Some((previous_lost, previous_sent)) = previous {
+                let percent = finch_audio::loss_to_fec_percent(
+                    lost.saturating_sub(previous_lost),
+                    sent.saturating_sub(previous_sent),
+                );
+                state.voice_expected_loss_pct.store(percent as u32, Ordering::Relaxed);
+            }
+            previous = Some((lost, sent));
+        }
+    });
+}
+
 fn capture_config(channel_id: u32, channel_bitrate: Option<u32>, settings: &crate::state::VoiceSettings) -> VoiceCaptureConfig {
     VoiceCaptureConfig {
         channel_short_id: channel_id,
@@ -741,6 +779,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 // 3. DSP pipeline for worker thread processing
                 let bitrate_kbps = state.voice_bitrate_kbps.load(Ordering::Relaxed);
                 let mut applied_bitrate_kbps = bitrate_kbps;
+                // A new capture starts with the encoder's default expected loss of 5 %.
+                let mut applied_loss_pct: u32 = 5;
                 let mut voice_capture = match VoiceCapture::new(capture_config(channel_id, Some(bitrate_kbps), &state.voice_settings)) {
                     Ok(mut capture) => { capture.set_transmit_gate(false); Some(capture) },
                     Err(e) => {
@@ -1108,6 +1148,15 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         applied_bitrate_kbps = wanted_bitrate_kbps;
                                         if let Err(error) = capture.set_bitrate_kbps(wanted_bitrate_kbps) {
                                             error!("Failed to change the voice bitrate: {}", error);
+                                        }
+                                    }
+                                    // The measured packet loss sets how much in-band FEC the encoder adds; applied on
+                                    // this worker thread only when the sampler has changed it.
+                                    let wanted_loss_pct = state.voice_expected_loss_pct.load(Ordering::Relaxed);
+                                    if wanted_loss_pct != applied_loss_pct {
+                                        applied_loss_pct = wanted_loss_pct;
+                                        if let Err(error) = capture.set_expected_loss(wanted_loss_pct.min(100) as u8) {
+                                            error!("Failed to change the expected voice packet loss: {}", error);
                                         }
                                     }
                                     // Recheck after processing/configuration work; opening requires

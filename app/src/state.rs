@@ -167,6 +167,10 @@ pub struct AppState {
     pub current_voice_channel: Arc<RwLock<Option<u32>>>,
     /// Opus bitrate (kbit/s, already clamped) of the room we are in; the audio worker applies changes.
     pub voice_bitrate_kbps: Arc<AtomicU32>,
+    /// Packet loss (percent) the voice encoder should expect, measured on the QUIC path every 2 s; the audio worker applies it.
+    pub voice_expected_loss_pct: Arc<AtomicU32>,
+    /// Bumped each time a voice loss sampler starts; an older sampler stops when it changes.
+    pub voice_loss_sampler_generation: Arc<AtomicU64>,
     /// Bitrate of each voice channel we have learned about, by short ID.
     pub channel_bitrates: Arc<RwLock<std::collections::HashMap<u32, u32>>>,
     pub is_muted: Arc<AtomicBool>,
@@ -350,6 +354,8 @@ impl AppState {
             quitting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             mic_test_request: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             voice_bitrate_kbps: Arc::new(AtomicU32::new(crate::audio_engine::voice_bitrate_kbps(None))),
+            voice_expected_loss_pct: Arc::new(AtomicU32::new(5)),
+            voice_loss_sampler_generation: Arc::new(AtomicU64::new(0)),
             channel_bitrates: Arc::new(RwLock::new(std::collections::HashMap::new())),
             voice_note: Arc::new(crate::voice_note::VoiceNoteState::default()),
             token_store: Arc::new(crate::credentials::KeyringStore),
