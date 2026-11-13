@@ -1,7 +1,7 @@
 //! Adaptive Jitter Buffer with 16-bit sequence number extension and Opus PLC.
 //!
 //! Converts wrapping 16-bit sequence numbers into monotonic 64-bit indexes,
-//! dynamically adapts buffer delay (40 ms – 120 ms) based on RFC 3550 inter-arrival jitter,
+//! adapts buffer delay (40 ms – 200 ms) to the 95th percentile of recent arrival jitter,
 //! and invokes Opus Packet Loss Concealment (PLC) when packets are delayed or lost.
 
 use std::collections::BTreeMap;
@@ -16,8 +16,20 @@ use crate::resampler::FRAME_SIZE_48K;
 /// Minimum jitter buffer delay (2 packets = 40 ms).
 pub const MIN_BUFFER_PACKETS: usize = 2;
 
-/// Maximum jitter buffer delay (6 packets = 120 ms).
-pub const MAX_BUFFER_PACKETS: usize = 6;
+/// Maximum jitter buffer delay and queue bound (10 packets = 200 ms).
+pub const MAX_BUFFER_PACKETS: usize = 10;
+
+/// Arrival-jitter samples behind the target depth: 100 packets = 2 s of 20 ms frames.
+const JITTER_WINDOW: usize = 100;
+
+/// Sorted index of the 95th percentile in the window (nearest rank: ceil(0.95 * 100) - 1).
+const P95_INDEX: usize = JITTER_WINDOW * 95 / 100 - 1;
+
+/// Frames to wait for a second packet before playout starts (6 packets = 120 ms).
+const MAX_PRIMING_FRAMES: usize = 6;
+
+/// How far behind the newest packet playout may fall before it resynchronizes (18 packets).
+const RESYNC_LAG_PACKETS: u64 = 18;
 
 /// Do not keep asking Opus to invent speech after the sender has stopped.
 const MAX_CONCEALMENT_FRAMES: usize = 6;
@@ -52,9 +64,12 @@ pub struct JitterBuffer {
     queue: BTreeMap<u64, QueuedPacket>,
     decoder: OpusVoiceDecoder,
 
-    // RFC 3550 Jitter estimation
+    // RFC 3550 Jitter estimation (smoothed, for diagnostics) and the arrival-jitter window
+    // that sets the target depth. Ring buffer of in-order samples, preallocated.
     last_transit: Option<(Instant, u32)>,
     jitter_ms: f64,
+    jitter_window: [f64; JITTER_WINDOW],
+    jitter_window_next: usize,
     target_packets: usize,
 
     // Packet loss tracking
@@ -82,6 +97,8 @@ impl JitterBuffer {
             decoder,
             last_transit: None,
             jitter_ms: 0.0,
+            jitter_window: [0.0; JITTER_WINDOW],
+            jitter_window_next: 0,
             target_packets: MIN_BUFFER_PACKETS,
             total_expected: 0,
             total_lost: 0,
@@ -137,10 +154,9 @@ impl JitterBuffer {
             let d = (arrival_diff_ms - timestamp_diff_ms).abs();
             self.jitter_ms += (d - self.jitter_ms) / 16.0;
 
-            // Adapt target buffer depth based on jitter
-            let jitter_ms = self.jitter_ms;
-            let needed_packets = (jitter_ms / 20.0).ceil() as usize + 1;
-            self.target_packets = needed_packets.clamp(MIN_BUFFER_PACKETS, MAX_BUFFER_PACKETS);
+            self.record_jitter_sample(d);
+            // Adapt target buffer depth to the 95th percentile of recent arrival jitter.
+            self.target_packets = self.target_from_window();
         }
         self.last_transit = Some((now, header.timestamp));
 
@@ -182,6 +198,23 @@ impl JitterBuffer {
         }
     }
 
+    /// Append one arrival-jitter sample (ms) to the ring buffer.
+    fn record_jitter_sample(&mut self, jitter_ms: f64) {
+        self.jitter_window[self.jitter_window_next] = jitter_ms;
+        self.jitter_window_next = (self.jitter_window_next + 1) % JITTER_WINDOW;
+    }
+
+    /// Target depth in packets: `ceil(p95 / 20 ms) + 1`, clamped to the buffer limits.
+    /// The percentile is over all 100 slots; slots not yet filled read as zero jitter, so a
+    /// single early sample cannot set the depth for the whole window. The percentile is taken
+    /// on a stack copy of the window, so this never allocates.
+    fn target_from_window(&self) -> usize {
+        let mut scratch = self.jitter_window;
+        let (_, p95_ms, _) = scratch.select_nth_unstable_by(P95_INDEX, f64::total_cmp);
+        let needed_packets = (*p95_ms / 20.0).ceil() as usize + 1;
+        needed_packets.clamp(MIN_BUFFER_PACKETS, MAX_BUFFER_PACKETS)
+    }
+
     fn finish_spurt(&mut self) {
         self.retired_before = self.next_playout_seq;
         self.next_playout_seq = None;
@@ -221,7 +254,7 @@ impl JitterBuffer {
             let complete = self.queue.values().any(|packet|
                 packet.flags & finch_protocol::media::FLAG_SILENCE != 0);
             if self.queue.len() < self.target_packets && !complete
-                && (self.queue.is_empty() || self.priming_frames < MAX_BUFFER_PACKETS)
+                && (self.queue.is_empty() || self.priming_frames < MAX_PRIMING_FRAMES)
             {
                 self.priming_frames += 1;
                 if self.conceal_while_priming {
@@ -237,7 +270,7 @@ impl JitterBuffer {
 
         // A valid capture pre-roll is five packets. Do not trim it to the smaller
         // adaptive target: those oldest packets contain the beginning of the word.
-        // push() still enforces the hard six-packet / 120 ms queue bound.
+        // push() still enforces the hard ten-packet / 200 ms queue bound.
 
         // Underrun: nothing queued at all means playout is ahead of the network, not that the
         // packet was lost. Hold position and re-buffer to the current target instead.
@@ -279,7 +312,7 @@ impl JitterBuffer {
 
             // If we have fallen too far behind incoming packets, resynchronize
             if let Some(&newest_seq) = self.queue.keys().next_back()
-                && newest_seq.saturating_sub(playout_seq) > (MAX_BUFFER_PACKETS as u64 * 3)
+                && newest_seq.saturating_sub(playout_seq) > RESYNC_LAG_PACKETS
                 && let Some(&oldest_queued) = self.queue.keys().next()
             {
                 self.next_playout_seq = Some(oldest_queued);
@@ -576,6 +609,63 @@ mod tests {
         assert!(played.values().all(|(_, out)| out.iter().all(|sample| sample.is_finite())));
     }
 
+    /// Stable arrivals every 20 ms keep the minimum two-frame depth.
+    #[test]
+    fn stable_arrivals_keep_the_minimum_depth() {
+        let payload = opus_frame();
+        let start = Instant::now();
+        let mut buffer = JitterBuffer::new().unwrap();
+        for seq in 0..200u16 {
+            let header = MediaHeader::new_audio(1, 1, seq, seq as u32 * 20, false, false);
+            buffer.push(&header, payload.clone(), start + std::time::Duration::from_millis(seq as u64 * 20));
+        }
+        assert_eq!(buffer.target_packets, MIN_BUFFER_PACKETS);
+    }
+
+    /// Wi-Fi-like arrivals: 0..=20 ms of jitter (mean 10 ms) and every tenth packet held back
+    /// 60 ms. The 95th percentile of the recent jitter must reach at least four frames.
+    #[test]
+    fn wifi_jitter_with_sixty_millisecond_peaks_targets_four_frames() {
+        let payload = opus_frame();
+        let start = Instant::now();
+        let mut buffer = JitterBuffer::new().unwrap();
+        let mut arrivals: Vec<(u64, u16)> = (0..200u16)
+            .map(|seq| {
+                let jitter = (seq as u64 * 7) % 21;
+                let peak = if seq % 10 == 9 { 60 } else { 0 };
+                (seq as u64 * 20 + jitter + peak, seq)
+            })
+            .collect();
+        arrivals.sort();
+        for (at, seq) in arrivals {
+            let header = MediaHeader::new_audio(1, 1, seq, seq as u32 * 20, false, false);
+            buffer.push(&header, payload.clone(), start + std::time::Duration::from_millis(at));
+        }
+        assert!(buffer.target_packets >= 4, "target {} frames for Wi-Fi jitter", buffer.target_packets);
+    }
+
+    /// Target = ceil(p95 / 20 ms) + 1 frames over the 100-sample window, within 2..=10 packets.
+    #[test]
+    fn target_is_the_ceiling_of_p95_plus_one_frame_capped_at_two_hundred_ms() {
+        let mut buffer = JitterBuffer::new().unwrap();
+        let window_of = |sample_ms: f64, count: usize| {
+            let mut buffer = JitterBuffer::new().unwrap();
+            for _ in 0..count {
+                buffer.record_jitter_sample(sample_ms);
+            }
+            buffer.target_from_window()
+        };
+        assert_eq!(window_of(0.0, 0), MIN_BUFFER_PACKETS, "empty window is the minimum");
+        assert_eq!(window_of(20.0, 10), 2, "p95 20 ms -> ceil(1) + 1");
+        assert_eq!(window_of(21.0, 10), 3, "p95 21 ms -> ceil(1.05) + 1");
+        assert_eq!(window_of(60.0, 10), 4, "10 % of 60 ms peaks -> ceil(3) + 1");
+        assert_eq!(window_of(500.0, 10), MAX_BUFFER_PACKETS, "the ceiling is 200 ms = 10 packets");
+        // Five spikes (5 %) fill only the five largest ranks; p95 reads the sixth.
+        assert_eq!(window_of(500.0, 5), MIN_BUFFER_PACKETS, "5 % spikes do not reach p95");
+        buffer.record_jitter_sample(0.0);
+        assert_eq!(buffer.target_from_window(), MIN_BUFFER_PACKETS);
+    }
+
     fn opus_frame() -> Bytes {
         let mut encoder = OpusVoiceEncoder::new(64).unwrap();
         encoder.encode(&[0.1f32; FRAME_SIZE_48K]).unwrap()
@@ -669,7 +759,7 @@ mod tests {
     }
 
     /// Capture pre-roll is intentional audio, not excess network backlog. Preserve it,
-    /// while keeping queued audio within the documented 120 ms hard limit.
+    /// while keeping queued audio within the documented 200 ms hard limit.
     #[test]
     fn test_preroll_latency_stays_within_the_hard_bound() {
         let mut buffer = JitterBuffer::new().unwrap();
@@ -701,7 +791,8 @@ mod tests {
         let mut buffer = JitterBuffer::new().unwrap();
         let payload = opus_frame();
         let mut out = [0.0f32; FRAME_SIZE_48K];
-        for seq in [0u16, 1, 3, 4, 5, 6, 7] {
+        // Twelve packets overflow the ten-packet bound, so the buffer skips ahead past 2.
+        for seq in (0u16..=12).filter(|seq| *seq != 2) {
             push_seq(&mut buffer, seq, false, &payload); // 2 is lost
         }
         buffer.pop_frame(&mut out);
@@ -715,7 +806,7 @@ mod tests {
         let payload = opus_frame();
         let mut out = [0.0; FRAME_SIZE_48K];
         push_seq(&mut buffer, 0, false, &payload);
-        for _ in 0..MAX_BUFFER_PACKETS {
+        for _ in 0..MAX_PRIMING_FRAMES {
             assert_eq!(buffer.pop_frame(&mut out), PlayoutResult::Buffering);
         }
         assert_eq!(buffer.pop_frame(&mut out), PlayoutResult::Normal);
@@ -805,10 +896,10 @@ mod tests {
         let payload = opus_frame();
         let mut buffer = JitterBuffer::new().unwrap();
         for seq in 0..50 { push_seq(&mut buffer, seq, false, &payload); }
-        assert_eq!(buffer.counters(), (44, 0), "discarded real packets are counted as played");
+        assert_eq!(buffer.counters(), (40, 0), "discarded real packets are counted as played");
         let mut buffer = JitterBuffer::new().unwrap();
         push_seq(&mut buffer, 0, false, &payload);
-        for seq in 10..=16 { push_seq(&mut buffer, seq, false, &payload); }
+        for seq in 10..=20 { push_seq(&mut buffer, seq, false, &payload); }
         assert_eq!(buffer.counters(), (11, 9), "missing slots 1 through 9 are still losses");
     }
 

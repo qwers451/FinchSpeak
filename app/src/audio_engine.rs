@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::Stream;
@@ -855,6 +855,8 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     }
                 };
 
+                // Packet timestamps come from the sample counter of this stream, not the wall clock.
+                let mut frame_clock = FrameClock::default();
                 let mut observed_generation = 0;
                 let mut input_boundary = InputBoundary::default();
                 let mut capture_tagged_buf = Vec::with_capacity(4096);
@@ -1156,6 +1158,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     if capture_raw_buf.len() != needed {
                                         break;
                                     }
+                                    // Every captured frame advances the clock, muted or dropped, so the
+                                    // stamps keep tracking real audio time across silent gaps.
+                                    let frame_ms = frame_clock.next_ms();
 
                                     if state.is_muted.load(Ordering::Relaxed) {
                                         local_peak = None;
@@ -1187,10 +1192,6 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         continue;
                                     };
 
-                                    let now_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
-                                        Ok(dur) => dur.as_millis() as u32,
-                                        Err(_) => 0,
-                                    };
                                     let sender_id = state.session_peer_id.load(Ordering::Relaxed);
                                     let settings = capture.set_voice_enhancement(state.voice_settings.voice_enhancement())
                                         .and_then(|_| capture.set_input_gain(state.voice_settings.input_gain()));
@@ -1231,7 +1232,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     let dsp_epoch = diagnostics.epoch();
                                     capture.set_diagnostics_enabled(dsp_epoch != 0);
                                     let dsp_started = (dsp_epoch != 0).then(Instant::now);
-                                    let processed = capture.process(&mut capture_frame_48k, sender_id, now_ms);
+                                    let processed = capture.process(&mut capture_frame_48k, sender_id, frame_ms);
                                     if let Some(started) = dsp_started { diagnostics.dsp_frame_at(dsp_epoch, started.elapsed().as_micros() as u64); }
                                     let output = match processed {
                                         Ok(output) => output,
@@ -1387,9 +1388,38 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
     }
 }
 
+/// Packet timestamps of one voice stream, in milliseconds, taken from the 48 kHz sample counter:
+/// each captured frame is 960 samples (20 ms), so the stamps follow the audio itself and not the
+/// scheduler or the wall clock.
+#[derive(Debug, Default)]
+struct FrameClock {
+    samples: u64,
+}
+
+impl FrameClock {
+    /// Stamp for the next captured frame, then advance the counter by one frame.
+    fn next_ms(&mut self) -> u32 {
+        let ms = (self.samples / 48) as u32;
+        self.samples += FRAME_SIZE_48K as u64;
+        ms
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_clock_stamps_every_frame_twenty_milliseconds_apart_from_zero() {
+        let mut clock = FrameClock::default();
+        let stamps: Vec<u32> = (0..4).map(|_| clock.next_ms()).collect();
+        assert_eq!(stamps, vec![0, 20, 40, 60]);
+        let mut long = FrameClock::default();
+        for _ in 0..49 {
+            long.next_ms();
+        }
+        assert_eq!(long.next_ms(), 980, "stamps keep counting in whole frames");
+    }
 
     #[test]
     fn voice_levels_publish_every_sixty_milliseconds_and_clear_once() {

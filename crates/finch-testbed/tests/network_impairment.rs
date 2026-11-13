@@ -12,7 +12,8 @@ use finch_testbed::voice::run_voice_link_with;
 use tokio::net::UdpSocket;
 
 const SR: usize = 48_000;
-const MAX_BUFFER_PACKETS: usize = 6;
+/// The jitter buffer ceiling: 10 packets = 200 ms.
+const MAX_BUFFER_PACKETS: usize = 10;
 
 #[path = "support/latency_probes.rs"]
 mod latency_probes;
