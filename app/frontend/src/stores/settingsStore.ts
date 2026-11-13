@@ -35,6 +35,8 @@ export interface AppearancePrefs {
   theme: 'bullfinch' | 'claude' | 'custom' | 'user';
   /** Set once the Bullfinch theme became the default for this person; saved prefs without it switch over once. */
   brandTheme161: boolean;
+  /** Set once Claude Dark became the default again (1.7); saved prefs without it move Bullfinch to Claude Dark once. */
+  claudeDefault17: boolean;
   customColors: ThemeColors;
   language: 'ru' | 'en';
   density: 'comfortable' | 'compact';
@@ -45,6 +47,8 @@ export interface AppearancePrefs {
 }
 
 export interface OverlayPrefs {
+  /** Off hides the mini window everywhere: the dock button, the tray item, the hotkey and the game rule. */
+  enabled: boolean;
   /** 0.3..1: how solid the mini window looks. */
   opacity: number;
   /** Show the mini window by itself while my game is running. */
@@ -64,9 +68,9 @@ export interface Prefs {
 
 export const DEFAULT_PREFS: Prefs = {
   privacy: { shareActivity: true },
-  overlay: { opacity: 0.85, autoInGame: false, clickThrough: false },
+  overlay: { enabled: true, opacity: 0.85, autoInGame: false, clickThrough: false },
   notifications: { mentions: true, allMessages: false, voiceJoin: true, replies: true, flockCalls: true, screenShares: true, sounds: true, voiceSounds: true, soundVolume: 0.6, soundSet: 'birds', flash: true },
-  appearance: { theme: 'bullfinch', brandTheme161: true, customColors: DEFAULT_THEME_COLORS, language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, speakingStyle: 'pulse', showMembers: true },
+  appearance: { theme: 'claude', brandTheme161: true, claudeDefault17: true, customColors: DEFAULT_THEME_COLORS, language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, speakingStyle: 'pulse', showMembers: true },
   mutedChannels: {},
 };
 
@@ -77,6 +81,19 @@ export const TEXT_ZOOM: Record<AppearancePrefs['textSize'], number> = { small: 0
 
 const bool = (value: unknown, fallback: boolean) => (typeof value === 'boolean' ? value : fallback);
 const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T => (allowed.includes(value as T) ? (value as T) : fallback);
+
+const THEMES = ['bullfinch', 'claude', 'custom', 'user'] as const;
+
+/** The saved theme, or the one-time 1.7 switch from the Bullfinch default of 1.6 to Claude Dark. */
+function resolveTheme(a: Record<string, unknown>): AppearancePrefs['theme'] {
+  const d = DEFAULT_PREFS.appearance.theme;
+  if (a.claudeDefault17 === true) return pick(a.theme, THEMES, d);
+  if (a.brandTheme161 === true) {
+    const saved = pick(a.theme, THEMES, d);
+    return saved === 'bullfinch' ? 'claude' : saved;
+  }
+  return d;
+}
 
 /** Read what was saved, repairing anything that is missing or of the wrong type. */
 export function parsePrefs(raw: string | null): Prefs {
@@ -110,13 +127,13 @@ export function parsePrefs(raw: string | null): Prefs {
       soundSet: pick(n.soundSet, ['birds', 'soft'] as const, d.notifications.soundSet),
       flash: bool(n.flash, d.notifications.flash),
     },
-    overlay: { opacity, autoInGame: bool(o.autoInGame, d.overlay.autoInGame), clickThrough: bool(o.clickThrough, d.overlay.clickThrough) },
+    overlay: { enabled: bool(o.enabled, d.overlay.enabled), opacity, autoInGame: bool(o.autoInGame, d.overlay.autoInGame), clickThrough: bool(o.clickThrough, d.overlay.clickThrough) },
     appearance: {
-      // Bullfinch became the default with the 1.6.1 brand: saved prefs from before it switch over once; a later choice is kept.
-      theme: a.brandTheme161 === true
-        ? pick(a.theme, ['bullfinch', 'claude', 'custom', 'user'] as const, d.appearance.theme)
-        : d.appearance.theme,
+      // Claude Dark is the default again (1.7). Prefs saved while Bullfinch was the default (1.6) switch over once:
+      // a Bullfinch choice becomes Claude Dark, any other theme is kept. A later choice is always kept.
+      theme: resolveTheme(a),
       brandTheme161: true,
+      claudeDefault17: true,
       customColors: parseThemeColors(a.customColors),
       language: pick(a.language, ['ru', 'en'] as const, d.appearance.language),
       density: pick(a.density, ['comfortable', 'compact'] as const, d.appearance.density),

@@ -17,16 +17,19 @@ pub enum HotkeyAction {
     ToggleMute,
     /// Pressed: turn all sound off or back on.
     ToggleDeafen,
+    /// Pressed: show or hide the mini window.
+    Overlay,
 }
 
 impl HotkeyAction {
-    const ALL: [HotkeyAction; 3] = [HotkeyAction::PushToTalk, HotkeyAction::ToggleMute, HotkeyAction::ToggleDeafen];
+    const ALL: [HotkeyAction; 4] = [HotkeyAction::PushToTalk, HotkeyAction::ToggleMute, HotkeyAction::ToggleDeafen, HotkeyAction::Overlay];
 
     pub fn parse(name: &str) -> Option<Self> {
         match name {
             "push_to_talk" => Some(Self::PushToTalk),
             "toggle_mute" => Some(Self::ToggleMute),
             "toggle_deafen" => Some(Self::ToggleDeafen),
+            "overlay" => Some(Self::Overlay),
             _ => None,
         }
     }
@@ -37,6 +40,7 @@ impl HotkeyAction {
             Self::PushToTalk => "push_to_talk",
             Self::ToggleMute => "toggle_mute",
             Self::ToggleDeafen => "toggle_deafen",
+            Self::Overlay => "overlay",
         }
     }
 
@@ -45,7 +49,7 @@ impl HotkeyAction {
     }
 }
 
-type Keys = [Option<Shortcut>; 3];
+type Keys = [Option<Shortcut>; 4];
 
 /// Which key each action uses.
 #[derive(Default)]
@@ -53,6 +57,8 @@ pub struct Hotkeys {
     keys: Mutex<Keys>,
     /// The push-to-talk key state last reported to the UI; auto-repeat does not change it.
     push_to_talk_down: AtomicBool,
+    /// The mini-window key state; auto-repeat must not toggle the window again and again.
+    overlay_down: AtomicBool,
 }
 
 impl Hotkeys {
@@ -77,6 +83,12 @@ fn key_changed(down: &AtomicBool, pressed: bool) -> bool {
     down.swap(pressed, Ordering::SeqCst) != pressed
 }
 
+/// Whether this key state change toggles the mini window: only a fresh press, and only while the window is enabled.
+fn overlay_press(down: &AtomicBool, pressed: bool, enabled: bool) -> bool {
+    let changed = key_changed(down, pressed);
+    changed && pressed && enabled
+}
+
 /// Called by the global-shortcut plugin for every registered key.
 pub fn handle(app: &AppHandle, shortcut: &Shortcut, key_state: ShortcutState) {
     let state = app.state::<AppState>();
@@ -87,6 +99,11 @@ pub fn handle(app: &AppHandle, shortcut: &Shortcut, key_state: ShortcutState) {
             state.voice_settings.set_key_down(pressed);
             if key_changed(&state.hotkeys.push_to_talk_down, pressed) {
                 let _ = app.emit("push-to-talk", serde_json::json!({ "pressed": pressed }));
+            }
+        }
+        HotkeyAction::Overlay => {
+            if overlay_press(&state.hotkeys.overlay_down, pressed, crate::overlay::enabled()) {
+                crate::overlay::toggle(app);
             }
         }
         // The UI owns mute and deafen (it keeps "muted before deafen" and the buttons in sync).
@@ -156,7 +173,7 @@ mod tests {
 
     #[test]
     fn a_key_belongs_to_one_action() {
-        let mut keys: Keys = [None; 3];
+        let mut keys: Keys = [None; 4];
         keys[HotkeyAction::ToggleMute.index()] = Some(key("F9"));
         assert_eq!(find_action(&keys, &key("F9")), Some(HotkeyAction::ToggleMute));
         assert_eq!(find_action(&keys, &key("F10")), None);
@@ -175,8 +192,34 @@ mod tests {
     }
 
     #[test]
+    fn no_key_is_registered_by_default() {
+        let keys: Keys = [None; 4];
+        assert_eq!(HotkeyAction::parse("overlay"), Some(HotkeyAction::Overlay));
+        assert_eq!(find_action(&keys, &key("F10")), None, "the mini window key is not chosen until the user picks one");
+        let hotkeys = Hotkeys::default();
+        assert!(hotkeys.keys.lock().expect("keys").iter().all(Option::is_none), "nothing is registered by default");
+    }
+
+    #[test]
+    fn the_mini_window_key_toggles_once_per_press() {
+        let down = AtomicBool::new(false);
+        assert!(overlay_press(&down, true, true), "the first press toggles");
+        assert!(!overlay_press(&down, true, true), "holding the key does not toggle again");
+        assert!(!overlay_press(&down, false, true), "the release does not toggle");
+        assert!(overlay_press(&down, true, true), "the next press toggles again");
+    }
+
+    #[test]
+    fn the_mini_window_key_does_nothing_when_the_window_is_off() {
+        let down = AtomicBool::new(false);
+        assert!(!overlay_press(&down, true, false), "a disabled mini window ignores the key");
+        assert!(!overlay_press(&down, false, true), "the release is not a toggle");
+        assert!(overlay_press(&down, true, true), "turning it back on makes the next press work");
+    }
+
+    #[test]
     fn modifiers_make_a_different_key() {
-        let mut keys: Keys = [None; 3];
+        let mut keys: Keys = [None; 4];
         keys[HotkeyAction::PushToTalk.index()] = Some(key("Control+M"));
         assert_eq!(find_action(&keys, &key("M")), None);
         assert_eq!(find_action(&keys, &key("Control+M")), Some(HotkeyAction::PushToTalk));

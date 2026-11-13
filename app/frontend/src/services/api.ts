@@ -605,7 +605,7 @@ export const api = {
   },
 
   /** System-wide key that toggles the microphone or all sound; null removes it. */
-  setHotkey: async (action: 'toggle_mute' | 'toggle_deafen', key: string | null): Promise<void> => {
+  setHotkey: async (action: 'toggle_mute' | 'toggle_deafen' | 'overlay', key: string | null): Promise<void> => {
     if (isTauri()) {
       return invoke('set_hotkey', { action, key });
     }

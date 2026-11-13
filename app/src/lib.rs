@@ -216,6 +216,7 @@ pub fn run() {
             commands::window::notify,
             overlay::overlay_show,
             overlay::overlay_hide,
+            overlay::overlay_set_enabled,
             overlay::overlay_set_click_through,
             commands::window::system_idle_seconds,
             // Auth

@@ -341,7 +341,7 @@ function AppearancePage() {
   return (
     <div class="col g8">
       <Row title={t('Interface')} hint={t('Finch turns the whole window into a tree: voice rooms are nests, text channels are birdhouses.')} control={seg(t('Interface'), nestView() ? 'finch' : 'classic', [['classic', t('Classic')], ['finch', t('Finch')]], (mode) => setNestView(mode === 'finch'))} />
-      <Row title={t('Theme')} control={seg(t('Theme'), a().theme, [['bullfinch', t('Bullfinch')], ['claude', 'Claude Dark'], ['custom', 'Finch Custom'], ['user', t('My colors')]], (theme) => updateAppearance({ theme }))} />
+      <Row title={t('Theme')} control={seg(t('Theme'), a().theme, [['claude', 'Claude Dark'], ['bullfinch', t('Bullfinch')], ['custom', 'Finch Custom'], ['user', t('My colors')]], (theme) => updateAppearance({ theme }))} />
       <Show when={a().theme === 'user'}><ThemeEditor /></Show>
       <Row title={t('Language')} control={seg(t('Language'), a().language, [['ru', 'Русский'], ['en', 'English']], (language) => updateAppearance({ language }))} />
       <Row title={t('Density')} hint={t('Compact fits more messages on the screen.')} control={seg(t('Density'), a().density, [['comfortable', t('Comfortable')], ['compact', t('Compact')]], (density) => updateAppearance({ density }))} />
@@ -369,7 +369,10 @@ function MiniWindowRows() {
   const o = () => prefs().overlay;
   return (
     <>
-      <Row title={t('Mini window')} hint={t('Shows the people of your room over other windows.')} control={<Toggle label={t('Mini window')} checked={overlayOpen()} onChange={() => void toggleOverlay()} />} />
+      <Row title={t('Mini window')} hint={t('Turn off to hide the mini window everywhere.')} control={<Toggle label={t('Mini window')} checked={o().enabled} onChange={(v) => setOverlayPref({ enabled: v })} />} />
+      <Show when={o().enabled}>
+        <Row title={t('Mini window')} hint={t('Shows the people of your room over other windows.')} control={<Toggle label={t('Mini window')} checked={overlayOpen()} onChange={() => void toggleOverlay()} />} />
+      </Show>
       <Row title={t('Show during games')} hint={t('Windows does not show the mini window over exclusive full-screen games: set the game to windowed borderless mode.')} control={<Toggle label={t('Show during games')} checked={o().autoInGame} onChange={(v) => setOverlayPref({ autoInGame: v })} />} />
       <Row title={t('Click-through')} hint={t('Mouse clicks go through the mini window to the window below it.')} control={<Toggle label={t('Click-through')} checked={o().clickThrough} onChange={(v) => setOverlayPref({ clickThrough: v })} />} />
       <Row title={t('Opacity')} control={<div style={{ width: '180px' }}><Slider label={t('Opacity')} min={0.3} max={1} step={0.05} value={o().opacity} onChange={(v) => updateOverlay({ opacity: v })} /></div>} />
@@ -426,6 +429,10 @@ function KeysPage() {
       <div class="setrow">
         <div class="col grow"><strong class="fs13">{t('Turn sound off')}</strong><span class="t3 fs12">{t('Pressed to turn all sound off or on; works in the background.')}</span></div>
         <HotkeyButton action="toggle_deafen" />
+      </div>
+      <div class="setrow">
+        <div class="col grow"><strong class="fs13">{t('Mini window')}</strong><span class="t3 fs12">{t('Pressed to show or hide the mini window.')}</span></div>
+        <HotkeyButton action="overlay" />
       </div>
       <div class="col g8">
         <For each={[['Enter', 'Send the message'], ['Shift + Enter', 'New line'], ['Esc', 'Cancel an edit, a reply or a dialog'], ['@', 'Mention someone']]}>

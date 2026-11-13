@@ -52,7 +52,8 @@ export function buildOverlayState(input: OverlayInput): OverlayState {
 export type AutoAction = 'show' | 'hide' | 'none';
 
 /** Show when my game starts (if the setting is on); hide when it stops only if the window was shown for it. */
-export function autoOverlayAction(input: { autoInGame: boolean; inGame: boolean; visible: boolean; shownAutomatically: boolean }): AutoAction {
+export function autoOverlayAction(input: { enabled: boolean; autoInGame: boolean; inGame: boolean; visible: boolean; shownAutomatically: boolean }): AutoAction {
+  if (!input.enabled) return 'none';
   if (input.autoInGame && input.inGame && !input.visible) return 'show';
   if (!input.inGame && input.visible && input.shownAutomatically) return 'hide';
   return 'none';
@@ -69,6 +70,7 @@ export const myGameRunning = () => {
 };
 
 export async function showOverlay(automatic = false) {
+  if (!prefs().overlay.enabled) return;
   shownAutomatically = automatic;
   await invoke('overlay_show');
   await setOverlayClickThrough(prefs().overlay.clickThrough);
@@ -86,6 +88,15 @@ export async function toggleOverlay() {
   else await showOverlay();
 }
 
+/** Tells the backend whether the mini window may be shown at all (the hotkey and the tray item follow it). */
+export async function applyOverlayEnabled(enabled: boolean) {
+  try {
+    await invoke('overlay_set_enabled', { enabled });
+  } catch {
+    // Outside the desktop app there is no mini window.
+  }
+}
+
 export async function setOverlayClickThrough(enabled: boolean) {
   try {
     await invoke('overlay_set_click_through', { enabled });
@@ -97,6 +108,7 @@ export async function setOverlayClickThrough(enabled: boolean) {
 /** Runs the automatic show/hide rule against the current game and settings. */
 export async function applyAutoOverlay(): Promise<AutoAction> {
   const action = autoOverlayAction({
+    enabled: prefs().overlay.enabled,
     autoInGame: prefs().overlay.autoInGame,
     inGame: myGameRunning(),
     visible: overlayOpen(),
@@ -109,6 +121,10 @@ export async function applyAutoOverlay(): Promise<AutoAction> {
 
 export function setOverlayPref(change: Partial<OverlayPrefs>) {
   updateOverlay(change);
+  if (change.enabled !== undefined) {
+    void applyOverlayEnabled(change.enabled);
+    if (!change.enabled) void hideOverlay();
+  }
   if (change.clickThrough !== undefined) void setOverlayClickThrough(change.clickThrough);
 }
 
@@ -118,6 +134,7 @@ let started = false;
 export async function startOverlaySync() {
   if (started) return;
   started = true;
+  void applyOverlayEnabled(prefs().overlay.enabled);
   createRoot(() => {
     createEffect(() => {
       if (!overlayOpen()) return;

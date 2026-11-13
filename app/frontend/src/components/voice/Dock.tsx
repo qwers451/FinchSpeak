@@ -1,4 +1,5 @@
 import { Show } from 'solid-js';
+import { prefs } from '../../stores/settingsStore';
 import { isSharing, stopSharing } from '../../stores/screenStore';
 import { musicAvailable, musicPanelOpen, musicState, setMusicPanelOpen } from '../../stores/musicStore';
 import { setSoundboardOpen, soundboardAvailable, soundboardOpen } from '../../stores/soundboardStore';
@@ -38,7 +39,9 @@ export function Dock(props: { onShare: () => void; onSettings: () => void }) {
         <Show when={soundboardAvailable()}>
           <Ctl label={t('Soundboard')} icon="smile" pressed={soundboardOpen()} onClick={() => setSoundboardOpen(!soundboardOpen())} />
         </Show>
-        <Ctl label={t('Mini window')} icon="pip" pressed={overlayOpen()} onClick={() => void toggleOverlay()} />
+        <Show when={prefs().overlay.enabled}>
+          <Ctl label={t('Mini window')} icon="pip" pressed={overlayOpen()} onClick={() => void toggleOverlay()} />
+        </Show>
         <Ctl label={t('Voice settings')} icon="sliders" onClick={props.onSettings} />
         <Ctl label={t('Leave the room')} icon="hangup" class="leave" onClick={() => void leaveVoice()} />
       </div>

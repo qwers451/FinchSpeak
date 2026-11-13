@@ -5,7 +5,7 @@ import { setGameActivity } from './activityGameStore';
 import { parsePrefs, DEFAULT_PREFS, prefs, setPrefs } from './settingsStore';
 import { setSessionUserId } from './sessionStore';
 import {
-  applyAutoOverlay, autoOverlayAction, buildOverlayState, hideOverlay, overlayOpen, setOverlayOpen,
+  applyAutoOverlay, autoOverlayAction, buildOverlayState, hideOverlay, overlayOpen, setOverlayOpen, setOverlayPref, showOverlay,
 } from './overlayStore';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn().mockResolvedValue(undefined) }));
@@ -62,12 +62,12 @@ it('outside a room the state has no room and no people', () => {
 });
 
 it('the game rule shows the window when my game starts and hides it only when it had shown it', () => {
-  const base = { autoInGame: true, inGame: true, visible: false, shownAutomatically: false };
+  const base = { enabled: true, autoInGame: true, inGame: true, visible: false, shownAutomatically: false };
   expect(autoOverlayAction(base)).toBe('show');
   expect(autoOverlayAction({ ...base, autoInGame: false })).toBe('none');
   expect(autoOverlayAction({ ...base, visible: true })).toBe('none');
-  expect(autoOverlayAction({ autoInGame: true, inGame: false, visible: true, shownAutomatically: true })).toBe('hide');
-  expect(autoOverlayAction({ autoInGame: true, inGame: false, visible: true, shownAutomatically: false })).toBe('none');
+  expect(autoOverlayAction({ enabled: true, autoInGame: true, inGame: false, visible: true, shownAutomatically: true })).toBe('hide');
+  expect(autoOverlayAction({ enabled: true, autoInGame: true, inGame: false, visible: true, shownAutomatically: false })).toBe('none');
 });
 
 it('applies the game rule to my game and leaves a window that I opened myself alone', async () => {
@@ -96,10 +96,32 @@ it('another person playing does not show the window for me', async () => {
 });
 
 it('the overlay prefs are repaired when read: bad values fall back, the opacity stays in range', () => {
-  expect(parsePrefs(null).overlay).toEqual({ opacity: 0.85, autoInGame: false, clickThrough: false });
-  const repaired = parsePrefs(JSON.stringify({ overlay: { opacity: 7, autoInGame: 'yes', clickThrough: true } }));
-  expect(repaired.overlay).toEqual({ opacity: 1, autoInGame: false, clickThrough: true });
+  expect(parsePrefs(null).overlay).toEqual({ enabled: true, opacity: 0.85, autoInGame: false, clickThrough: false });
+  const repaired = parsePrefs(JSON.stringify({ overlay: { enabled: 0, opacity: 7, autoInGame: 'yes', clickThrough: true } }));
+  expect(repaired.overlay).toEqual({ enabled: true, opacity: 1, autoInGame: false, clickThrough: true });
   expect(parsePrefs(JSON.stringify({ overlay: { opacity: 0.01 } })).overlay.opacity).toBe(0.3);
   expect(parsePrefs(JSON.stringify({ overlay: 'broken' })).overlay.opacity).toBe(0.85);
   expect(prefs().overlay.opacity).toBe(0.85);
+});
+
+it('turned off, the game rule never shows the mini window', () => {
+  expect(autoOverlayAction({ enabled: false, autoInGame: true, inGame: true, visible: false, shownAutomatically: false })).toBe('none');
+});
+
+it('turned off, showing it does nothing and the backend is not asked to show it', async () => {
+  setPrefs({ ...DEFAULT_PREFS, overlay: { ...DEFAULT_PREFS.overlay, enabled: false } });
+  await showOverlay();
+  expect(invoke).not.toHaveBeenCalledWith('overlay_show');
+  expect(overlayOpen()).toBe(false);
+});
+
+it('turning it off hides an open window and tells the backend', async () => {
+  setPrefs({ ...DEFAULT_PREFS, overlay: { ...DEFAULT_PREFS.overlay, enabled: true } });
+  setOverlayOpen(true);
+  setOverlayPref({ enabled: false });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(invoke).toHaveBeenCalledWith('overlay_set_enabled', { enabled: false });
+  expect(invoke).toHaveBeenCalledWith('overlay_hide');
+  expect(overlayOpen()).toBe(false);
+  expect(prefs().overlay.enabled).toBe(false);
 });

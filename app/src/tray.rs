@@ -173,6 +173,13 @@ pub fn set_mentions(app: &AppHandle, mentions: u32, language: Option<&str>) {
     }
 }
 
+/// Greys the mini window item out when the user has turned the mini window off.
+pub fn set_overlay_item_enabled(app: &AppHandle, enabled: bool) {
+    if let Some(labels) = app.try_state::<TrayLabels>() {
+        let _ = labels.overlay.set_enabled(enabled);
+    }
+}
+
 fn apply(app: &AppHandle, state: TrayState, mentions: u32, language: &str) {
     let copy = tray_copy(language);
     if let Some(labels) = app.try_state::<TrayLabels>() {
@@ -228,7 +235,7 @@ pub fn setup(app: &AppHandle, language: &str) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_window(app),
-            "overlay" => crate::overlay::toggle_from_tray(app),
+            "overlay" => crate::overlay::toggle(app),
             "mute" => {
                 let _ = app.emit("tray-toggle-mute", ());
             }

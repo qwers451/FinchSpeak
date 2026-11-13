@@ -4,7 +4,7 @@ import { appError, setAppError } from './notificationStore';
 import { clearToasts, toasts } from '../ui';
 import {
   changeVoiceSettings, chooseHotkey, choosePushToTalkKey, deafenKey, DEFAULT_VOICE_SETTINGS, handleHotkey, isDeafened, isMuted, muteKey,
-  pushToTalkKey, restoreVoiceSettings, setActiveVoiceChannel, setDeafenKey, setIsDeafened, setIsMuted, setMuteKey, setPushToTalkKey, setVoiceSettings,
+  overlayKey, pushToTalkKey, restoreVoiceSettings, setActiveVoiceChannel, setDeafenKey, setIsDeafened, setIsMuted, setMuteKey, setOverlayKey, setPushToTalkKey, setVoiceSettings,
   shortcutFromEvent, hotkeyErrorText, voiceSettings,
 } from './voiceStore';
 import { DEFAULT_PREFS, setPrefs } from './settingsStore';
@@ -22,6 +22,7 @@ beforeEach(() => {
   setPushToTalkKey(null);
   setMuteKey(null);
   setDeafenKey(null);
+  setOverlayKey(null);
   setIsMuted(false);
   setIsDeafened(false);
 });
@@ -158,6 +159,25 @@ it('mute and deafen keys are sent, remembered and restored', async () => {
   expect(send).toHaveBeenCalledWith('toggle_mute', 'F9');
   expect(send).toHaveBeenCalledWith('toggle_deafen', 'Control+F10');
   expect(deafenKey()).toBe('Control+F10');
+});
+
+it('the mini window key is off until chosen, then it is sent, remembered and restored', async () => {
+  const send = vi.spyOn(api, 'setHotkey').mockResolvedValue();
+  vi.spyOn(api, 'setVoiceSettings').mockResolvedValue();
+  await restoreVoiceSettings();
+  expect(send).not.toHaveBeenCalled();
+  expect(overlayKey()).toBeNull();
+
+  await chooseHotkey('overlay', 'Control+F11');
+  expect(send).toHaveBeenCalledWith('overlay', 'Control+F11');
+  expect(overlayKey()).toBe('Control+F11');
+  expect(JSON.parse(localStorage.getItem('finchspeak.voiceSettings')!)).toMatchObject({ overlayKey: 'Control+F11' });
+
+  setOverlayKey(null);
+  send.mockClear();
+  await restoreVoiceSettings();
+  expect(send).toHaveBeenCalledWith('overlay', 'Control+F11');
+  expect(overlayKey()).toBe('Control+F11');
 });
 
 it('one key cannot serve two actions', async () => {

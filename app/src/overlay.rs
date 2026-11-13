@@ -2,6 +2,7 @@
 //! It is created on first use, hidden instead of closed, and remembers where it was dragged.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
@@ -104,8 +105,18 @@ fn create(app: &AppHandle, dir: Option<PathBuf>) -> tauri::Result<WebviewWindow>
     Ok(window)
 }
 
+/// Whether the mini window may be shown at all (the user's switch in the settings).
+static ENABLED: AtomicBool = AtomicBool::new(true);
+
+pub fn enabled() -> bool {
+    ENABLED.load(Ordering::SeqCst)
+}
+
 /// Show the mini window, creating it on first use and putting it back where it was.
 pub async fn show(app: &AppHandle) -> tauri::Result<()> {
+    if !enabled() {
+        return Ok(());
+    }
     let dir = profile_dir(app).await;
     let window = match app.get_webview_window(OVERLAY_LABEL) {
         Some(window) => window,
@@ -129,8 +140,8 @@ pub fn hide(app: &AppHandle) -> tauri::Result<()> {
     app.emit("overlay-visibility", false)
 }
 
-/// The tray item: show when hidden, hide when shown.
-pub fn toggle_from_tray(app: &AppHandle) {
+/// Show when hidden, hide when shown. Used by the tray item and the mini-window hotkey.
+pub fn toggle(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let visible = app.get_webview_window(OVERLAY_LABEL).and_then(|window| window.is_visible().ok()).unwrap_or(false);
@@ -139,6 +150,17 @@ pub fn toggle_from_tray(app: &AppHandle) {
             tracing::warn!("Could not toggle the mini window: {e}");
         }
     });
+}
+
+/// The user's switch: off hides the window and disables the tray item; the hotkey and the game rule do nothing.
+#[tauri::command]
+pub async fn overlay_set_enabled(enabled: bool, app: AppHandle) -> Result<(), String> {
+    ENABLED.store(enabled, Ordering::SeqCst);
+    crate::tray::set_overlay_item_enabled(&app, enabled);
+    if !enabled {
+        hide(&app).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
