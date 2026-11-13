@@ -6,7 +6,7 @@ import { knownUsers } from '../../stores/sessionStore';
 import { musicPosition, musicState, musicVolume, sendMusicCommand, setMusicVolume } from '../../stores/musicStore';
 import { setAppError } from '../../stores/notificationStore';
 import type { MusicQueueEntry, MusicTrack } from '../../types';
-import { Button, ConfirmDialog, Icon, Slider } from '../../ui';
+import { Button, ConfirmDialog, FinchBird, Icon, Slider } from '../../ui';
 import { formatDuration, t } from '../../i18n';
 
 /** Audio formats the server accepts (the picker filters on them; the server checks again). */
@@ -92,7 +92,7 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
     }
   }
 
-  const tabClass = (name: 'library' | 'computer') => `music-tab${tab() === name ? ' on' : ''}`;
+  const tabClass = (name: 'library' | 'computer') => `tab${tab() === name ? ' on' : ''}`;
 
   return (
     <section class="music-panel" aria-label={t('Music')}>
@@ -124,7 +124,7 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
                   onChange={setDragSeconds}
                   onCommit={(seconds) => { setDragSeconds(null); void sendMusicCommand({ kind: 'seek', position_ms: seconds * 1000 }); }}
                 />
-                <span class="t3 fs12 tabular">
+                <span class="t3 fs12 music-clock">
                   {formatClock(musicPosition())} / {formatClock(now().entry.track.duration_ms)}
                 </span>
               </div>
@@ -148,7 +148,10 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
         <section class="music-queue-block">
           <h4 class="music-heading">{t('Queue')}</h4>
           <Show when={!playing() && queue().length === 0}>
-            <p class="t2 fs13 music-empty">{t('Nothing is playing. Add a track to start.')}</p>
+            <div class="music-empty">
+              <FinchBird size={72} />
+              <p class="t2 fs13">{t('Nothing is playing. Add a track to start.')}</p>
+            </div>
           </Show>
           <ol class="music-list" aria-label={t('Queue')}>
             <For each={queue()}>
@@ -171,7 +174,7 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
 
         <section class="music-add">
           <h4 class="music-heading">{t('Add')}</h4>
-          <div class="music-tabs" role="tablist">
+          <div class="tabs" role="tablist">
             <button type="button" role="tab" class={tabClass('library')} aria-selected={tab() === 'library'} onClick={() => setTab('library')}>{t('Library')}</button>
             <button type="button" role="tab" class={tabClass('computer')} aria-selected={tab() === 'computer'} onClick={() => setTab('computer')}>{t('From my computer')}</button>
           </div>

@@ -18,8 +18,9 @@
 .music-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 18px; }
 .music-heading { margin: 0 0 8px; font-size: 12px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
 
-.music-now { display: flex; flex-direction: column; gap: 10px; }
+.music-now { display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--bg-card); border: 1px solid var(--line-soft); border-radius: var(--r-lg); min-width: 0; }
 .music-titles { min-width: 0; gap: 2px; }
+.music-clock { font-variant-numeric: tabular-nums; }
 .music-progress { display: flex; align-items: center; gap: 10px; }
 .music-progress .range-control { flex: 1; min-width: 0; }
 .music-controls { flex-wrap: wrap; }
@@ -29,12 +30,13 @@
 .music-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .music-row { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 6px; border-radius: var(--r-sm); min-width: 0; }
 .music-row .col { min-width: 0; gap: 1px; }
-.music-empty { margin: 0; }
+.music-queue-block { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.music-empty { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
 
 .music-add { display: flex; flex-direction: column; gap: 10px; }
-.music-tabs { display: flex; gap: 4px; padding: 3px; border-radius: var(--r-pill); background: var(--bg-deep); }
-.music-tab { flex: 1; min-width: 0; height: 30px; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--text-2); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
-.music-tab.on { background: var(--bg-hover); color: var(--text); }
+/* The add block uses the shared tabs (.tabs / .tab); the two labels share the 340 px panel width. */
+.music-add .tabs { gap: 16px; }
+.music-add .tab { flex: 1 1 0; min-width: 0; justify-content: center; font-size: 13px; }
 .music-search { width: 100%; min-width: 0; }
 .music-file-input { display: none; }
 
