@@ -44,6 +44,131 @@ fn wait_for_work(timeout: Duration) {
     std::thread::park_timeout(timeout);
 }
 
+/// Interleaved samples converted per pass inside a capture callback. The scratch buffers are
+/// allocated once, before the stream exists; a longer device buffer is converted in several passes.
+const CAPTURE_SCRATCH_SAMPLES: usize = 4096;
+
+/// Signed 16-bit PCM to f32 in [-1, 1].
+fn i16_to_f32(sample: i16) -> f32 {
+    f32::from(sample) / 32_768.0
+}
+
+/// Unsigned 16-bit PCM (midpoint 32768 is silence) to f32 in [-1, 1].
+fn u16_to_f32(sample: u16) -> f32 {
+    (f32::from(sample) - 32_768.0) / 32_768.0
+}
+
+/// Signed 32-bit PCM to f32 in [-1, 1].
+fn i32_to_f32(sample: i32) -> f32 {
+    (f64::from(sample) / 2_147_483_648.0) as f32
+}
+
+/// Converts as many samples as both slices hold and returns how many were written.
+fn convert_samples<T: Copy>(src: &[T], convert: fn(T) -> f32, dst: &mut [f32]) -> usize {
+    let count = src.len().min(dst.len());
+    for (out, &input) in dst[..count].iter_mut().zip(&src[..count]) {
+        *out = convert(input);
+    }
+    count
+}
+
+/// One mono sample per whole frame of `interleaved`, written to `mono`; returns the frame count.
+/// One channel is kept as it is, stereo is averaged, and with more than two channels only channel 0
+/// is taken: averaging every channel mixes out-of-phase signals and weakens the voice.
+fn downmix_to_mono(interleaved: &[f32], channels: usize, mono: &mut [f32]) -> usize {
+    if channels == 0 {
+        return 0;
+    }
+    let frames = (interleaved.len() / channels).min(mono.len());
+    for (index, out) in mono[..frames].iter_mut().enumerate() {
+        let frame = &interleaved[index * channels..(index + 1) * channels];
+        *out = match channels {
+            2 => (frame[0] + frame[1]) / 2.0,
+            _ => frame[0],
+        };
+    }
+    frames
+}
+
+/// Everything the capture callback owns. Built on the worker thread before the stream is opened;
+/// the callback itself takes no locks and allocates nothing.
+struct CaptureSink {
+    privacy: Arc<crate::state::VoiceSettings>,
+    clock: CaptureClock<cpal::StreamInstant>,
+    producer: HeapProd<CapturedSample>,
+    diagnostics: Arc<AudioDiagnostics>,
+    previous_callback: Option<(u64, Instant)>,
+    channels: usize,
+    /// Whole frames converted per pass; `raw` holds `frames_per_pass * channels` samples.
+    frames_per_pass: usize,
+    raw: Vec<f32>,
+    mono: Vec<f32>,
+    worker: std::thread::Thread,
+}
+
+impl CaptureSink {
+    fn new(
+        privacy: Arc<crate::state::VoiceSettings>,
+        producer: HeapProd<CapturedSample>,
+        diagnostics: Arc<AudioDiagnostics>,
+        channels: usize,
+        worker: std::thread::Thread,
+    ) -> Self {
+        let channels = channels.max(1);
+        let frames_per_pass = (CAPTURE_SCRATCH_SAMPLES / channels).max(1);
+        Self {
+            privacy,
+            clock: CaptureClock::default(),
+            producer,
+            diagnostics,
+            previous_callback: None,
+            channels,
+            frames_per_pass,
+            raw: vec![0.0; frames_per_pass * channels],
+            mono: vec![0.0; frames_per_pass],
+            worker,
+        }
+    }
+}
+
+/// The capture callback for any device sample type: `convert` maps one device sample to f32.
+fn capture_callback<T: Copy + 'static>(
+    mut sink: CaptureSink,
+    convert: fn(T) -> f32,
+) -> impl FnMut(&[T], &cpal::InputCallbackInfo) + Send + 'static {
+    move |data: &[T], info: &cpal::InputCallbackInfo| {
+        let channels = sink.channels;
+        let (generation, open) = sink.privacy.privacy_snapshot();
+        let timestamp = info.timestamp();
+        let tag = sink.clock.tag(generation, open, timestamp.capture, timestamp.callback);
+        let diagnostic_epoch = sink.diagnostics.epoch();
+        if diagnostic_epoch != 0 {
+            let now = Instant::now();
+            let gap = sink.previous_callback.filter(|(epoch, _)| *epoch == diagnostic_epoch)
+                .map(|(_, last)| now.duration_since(last).as_micros() as u64).unwrap_or(0);
+            sink.previous_callback = Some((diagnostic_epoch, now));
+            sink.diagnostics.callback_at(diagnostic_epoch, true, data.len() / channels, gap);
+        } else {
+            sink.previous_callback = None;
+        }
+        let mut dropped = 0;
+        // Passes hold whole frames, so a frame is never split between two passes.
+        let pass_len = sink.frames_per_pass * channels;
+        for pass in data.chunks(pass_len) {
+            let converted = convert_samples(pass, convert, &mut sink.raw);
+            let frames = downmix_to_mono(&sink.raw[..converted], channels, &mut sink.mono);
+            for &sample in &sink.mono[..frames] {
+                if sink.producer.try_push(CapturedSample { sample, generation: tag }).is_err() {
+                    dropped += 1;
+                }
+            }
+        }
+        sink.diagnostics.add_at(diagnostic_epoch, Metric::CaptureDroppedSamples, dropped);
+        sink.diagnostics.maximum_at(diagnostic_epoch, Metric::CaptureHighWaterSamples, sink.producer.occupied_len() as u64);
+        sink.worker.unpark();
+    }
+}
+
 /// Keeps the calling thread registered with MMCSS (multimedia class scheduler) under a task
 /// such as "Pro Audio" for as long as the guard lives. Dropping the guard reverts the thread.
 #[cfg(windows)]
@@ -734,7 +859,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
 
                 // 2. Input (Capture) Ring Buffer & cpal Stream
                 let capture_rb = HeapRb::<CapturedSample>::new(RING_BUFFER_CAPACITY);
-                let (mut capture_prod, mut capture_cons) = capture_rb.split();
+                let (capture_prod, mut capture_cons) = capture_rb.split();
 
                 let mut capture_stream: Option<Stream> = None;
                 let mut input_resampler: Option<InputResampler> = None;
@@ -765,46 +890,42 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                 error!("Audio input error: {}", err);
                                 failed.store(true, Ordering::SeqCst);
                             };
-                            let privacy = state.voice_settings.clone();
-                            let mut capture_clock = CaptureClock::default();
-                            let input_diagnostics = diagnostics.clone();
-                            let mut previous_input_callback: Option<(u64, Instant)> = None;
                             // This stream is built on the worker thread, so this is the worker's handle.
                             // The callback only unparks it: no locks and no allocation.
                             let worker_thread = std::thread::current();
-                            let stream_res = device.build_input_stream(
-                                &config.into(),
-                                move |data: &[f32], info: &cpal::InputCallbackInfo| {
-                                    let (generation, open) = privacy.privacy_snapshot();
-                                    let timestamp = info.timestamp();
-                                    let tag = capture_clock.tag(generation, open, timestamp.capture, timestamp.callback);
-                                    if channels == 0 {
-                                        return;
-                                    }
-                                    let diagnostic_epoch = input_diagnostics.epoch();
-                                    if diagnostic_epoch != 0 {
-                                        let now = Instant::now();
-                                        let gap = previous_input_callback.filter(|(epoch, _)| *epoch == diagnostic_epoch)
-                                            .map(|(_, last)| now.duration_since(last).as_micros() as u64).unwrap_or(0);
-                                        previous_input_callback = Some((diagnostic_epoch, now));
-                                        input_diagnostics.callback_at(diagnostic_epoch, true, data.len() / channels, gap);
-                                    } else { previous_input_callback = None; }
-                                    let mut dropped = 0;
-                                    for frame in data.chunks(channels) {
-                                        let mut sum = 0.0f32;
-                                        for &s in frame {
-                                            sum += s;
-                                        }
-                                        let mono = sum / (channels as f32);
-                                        if capture_prod.try_push(CapturedSample { sample: mono, generation: tag }).is_err() { dropped += 1; }
-                                    }
-                                    input_diagnostics.add_at(diagnostic_epoch, Metric::CaptureDroppedSamples, dropped);
-                                    input_diagnostics.maximum_at(diagnostic_epoch, Metric::CaptureHighWaterSamples, capture_prod.occupied_len() as u64);
-                                    worker_thread.unpark();
-                                },
-                                err_fn,
-                                None,
-                            );
+                            let sample_format = config.sample_format();
+                            let stream_config: cpal::StreamConfig = config.into();
+                            let sink = CaptureSink::new(state.voice_settings.clone(), capture_prod, diagnostics.clone(), channels, worker_thread);
+                            let stream_res = match sample_format {
+                                cpal::SampleFormat::F32 => device.build_input_stream(
+                                    &stream_config,
+                                    capture_callback::<f32>(sink, |s| s),
+                                    err_fn,
+                                    None,
+                                ),
+                                cpal::SampleFormat::I16 => device.build_input_stream(
+                                    &stream_config,
+                                    capture_callback::<i16>(sink, i16_to_f32),
+                                    err_fn,
+                                    None,
+                                ),
+                                cpal::SampleFormat::U16 => device.build_input_stream(
+                                    &stream_config,
+                                    capture_callback::<u16>(sink, u16_to_f32),
+                                    err_fn,
+                                    None,
+                                ),
+                                cpal::SampleFormat::I32 => device.build_input_stream(
+                                    &stream_config,
+                                    capture_callback::<i32>(sink, i32_to_f32),
+                                    err_fn,
+                                    None,
+                                ),
+                                other => {
+                                    error!("Unsupported microphone sample format {:?}; supported: i16, u16, i32, f32", other);
+                                    Err(cpal::BuildStreamError::StreamConfigNotSupported)
+                                }
+                            };
 
                             match stream_res {
                                 Ok(stream) => {
@@ -1824,5 +1945,89 @@ mod tests {
             .expect("worker did not wake up after unpark");
         assert!(woke.duration_since(sent) < Duration::from_millis(500));
         worker.join().expect("worker thread panicked");
+    }
+
+    #[test]
+    fn i16_samples_map_to_the_unit_range() {
+        assert_eq!(i16_to_f32(i16::MIN), -1.0);
+        assert_eq!(i16_to_f32(0), 0.0);
+        assert!((i16_to_f32(i16::MAX) - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn u16_samples_are_centred_on_the_midpoint() {
+        assert_eq!(u16_to_f32(0), -1.0);
+        assert_eq!(u16_to_f32(32_768), 0.0);
+        assert!((u16_to_f32(u16::MAX) - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn i32_samples_map_to_the_unit_range() {
+        assert_eq!(i32_to_f32(i32::MIN), -1.0);
+        assert_eq!(i32_to_f32(0), 0.0);
+        assert!((i32_to_f32(i32::MAX) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn slice_conversion_fills_the_buffer_and_stops_at_its_length() {
+        let mut dst = [9.0f32; 4];
+        let written = convert_samples(&[i16::MIN, 0, i16::MAX], i16_to_f32, &mut dst);
+        assert_eq!(written, 3);
+        assert_eq!(dst[0], -1.0);
+        assert_eq!(dst[1], 0.0);
+        assert!((dst[2] - 1.0).abs() < 1e-4);
+        assert_eq!(dst[3], 9.0, "samples past the converted input are untouched");
+
+        let mut small = [0.0f32; 2];
+        assert_eq!(convert_samples(&[1.0f32, 0.5, 0.25], |s: f32| s, &mut small), 2);
+        assert_eq!(small, [1.0, 0.5]);
+    }
+
+    /// A 48 kHz tone on channel 0 and different signals on the other channels of a 4-channel device.
+    fn four_channel_frames(frames: usize) -> Vec<f32> {
+        let mut interleaved = Vec::with_capacity(frames * 4);
+        for n in 0..frames {
+            let t = n as f32 / 48_000.0;
+            interleaved.push(0.5 * (2.0 * std::f32::consts::PI * 440.0 * t).sin());
+            interleaved.push(0.9);
+            interleaved.push(-0.7);
+            interleaved.push(0.3 * (2.0 * std::f32::consts::PI * 1_000.0 * t).sin());
+        }
+        interleaved
+    }
+
+    #[test]
+    fn multichannel_input_uses_channel_zero_only() {
+        let interleaved = four_channel_frames(480);
+        let mut mono = [0.0f32; 480];
+        assert_eq!(downmix_to_mono(&interleaved, 4, &mut mono), 480);
+        for (n, sample) in mono.iter().enumerate() {
+            assert_eq!(*sample, interleaved[n * 4], "frame {n} must be channel 0 unchanged");
+        }
+    }
+
+    #[test]
+    fn stereo_input_is_averaged() {
+        let interleaved = [0.5f32, -0.25, 1.0, 0.0];
+        let mut mono = [0.0f32; 2];
+        assert_eq!(downmix_to_mono(&interleaved, 2, &mut mono), 2);
+        assert_eq!(mono, [0.125, 0.5]);
+    }
+
+    #[test]
+    fn mono_input_is_passed_through() {
+        let interleaved = [0.1f32, -0.2, 0.3];
+        let mut mono = [0.0f32; 3];
+        assert_eq!(downmix_to_mono(&interleaved, 1, &mut mono), 3);
+        assert_eq!(mono, [0.1, -0.2, 0.3]);
+    }
+
+    #[test]
+    fn downmix_never_writes_past_the_output_or_reads_a_partial_frame() {
+        let interleaved = [0.5f32, 0.5, 0.5, 0.5, 0.5]; // 2 whole stereo frames and one stray sample
+        let mut mono = [0.0f32; 1];
+        assert_eq!(downmix_to_mono(&interleaved, 2, &mut mono), 1);
+        assert_eq!(mono, [0.5]);
+        assert_eq!(downmix_to_mono(&interleaved, 0, &mut mono), 0, "zero channels yields nothing");
     }
 }
