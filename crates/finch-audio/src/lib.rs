@@ -11,7 +11,8 @@
 //! - [`jitter`] — Adaptive jitter buffer with sequence rollover handling
 //! - [`vad`] — Voice Activity Detection: neural speech classifier or RMS dBFS threshold, with hangover
 //! - [`speech`] — Earshot speech classifier used by the VAD
-//! - [`mixer`] — Multi-speaker mixing with `tanh()` soft-limiter
+//! - [`limiter`] — Soft-knee limiter applied to mixed output
+//! - [`mixer`] — Multi-speaker mixing with the soft-knee limiter
 //! - [`capture`] — Voice capture pipeline (AEC → NS → VAD → Opus → packet)
 //! - [`reference`] — playout reference feeder for echo cancellation
 //! - [`aec`] — Acoustic Echo Cancellation with reference ring buffer
@@ -21,6 +22,7 @@ pub mod aec;
 pub mod capture;
 pub mod devices;
 pub mod jitter;
+pub mod limiter;
 pub mod mixer;
 pub mod music;
 pub mod noise;

@@ -1,8 +1,9 @@
-//! Multi-speaker audio mixer with `tanh()` soft-limiting and local speech tracking.
+//! Multi-speaker audio mixer with soft-knee limiting and local speech tracking.
 //!
 //! - Mixes up to N participants every 20 ms.
 //! - Per-speaker volume scaling (0.0 to 2.0).
-//! - Non-linear `x.tanh()` soft limiter prevents harsh clipping when multiple people talk/shout.
+//! - Soft-knee limiter ([`crate::limiter::soft_limit`]) leaves normal levels untouched and only bends
+//!   peaks above 0.8 towards full scale, so several people talking at once do not clip harshly.
 //! - Tracks speaker activity locally (250 ms timeout or silence flag triggers UI speaking border events).
 //! - Spatial audio (optional): each voice sits somewhere between left and right.
 
@@ -13,6 +14,7 @@ use bytes::Bytes;
 use finch_protocol::media::MediaHeader;
 
 use crate::jitter::{JitterBuffer, PlayoutResult};
+use crate::limiter::soft_limit;
 use crate::resampler::FRAME_SIZE_48K;
 use crate::vad::VoiceActivityDetector;
 
@@ -257,7 +259,7 @@ impl AudioMixer {
     }
 
     /// Mix all remote speakers into a 960-sample 48 kHz output buffer.
-    /// Applies individual volume adjustments and `tanh()` soft-limiting.
+    /// Applies individual volume adjustments and soft-knee limiting.
     /// Returns a list of speakers whose speech status changed (e.g. timed out after 250 ms).
     pub fn mix_frame(
         &mut self,
@@ -286,9 +288,9 @@ impl AudioMixer {
             }
         }
 
-        // Apply tanh() soft-limiting: compresses loud peaks without hard digital clipping
+        // Soft-knee limiting: compresses loud peaks without hard digital clipping
         for sample in output.iter_mut() {
-            *sample = sample.tanh();
+            *sample = soft_limit(*sample);
         }
 
         speech_events
@@ -328,7 +330,7 @@ impl AudioMixer {
         }
 
         for sample in left.iter_mut().chain(right.iter_mut()) {
-            *sample = sample.tanh();
+            *sample = soft_limit(*sample);
         }
 
         speech_events
@@ -444,7 +446,7 @@ mod tests {
         let mut out = [0.0f32; FRAME_SIZE_48K];
         let _ = mixer.mix_frame(&mut out, now);
 
-        // Verify tanh() keeps all samples strictly within (-1.0, 1.0)
+        // Verify the limiter keeps all samples strictly within (-1.0, 1.0)
         for &s in &out {
             assert!(s.abs() < 1.0);
         }
@@ -596,5 +598,30 @@ mod tests {
         for _ in 0..3 { mixer.mix_frame_stereo(&mut left, &mut right, now); }
         assert!(energy(&left) > energy(&right) * 4.0, "a voice on the left is louder on the left");
         assert!(energy(&right) > 0.0, "the far ear still hears it a little");
+    }
+
+    #[test]
+    fn three_loud_speakers_stay_in_range() {
+        let now = Instant::now();
+        let mut mixer = AudioMixer::new();
+        let mut encoder = OpusVoiceEncoder::new(64).unwrap();
+        let loud = encoder.encode(&[0.9f32; FRAME_SIZE_48K]).unwrap();
+        for peer in 1..=3u32 {
+            for seq in 0..4u16 {
+                let header = MediaHeader::new_audio(1, peer, seq, seq as u32 * 20, false, false);
+                mixer.on_audio_packet(&header, loud.clone(), now);
+            }
+        }
+        let mut out = [0.0f32; FRAME_SIZE_48K];
+        let (mut left, mut right) = ([0.0f32; FRAME_SIZE_48K], [0.0f32; FRAME_SIZE_48K]);
+        for _ in 0..3 {
+            mixer.mix_frame(&mut out, now);
+            assert!(out.iter().all(|s| s.is_finite() && s.abs() < 1.0), "mono mix out of range");
+            mixer.mix_frame_stereo(&mut left, &mut right, now);
+            assert!(
+                left.iter().chain(right.iter()).all(|s| s.is_finite() && s.abs() < 1.0),
+                "stereo mix out of range"
+            );
+        }
     }
 }
