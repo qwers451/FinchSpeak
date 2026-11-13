@@ -2,12 +2,15 @@
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use dashmap::DashMap;
 use finch_protocol::messages::ServerMessage;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
+
+use crate::config::LimitsConfig;
+use crate::limits::MediaRateLimiter;
 
 /// A connected client session.
 #[derive(Clone)]
@@ -32,6 +35,8 @@ pub struct ClientSession {
     pub last_activity_update: Option<std::time::Instant>,
     pub connection: quinn::Connection,
     pub control_tx: Sender<ServerMessage>,
+    /// Media this participant may send per second; checked for every datagram it sends (see `sfu.rs`).
+    pub media: Arc<Mutex<MediaRateLimiter>>,
 }
 
 /// A voice room tracking active participants.
@@ -73,6 +78,8 @@ pub struct SessionManager {
     message_hits: Arc<crate::limits::WindowLimiter>,
     /// Other things a person could repeat endlessly (status changes).
     action_hits: Arc<crate::limits::WindowLimiter>,
+    /// Per-participant media limits, set with the router; unset means the defaults.
+    media_config: Arc<std::sync::OnceLock<LimitsConfig>>,
 }
 
 impl Default for SessionManager {
@@ -111,7 +118,19 @@ impl SessionManager {
             message_rule: Arc::new(std::sync::Mutex::new((30, std::time::Duration::from_secs(10)))),
             message_hits: Arc::new(crate::limits::WindowLimiter::default()),
             action_hits: Arc::new(crate::limits::WindowLimiter::default()),
+            media_config: Arc::new(std::sync::OnceLock::new()),
         }
+    }
+
+    /// Set the per-participant media limits (before the listeners accept clients).
+    pub fn set_media_limits(&self, limits: LimitsConfig) {
+        self.media_config.set(limits).ok();
+    }
+
+    /// A fresh media budget for a newly registered participant.
+    pub fn media_budget(&self) -> Arc<Mutex<MediaRateLimiter>> {
+        let limits = self.media_config.get().cloned().unwrap_or_default();
+        Arc::new(Mutex::new(MediaRateLimiter::new(&limits, std::time::Instant::now())))
     }
 
     /// Set how many messages one person may send per window.
@@ -394,7 +413,7 @@ mod tests {
                 username: "client".into(), role: "member".into(), current_voice_channel: None,
                 muted: false, deafened: false, sharing_screen: false, server_muted: false,
                 supports_voice_extensions: true, client_level, activity: None, last_activity_update: None,
-                connection: connection.clone(), control_tx,
+                connection: connection.clone(), control_tx, media: manager.media_budget(),
             });
             manager.join_voice(peer_id, room);
             receivers.push((client_level, control_rx));
@@ -443,7 +462,7 @@ mod tests {
                 peer_id, user_id, username: "alice".into(), role: "member".into(),
                 current_voice_channel: None, muted: false, deafened: false, sharing_screen: false, server_muted: false,
                 supports_voice_extensions: false, client_level: 0, activity: None, last_activity_update: None,
-                connection: connection.clone(), control_tx,
+                connection: connection.clone(), control_tx, media: manager.media_budget(),
             });
         }
         (manager, user_id, server, client, remote)

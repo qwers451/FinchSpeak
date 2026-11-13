@@ -263,6 +263,7 @@ pub async fn handle_connection(
         last_activity_update: None,
         connection: conn.clone(),
         control_tx: control_tx.clone(),
+        media: sessions.media_budget(),
     };
     sessions.register_session(session);
     initial_state.activities = sessions.activities();
@@ -356,7 +357,7 @@ pub async fn handle_connection(
     // Datagram forwarder
     let datagram_task = tokio::spawn(async move {
         while let Ok(data) = conn_datagram.read_datagram().await {
-            sfu_datagram.route_datagram(&data, peer_id).await;
+            sfu_datagram.route_datagram(data, peer_id).await;
         }
     });
 

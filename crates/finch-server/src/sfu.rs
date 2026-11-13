@@ -4,9 +4,11 @@
 //! rewrites `sender_peer_id` to prevent spoofing, and fans out media to subscribers.
 
 use std::sync::atomic::Ordering;
+use std::sync::PoisonError;
+use std::time::Instant;
 
 use bytes::{Bytes, BytesMut};
-use finch_protocol::media::{MediaHeader, MediaType, MEDIA_HEADER_SIZE};
+use finch_protocol::media::{MediaHeader, MediaType};
 
 use crate::health::TRAFFIC;
 use crate::session::SessionManager;
@@ -32,41 +34,61 @@ impl SfuRouter {
         Self { sessions }
     }
 
-    /// Route an incoming media datagram.
-    pub async fn route_datagram(&self, raw_datagram: &[u8], auth_peer_id: u32) {
-        if raw_datagram.len() < MEDIA_HEADER_SIZE {
+    /// Route an incoming media datagram. Taken by value so the sender-id rewrite can reuse its buffer.
+    pub async fn route_datagram(&self, datagram: Bytes, auth_peer_id: u32) {
+        TRAFFIC.bytes_in.fetch_add(datagram.len() as u64, Ordering::Relaxed);
+
+        // The participant's media budget (bytes and datagrams per second) is charged for every
+        // datagram it sends, malformed ones included, before anything is routed.
+        let (voice_channel, sending_muted, budget) = match self.sessions.sessions.get(&auth_peer_id) {
+            Some(s) => (s.current_voice_channel, s.muted || s.server_muted, s.media.clone()),
+            None => return,
+        };
+        let allowed = budget
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .allow(Instant::now(), datagram.len());
+        if !allowed {
+            TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
             return;
         }
-        TRAFFIC.bytes_in.fetch_add(raw_datagram.len() as u64, Ordering::Relaxed);
 
-        let header = match MediaHeader::from_slice(raw_datagram) {
+        let header = match MediaHeader::from_slice(&datagram) {
             Ok(h) => h,
-            Err(_) => return,
+            Err(_) => {
+                // Too short, or an unknown media type: there is nothing to route.
+                TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
         };
 
         // 1. Validate that the sender is in the room specified in the header
-        let session = match self.sessions.sessions.get(&auth_peer_id) {
-            Some(s) => s.clone(),
-            None => return,
-        };
-
-        if session.current_voice_channel != Some(header.channel_id) {
+        if voice_channel != Some(header.channel_id) {
             tracing::warn!(
                 "Peer {auth_peer_id} attempted to send to channel {} but is in {:?}",
                 header.channel_id,
-                session.current_voice_channel
+                voice_channel
             );
             return;
         }
 
         // A muted microphone sends no voice; the sound of a shared screen is a separate stream.
-        if (session.muted || session.server_muted) && header.media_type == MediaType::Audio {
+        if sending_muted && header.media_type == MediaType::Audio {
             return;
         }
 
-        // 2. Rewrite sender_peer_id to the verified auth_peer_id
-        let mut rewritten = BytesMut::from(raw_datagram);
+        // C4 hook: check here that the sender may send this media type. Screen video and screen
+        // audio only while the sender has a screen share started. A refused datagram is dropped
+        // with `TRAFFIC.datagrams_dropped` counted, like the cases above.
+
+        // 2. Rewrite sender_peer_id to the verified auth_peer_id. The datagram's own buffer is
+        // reused when nothing else holds it; a shared buffer is copied.
+        let mut rewritten = match datagram.try_into_mut() {
+            Ok(buffer) => buffer,
+            Err(shared) => BytesMut::from(&shared[..]),
+        };
         if MediaHeader::overwrite_sender_peer_id(&mut rewritten, auth_peer_id).is_err() {
+            TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
             return;
         }
         let datagram_bytes = rewritten.freeze();

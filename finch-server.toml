@@ -31,3 +31,10 @@ max_track_minutes = 180
 [soundboard]
 enabled = true
 max_sounds = 48
+
+# Media rate limits per participant: the SFU drops (and counts in the health panel) media above them.
+# Defaults: 12 Mbit/s with a 256 KB burst, and 2000 datagrams per second.
+# [limits]
+# media_bytes_per_sec = 1500000
+# media_burst_bytes = 262144
+# media_packets_per_sec = 2000

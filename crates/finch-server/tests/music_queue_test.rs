@@ -70,6 +70,7 @@ impl Room {
                 last_activity_update: None,
                 connection: local.clone(),
                 control_tx: tx,
+                media: sessions.media_budget(),
             });
         }
         Ok(Self {

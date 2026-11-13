@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 
+use crate::config::LimitsConfig;
+
 const MAX_LOGIN_KEYS: usize = 10_000;
 
 /// The address a REST request came from (added by the HTTPS listener).
@@ -98,6 +100,55 @@ impl WindowLimiter {
     }
 }
 
+/// Media one participant may send: a token bucket over bytes and one over datagrams.
+///
+/// Pure: the caller passes the clock, so tests drive time directly. A datagram passes only when
+/// both buckets have room, and a refused datagram takes nothing from either bucket.
+pub struct MediaRateLimiter {
+    bytes_per_sec: f64,
+    burst_bytes: f64,
+    bytes: f64,
+    packets_per_sec: f64,
+    burst_packets: f64,
+    packets: f64,
+    last: Instant,
+}
+
+impl MediaRateLimiter {
+    /// A full bucket: a new participant may send one burst at once.
+    pub fn new(limits: &LimitsConfig, now: Instant) -> Self {
+        let burst_bytes = limits.media_burst_bytes as f64;
+        let burst_packets = limits.media_packets_per_sec as f64;
+        Self {
+            bytes_per_sec: limits.media_bytes_per_sec as f64,
+            burst_bytes,
+            bytes: burst_bytes,
+            packets_per_sec: burst_packets,
+            burst_packets,
+            packets: burst_packets,
+            last: now,
+        }
+    }
+
+    /// Charge one datagram of `bytes`. `false` when it is over the limit (nothing is taken then).
+    pub fn allow(&mut self, now: Instant, bytes: usize) -> bool {
+        // A clock that goes back refills nothing and is not an error.
+        if now > self.last {
+            let elapsed = now.duration_since(self.last).as_secs_f64();
+            self.bytes = (self.bytes + elapsed * self.bytes_per_sec).min(self.burst_bytes);
+            self.packets = (self.packets + elapsed * self.packets_per_sec).min(self.burst_packets);
+            self.last = now;
+        }
+        let bytes = bytes as f64;
+        if self.bytes < bytes || self.packets < 1.0 {
+            return false;
+        }
+        self.bytes -= bytes;
+        self.packets -= 1.0;
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +211,61 @@ mod tests {
             assert!(limiter.hit("u", t0 + Duration::from_secs(second), 1, window).is_err());
         }
         assert!(limiter.hit("u", t0 + Duration::from_secs(10), 1, window).is_ok());
+    }
+
+    #[test]
+    fn steady_media_under_the_rate_is_never_refused() {
+        let t0 = Instant::now();
+        let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
+        // 1000 bytes every 2 ms is 500 KB/s, well under 1.5 MB/s.
+        for step in 0..5_000u32 {
+            let now = t0 + Duration::from_millis(2 * u64::from(step));
+            assert!(bucket.allow(now, 1000), "packet {step} refused");
+        }
+    }
+
+    #[test]
+    fn the_byte_burst_passes_once_then_refuses_without_charging_the_refusal() {
+        let t0 = Instant::now();
+        let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
+        assert!(bucket.allow(t0, 262_144), "a full burst is allowed");
+        assert!(!bucket.allow(t0, 1), "nothing is left in the same instant");
+        // 100 ms refills 150 000 bytes: one 100 000 byte packet fits, a second does not.
+        let later = t0 + Duration::from_millis(100);
+        assert!(bucket.allow(later, 100_000));
+        assert!(!bucket.allow(later, 100_000));
+    }
+
+    #[test]
+    fn refill_is_capped_at_the_burst() {
+        let t0 = Instant::now();
+        let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
+        assert!(bucket.allow(t0, 262_144));
+        let idle = t0 + Duration::from_secs(60);
+        assert!(!bucket.allow(idle, 262_145), "a minute of silence does not buy more than the burst");
+        assert!(bucket.allow(idle, 262_144));
+    }
+
+    #[test]
+    fn packets_are_limited_separately_from_bytes() {
+        let t0 = Instant::now();
+        let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
+        for _ in 0..2_000 {
+            assert!(bucket.allow(t0, 10), "2000 packets fit the first second");
+        }
+        assert!(!bucket.allow(t0, 10), "the 2001st packet in that second is refused");
+        let next = t0 + Duration::from_secs(1);
+        for _ in 0..2_000 {
+            assert!(bucket.allow(next, 10), "the packet rate refills per second");
+        }
+    }
+
+    #[test]
+    fn a_clock_that_goes_back_neither_refills_nor_panics() {
+        let t0 = Instant::now();
+        let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
+        let t1 = t0 + Duration::from_secs(1);
+        assert!(bucket.allow(t1, 262_144));
+        assert!(!bucket.allow(t0, 1));
     }
 }

@@ -25,6 +25,27 @@ pub struct ServerConfig {
     pub music: MusicConfig,
     #[serde(default)]
     pub soundboard: SoundboardConfig,
+    #[serde(default)]
+    pub limits: LimitsConfig,
+}
+
+/// Media rate limits per participant (the SFU drops what exceeds them and counts it).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LimitsConfig {
+    /// Media bytes one participant may send per second. 1.5 MB/s = 12 Mbit/s: above the 10 Mbit/s
+    /// screen cap plus voice.
+    pub media_bytes_per_sec: u64,
+    /// Bytes that may be sent at once after a quiet spell.
+    pub media_burst_bytes: u64,
+    /// Media datagrams one participant may send per second (the burst is one second's worth).
+    pub media_packets_per_sec: u64,
+}
+
+impl Default for LimitsConfig {
+    fn default() -> Self {
+        Self { media_bytes_per_sec: 1_500_000, media_burst_bytes: 262_144, media_packets_per_sec: 2000 }
+    }
 }
 
 /// The shared soundboard: sounds are stored in the database; `enabled = false` hides the feature.
@@ -431,6 +452,21 @@ mod tests {
         assert_eq!(config.storage.max_file_size_mb, 50);
         assert_eq!(config.auth.jwt_secret, "CHANGE_ME_SECURE_JWT_SECRET_32_BYTES_MINIMUM");
         assert_eq!(config.auth.jwt_expiration_hours, 72);
+    }
+
+    #[test]
+    fn limits_section_is_optional_and_overrides_single_keys() {
+        let defaults = ServerConfig::default();
+        assert_eq!(defaults.limits.media_bytes_per_sec, 1_500_000);
+        assert_eq!(defaults.limits.media_burst_bytes, 262_144);
+        assert_eq!(defaults.limits.media_packets_per_sec, 2000);
+
+        let without_section: ServerConfig = toml::from_str("[server]\nquic_port = 4433\n").unwrap();
+        assert_eq!(without_section.limits.media_packets_per_sec, 2000, "existing configs keep working");
+
+        let partial: ServerConfig = toml::from_str("[limits]\nmedia_bytes_per_sec = 900000\n").unwrap();
+        assert_eq!(partial.limits.media_bytes_per_sec, 900_000);
+        assert_eq!(partial.limits.media_burst_bytes, 262_144);
     }
 
     fn temp_secret_file() -> std::path::PathBuf {
