@@ -1,3 +1,4 @@
+import { FinchBird } from '../ui/FinchBird';
 import { Show } from 'solid-js';
 import { currentUser, logoutUser } from '../stores/authStore';
 import { sessionEnded } from '../stores/sessionEnd';
@@ -11,7 +12,7 @@ import { describeError } from '../i18n/errors';
 export function Splash() {
   return (
     <div class="splash" role="status">
-      <img src="/custom/assets/brand/finchspeak-tile.svg" alt="" width="240" />
+      <FinchBird size={240} />
       <span class="spin" />
       <span class="t2">{t('Starting FinchSpeak…')}</span>
     </div>

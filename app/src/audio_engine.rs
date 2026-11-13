@@ -576,6 +576,8 @@ fn open_output(state: &AppState, app_handle: &tauri::AppHandle, diagnostics: &Ar
 fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
     let mut pending_cmd: Option<AudioCommand> = None;
     let mut restart_times: std::collections::VecDeque<Instant> = std::collections::VecDeque::new();
+    // Feeds processed frames to a voice message being recorded; kept across device restarts.
+    let mut note_feed = crate::voice_note::TapFeed::default();
 
     loop {
         let cmd = match pending_cmd.take() {
@@ -721,6 +723,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     }
                     continue;
                 }
+
+                // Voice message recording may start once frames can arrive.
+                state.voice_note.tap.set_live(capture_stream.is_some());
 
                 // 3. DSP pipeline for worker thread processing
                 let mut voice_capture = match VoiceCapture::new(capture_config(channel_id, &state.voice_settings)) {
@@ -874,7 +879,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                         }
                     }
                     // A local test owns the streams only for as long as it runs.
-                    if local_only && mic_test.is_none() {
+                    if local_only && mic_test.is_none() && !state.voice_note.tap.is_active() {
                         is_running.store(false, Ordering::SeqCst);
                         break;
                     }
@@ -1107,6 +1112,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         }
                                     };
                                     processing_failures.succeeded();
+                                    // The processed frame, for a voice message being recorded (never sent).
+                                    note_feed.refresh(&state.voice_note.tap);
+                                    note_feed.push(&capture_frame_48k);
                                     if let Some(stages) = output.diagnostics {
                                         diagnostics.signal_frame_at(dsp_epoch, stages.stage_power, stages.gate_changes, stages.dsp_resets);
                                     }
@@ -1226,6 +1234,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                     let _ = app_handle.emit("mic-level", serde_json::json!({ "db": -120.0, "speaking": false }));
                 }
 
+                state.voice_note.tap.set_live(false);
                 diagnostics.stream_active(true, false);
                 diagnostics.stream_active(false, false);
                 diagnostics.tick("stopped", state.is_muted.load(Ordering::Relaxed), state.is_deafened.load(Ordering::Relaxed));

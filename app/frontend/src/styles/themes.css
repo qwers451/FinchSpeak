@@ -223,21 +223,23 @@ button:disabled { cursor:not-allowed; }
 [data-theme="custom"] .mhead h3 { text-transform:uppercase; font-size:14px!important; letter-spacing:.045em; }
 [data-theme="custom"] .members { background:var(--bg-panel); border-color:var(--line); }
 [data-theme="custom"] .upanel { background:var(--bg-deep); border-color:var(--line); }
-[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox) {
+[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox,.music-panel,.soundboard-panel,.soundboard-tile,.health-tile,.voice-note,.flock-card,.overlay-card) {
   --cut:8px; --plate:var(--bg-card); --edge:var(--line); --edge-width:1px;
   isolation:isolate; background:transparent; border:0; border-radius:0; box-shadow:none;
 }
-[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.emoji-picker) { position:relative; }
+[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.emoji-picker,.music-panel,.soundboard-panel,.soundboard-tile,.health-tile,.voice-note,.flock-card,.overlay-card) { position:relative; }
 [data-theme="custom"] :is(.search-results,.mention-menu) { position:absolute; }
 /* Clip background layers only. Menus, focus rings and status badges remain outside the panel. */
-[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox)::before,
-[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox)::after {
+[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox,.music-panel,.soundboard-panel,.soundboard-tile,.health-tile,.voice-note,.flock-card,.overlay-card)::before,
+[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox,.music-panel,.soundboard-panel,.soundboard-tile,.health-tile,.voice-note,.flock-card,.overlay-card)::after {
   content:''; position:absolute; pointer-events:none; z-index:-1;
   clip-path:polygon(0 0,calc(100% - var(--cut)) 0,100% var(--cut),100% 100%,var(--cut) 100%,0 calc(100% - var(--cut)));
 }
-[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox)::before { inset:0; background:var(--edge); }
-[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox)::after { inset:var(--edge-width); background:var(--plate); --cut:7px; }
+[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox,.music-panel,.soundboard-panel,.soundboard-tile,.health-tile,.voice-note,.flock-card,.overlay-card)::before { inset:0; background:var(--edge); }
+[data-theme="custom"] :is(.btn,.ctl,.input,.select,.vc,.modal,.dock,.file,.toast,.sharer-pill,.fp-card,.search-results,.mention-menu,.emoji-picker,.ctx-menu,.select-listbox,.music-panel,.soundboard-panel,.soundboard-tile,.health-tile,.voice-note,.flock-card,.overlay-card)::after { inset:var(--edge-width); background:var(--plate); --cut:7px; }
 [data-theme="custom"] :is(.btn,.ctl):hover:not(:disabled) { --plate:var(--bg-hover); --edge:var(--text-3); }
+/* Inside the narrow-window dialog the dialog already draws the frame, so the music panel sheds its own edge. */
+[data-theme="custom"] .modal .music-panel::before, [data-theme="custom"] .modal .music-panel::after { display:none; }
 [data-theme="custom"] .btn { height:36px; padding:0 16px; font-size:11px; }
 [data-theme="custom"] .btn.sm { height:28px; padding:0 10px; font-size:10px; }
 [data-theme="custom"] .btn.icon { width:36px; padding:0; }

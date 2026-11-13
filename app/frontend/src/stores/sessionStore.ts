@@ -8,7 +8,7 @@ import { activeVoiceChannel, allVoiceParticipants, handlePushToTalk, toggleMute,
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
 import { classifyEnd, sessionEnded, setSessionEnded } from './sessionEnd';
-import { reactToMessage, reactToVoiceMovement } from './desktop';
+import { reactToFlockCall, reactToMessage, reactToShareStarted, reactToVoiceMovement } from './desktop';
 import { clearJoinSounds, invalidateJoinSound } from './joinSound';
 import { clearTyping, isMentioned, noteIncoming, noteTyping, resetActivity, setUnreadFromServer } from './activityStore';
 import { handleMessageDeleted, handleMessageEdited, handleReactionChanged, renameAuthor } from './chatStore';
@@ -18,6 +18,8 @@ import { endWatching, screenHandlers } from './screenStore';
 import { applySavedVolume } from './volumeStore';
 import { pushToast } from '../ui/toastStore';
 import { updateVoiceLevels } from './levelStore';
+import { handleFlockRefusal, receiveFlockCall } from './flockStore';
+import { handleSoundPlayed } from './soundboardStore';
 export { appError, setAppError } from './notificationStore';
 
 export const [connectionStatus, setConnectionStatus] = createSignal<'connected' | 'disconnected' | 'reconnecting' | 'failed'>('disconnected');
@@ -114,6 +116,15 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     reactToMessage(incoming, isMentioned(incoming));
   },
   'activity-changed': setGameActivity,
+  // A lambda, not the function itself: flockStore may still be loading when this table is built.
+  // The caller's name as this person knows it; the server's name is the fallback.
+  'flock-call': (call) => {
+    const from_name = knownUsers().find((user) => user.id === call.from_user_id)?.display_name || call.from_name;
+    const named = { ...call, from_name };
+    receiveFlockCall(named);
+    reactToFlockCall(named);
+  },
+  'sound-played': (event) => handleSoundPlayed(event),
   'message-edited': handleMessageEdited,
   'message-deleted': handleMessageDeleted,
   'reaction-changed': handleReactionChanged,
@@ -164,6 +175,10 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
   'user-voice-state-changed': (data) => setVoiceParticipants((previous) => previous.map((participant) =>
     participant.peer_id === data.peer_id ? { ...participant, is_muted: data.muted, is_deafened: data.deafened } : participant)),
   ...screenHandlers,
+  'screen-share-started': (data) => {
+    screenHandlers['screen-share-started'](data);
+    reactToShareStarted(data.user_id);
+  },
   'presence-update': (data) => {
     setPresence((previous) => ({ ...previous, [data.user_id]: data.status }));
     setStatusTexts((previous) => {
@@ -226,7 +241,9 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     const ended = classifyEnd(reason);
     if (ended && !sessionEnded()) setSessionEnded(ended);
   },
-  'server-error': (error) => setAppError(`${error.code}: ${error.message}`),
+  'server-error': (error) => {
+    if (!handleFlockRefusal(error)) setAppError(`${error.code}: ${error.message}`);
+  },
   'audio-device-lost': () => {
     resetMicPreview();
     setAppError(t('An audio device was disconnected; reopening the audio devices...'));

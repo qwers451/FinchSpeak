@@ -7,6 +7,7 @@ const LABELS: Record<HotkeyAction, string> = {
   push_to_talk: 'Push-to-talk key',
   toggle_mute: 'Mute microphone key',
   toggle_deafen: 'Turn sound off key',
+  overlay: 'Mini window key',
 };
 
 /** Click, then press the key to use for this action; Esc cancels, × removes the key. */

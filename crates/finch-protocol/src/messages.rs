@@ -53,6 +53,21 @@ pub enum ClientMessage {
         channel_id: Uuid,
     },
 
+    /// Call everybody in my voice room to `target_channel` (the caller flies there with a separate JoinVoice).
+    CallFlock {
+        target_channel: Uuid,
+    },
+
+    /// Call one person (online, not in my room) to my voice room.
+    CallUser {
+        user_id: Uuid,
+    },
+
+    /// Play a soundboard sound for everybody in my voice room (each client plays it from its own cache).
+    PlaySound {
+        sound_id: Uuid,
+    },
+
     /// Choose how you appear while connected (not `Offline`), with an optional short text.
     SetStatus {
         status: UserStatus,
@@ -253,6 +268,19 @@ pub enum ServerMessage {
         display_name: String,
     },
 
+    /// Someone calls you to a voice room; the client decides whether to fly there.
+    FlockCall {
+        from_user_id: Uuid,
+        from_name: String,
+        channel_id: Uuid,
+    },
+
+    /// A soundboard sound was played in a voice room (sent to everybody in it, the player included).
+    SoundPlayed {
+        sound_id: Uuid,
+        user_id: Uuid,
+    },
+
     /// Somebody is typing in a channel.
     UserTyping {
         channel_id: Uuid,
@@ -329,6 +357,7 @@ impl ServerMessage {
     pub fn minimum_client_level(&self) -> u16 {
         match self {
             Self::ActivityChanged { .. } | Self::MusicState { .. } => crate::CLIENT_LEVEL_1_5,
+            Self::FlockCall { .. } | Self::SoundPlayed { .. } => crate::CLIENT_LEVEL_1_7,
             _ => 0,
         }
     }

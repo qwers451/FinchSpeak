@@ -78,6 +78,12 @@
 }
 .music-now-chip .trunc { min-width: 0; }
 
+/* Narrow desktop windows: the side panel narrows and the member list gives way, so the room keeps its width. */
+@media (max-width:1150px) {
+  .music-panel { width:280px; }
+  .voice-room.music-open ~ .members { display:none; }
+}
+
 /* Note on the voice strip (sidebar) and on the perch (tree view). */
 .music-note {
   flex: none;

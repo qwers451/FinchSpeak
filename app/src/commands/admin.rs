@@ -1,6 +1,6 @@
 //! Administration: invitation codes (and, for admins, moderation).
 
-use finch_client_core::api::{AdminUserDto, ApiClient, AuditEntryDto, InviteDto, ServerOverviewDto};
+use finch_client_core::api::{AdminUserDto, ApiClient, AuditEntryDto, HealthReportDto, InviteDto, ServerOverviewDto};
 use uuid::Uuid;
 use tauri::State;
 
@@ -62,6 +62,11 @@ pub async fn audit_log(before: Option<i64>, limit: Option<u32>, state: State<'_,
 #[tauri::command]
 pub async fn server_overview(state: State<'_, AppState>) -> Result<ServerOverviewDto, String> {
     api(&state).await?.server_overview().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn server_health(state: State<'_, AppState>) -> Result<HealthReportDto, String> {
+    api(&state).await?.server_health().await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -10,7 +10,8 @@ import './styles/user-theme.css';
 import './styles/spatial.css';
 import './styles/nest.css';
 import './styles/music.css';
-import { App } from './App';
+import './styles/soundboard.css';
+import './styles/voiceNote.css';
 
 const root = document.getElementById('root');
 
@@ -20,4 +21,11 @@ if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
   );
 }
 
-render(() => <App />, root!);
+// The mini window opens this same bundle with ?view=overlay: it gets only its own view, none of the app's stores.
+if (new URLSearchParams(window.location.search).get('view') === 'overlay') {
+  document.documentElement.dataset.view = 'overlay';
+  void import('./components/overlay/OverlayView').then(({ OverlayWindow }) => render(() => <OverlayWindow />, root!));
+} else {
+  void import('./App').then(({ App }) => render(() => <App />, root!));
+  void import('./stores/overlayStore').then(({ startOverlaySync }) => startOverlaySync());
+}

@@ -72,7 +72,7 @@ it('tones are short chirps and the voice-room ones respect the setting', async (
     expect(tone.noteMs).toBeLessThanOrEqual(150);
   }
   const play = vi.fn();
-  vi.stubGlobal('AudioContext', class { currentTime = 0; destination = {}; createOscillator = () => { play(); return { type: '', frequency: {}, connect: () => ({ connect: () => {} }), start() {}, stop() {} }; }; createGain = () => ({ gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: () => ({}) }); });
+  vi.stubGlobal('AudioContext', class { currentTime = 0; destination = {}; createOscillator = () => { play(); return { type: '', frequency: {}, connect: () => ({ connect: () => {} }), start() {}, stop() {} }; }; createGain = () => ({ gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: () => ({}) }); createBiquadFilter = () => ({ type: '', frequency: { value: 0 }, connect: () => ({}) }); });
   reactToVoiceMovement('join', 'Bob', 'bob', true);
   await flush();
   expect(play).toHaveBeenCalledTimes(2);

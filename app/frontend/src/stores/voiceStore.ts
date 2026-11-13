@@ -143,19 +143,22 @@ export const [pushToTalkKey, setPushToTalkKey] = createSignal<string | null>(nul
 export const [muteKey, setMuteKey] = createSignal<string | null>(null);
 /** System-wide key that turns all sound off or back on. */
 export const [deafenKey, setDeafenKey] = createSignal<string | null>(null);
+/** System-wide key that shows or hides the mini window. None until the user chooses one. */
+export const [overlayKey, setOverlayKey] = createSignal<string | null>(null);
 
-export type HotkeyAction = 'push_to_talk' | 'toggle_mute' | 'toggle_deafen';
-const HOTKEY_LABELS: Record<HotkeyAction, string> = { push_to_talk: 'Push to talk', toggle_mute: 'Mute microphone', toggle_deafen: 'Turn sound off' };
+export type HotkeyAction = 'push_to_talk' | 'toggle_mute' | 'toggle_deafen' | 'overlay';
+const HOTKEY_LABELS: Record<HotkeyAction, string> = { push_to_talk: 'Push to talk', toggle_mute: 'Mute microphone', toggle_deafen: 'Turn sound off', overlay: 'Mini window' };
 const hotkeySignals: Record<HotkeyAction, [() => string | null, (key: string | null) => void]> = {
   push_to_talk: [pushToTalkKey, setPushToTalkKey],
   toggle_mute: [muteKey, setMuteKey],
   toggle_deafen: [deafenKey, setDeafenKey],
+  overlay: [overlayKey, setOverlayKey],
 };
 export const hotkeyFor = (action: HotkeyAction) => hotkeySignals[action][0]();
 
 const VOICE_SETTINGS_KEY = 'finchspeak.voiceSettings';
 
-type SavedVoice = { settings: Omit<VoiceSettings, 'key_down'>; key: string | null; muteKey: string | null; deafenKey: string | null };
+type SavedVoice = { settings: Omit<VoiceSettings, 'key_down'>; key: string | null; muteKey: string | null; deafenKey: string | null; overlayKey: string | null };
 
 function readSavedVoice(): SavedVoice | null {
   try {
@@ -175,6 +178,7 @@ function readSavedVoice(): SavedVoice | null {
       key: typeof saved.key === 'string' && saved.key ? saved.key : null,
       muteKey: typeof saved.muteKey === 'string' && saved.muteKey ? saved.muteKey : null,
       deafenKey: typeof saved.deafenKey === 'string' && saved.deafenKey ? saved.deafenKey : null,
+      overlayKey: typeof saved.overlayKey === 'string' && saved.overlayKey ? saved.overlayKey : null,
     };
   } catch {
     return null;
@@ -184,7 +188,7 @@ function readSavedVoice(): SavedVoice | null {
 function saveVoice() {
   try {
     const { key_down: _down, ...settings } = voiceSettings();
-    localStorage.setItem(VOICE_SETTINGS_KEY, JSON.stringify({ settings, key: pushToTalkKey(), muteKey: muteKey(), deafenKey: deafenKey() }));
+    localStorage.setItem(VOICE_SETTINGS_KEY, JSON.stringify({ settings, key: pushToTalkKey(), muteKey: muteKey(), deafenKey: deafenKey(), overlayKey: overlayKey() }));
   } catch {
     /* not remembered */
   }
@@ -303,7 +307,7 @@ export function restoreVoiceSettings() {
       }
     }
     setPushToTalkKey(saved.key);
-    for (const [action, key] of [['toggle_mute', saved.muteKey], ['toggle_deafen', saved.deafenKey]] as const) {
+    for (const [action, key] of [['toggle_mute', saved.muteKey], ['toggle_deafen', saved.deafenKey], ['overlay', saved.overlayKey]] as const) {
       if (key) {
         try {
           await api.setHotkey(action, key);

@@ -2,10 +2,11 @@ import { createMemo, createSignal, For, Show } from 'solid-js';
 import { notifyTyping } from '../../stores/activityStore';
 import { attachFiles, formatSize, pendingFiles, removePending, retryUpload, takePending } from '../../stores/attachmentStore';
 import { activeChannel, MAX_MESSAGE_CHARS, replyingTo, sendMessage, setReplyingTo } from '../../stores/chatStore';
-import { connectionStatus, knownUsers } from '../../stores/sessionStore';
+import { connectionStatus, knownUsers, serverFeatures } from '../../stores/sessionStore';
 import { currentUser } from '../../stores/authStore';
 import { Avatar, Button, Icon } from '../../ui';
 import { EmojiPicker } from './EmojiPicker';
+import { inApp, isRecording, VoiceRecordButton, voiceMessagesAvailable } from './VoiceNote';
 import { t } from '../../i18n';
 
 /** The `@word` the caret is in, if any: where it starts and what has been typed of it. */
@@ -26,6 +27,7 @@ export function Composer() {
   let fileInput: HTMLInputElement | undefined;
 
   const offline = () => connectionStatus() !== 'connected';
+  const voiceAvailable = () => voiceMessagesAvailable(serverFeatures(), inApp());
   const over = () => Math.max(0, text().length - MAX_MESSAGE_CHARS);
   const hasReady = () => pendingFiles().some((entry) => entry.status === 'ready');
   const busyUploading = () => pendingFiles().some((entry) => entry.status === 'uploading');
@@ -107,16 +109,16 @@ export function Composer() {
       </Show>
 
       <Show when={pendingFiles().length > 0}>
-        <div class="row g8 wrap" style={{ padding: '0 20px 8px' }} aria-label={t('Attachments')}>
+        <div class="row g8 wrap attach-row" aria-label={t('Attachments')}>
           <For each={pendingFiles()}>
             {(entry) => (
               <span class={`pill file-pill ${entry.status}`} title={entry.error}>
                 <Show when={entry.status === 'uploading'} fallback={<Icon name={entry.status === 'ready' ? 'file' : 'warn'} size="sm" />}><span class="spin mini" /></Show>
-                <span class="trunc" style={{ 'max-width': '180px' }}>{entry.name}</span>
+                <span class="trunc attach-name">{entry.name}</span>
                 <Show when={entry.status === 'uploading'}><span class="t3">{t('Uploading…')}</span></Show>
                 <Show when={entry.status === 'toolarge'}><span class="tr">{t('Too large: {size}. The limit is 10 MB.', { size: formatSize(entry.size) })}</span></Show>
                 <Show when={entry.status === 'failed'}>
-                  <span style={{ color: 'var(--amber)' }}>{t('Upload failed')}</span>
+                  <span class="upload-failed">{t('Upload failed')}</span>
                   <button type="button" class="link-btn ty" style={{ margin: 0 }} onClick={() => void retryUpload(entry.key)}>{t('Retry')}</button>
                 </Show>
                 <button type="button" class="icon-close" aria-label={t('Remove {name}', { name: entry.name })} onClick={() => removePending(entry.key)}><Icon name="x" size="sm" /></button>
@@ -129,7 +131,7 @@ export function Composer() {
       <div class="composer-anchor">
         <Show when={candidates().length > 0}>
           <div class="card mention-menu" role="listbox" aria-label={t('Members')}>
-            <span class="sec-label" style={{ padding: '6px 8px' }}>{t('Members matching "{query}"', { query: mention()!.query })}</span>
+            <span class="sec-label mention-label">{t('Members matching "{query}"', { query: mention()!.query })}</span>
             <For each={candidates()}>
               {(user, index) => (
                 <div class={`mem${index() === selected() ? ' sel' : ''}`} role="option" aria-selected={index() === selected()}
@@ -152,6 +154,7 @@ export function Composer() {
         <div class={`composer${over() > 0 ? ' is-error' : ''}${offline() ? ' is-offline' : ''}`}>
           <input ref={fileInput} type="file" multiple hidden onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; void attachFiles(files); }} />
           <Button iconOnly size="sm" variant="ghost" icon="clip" label={t('Attach a file')} disabled={offline()} onClick={() => fileInput?.click()} />
+          <Show when={!isRecording()}>
           <textarea
             ref={box}
             class="txt"
@@ -173,8 +176,10 @@ export function Composer() {
             onClick={syncCaret}
             onPaste={onPaste}
           />
+          </Show>
           <Show when={over() > 0}><span class="tr fs12 b fit">{t('{count} over', { count: over() })}</span></Show>
           <Button iconOnly size="sm" variant="ghost" icon="smile" label={t('Emoji')} disabled={offline()} onClick={() => setEmoji(!emoji())} />
+          <Show when={voiceAvailable()}><VoiceRecordButton disabled={offline()} /></Show>
           <Button iconOnly size="sm" variant="primary" icon="send" label={t('Send')} disabled={!canSend()} onClick={() => void submit()} />
         </div>
       </div>

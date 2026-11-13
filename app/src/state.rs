@@ -208,6 +208,8 @@ pub struct AppState {
     /// The user chose Quit: really close.
     pub quitting: Arc<std::sync::atomic::AtomicBool>,
     pub mic_test_request: Arc<std::sync::atomic::AtomicU32>,
+    /// Voice message recording: the frames the audio worker feeds it, and the recording in progress.
+    pub voice_note: Arc<crate::voice_note::VoiceNoteState>,
     /// Where session tokens are kept between launches.
     pub token_store: Arc<dyn crate::credentials::TokenStore>,
     /// Credential key of the current session (used by logout and refresh).
@@ -343,6 +345,7 @@ impl AppState {
             pending_update: Arc::new(tokio::sync::Mutex::new(None)),
             quitting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             mic_test_request: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            voice_note: Arc::new(crate::voice_note::VoiceNoteState::default()),
             token_store: Arc::new(crate::credentials::KeyringStore),
             signed_in_key: Arc::new(RwLock::new(None)),
             hotkeys: Arc::new(crate::hotkeys::Hotkeys::default()),

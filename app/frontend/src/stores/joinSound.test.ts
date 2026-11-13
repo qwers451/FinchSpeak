@@ -11,10 +11,13 @@ vi.stubGlobal('AudioContext', class {
   currentTime = 0;
   destination = {};
   createOscillator() {
-    return { type: '', frequency: { set value(hz: number) { frequencies.push(hz); } }, connect: () => ({ connect: () => {} }), start() {}, stop() {} };
+    return { type: '', frequency: { set value(hz: number) { frequencies.push(hz); }, exponentialRampToValueAtTime() {} }, connect: () => ({ connect: () => {} }), start() {}, stop() {} };
   }
   createGain() {
     return { gain: { value: 0, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect: () => ({ connect: () => {} }) };
+  }
+  createBiquadFilter() {
+    return { type: '', frequency: { value: 0 }, connect: () => ({ connect: () => {} }) };
   }
   createBufferSource() {
     return { buffer: null, connect: () => ({ connect: () => {} }), start: () => { started.push(1); } };
@@ -44,10 +47,14 @@ it('encodes a 16-bit mono PCM WAV header and samples', () => {
   expect([view.getInt16(44, true), view.getInt16(46, true), view.getInt16(48, true), view.getInt16(50, true)]).toEqual([0, 32767, -32768, 32767]);
 });
 
-it('falls back to the default join tone when the person has no sound', async () => {
+it('falls back to the join tone of the chosen sound set when the person has no sound', async () => {
   vi.spyOn(api, 'downloadJoinSound').mockResolvedValue(null);
   await playJoinSound('u1');
-  expect(frequencies).toEqual([660, 880]);
+  expect(frequencies).toEqual([1800, 2400]);
+  setPrefs({ ...DEFAULT_PREFS, notifications: { ...DEFAULT_PREFS.notifications, soundSet: 'soft' } });
+  frequencies.length = 0;
+  await playJoinSound('u1');
+  expect(frequencies).toEqual([495, 660]);
   expect(started).toEqual([]);
 });
 
@@ -71,7 +78,7 @@ it('uses the default tone if the sound was removed during a disconnect', async (
   sessionHandlers.reconnected(null);
 
   await playJoinSound('u1');
-  expect(frequencies).toEqual([660, 880]);
+  expect(frequencies).toEqual([1800, 2400]);
   expect(started).toHaveLength(1);
 });
 

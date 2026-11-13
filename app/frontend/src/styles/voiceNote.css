@@ -1,0 +1,117 @@
+/* Voice messages: the player in a chat message, the record button and the recording bar in the composer. */
+
+.voice-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: min(340px, 100%);
+  padding: 8px 12px 8px 8px;
+  border-radius: var(--r-pill);
+  background: var(--bg-card);
+  border: 1px solid var(--line-soft);
+}
+.voice-play {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--tint-accent);
+  color: var(--text);
+  cursor: pointer;
+}
+.voice-play:disabled { opacity: 0.5; cursor: default; }
+.voice-wave {
+  flex: 1;
+  min-width: 80px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.voice-bar {
+  flex: 1;
+  min-width: 1px;
+  border-radius: 1px;
+  background: var(--text-3);
+  opacity: 0.45;
+}
+.voice-bar.played { opacity: 1; background: var(--text); }
+.voice-time { flex: none; min-width: 34px; text-align: right; }
+.voice-speed {
+  flex: none;
+  min-width: 40px;
+  padding: 3px 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.voice-mic {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.voice-mic:hover { background: var(--bg-hover); color: var(--text); }
+.voice-mic:disabled { opacity: 0.5; cursor: default; }
+
+.voice-recording {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 4px 4px 10px;
+  border-radius: var(--r-pill);
+  background: var(--tint-danger);
+}
+.voice-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  animation: voice-pulse 1.2s ease-in-out infinite;
+}
+@keyframes voice-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.voice-clock { flex: none; min-width: 34px; }
+.voice-level {
+  flex: 1;
+  min-width: 40px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line-soft);
+  overflow: hidden;
+}
+.voice-level > span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  background: var(--red);
+  transition: transform 80ms linear;
+}
+.voice-recording .icon-close { flex: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-dot { animation: none; }
+  .voice-level > span { transition: none; }
+}

@@ -1,0 +1,12 @@
+/* The soundboard panel in the voice room. Colors come from the theme tokens, so every theme gets them. */
+.soundboard-panel { display: flex; flex-direction: column; gap: 12px; }
+.soundboard-panel .input { width: 100%; }
+.soundboard-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(120px, 100%), 1fr)); gap: 8px; max-height: 320px; overflow-y: auto; }
+.soundboard-tile { display: flex; align-items: center; gap: 4px; min-width: 0; background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--r-sm); }
+.soundboard-play { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 10px 8px; background: none; border: 0; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.soundboard-play:hover, .soundboard-play:focus-visible { color: var(--yellow); }
+.soundboard-play .trunc { min-width: 0; }
+.soundboard-add { display: grid; grid-template-columns: minmax(0, 1fr) 90px; gap: 8px; align-items: center; }
+.soundboard-add .btn { grid-column: 1 / -1; }
+/* The emoji field is a 90px column: a long localized placeholder gets an ellipsis instead of a hard cut. */
+.soundboard-add .input { min-width: 0; text-overflow: ellipsis; }

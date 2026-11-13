@@ -1,7 +1,10 @@
-import { Show } from 'solid-js';
+import { For, Show } from 'solid-js';
+import { prefs } from '../../stores/settingsStore';
 import { isSharing, stopSharing } from '../../stores/screenStore';
 import { musicAvailable, musicPanelOpen, musicState, setMusicPanelOpen } from '../../stores/musicStore';
+import { setSoundboardOpen, soundboardAvailable, soundboardOpen } from '../../stores/soundboardStore';
 import { isDeafened, isMuted, leaveVoice, pushToTalkKey, toggleDeafen, toggleMute, voiceSettings } from '../../stores/voiceStore';
+import { overlayOpen, toggleOverlay } from '../../stores/overlayStore';
 import { Icon, type IconName } from '../../ui';
 import { t } from '../../i18n';
 
@@ -10,7 +13,8 @@ type CtlProps = { label: string; icon: IconName; class?: string; pressed?: boole
 function Ctl(props: CtlProps) {
   return (
     <button type="button" class={`ctl${props.class ? ` ${props.class}` : ''}`} aria-label={props.label} title={props.label} aria-pressed={props.pressed} onClick={props.onClick}>
-      <Icon name={props.icon} size="lg" />
+      {/* A new icon turns in when the state changes; the same icon is not rebuilt on re-render. */}
+      <For each={[props.icon]}>{(icon) => <span class="ctl-ico" aria-hidden="true"><Icon name={icon} size="lg" /></span>}</For>
     </button>
   );
 }
@@ -22,7 +26,7 @@ export function Dock(props: { onShare: () => void; onSettings: () => void }) {
     <div class="row center g16 voice-controls">
       <Show when={voiceSettings().push_to_talk && pushToTalkKey()}>
         <span class="pill" style={talking() ? { 'border-color': 'var(--cyan)', color: 'var(--cyan)' } : undefined} role="status">
-          <span class="dot" style={{ background: talking() ? 'var(--cyan)' : 'var(--text-3)' }} />
+          <span class={`dot${talking() ? ' talk' : ''}`} />
           {pushToTalkKey()} · {t(talking() ? 'talking' : 'push to talk')}
         </span>
       </Show>
@@ -32,6 +36,12 @@ export function Dock(props: { onShare: () => void; onSettings: () => void }) {
         <Ctl label={t(isSharing() ? 'Stop sharing' : 'Share your screen')} icon="share" class={isSharing() ? 'live' : ''} pressed={isSharing()} onClick={() => (isSharing() ? void stopSharing() : props.onShare())} />
         <Show when={musicAvailable()}>
           <Ctl label={t('Music')} icon="music" class={musicState()?.playing ? 'live' : ''} pressed={musicPanelOpen()} onClick={() => setMusicPanelOpen(!musicPanelOpen())} />
+        </Show>
+        <Show when={soundboardAvailable()}>
+          <Ctl label={t('Soundboard')} icon="smile" pressed={soundboardOpen()} onClick={() => setSoundboardOpen(!soundboardOpen())} />
+        </Show>
+        <Show when={prefs().overlay.enabled}>
+          <Ctl label={t('Mini window')} icon="pip" pressed={overlayOpen()} onClick={() => void toggleOverlay()} />
         </Show>
         <Ctl label={t('Voice settings')} icon="sliders" onClick={props.onSettings} />
         <Ctl label={t('Leave the room')} icon="hangup" class="leave" onClick={() => void leaveVoice()} />

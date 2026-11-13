@@ -1,10 +1,11 @@
-import { createMemo, createSignal, For, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
 import { currentUser } from '../../stores/authStore';
 import { deleteMessage, discardFailed, editMessage, MAX_MESSAGE_CHARS, messages, retryMessage, toggleReaction } from '../../stores/chatStore';
 import { isMentioned } from '../../stores/activityStore';
 import { knownUsers } from '../../stores/sessionStore';
 import type { Message } from '../../types';
-import { Avatar, Button, ConfirmDialog, Icon } from '../../ui';
+import { Avatar, Button, ConfirmDialog, Icon, Rolling } from '../../ui';
+import { popIn } from '../../ui/motion';
 import { Attachments } from './AttachmentView';
 import { clock } from './chatFormat';
 import { RichText } from './RichText';
@@ -17,6 +18,8 @@ type Props = {
   compact: boolean;
   onReply: (message: Message) => void;
   onJump: (messageId: string) => void;
+  /** Stagger index while the message plays its enter animation; undefined when it does not. */
+  enter?: number;
 };
 
 const countLabel = (count: number) => (count > 99 ? '99+' : String(count));
@@ -73,6 +76,8 @@ export function MessageItem(props: Props) {
     <div
       class={`msg${mine() ? ' own' : ''}${mentioned() ? ' mention' : ''}${msg().state === 'sending' ? ' sending' : ''}${msg().state === 'failed' ? ' failed' : ''}${props.compact ? ' compact' : ''}`}
       data-message-id={msg().id}
+      classList={{ 'msg-enter': props.enter !== undefined }}
+      style={{ '--i': String(props.enter ?? 0) }}
       ref={row}
     >
       <Show when={!props.compact} fallback={<span class="msg-gutter" />}>
@@ -143,10 +148,18 @@ export function MessageItem(props: Props) {
             <For each={msg().reactions}>
               {(reaction) => {
                 const reacted = () => reaction.user_ids.includes(me()?.id ?? '');
+                let chip: HTMLButtonElement | undefined;
+                // A reaction whose count grew while on screen pops; a re-render with the same count does nothing.
+                let shown = reaction.user_ids.length;
+                createEffect(() => {
+                  const count = reaction.user_ids.length;
+                  if (count > shown && chip) popIn(chip);
+                  shown = count;
+                });
                 return (
-                  <button type="button" class={`react${reacted() ? ' mine' : ''}`} aria-pressed={reacted()}
+                  <button type="button" ref={chip} class={`react${reacted() ? ' mine' : ''}`} aria-pressed={reacted()}
                     aria-label={`${reaction.emoji} ${reaction.user_ids.length}`} onClick={() => void toggleReaction(msg(), reaction.emoji)}>
-                    <span>{reaction.emoji}</span><span>{countLabel(reaction.user_ids.length)}</span>
+                    <span>{reaction.emoji}</span><Rolling value={countLabel(reaction.user_ids.length)} />
                     <span class="tooltip react-tip" role="tooltip">
                       <span style={{ 'font-size': '16px' }}>{reaction.emoji}</span>
                       <span>{reaction.user_ids.length > 5 ? t('{names} and {count} others', { names: reaction.user_ids.slice(0, 5).map(nameOf).join(', '), count: reaction.user_ids.length - 5 }) : reaction.user_ids.slice(0, 5).map(nameOf).join(', ')}</span>

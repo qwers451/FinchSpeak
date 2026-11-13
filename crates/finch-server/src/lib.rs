@@ -9,6 +9,7 @@ pub mod cleanup;
 pub mod chat;
 pub mod config;
 pub mod db;
+pub mod health;
 pub mod error;
 pub mod https;
 pub mod launch;

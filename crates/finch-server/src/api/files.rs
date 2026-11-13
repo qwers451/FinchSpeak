@@ -43,11 +43,27 @@ pub async fn upload_file_handler(
 
     let max_bytes = state.config.storage.max_file_size_mb * 1024 * 1024;
 
-    if let Some(mut field) = multipart
-        .next_field()
-        .await
-        .map_err(|e| ServerError::BadRequest(e.to_string()))?
-    {
+    // A voice message sends its length and waveform as text fields before the file.
+    let mut voice = VoiceFields::default();
+    let first = loop {
+        let Some(field) = multipart
+            .next_field()
+            .await
+            .map_err(|e| ServerError::BadRequest(e.to_string()))?
+        else {
+            break None;
+        };
+        let name = field.name().map(str::to_string);
+        match name.as_deref() {
+            Some(VOICE_DURATION_FIELD) | Some(VOICE_WAVEFORM_FIELD) => {
+                let text = field.text().await.map_err(|e| ServerError::BadRequest(e.to_string()))?;
+                voice.set(name.as_deref().unwrap_or_default(), text);
+            }
+            _ => break Some(field),
+        }
+    };
+
+    if let Some(mut field) = first {
         let filename = field
             .file_name()
             .unwrap_or("unnamed_attachment")
@@ -57,6 +73,12 @@ pub async fn upload_file_handler(
             .content_type()
             .unwrap_or("application/octet-stream")
             .to_string();
+
+        let (duration_ms, waveform) = if content_type == "audio/ogg" {
+            voice.parse()?
+        } else {
+            (None, None)
+        };
 
         // Read the whole upload even when it is too large (up to `drain_cap`): answering 413 and
         // closing while the client is still sending makes it see a connection reset instead of
@@ -118,8 +140,8 @@ pub async fn upload_file_handler(
         };
 
         sqlx::query(
-            "INSERT INTO attachments (id, uploader_id, filename, size_bytes, content_type, storage_path, created_at, width, height, thumb_path)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO attachments (id, uploader_id, filename, size_bytes, content_type, storage_path, created_at, width, height, thumb_path, duration_ms, waveform)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(attachment_id.to_string())
         .bind(auth.user_id.to_string())
@@ -131,6 +153,8 @@ pub async fn upload_file_handler(
         .bind(width.map(i64::from))
         .bind(height.map(i64::from))
         .bind(&thumb_path)
+        .bind(duration_ms)
+        .bind(waveform.clone())
         .execute(&state.pool)
         .await?;
 
@@ -143,6 +167,8 @@ pub async fn upload_file_handler(
             width,
             height,
             has_thumb: thumb_path.is_some(),
+            duration_ms: duration_ms.map(|ms| ms as u64),
+            waveform,
         };
 
         return Ok((StatusCode::CREATED, Json(info)));
@@ -207,6 +233,96 @@ pub async fn download_thumb_handler(
     headers.insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
     headers.insert("X-Content-Type-Options", HeaderValue::from_static("nosniff"));
     Ok((headers, data))
+}
+
+const VOICE_DURATION_FIELD: &str = "duration_ms";
+const VOICE_WAVEFORM_FIELD: &str = "waveform";
+/// The longest voice message the app records, in milliseconds.
+const MAX_VOICE_MS: u64 = 120_000;
+/// Values in the waveform of a voice message, one byte each.
+const WAVEFORM_BYTES: usize = 64;
+
+/// The text fields of a voice message, as they arrived.
+#[derive(Default)]
+struct VoiceFields {
+    duration_ms: Option<String>,
+    waveform: Option<String>,
+}
+
+impl VoiceFields {
+    fn set(&mut self, name: &str, text: String) {
+        match name {
+            VOICE_DURATION_FIELD => self.duration_ms = Some(text),
+            VOICE_WAVEFORM_FIELD => self.waveform = Some(text),
+            _ => {}
+        }
+    }
+
+    /// The checked length and waveform; a missing field stays empty.
+    fn parse(&self) -> Result<(Option<i64>, Option<Vec<u8>>), ServerError> {
+        let duration_ms = match &self.duration_ms {
+            Some(text) => {
+                let value: u64 = text
+                    .trim()
+                    .parse()
+                    .map_err(|_| ServerError::BadRequest("duration_ms must be a whole number".to_string()))?;
+                if value > MAX_VOICE_MS {
+                    return Err(ServerError::BadRequest("A voice message is at most 2 minutes long".to_string()));
+                }
+                Some(value as i64)
+            }
+            None => None,
+        };
+        let waveform = match &self.waveform {
+            Some(hex) => Some(decode_waveform(hex)?),
+            None => None,
+        };
+        Ok((duration_ms, waveform))
+    }
+}
+
+/// A waveform arrives as hex text: 64 bytes, so 128 hex characters.
+pub fn decode_waveform(hex: &str) -> Result<Vec<u8>, ServerError> {
+    let hex = hex.trim();
+    let invalid = || ServerError::BadRequest(format!("waveform must be {WAVEFORM_BYTES} bytes in hex"));
+    if hex.len() != WAVEFORM_BYTES * 2 || !hex.is_ascii() {
+        return Err(invalid());
+    }
+    hex.as_bytes()
+        .chunks(2)
+        .map(|pair| std::str::from_utf8(pair).ok().and_then(|text| u8::from_str_radix(text, 16).ok()))
+        .collect::<Option<Vec<u8>>>()
+        .ok_or_else(invalid)
+}
+
+#[cfg(test)]
+mod voice_note_tests {
+    use super::*;
+
+    #[test]
+    fn voice_note_waveform_must_be_exactly_64_bytes() {
+        let good = "ff".repeat(WAVEFORM_BYTES);
+        assert_eq!(decode_waveform(&good).unwrap(), vec![0xff; WAVEFORM_BYTES]);
+        assert!(decode_waveform(&"ff".repeat(63)).is_err(), "63 values are refused");
+        assert!(decode_waveform(&"ff".repeat(65)).is_err(), "65 values are refused");
+        assert!(decode_waveform(&format!("{}zz", "ff".repeat(63))).is_err(), "non-hex text is refused");
+    }
+
+    #[test]
+    fn voice_note_duration_is_capped_at_two_minutes() {
+        let mut fields = VoiceFields::default();
+        fields.set(VOICE_DURATION_FIELD, "120000".to_string());
+        assert_eq!(fields.parse().unwrap().0, Some(120_000));
+        fields.set(VOICE_DURATION_FIELD, "120001".to_string());
+        assert!(fields.parse().is_err());
+        fields.set(VOICE_DURATION_FIELD, "soon".to_string());
+        assert!(fields.parse().is_err());
+    }
+
+    #[test]
+    fn voice_note_fields_are_optional() {
+        assert_eq!(VoiceFields::default().parse().unwrap(), (None, None));
+    }
 }
 
 /// File extension used for the name on disk: letters and digits only, at most 8, else `bin`.

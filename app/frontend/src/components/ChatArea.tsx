@@ -4,12 +4,14 @@ import { attachFiles } from '../stores/attachmentStore';
 import { currentUser } from '../stores/authStore';
 import { activeChannel, chatLoading, hasMoreHistory, loadingOlder, loadOlder, messages, revealTarget, setRevealTarget, setReplyingTo } from '../stores/chatStore';
 import type { Message } from '../types';
+import { FinchBird } from '../ui/FinchBird';
 import { Button, Icon, pushToast } from '../ui';
 import { rowInfo } from './chat/chatFormat';
 import { Composer } from './chat/Composer';
 import { plural, t } from '../i18n';
 import { SearchBox } from './chat/SearchBox';
 import { MessageItem } from './chat/MessageItem';
+import { MAX_WAVE_ITEMS } from '../ui/motion';
 
 /** Closer than this to the bottom counts as "reading the latest messages". */
 const STICK_TO_BOTTOM_PX = 96;
@@ -21,7 +23,7 @@ function Skeleton() {
     <div class="col g16" style={{ padding: '16px 20px' }} aria-label={t('Loading messages')} role="status">
       <For each={[140, 100, 120]}>
         {(width, index) => (
-          <div class="row g12" style={{ 'align-items': 'flex-start' }}>
+          <div class="row g12" style={{ 'align-items': 'flex-start', '--i': String(index()) }}>
             <span class="skel pulse" style={{ width: '40px', height: '40px', 'border-radius': '50%', flex: 'none' }} />
             <div class="col g8 grow">
               <span class="skel pulse" style={{ height: '12px', width: `${width}px` }} />
@@ -52,6 +54,25 @@ export function ChatArea() {
   const [today, setToday] = createSignal(Date.now());
   const dayTimer = setInterval(() => setToday(Date.now()), 60_000);
   onCleanup(() => clearInterval(dayTimer));
+  // Messages that play the enter wave, with their stagger index: the last few when a channel opens, then each new one.
+  const [entering, setEntering] = createSignal<Map<string, number>>(new Map());
+  let waveChannel: string | null | undefined;
+  let waveNewest: string | undefined;
+  createEffect(() => {
+    const channelId = activeChannel()?.id ?? null;
+    const all = messages();
+    const newest = all[all.length - 1]?.id;
+    if (channelId !== waveChannel || waveNewest === undefined) {
+      waveChannel = channelId;
+      waveNewest = newest;
+      setEntering(new Map(all.slice(-MAX_WAVE_ITEMS).map((message, index) => [message.id, index])));
+      return;
+    }
+    if (newest !== undefined && newest !== waveNewest) {
+      waveNewest = newest;
+      if (!loadingOlder()) setEntering(new Map([[newest, 0]]));
+    }
+  });
   const byId = createMemo(() => new Map(messages().map((message) => [message.id, message])));
   const ids = createMemo(() => messages().map((message) => message.id));
   const lastStored = () => [...messages()].reverse().find((message) => !message.state)?.id ?? null;
@@ -178,7 +199,7 @@ export function ChatArea() {
         <Show when={chatLoading() && messages().length === 0}><Skeleton /></Show>
         <Show when={!chatLoading() && messages().length === 0}>
           <div class="col center g12 empty-chat">
-            <img src="/custom/assets/brand/finchspeak-tile.svg" alt="" width="150" />
+            <FinchBird size={150} />
             <h3 style={{ 'font-size': '20px' }}>{t('Welcome to #{channel}!', { channel: activeChannel()?.name ?? '' })}</h3>
             <span class="t2 fs13">{t('This is the start of the conversation. Say hello — someone is always listening.')}</span>
           </div>
@@ -196,7 +217,7 @@ export function ChatArea() {
                   <>
                     <Show when={info()?.day}>{(label) => <div class="daysep">{label()}</div>}</Show>
                     <Show when={info()?.divider}><div class="daysep new">{t('New messages')}</div></Show>
-                    <MessageItem message={current()} compact={info()?.compact ?? false} onReply={reply} onJump={jumpTo} />
+                    <MessageItem message={current()} compact={info()?.compact ?? false} enter={entering().get(id)} onReply={reply} onJump={jumpTo} />
                   </>
                 )}
               </Show>

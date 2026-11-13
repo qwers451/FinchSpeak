@@ -46,6 +46,8 @@ dashmap = "6"
 # Audio I/O
 cpal = "0.15"
 ringbuf = "0.5"
+# Ogg container for voice messages (Opus packets come from finch_audio)
+ogg = "0.9"
 
 # Logging
 tracing = { workspace = true }
@@ -57,6 +59,8 @@ thiserror = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_Graphics_Gdi"] }
+# Toasts with a round picture, buttons and click reports (the plugin has none of these).
+tauri-winrt-notification = "0.8"
 
 [features]
 # Serve the bundled frontend instead of the dev server (set by `tauri build`).

@@ -27,3 +27,7 @@ temp_quota_mb_total = 512
 temp_quota_mb_per_user = 200
 max_queue = 100
 max_track_minutes = 180
+
+[soundboard]
+enabled = true
+max_sounds = 48

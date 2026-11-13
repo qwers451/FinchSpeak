@@ -17,6 +17,16 @@ pub struct MusicTrack {
     pub created_at: i64,
 }
 
+/// A soundboard sound as listed to members (the audio itself is fetched separately).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SoundInfo {
+    pub id: Uuid,
+    pub name: String,
+    pub emoji: Option<String>,
+    pub uploader_id: Uuid,
+    pub duration_ms: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct QueueEntry {
     pub entry_id: Uuid,
@@ -128,6 +138,12 @@ pub struct AttachmentInfo {
     /// A 320 px preview exists at `{url}/thumb`.
     #[serde(default)]
     pub has_thumb: bool,
+    /// Length of a voice message (an `audio/ogg` attachment made in the app), in milliseconds.
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    /// 64 peak values (0 to 255) of a voice message, for drawing its waveform.
+    #[serde(default)]
+    pub waveform: Option<Vec<u8>>,
 }
 
 /// The message a reply answers, in the shape the client shows above the reply.
@@ -140,6 +156,9 @@ pub struct ReplyRef {
     /// The original was deleted; `author_name` and `snippet` are empty then.
     #[serde(default)]
     pub deleted: bool,
+    /// Who wrote the original: lets the client tell a reply to one's own message from another one.
+    #[serde(default)]
+    pub author_id: Option<Uuid>,
 }
 
 /// Unread state of one channel for the signed-in user.

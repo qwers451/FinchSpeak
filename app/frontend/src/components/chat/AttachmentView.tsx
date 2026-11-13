@@ -3,6 +3,7 @@ import { downloadAttachment, formatSize, imageUrl, isImage, thumbUrl } from '../
 import type { AttachmentInfo } from '../../types';
 import { Button, Icon, Modal } from '../../ui';
 import { t } from '../../i18n';
+import { isVoiceNote, VoiceNotePlayer } from './VoiceNote';
 
 /** Longest side of a preview on screen. */
 const PREVIEW_MAX_WIDTH = 320;
@@ -74,7 +75,7 @@ export function Attachments(props: { attachments: AttachmentInfo[] }) {
       <div class="row g12 wrap" style={{ 'align-items': 'flex-end' }}>
         <For each={props.attachments}>
           {(attachment) => (
-            <Show when={isImage(attachment) && attachment.has_thumb} fallback={<FileChip attachment={attachment} />}>
+            <Show when={isImage(attachment) && attachment.has_thumb} fallback={isVoiceNote(attachment) ? <VoiceNotePlayer attachment={attachment} /> : <FileChip attachment={attachment} />}>
               <ImageThumb attachment={attachment} onOpen={() => setOpened(attachment)} />
             </Show>
           )}

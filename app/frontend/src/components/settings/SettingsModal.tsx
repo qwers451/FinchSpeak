@@ -7,11 +7,12 @@ import {
 } from '../../stores/profileStore';
 import { presence, serverFeatures, statusTexts } from '../../stores/sessionStore';
 import {
-  isChannelMuted, muteChannel, prefs, unmuteChannel, updateAppearance, updateNotifications, updatePrivacy,
+  isChannelMuted, muteChannel, prefs, unmuteChannel, updateAppearance, updateNotifications, updateOverlay, updatePrivacy,
 } from '../../stores/settingsStore';
 import { nestView, setNestView } from '../../stores/nestView';
 import { availableUpdate, setAvailableUpdate } from '../../stores/updateStore';
 import { activeVoiceChannel } from '../../stores/voiceStore';
+import { overlayOpen, setOverlayPref, toggleOverlay } from '../../stores/overlayStore';
 import type { UserStatus } from '../../types';
 import { Avatar, Button, Field, Icon, type IconName, Modal, pushToast, Slider, Toggle } from '../../ui';
 import { clock, dayLabel } from '../chat/chatFormat';
@@ -24,6 +25,8 @@ import { ThemeEditor } from './ThemeEditor';
 import { paletteFromImage, type ThemeColors } from '../../stores/themeColors';
 import { encodeJoinSound } from '../../stores/joinSoundEncode';
 import { invalidateJoinSound, previewJoinSound } from '../../stores/joinSound';
+import { playTone } from '../../stores/tones';
+import { Select } from '../../ui/Select';
 
 export const APP_VERSION = '0.1.0';
 
@@ -108,7 +111,7 @@ function ProfilePage() {
           <div class="auth-banner info col g8" role="status" aria-label={t('Match the theme to your picture?')}>
             <strong class="fs13">{t('Match the theme to your picture?')}</strong>
             <div class="chips" aria-hidden="true" data-testid="theme-offer-swatches">
-              <For each={['background', 'sidebar', 'surface', 'text', 'accent', 'signal'] as const}>{(key) => <i style={{ 'background-color': palette()[key] }} />}</For>
+              <For each={['background', 'sidebar', 'surface', 'text', 'accent', 'signal'] as const}>{(key) => <i style={{ '--swatch-color': palette()[key] }} />}</For>
             </div>
             <div class="row g8">
               <Button size="sm" variant="primary" onClick={() => { updateAppearance({ theme: 'user', customColors: palette() }); setOffered(null); }}>{t('Apply theme')}</Button>
@@ -136,7 +139,7 @@ function ProfilePage() {
             {(option) => (
             <span role="radio" tabindex="0" aria-label={t(option.label)} aria-checked={myStatus() === option.id} class={myStatus() === option.id ? 'on' : ''}
                 onClick={() => void saveStatus(option.id, text())} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && void saveStatus(option.id, text())}>
-                <i class={`dot ${option.dot}`} style={{ 'margin-right': '8px' }} />{t(option.label)}
+                <i class={`dot dot-gap ${option.dot}`} />{t(option.label)}
               </span>
             )}
           </For>
@@ -249,15 +252,25 @@ function NotificationsPage() {
       <Row title={t('Mentions')} hint={t('A notification when someone mentions you, even if the window is in the background.')} control={<Toggle label={t('Mentions')} checked={n().mentions} onChange={(v) => updateNotifications({ mentions: v })} />} />
       <Row title={t('Every message')} hint={t('Also for channels you are not looking at.')} control={<Toggle label={t('Every message')} checked={n().allMessages} onChange={(v) => updateNotifications({ allMessages: v })} />} />
       <Row title={t('Someone joins my voice room')} control={<Toggle label={t('Someone joins my voice room')} checked={n().voiceJoin} onChange={(v) => updateNotifications({ voiceJoin: v })} />} />
+      <Row title={t('Replies to my messages')} control={<Toggle label={t('Replies to my messages')} checked={n().replies} onChange={(v) => updateNotifications({ replies: v })} />} />
+      <Row title={t('Calls to fly to a room')} control={<Toggle label={t('Calls to fly to a room')} checked={n().flockCalls} onChange={(v) => updateNotifications({ flockCalls: v })} />} />
+      <Row title={t('Someone starts sharing a screen in my room')} control={<Toggle label={t('Someone starts sharing a screen in my room')} checked={n().screenShares} onChange={(v) => updateNotifications({ screenShares: v })} />} />
       <Row title={t('Sounds')} hint={t('A short tone for mentions and for people joining.')} control={<Toggle label={t('Sounds')} checked={n().sounds} onChange={(v) => updateNotifications({ sounds: v })} />} />
       <div class="setrow">
+        <div class="col grow"><strong class="fs13">{t('Sound set')}</strong><span class="t3 fs12">{t('Birds are short synthesised chirps; soft are the gentler first tones.')}</span></div>
+        <div class="row g8">
+          <div class="field-narrow"><Select label={t('Sound set')} value={n().soundSet} options={[{ value: 'birds', label: t('Birds') }, { value: 'soft', label: t('Soft') }]} onChange={(v) => updateNotifications({ soundSet: v })} /></div>
+          <Button size="sm" variant="secondary" icon="play" onClick={() => playTone('mention')}>{t('Listen')}</Button>
+        </div>
+      </div>
+      <div class="setrow">
         <div class="col grow"><strong class="fs13">{t('Sound volume')}</strong></div>
-        <div style={{ width: '180px' }}><Slider label={t('Sound volume')} min={0} max={1} step={0.05} value={n().soundVolume} onChange={(v) => updateNotifications({ soundVolume: v })} /></div>
+        <div class="field-slider"><Slider label={t('Sound volume')} min={0} max={1} step={0.05} value={n().soundVolume} onChange={(v) => updateNotifications({ soundVolume: v })} /></div>
       </div>
       <JoinSoundRow />
       <Row title={t('Sounds for voice actions')} hint={t('Joining and leaving, microphone and sound on or off, push-to-talk.')} control={<Toggle label={t('Sounds for voice actions')} checked={n().voiceSounds} onChange={(v) => updateNotifications({ voiceSounds: v })} />} />
       <Row title={t('Flash the taskbar')} hint={t('While the window is in the background.')} control={<Toggle label={t('Flash the taskbar')} checked={n().flash} onChange={(v) => updateNotifications({ flash: v })} />} />
-      <span class="field-label" style={{ 'margin-top': '16px' }}>{t('Muted channels')}</span>
+      <span class="field-label gap-top-16">{t('Muted channels')}</span>
       <For each={textChannels()}>
         {(channel) => (
           <div class="setrow">
@@ -328,7 +341,7 @@ function AppearancePage() {
   return (
     <div class="col g8">
       <Row title={t('Interface')} hint={t('Finch turns the whole window into a tree: voice rooms are nests, text channels are birdhouses.')} control={seg(t('Interface'), nestView() ? 'finch' : 'classic', [['classic', t('Classic')], ['finch', t('Finch')]], (mode) => setNestView(mode === 'finch'))} />
-      <Row title={t('Theme')} control={seg(t('Theme'), a().theme, [['bullfinch', t('Bullfinch')], ['claude', 'Claude Dark'], ['custom', 'Finch Custom'], ['user', t('My colors')]], (theme) => updateAppearance({ theme }))} />
+      <Row title={t('Theme')} control={seg(t('Theme'), a().theme, [['claude', 'Claude Dark'], ['bullfinch', t('Bullfinch')], ['custom', 'Finch Custom'], ['user', t('My colors')]], (theme) => updateAppearance({ theme }))} />
       <Show when={a().theme === 'user'}><ThemeEditor /></Show>
       <Row title={t('Language')} control={seg(t('Language'), a().language, [['ru', 'Русский'], ['en', 'English']], (language) => updateAppearance({ language }))} />
       <Row title={t('Density')} hint={t('Compact fits more messages on the screen.')} control={seg(t('Density'), a().density, [['comfortable', t('Comfortable')], ['compact', t('Compact')]], (density) => updateAppearance({ density }))} />
@@ -346,7 +359,24 @@ function AppearancePage() {
       <Row title={t('Reduce motion')} hint={t('Turns off pulsing rings and slides.')} control={<Toggle label={t('Reduce motion')} checked={a().reduceMotion} onChange={(v) => updateAppearance({ reduceMotion: v })} />} />
       <Row title={t('Start with Windows')} hint={t('Starts hidden in the tray and signs you in.')} control={<Toggle label={t('Start with Windows')} checked={autostart()} onChange={(v) => void changeAutostart(v)} />} />
       <Row title={t('Members panel')} hint={t('The list of people on the right.')} control={<Toggle label={t('Members panel')} checked={a().showMembers} onChange={(v) => updateAppearance({ showMembers: v })} />} />
+      <MiniWindowRows />
     </div>
+  );
+}
+
+/** The mini window block of the Appearance page: open it, show it during games, click-through, opacity. */
+function MiniWindowRows() {
+  const o = () => prefs().overlay;
+  return (
+    <>
+      <Row title={t('Mini window')} hint={t('Turn off to hide the mini window everywhere.')} control={<Toggle label={t('Mini window')} checked={o().enabled} onChange={(v) => setOverlayPref({ enabled: v })} />} />
+      <Show when={o().enabled}>
+        <Row title={t('Mini window')} hint={t('Shows the people of your room over other windows.')} control={<Toggle label={t('Mini window')} checked={overlayOpen()} onChange={() => void toggleOverlay()} />} />
+      </Show>
+      <Row title={t('Show during games')} hint={t('Windows does not show the mini window over exclusive full-screen games: set the game to windowed borderless mode.')} control={<Toggle label={t('Show during games')} checked={o().autoInGame} onChange={(v) => setOverlayPref({ autoInGame: v })} />} />
+      <Row title={t('Click-through')} hint={t('Mouse clicks go through the mini window to the window below it.')} control={<Toggle label={t('Click-through')} checked={o().clickThrough} onChange={(v) => setOverlayPref({ clickThrough: v })} />} />
+      <Row title={t('Opacity')} control={<div class="field-slider"><Slider label={t('Opacity')} min={0.3} max={1} step={0.05} value={o().opacity} onChange={(v) => updateOverlay({ opacity: v })} /></div>} />
+    </>
   );
 }
 
@@ -400,13 +430,17 @@ function KeysPage() {
         <div class="col grow"><strong class="fs13">{t('Turn sound off')}</strong><span class="t3 fs12">{t('Pressed to turn all sound off or on; works in the background.')}</span></div>
         <HotkeyButton action="toggle_deafen" />
       </div>
+      <div class="setrow">
+        <div class="col grow"><strong class="fs13">{t('Mini window')}</strong><span class="t3 fs12">{t('Pressed to show or hide the mini window.')}</span></div>
+        <HotkeyButton action="overlay" />
+      </div>
       <div class="col g8">
         <For each={[['Enter', 'Send the message'], ['Shift + Enter', 'New line'], ['Esc', 'Cancel an edit, a reply or a dialog'], ['@', 'Mention someone']]}>
           {([key, what]) => <div class="row g12"><span class="kbd">{key}</span><span class="t2 fs13">{t(what)}</span></div>}
         </For>
       </div>
 
-      <span class="field-label" style={{ 'margin-top': '8px' }}>{t('About')}</span>
+      <span class="field-label gap-top-8">{t('About')}</span>
       <div class="col g8">
         <div class="row g12 between"><span class="t2">{t('Version')}</span><strong>{version()}</strong></div>
         <div class="row g12 between">
@@ -420,7 +454,7 @@ function KeysPage() {
         <div class="row g12 between"><span class="t2">{t('Server')}</span><strong class="trunc">{info().server_url ?? t('unknown')}</strong></div>
         <div class="col g4">
           <span class="t2">{t('Certificate fingerprint (SHA-256)')}</span>
-          <div class="fp-grid plain" style={{ 'font-size': '12px' }}>{info().fingerprint ?? t('unknown')}</div>
+          <div class="fp-grid plain fp-value">{info().fingerprint ?? t('unknown')}</div>
           <Show when={info().fingerprint}><Button size="sm" variant="ghost" icon="copy" onClick={() => copy(info().fingerprint!, 'Fingerprint')}>{t('Copy fingerprint')}</Button></Show>
         </div>
         <Button variant="secondary" icon="copy" onClick={() => copy(diagnostics(), 'Diagnostics')}>{t('Copy diagnostics')}</Button>

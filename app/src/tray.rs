@@ -33,21 +33,23 @@ pub enum TrayState {
 
 struct TrayLabels {
     open: MenuItem<tauri::Wry>,
+    overlay: MenuItem<tauri::Wry>,
     mute: MenuItem<tauri::Wry>,
     quit: MenuItem<tauri::Wry>,
 }
 
 struct TrayCopy {
     open: &'static str,
+    overlay: &'static str,
     mute: &'static str,
     quit: &'static str,
 }
 
 fn tray_copy(language: &str) -> TrayCopy {
     if language == "en" {
-        TrayCopy { open: "Open FinchSpeak", mute: "Mute / unmute", quit: "Quit" }
+        TrayCopy { open: "Open FinchSpeak", overlay: "Mini window", mute: "Mute / unmute", quit: "Quit" }
     } else {
-        TrayCopy { open: "Открыть FinchSpeak", mute: "Включить / выключить микрофон", quit: "Выйти" }
+        TrayCopy { open: "Открыть FinchSpeak", overlay: "Мини-окно", mute: "Включить / выключить микрофон", quit: "Выйти" }
     }
 }
 
@@ -171,10 +173,18 @@ pub fn set_mentions(app: &AppHandle, mentions: u32, language: Option<&str>) {
     }
 }
 
+/// Greys the mini window item out when the user has turned the mini window off.
+pub fn set_overlay_item_enabled(app: &AppHandle, enabled: bool) {
+    if let Some(labels) = app.try_state::<TrayLabels>() {
+        let _ = labels.overlay.set_enabled(enabled);
+    }
+}
+
 fn apply(app: &AppHandle, state: TrayState, mentions: u32, language: &str) {
     let copy = tray_copy(language);
     if let Some(labels) = app.try_state::<TrayLabels>() {
         let _ = labels.open.set_text(copy.open);
+        let _ = labels.overlay.set_text(copy.overlay);
         let _ = labels.mute.set_text(copy.mute);
         let _ = labels.quit.set_text(copy.quit);
     }
@@ -214,16 +224,18 @@ pub fn save_language(dir: &Path, language: &str) {
 pub fn setup(app: &AppHandle, language: &str) -> tauri::Result<()> {
     let copy = tray_copy(language);
     let open = MenuItem::with_id(app, "open", copy.open, true, None::<&str>)?;
+    let overlay = MenuItem::with_id(app, "overlay", copy.overlay, true, None::<&str>)?;
     let mute = MenuItem::with_id(app, "mute", copy.mute, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", copy.quit, true, None::<&str>)?;
-    app.manage(TrayLabels { open: open.clone(), mute: mute.clone(), quit: quit.clone() });
-    let menu = Menu::with_items(app, &[&open, &mute, &quit])?;
+    app.manage(TrayLabels { open: open.clone(), overlay: overlay.clone(), mute: mute.clone(), quit: quit.clone() });
+    let menu = Menu::with_items(app, &[&open, &overlay, &mute, &quit])?;
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip(TrayState::Idle.tooltip(language))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_window(app),
+            "overlay" => crate::overlay::toggle(app),
             "mute" => {
                 let _ = app.emit("tray-toggle-mute", ());
             }

@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { AuditEntry, DeviceSession, Role, SearchHit, ServerOverview, UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot, MusicCommand, MusicEvents, MusicTrack } from '../types';
+import type { Notice, AuditEntry, DeviceSession, Role, SearchHit, ServerHealth, ServerOverview,UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot, MusicCommand, MusicEvents, MusicTrack, SoundInfo, AttachmentInfo, VoiceNote } from '../types';
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -159,6 +159,13 @@ export const api = {
     // In browser environment, broadcast or notify
     console.info(`[Browser mode] Simulated message sent to ${channelId}: ${content}`);
   },
+
+  /** Voice messages are recorded by the app (never in a browser): start, end with the bytes, or cancel. */
+  voiceNoteStart: (): Promise<void> => invoke('voice_note_start'),
+  voiceNoteStop: (): Promise<VoiceNote> => invoke('voice_note_stop'),
+  voiceNoteCancel: (): Promise<void> => invoke('voice_note_cancel'),
+  uploadVoiceNote: (data: number[], durationMs: number, waveform: number[]): Promise<AttachmentInfo> =>
+    invoke('upload_voice_note', { data, durationMs, waveform }),
 
   uploadFile: async (filename: string, contentType: string, data: number[]): Promise<any> => {
     if (isTauri()) {
@@ -424,6 +431,11 @@ export const api = {
     throw new Error('The server page needs the desktop app');
   },
 
+  serverHealth: async (): Promise<ServerHealth> => {
+    if (isTauri()) return invoke('server_health');
+    throw new Error('The health panel needs the desktop app');
+  },
+
   setRegistration: async (mode: 'open' | 'invite'): Promise<void> => {
     if (isTauri()) return invoke('set_registration', { mode });
   },
@@ -532,6 +544,11 @@ export const api = {
     }
   },
 
+  /** A Windows notification with the sender's picture (PNG bytes, optional). Rejects on other systems. */
+  notify: async (notice: Notice, avatarPng: ArrayBuffer | null): Promise<void> => {
+    if (isTauri()) return invoke('notify', { notice, avatarPng: avatarPng ? Array.from(new Uint8Array(avatarPng)) : null });
+    throw new Error('Notifications need the desktop app');
+  },
   setTrayState: async (state: 'idle' | 'voice' | 'speaking' | 'muted' | 'live', language: 'ru' | 'en' = 'ru'): Promise<void> => {
     if (isTauri()) return invoke('set_tray_state', { state, language });
   },
@@ -588,7 +605,7 @@ export const api = {
   },
 
   /** System-wide key that toggles the microphone or all sound; null removes it. */
-  setHotkey: async (action: 'toggle_mute' | 'toggle_deafen', key: string | null): Promise<void> => {
+  setHotkey: async (action: 'toggle_mute' | 'toggle_deafen' | 'overlay', key: string | null): Promise<void> => {
     if (isTauri()) {
       return invoke('set_hotkey', { action, key });
     }
@@ -612,6 +629,35 @@ export const api = {
   },
   musicCommand: async (command: MusicCommand): Promise<void> => {
     if (isTauri()) return invoke('music_command', { command });
+  },
+  callFlock: async (targetChannel: string): Promise<void> => {
+    if (isTauri()) return invoke('call_flock', { targetChannel });
+  },
+  callUser: async (userId: string): Promise<void> => {
+    if (isTauri()) return invoke('call_user', { userId });
+  },
+
+  // Soundboard
+  soundboard: async (): Promise<SoundInfo[]> => {
+    if (isTauri()) return invoke<SoundInfo[]>('soundboard');
+    return [];
+  },
+  /** `wav` is a 16-bit mono 24 kHz WAV of at most 5 seconds. */
+  uploadBoardSound: async (wav: Uint8Array, name: string, emoji?: string): Promise<SoundInfo> => {
+    if (!isTauri()) throw new Error('The soundboard needs the desktop app');
+    return invoke<SoundInfo>('upload_board_sound', { data: Array.from(wav), name, emoji: emoji?.trim() || null });
+  },
+  deleteBoardSound: async (soundId: string): Promise<void> => {
+    if (isTauri()) return invoke('delete_board_sound', { soundId });
+  },
+  /** A sound's WAV bytes, or null when it is gone. */
+  downloadBoardSound: async (soundId: string): Promise<ArrayBuffer | null> => {
+    if (!isTauri()) return null;
+    const bytes = await invoke<ArrayBuffer>('download_board_sound', { soundId });
+    return bytes.byteLength > 0 ? bytes : null;
+  },
+  playBoardSound: async (soundId: string): Promise<void> => {
+    if (isTauri()) return invoke('play_board_sound', { soundId });
   },
   musicSetVolume: async (volume: number): Promise<void> => {
     if (isTauri()) return invoke('music_set_volume', { volume });

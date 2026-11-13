@@ -7,6 +7,7 @@ mod capture_privacy;
 pub mod updater;
 pub mod commands;
 mod tray;
+mod overlay;
 pub mod hotkeys;
 pub mod connection;
 pub mod state;
@@ -14,6 +15,8 @@ pub mod activity;
 pub mod credentials;
 pub mod music;
 mod music_clock;
+mod notify;
+pub mod voice_note;
 
 use state::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -210,6 +213,11 @@ pub fn run() {
             commands::window::set_tray_state,
             commands::window::set_attention,
             commands::window::show_main_window,
+            commands::window::notify,
+            overlay::overlay_show,
+            overlay::overlay_hide,
+            overlay::overlay_set_enabled,
+            overlay::overlay_set_click_through,
             commands::window::system_idle_seconds,
             // Auth
             commands::auth::login,
@@ -228,6 +236,10 @@ pub fn run() {
             commands::auth::server_info,
             commands::window::take_invite_link,
             commands::chat::mark_channel_read,
+            commands::chat::voice_note_start,
+            commands::chat::voice_note_stop,
+            commands::chat::voice_note_cancel,
+            commands::chat::upload_voice_note,
             commands::chat::upload_avatar,
             commands::chat::remove_avatar,
             commands::chat::download_avatar,
@@ -239,6 +251,7 @@ pub fn run() {
             commands::chat::search_messages,
             commands::admin::audit_log,
             commands::admin::server_overview,
+            commands::admin::server_health,
             commands::admin::set_registration,
             commands::admin::backup_now,
             commands::admin::moderate_voice,
@@ -265,6 +278,8 @@ pub fn run() {
             // Voice
             commands::voice::join_voice_channel,
             commands::voice::leave_voice_channel,
+            commands::voice::call_flock,
+            commands::voice::call_user,
             commands::voice::set_voice_state,
             commands::voice::get_audio_devices,
             commands::voice::set_audio_devices,
@@ -273,6 +288,11 @@ pub fn run() {
             commands::voice::set_speaker_pan,
             commands::voice::get_voice_settings,
             commands::voice::set_voice_settings,
+            commands::soundboard::soundboard,
+            commands::soundboard::upload_board_sound,
+            commands::soundboard::delete_board_sound,
+            commands::soundboard::download_board_sound,
+            commands::soundboard::play_board_sound,
             commands::music::music_library,
             commands::music::music_upload,
             commands::music::music_delete_track,

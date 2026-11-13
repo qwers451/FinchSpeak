@@ -14,14 +14,14 @@ vi.mock('@tauri-apps/plugin-notification', () => ({
 }));
 
 import { api } from '../services/api';
-import { isDoNotDisturb, mentionCount, reactToMessage, startDesktopSync, trayStateNow } from './desktop';
+import { handleNoticeActivated, isDoNotDisturb, mentionCount, reactToFlockCall, reactToMessage, reactToShareStarted, startDesktopSync, trayStateNow } from './desktop';
 import { sessionHandlers, setPresence } from './sessionStore';
 import { setCurrentUser } from './authStore';
 import { setChannels } from './chatStore';
 import { setUnread } from './activityStore';
 import { muteChannel, setPrefs, DEFAULT_PREFS, updateAppearance, updateNotifications } from './settingsStore';
 import { setIsSharing } from './screenState';
-import { setActiveVoiceChannel, setIsDeafened, setIsLocalSpeaking, setIsMuted } from './voiceStore';
+import { activeVoiceChannel, setActiveVoiceChannel, setIsDeafened, setIsLocalSpeaking, setIsMuted, setVoiceParticipants } from './voiceStore';
 
 const message = { channel_id: 'c1', author_id: 'other', author_name: 'Other', content: 'hi @me', mentions: [] };
 const me = { id: 'me', username: 'me', display_name: 'Me', role: 'member' as const };
@@ -56,6 +56,7 @@ it('online user is notified', async () => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -131,28 +132,80 @@ it('changing the interface language refreshes the current native tray copy', () 
   expect(setTrayState.mock.calls).toEqual([['voice', 'en']]);
 });
 
-it('focus_soon_after_notification_jumps', async () => {
-  vi.useFakeTimers();
-  startDesktopSync();
-  setCurrentUser({ ...me, status: 'online' });
-  expect(reactToMessage(message, true, false)).toBe('notified');
-  await vi.waitFor(() => expect(sendNotification).toHaveBeenCalled());
-  await vi.advanceTimersByTimeAsync(5_000);
-  window.dispatchEvent(new Event('focus'));
-  expect(selectChannel).toHaveBeenCalledTimes(1);
-  window.dispatchEvent(new Event('focus'));
-  expect(selectChannel).toHaveBeenCalledTimes(1);
+/** Pretend to be the Windows app: the picture-and-buttons path is only taken there. */
+function asWindows() {
+  vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' });
+}
+
+it('a click on a channel notice opens that channel', () => {
+  handleNoticeActivated({ target: { kind: 'channel', id: 'c1' }, action: null });
+  expect(selectChannel).toHaveBeenCalledWith(expect.objectContaining({ id: 'c1' }));
 });
 
-it('late_focus_does_not_jump', async () => {
-  vi.useFakeTimers();
-  startDesktopSync();
+it('a reply to my message is a notice of its own, switched by Replies', async () => {
+  asWindows();
+  const notify = vi.spyOn(api, 'notify').mockResolvedValue();
   setCurrentUser({ ...me, status: 'online' });
-  expect(reactToMessage(message, true, false)).toBe('notified');
-  await vi.waitFor(() => expect(sendNotification).toHaveBeenCalled());
-  await vi.advanceTimersByTimeAsync(3 * 60_000);
-  window.dispatchEvent(new Event('focus'));
-  expect(selectChannel).not.toHaveBeenCalled();
+  const reply = (author_id: string) => ({ ...message, mentions: [], reply_to: { message_id: 'm0', author_name: 'Me', snippet: 'x', author_id } });
+  expect(reactToMessage(reply('me'), false, false)).toBe('notified');
+  await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(1));
+  expect(notify.mock.calls[0][0]).toMatchObject({ title: expect.stringContaining('#general'), target: { kind: 'channel', id: 'c1' }, avatar_user_id: 'other' });
+
+  expect(reactToMessage(reply('someone-else'), false, false)).toBe('none');
+  updateNotifications({ replies: false });
+  expect(reactToMessage(reply('me'), false, false)).toBe('none');
+  expect(notify).toHaveBeenCalledTimes(1);
+});
+
+it('a call to my room in the background offers Fly and Stay with the caller picture', async () => {
+  asWindows();
+  const notify = vi.spyOn(api, 'notify').mockResolvedValue();
+  setCurrentUser({ ...me, status: 'online' });
+  reactToFlockCall({ from_user_id: 'bob', from_name: 'Bob', channel_id: 'v' }, false);
+  await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(1));
+  expect(notify.mock.calls[0][0]).toMatchObject({
+    avatar_user_id: 'bob',
+    target: { kind: 'voice_room', id: 'v' },
+    actions: [{ id: 'fly', label: 'Лететь' }, { id: 'stay', label: 'Остаться' }],
+  });
+});
+
+it('no call notice in Do not disturb, in a muted room or while the window is focused', () => {
+  asWindows();
+  const notify = vi.spyOn(api, 'notify').mockResolvedValue();
+  const call = { from_user_id: 'bob', from_name: 'Bob', channel_id: 'v' };
+  setCurrentUser({ ...me, status: 'donotdisturb' });
+  reactToFlockCall(call, false);
+  setCurrentUser({ ...me, status: 'online' });
+  reactToFlockCall(call, true);
+  muteChannel('v', null);
+  reactToFlockCall(call, false);
+  expect(notify).not.toHaveBeenCalled();
+});
+
+it('Fly when I am already in that room changes nothing', async () => {
+  setChannels([voiceRoom as never]);
+  setActiveVoiceChannel(voiceRoom);
+  const join = vi.spyOn(api, 'joinVoiceChannel').mockResolvedValue(undefined as never);
+  handleNoticeActivated({ target: { kind: 'voice_room', id: 'v' }, action: 'fly' });
+  await vi.waitFor(() => expect(join).not.toHaveBeenCalled());
+  expect(activeVoiceChannel()?.id).toBe('v');
+});
+
+it('a screen share starts a notice only when it is in my room', async () => {
+  asWindows();
+  const notify = vi.spyOn(api, 'notify').mockResolvedValue();
+  setCurrentUser({ ...me, status: 'online' });
+  setActiveVoiceChannel(voiceRoom);
+  setVoiceParticipants([
+    { user_id: 'bob', peer_id: 2, username: 'Bob', channel_id: 'v' },
+    { user_id: 'ann', peer_id: 3, username: 'Ann', channel_id: 'elsewhere' },
+  ] as never);
+  reactToShareStarted('ann', false);
+  expect(notify).not.toHaveBeenCalled();
+  reactToShareStarted('bob', false);
+  await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(1));
+  expect(notify.mock.calls[0][0]).toMatchObject({ avatar_user_id: 'bob', target: { kind: 'voice_room', id: 'v' } });
 });
 
 it('dnd_from_presence_survives_sign_in_without_status_field', () => {

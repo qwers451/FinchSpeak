@@ -72,6 +72,8 @@ pub async fn server_state(
     };
     let mut features = vec!["activity".into()];
     if sessions.music.get().is_some_and(|music| music.config.enabled) { features.push("music".into()); }
+    if sessions.soundboard.get().is_none_or(|soundboard| soundboard.enabled) { features.push("soundboard".into()); }
+    features.extend(["voice-messages", "flock", "health"].map(String::from));
     Ok(ServerState { channels, online_users, offline_users, voice_states, unread, features, activities: sessions.activities() })
 }
 

@@ -30,8 +30,11 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array
   return out;
 }
 
-/** Decode any audio file the platform understands into a mono 24 kHz 16-bit WAV of at most 2 seconds. */
-export async function encodeJoinSound(file: File): Promise<Uint8Array> {
+/** Soundboard sounds are cut to this length (longer ones are trimmed, not refused). */
+export const BOARD_SOUND_MAX_SECONDS = 5;
+
+/** Decode `file` with the platform's audio support and hand the buffer to `use`; the decoder is closed afterwards. */
+async function withDecoded<T>(file: File, use: (decoded: AudioBuffer) => Promise<T>): Promise<T> {
   const Audio = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!Audio) throw new Error(t('This sound cannot be read'));
   const context = new Audio();
@@ -42,16 +45,33 @@ export async function encodeJoinSound(file: File): Promise<Uint8Array> {
     } catch {
       throw new Error(t('This sound cannot be read'));
     }
-    if (decoded.duration > JOIN_SOUND_MAX_SECONDS) throw new Error(t('The sound is longer than 2 seconds'));
-    const frames = Math.max(1, Math.ceil(decoded.duration * JOIN_SOUND_RATE));
-    const offline = new OfflineAudioContext(1, frames, JOIN_SOUND_RATE);
-    const source = offline.createBufferSource();
-    source.buffer = decoded; // a mono destination downmixes the channels
-    source.connect(offline.destination);
-    source.start();
-    const rendered = await offline.startRendering();
-    return encodeWav(rendered.getChannelData(0), JOIN_SOUND_RATE);
+    return await use(decoded);
   } finally {
     void context.close().catch(() => {});
   }
+}
+
+/** Render a decoded sound as mono 24 kHz 16-bit WAV, cut to `maxSeconds`. */
+async function renderMono(decoded: AudioBuffer, maxSeconds: number): Promise<Uint8Array> {
+  const frames = Math.max(1, Math.ceil(Math.min(decoded.duration, maxSeconds) * JOIN_SOUND_RATE));
+  const offline = new OfflineAudioContext(1, frames, JOIN_SOUND_RATE);
+  const source = offline.createBufferSource();
+  source.buffer = decoded; // a mono destination downmixes the channels
+  source.connect(offline.destination);
+  source.start();
+  const rendered = await offline.startRendering();
+  return encodeWav(rendered.getChannelData(0), JOIN_SOUND_RATE);
+}
+
+/** Decode any audio file the platform understands into a mono 24 kHz 16-bit WAV of at most 2 seconds. */
+export function encodeJoinSound(file: File): Promise<Uint8Array> {
+  return withDecoded(file, async (decoded) => {
+    if (decoded.duration > JOIN_SOUND_MAX_SECONDS) throw new Error(t('The sound is longer than 2 seconds'));
+    return renderMono(decoded, JOIN_SOUND_MAX_SECONDS);
+  });
+}
+
+/** A soundboard sound: any audio file, trimmed to 5 seconds and rendered as mono 24 kHz 16-bit WAV. */
+export function encodeBoardSound(file: File): Promise<Uint8Array> {
+  return withDecoded(file, (decoded) => renderMono(decoded, BOARD_SOUND_MAX_SECONDS));
 }

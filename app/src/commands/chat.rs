@@ -115,6 +115,41 @@ pub async fn upload_file(
         .map_err(|e| format!("File upload failed: {}", e))
 }
 
+/// Starts recording a voice message from the microphone (nothing is sent to a room).
+#[tauri::command]
+pub async fn voice_note_start(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    crate::voice_note::start(&state, app).await
+}
+
+/// Ends the recording: the Ogg/Opus bytes, the length and the waveform.
+#[tauri::command]
+pub async fn voice_note_stop(state: State<'_, AppState>) -> Result<crate::voice_note::VoiceNote, String> {
+    crate::voice_note::stop(&state).await
+}
+
+#[tauri::command]
+pub async fn voice_note_cancel(state: State<'_, AppState>) -> Result<(), String> {
+    crate::voice_note::cancel(&state).await
+}
+
+/// Uploads a finished voice message as an ordinary attachment, with its length and waveform.
+#[tauri::command]
+pub async fn upload_voice_note(
+    data: Vec<u8>,
+    duration_ms: u64,
+    waveform: Vec<u8>,
+    state: State<'_, AppState>,
+) -> Result<AttachmentInfo, String> {
+    if waveform.len() != crate::voice_note::WAVEFORM_BARS {
+        return Err("The waveform of a voice message has 64 values".to_string());
+    }
+    api_client(&state)
+        .await?
+        .upload_voice_note(data, duration_ms, &waveform)
+        .await
+        .map_err(|e| format!("File upload failed: {}", e))
+}
+
 #[tauri::command]
 pub async fn mark_channel_read(channel_id: String, message_id: String, state: State<'_, AppState>) -> Result<(), String> {
     api_client(&state).await?.mark_read(parse_id(&channel_id)?, parse_id(&message_id)?).await.map_err(|e| e.to_string())

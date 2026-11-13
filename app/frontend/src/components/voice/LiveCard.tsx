@@ -14,11 +14,11 @@ export function LiveCard(props: { participant: VoiceParticipant }) {
     <div class="vc live-card" data-peer-id={p().peer_id}>
       <div class="live-art" aria-hidden="true">
         <img src="/custom/assets/brand/finchspeak-tile.svg" alt="" width="64" />
-        <span class="tag live"><span class="dot live" style={{ background: 'var(--bg-app)', width: '6px', height: '6px' }} />{t('Live')}</span>
+        <span class="tag live"><span class="dot live tag-dot" />{t('Live')}</span>
       </div>
       <div class="row g8 live-foot">
         <Avatar name={name()} id={p().user_id} size={32} />
-        <div class="col grow" style={{ 'min-width': 0 }}>
+        <div class="col grow live-titles">
           <strong class="head fs16 trunc">{name()}</strong>
           <span class="t2 fs12">{t('is sharing a screen')}</span>
         </div>

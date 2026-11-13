@@ -54,7 +54,7 @@ afterEach(() => {
 it('an admin sees every tab, a moderator only the members and the log', async () => {
   open(boss);
   await flush();
-  expect(Array.from(document.querySelectorAll('.setnav .si')).map((b) => b.textContent)).toEqual(['Members', 'Invitations', 'Channels', 'Server', 'Log']);
+  expect(Array.from(document.querySelectorAll('.setnav .si')).map((b) => b.textContent)).toEqual(['Members', 'Invitations', 'Channels', 'Server', 'Health', 'Log']);
   dispose?.();
   document.body.innerHTML = '';
   open(mod);

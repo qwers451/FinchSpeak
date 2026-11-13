@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
-use finch_protocol::models::{AttachmentInfo, HistoryMessage, MusicTrack, ServerState};
+use finch_protocol::models::{AttachmentInfo, HistoryMessage, MusicTrack, ServerState, SoundInfo};
 use reqwest::multipart::{Form, Part};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -105,6 +105,36 @@ pub struct ServerOverviewDto {
     pub backup_dir: String,
     pub uploads_bytes: u64,
     pub log_dir: String,
+}
+
+/// One measurement of the server's health (see `GET /api/admin/health`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthSampleDto {
+    pub at: i64,
+    pub cpu_percent: f32,
+    pub rss_bytes: u64,
+    pub system_used_bytes: u64,
+    pub system_total_bytes: u64,
+    pub container_limit_bytes: Option<u64>,
+    pub disk_free_bytes: u64,
+    pub sessions: u32,
+    pub voice_users: u32,
+    pub bytes_in_per_sec: u64,
+    pub bytes_out_per_sec: u64,
+    pub datagrams_dropped: u64,
+}
+
+/// The server's health panel: the newest sample, the last hour and the folder sizes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthReportDto {
+    pub now: HealthSampleDto,
+    pub history: Vec<HealthSampleDto>,
+    pub db_bytes: u64,
+    pub uploads_bytes: u64,
+    pub music_bytes: u64,
+    pub uptime_secs: u64,
+    /// Codes such as `memory-high` and `disk-low`.
+    pub warnings: Vec<String>,
 }
 
 /// An invitation code as listed by the server.
@@ -412,6 +442,11 @@ impl ApiClient {
         parse_json(self.send(self.authorized(self.http.get(self.url("/api/admin/server")))).await?).await
     }
 
+    /// Admin: CPU, memory, disk, traffic and the last hour of samples.
+    pub async fn server_health(&self) -> Result<HealthReportDto, ClientError> {
+        parse_json(self.send(self.authorized(self.http.get(self.url("/api/admin/health")))).await?).await
+    }
+
     pub async fn set_registration(&self, mode: &str) -> Result<(), ClientError> {
         let req = self.authorized(self.http.put(self.url("/api/admin/registration"))).json(&serde_json::json!({ "mode": mode }));
         check_status(self.send(req).await?).await?;
@@ -589,6 +624,22 @@ impl ApiClient {
         parse_json(self.send(req).await?).await
     }
 
+    /// Uploads a voice message: an Ogg/Opus file with its length in milliseconds and its
+    /// 64-value waveform (sent as hex text, 128 characters).
+    pub async fn upload_voice_note(&self, data: Vec<u8>, duration_ms: u64, waveform: &[u8]) -> Result<AttachmentInfo, ClientError> {
+        let part = Part::bytes(data).file_name("voice-message.ogg".to_string()).mime_str("audio/ogg")?;
+        let hex: String = waveform.iter().map(|value| format!("{value:02x}")).collect();
+        // The server reads these text fields before the file, so they go first.
+        let form = Form::new()
+            .text("duration_ms", duration_ms.to_string())
+            .text("waveform", hex)
+            .part("file", part);
+        let req = self
+            .authorized(self.http.post(self.url("/api/files/upload")))
+            .multipart(form);
+        parse_json(self.send(req).await?).await
+    }
+
     /// Set your profile picture (any PNG/JPEG/WebP up to 2 MB; the server makes it 128x128).
     pub async fn upload_avatar(&self, data: Vec<u8>, content_type: &str) -> Result<UserDto, ClientError> {
         let part = Part::bytes(data).file_name("avatar".to_string()).mime_str(content_type)?;
@@ -671,6 +722,45 @@ impl ApiClient {
         let req = self.authorized(self.http.get(self.url(&format!("/api/files/{id}"))));
         let resp = check_status(self.send(req).await?).await?;
         Ok(resp.bytes().await?)
+    }
+
+    /// The soundboard: every sound on the board.
+    pub async fn soundboard(&self) -> Result<Vec<SoundInfo>, ClientError> {
+        let req = self.authorized(self.http.get(self.url("/api/soundboard")));
+        parse_json(self.send(req).await?).await
+    }
+
+    /// Add a sound to the board. `wav` must be 16-bit mono 24 kHz, at most 5 seconds and 256 KB.
+    pub async fn upload_board_sound(&self, wav: Vec<u8>, name: &str, emoji: Option<&str>) -> Result<SoundInfo, ClientError> {
+        let mut form = Form::new().text("name", name.to_string());
+        if let Some(emoji) = emoji.map(str::trim).filter(|emoji| !emoji.is_empty()) {
+            form = form.text("emoji", emoji.to_string());
+        }
+        let part = Part::bytes(wav).file_name("sound.wav".to_string()).mime_str("audio/wav")?;
+        let req = self.authorized(self.http.post(self.url("/api/soundboard"))).multipart(form.part("file", part));
+        parse_json(self.send(req).await?).await
+    }
+
+    /// One sound's WAV bytes; cached by id on the server, so repeat calls can send `etag`.
+    pub async fn download_board_sound_cached(&self, sound_id: Uuid, etag: Option<&str>) -> Result<(Option<Bytes>, Option<String>), ClientError> {
+        let mut req = self.authorized(self.http.get(self.url(&format!("/api/soundboard/{sound_id}/file"))));
+        if let Some(etag) = etag {
+            req = req.header("If-None-Match", etag);
+        }
+        let resp = self.send(req).await?;
+        if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+            return Ok((None, etag.map(str::to_string)));
+        }
+        let resp = check_status(resp).await?;
+        let tag = resp.headers().get("etag").and_then(|v| v.to_str().ok()).map(str::to_string);
+        Ok((Some(resp.bytes().await?), tag))
+    }
+
+    /// Remove a sound: its uploader or a moderator may.
+    pub async fn delete_board_sound(&self, sound_id: Uuid) -> Result<(), ClientError> {
+        let req = self.authorized(self.http.delete(self.url(&format!("/api/soundboard/{sound_id}"))));
+        check_status(self.send(req).await?).await?;
+        Ok(())
     }
 
     /// Room music library: the tracks the server keeps plus temporary uploads still queued.

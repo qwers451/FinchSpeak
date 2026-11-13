@@ -31,6 +31,9 @@ vi.stubGlobal('AudioContext', class {
       connect: () => ({}),
     };
   }
+  createBiquadFilter() {
+    return { type: '', frequency: { value: 0 }, connect: () => ({}) };
+  }
 });
 
 /** Frequencies of every note played since the last call. */
@@ -43,7 +46,8 @@ beforeEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
   created.length = 0;
-  setPrefs(DEFAULT_PREFS);
+  // The soft set keeps the note values these assertions were written for.
+  setPrefs({ ...DEFAULT_PREFS, notifications: { ...DEFAULT_PREFS.notifications, soundSet: 'soft' } });
   setCurrentUser(me);
   setPresence({});
   setAppError(null);
@@ -57,13 +61,13 @@ beforeEach(() => {
 
 afterEach(() => vi.restoreAllMocks());
 
-it('the new tones have the notes the brief asks for', () => {
-  expect(TONES.mute).toEqual({ notes: [520, 392], noteMs: 70 });
-  expect(TONES.unmute).toEqual({ notes: [392, 520], noteMs: 70 });
-  expect(TONES.deafen).toEqual({ notes: [440, 294], noteMs: 80 });
-  expect(TONES.undeafen).toEqual({ notes: [294, 440], noteMs: 80 });
-  expect(TONES['ptt-on']).toEqual({ notes: [740], noteMs: 45 });
-  expect(TONES['ptt-off']).toEqual({ notes: [520], noteMs: 45 });
+it('the soft tones are the old notes a fourth lower', () => {
+  expect(TONES.mute).toEqual({ notes: [390, 294], noteMs: 70 });
+  expect(TONES.unmute).toEqual({ notes: [294, 390], noteMs: 70 });
+  expect(TONES.deafen).toEqual({ notes: [330, 221], noteMs: 80 });
+  expect(TONES.undeafen).toEqual({ notes: [221, 330], noteMs: 80 });
+  expect(TONES['ptt-on']).toEqual({ notes: [555], noteMs: 45 });
+  expect(TONES['ptt-off']).toEqual({ notes: [390], noteMs: 45 });
 });
 
 it('toggleMute plays mute, then unmute, once each', async () => {

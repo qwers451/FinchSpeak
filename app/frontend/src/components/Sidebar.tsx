@@ -30,7 +30,7 @@ import { gameOf } from '../stores/activityGameStore';
 import type { Channel, VoiceParticipant } from '../types';
 import { api } from '../services/api';
 import { moveChannel, removeChannel, renameChannel } from '../stores/channelAdminStore';
-import { Avatar, Button, ConfirmDialog, Field, Icon, Modal } from '../ui';
+import { Avatar, Badge, Button, ConfirmDialog, Field, Icon, Modal } from '../ui';
 import { t } from '../i18n';
 import { describeError } from '../i18n/errors';
 
@@ -193,9 +193,7 @@ export function Sidebar() {
                 <ChannelActions channel={channel} onDialog={setDialog} />
                 <Show when={unread()[channel.id]}>
                   {(entry) => (
-                    <span class={`badge${entry().mention ? ' mention' : ''}`} title={entry().mention ? t('You were mentioned') : t('Unread messages')}>
-                      {entry().count > 99 ? '99+' : entry().count}
-                    </span>
+                    <Badge count={entry().count} mention={entry().mention} title={entry().mention ? t('You were mentioned') : t('Unread messages')} />
                   )}
                 </Show>
               </div>

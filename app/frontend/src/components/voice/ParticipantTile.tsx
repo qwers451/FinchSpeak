@@ -1,4 +1,5 @@
-import { createMemo, createSignal, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, on, onCleanup, Show } from 'solid-js';
+import { lastSound } from '../../stores/soundboardStore';
 import { currentUser } from '../../stores/authStore';
 import { knownUsers, localPeerId } from '../../stores/sessionStore';
 import { isLocallyMuted } from '../../stores/localMuteStore';
@@ -15,6 +16,10 @@ type Props = {
   participant: VoiceParticipant;
   isMe: boolean;
   avatarSize: 128 | 96 | 72 | 56;
+  /** Joined after the room was shown: plays the enter animation (set once, on creation). */
+  entering?: boolean;
+  /** Left the room: plays the exit animation before it is removed. */
+  leaving?: boolean;
 };
 
 /** Four bars: how good the link to this person is. */
@@ -30,6 +35,16 @@ function Quality(props: { peerId: number }) {
 
 export function ParticipantTile(props: Props) {
   const p = () => props.participant;
+  // Someone of this tile played a sound: their name floats above the tile for a moment.
+  const [saidAt, setSaidAt] = createSignal(0);
+  let saidTimer: ReturnType<typeof setTimeout> | undefined;
+  createEffect(on(lastSound, (sound) => {
+    if (!sound || sound.userId !== props.participant.user_id) return;
+    setSaidAt(sound.at);
+    clearTimeout(saidTimer);
+    saidTimer = setTimeout(() => setSaidAt(0), 1200);
+  }, { defer: true }));
+  onCleanup(() => clearTimeout(saidTimer));
   const speaking = () => (props.isMe ? isLocalSpeaking() : speakingPeers().has(p().peer_id));
   const muted = () => (props.isMe ? isMuted() : p().is_muted);
   const deafened = () => (props.isMe ? isDeafened() : p().is_deafened);
@@ -72,13 +87,16 @@ export function ParticipantTile(props: Props) {
   const poor = () => !props.isMe && voiceQuality()[p().peer_id]?.quality === 'poor';
 
   return (
-    <div class={`vc${speaking() ? ' speaking' : ''}`} data-peer-id={p().peer_id} tabindex="0" draggable={!props.isMe}
-      classList={{ 'tile-drop-before': dropSide() === 'before', 'tile-drop-after': dropSide() === 'after' }}
+    <div class={`vc${speaking() ? ' speaking' : ''}`} data-peer-id={p().peer_id} data-flip={p().user_id} tabindex="0" draggable={!props.isMe}
+      classList={{ 'tile-drop-before': dropSide() === 'before', 'tile-drop-after': dropSide() === 'after', 'vc-enter': !!props.entering, 'vc-leave': !!props.leaving }}
       onDragStart={startDrag} onDragOver={dragOver} onDrop={drop}
       onDragLeave={() => setDropSide(null)} onDragEnd={() => { setDropSide(null); setDraggedTile(null); }}
       onContextMenu={(event) => participantContextMenu(event, p().user_id, p())}
       onKeyDown={(event) => participantMenuKey(event, p().user_id, p())}
       aria-label={`${name()}${muted() ? `, ${t('Muted').toLowerCase()}` : ''}${deafened() ? `, ${t('Deafened').toLowerCase()}` : ''}`}>
+      <Show when={saidAt() || undefined} keyed>
+        {(at) => <span class="sb-said" data-said-at={at} aria-hidden="true">{p().username}</span>}
+      </Show>
       <Button iconOnly size="sm" variant="ghost" icon="more" class="participant-actions" label={t('Actions for {name}', { name: name() })}
         onClick={(event) => openParticipantMenu(event.currentTarget, p().user_id, p())} />
       <Show when={!props.isMe}><Quality peerId={p().peer_id} /></Show>

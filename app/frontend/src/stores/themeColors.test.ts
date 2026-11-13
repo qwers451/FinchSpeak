@@ -21,7 +21,7 @@ it('saved colors are repaired, not trusted', () => {
   const prefs = parsePrefs(JSON.stringify({ appearance: { theme: 'user', brandTheme161: true, customColors: { signal: '#00ff00' } } }));
   expect(prefs.appearance.theme).toBe('user');
   expect(prefs.appearance.customColors.signal).toBe('#00ff00');
-  expect(parsePrefs(JSON.stringify({ appearance: { theme: 'neon', brandTheme161: true } })).appearance.theme).toBe('bullfinch');
+  expect(parsePrefs(JSON.stringify({ appearance: { theme: 'neon', brandTheme161: true } })).appearance.theme).toBe('claude');
 });
 
 it('bullfinch_text_contrast: the Снегирь theme keeps its text and accent readable', () => {

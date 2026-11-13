@@ -33,6 +33,16 @@ export interface AttachmentInfo {
   height?: number | null;
   /** The server made a 320 px preview. */
   has_thumb?: boolean;
+  /** A voice message: its length in milliseconds and its 64-value waveform (0 to 255). */
+  duration_ms?: number | null;
+  waveform?: number[] | null;
+}
+
+/** A recorded voice message, before it is uploaded (Ogg/Opus bytes). */
+export interface VoiceNote {
+  bytes: number[];
+  duration_ms: number;
+  waveform: number[];
 }
 
 /** The message a reply answers (as the server quotes it). */
@@ -41,6 +51,33 @@ export interface ReplyRef {
   author_name: string;
   snippet: string;
   deleted?: boolean;
+  /** Who wrote the original; null or missing when it was deleted. */
+  author_id?: string | null;
+}
+
+/** A Windows notification as the interface sends it to the backend (see app/src/notify.rs). */
+export interface NoticeTarget {
+  kind: 'channel' | 'voice_room' | 'none';
+  id?: string;
+}
+
+export interface NoticeAction {
+  id: 'fly' | 'stay';
+  label: string;
+}
+
+export interface Notice {
+  title: string;
+  body: string;
+  avatar_user_id?: string | null;
+  target: NoticeTarget;
+  actions: NoticeAction[];
+}
+
+/** A click on a Windows notification: where to go, and the pressed button if any. */
+export interface NoticeActivation {
+  target: NoticeTarget;
+  action: 'fly' | 'stay' | null;
 }
 
 export interface ChannelUnread {
@@ -161,6 +198,34 @@ export interface ServerOverview {
   log_dir: string;
 }
 
+/** One measurement of the server's health, taken every 5 seconds. */
+export interface HealthSample {
+  at: number;
+  cpu_percent: number;
+  rss_bytes: number;
+  system_used_bytes: number;
+  system_total_bytes: number;
+  container_limit_bytes: number | null;
+  disk_free_bytes: number;
+  sessions: number;
+  voice_users: number;
+  bytes_in_per_sec: number;
+  bytes_out_per_sec: number;
+  datagrams_dropped: number;
+}
+
+export interface ServerHealth {
+  now: HealthSample;
+  /** The last hour, oldest first. */
+  history: HealthSample[];
+  db_bytes: number;
+  uploads_bytes: number;
+  music_bytes: number;
+  uptime_secs: number;
+  /** Codes such as `memory-high` and `disk-low`. */
+  warnings: string[];
+}
+
 export interface SearchHit {
   message_id: string;
   channel_id: string;
@@ -198,6 +263,21 @@ export interface AudioDevice {
 }
 
 export type UserStatus = 'online' | 'idle' | 'donotdisturb' | 'offline';
+/** A soundboard sound as the server lists it. */
+export interface SoundInfo {
+  id: string;
+  name: string;
+  emoji: string | null;
+  uploader_id: string;
+  duration_ms: number;
+}
+/** Someone calls me to a voice room ("Позвать за собой" or "Позвать сюда"). */
+export interface FlockCall {
+  from_user_id: string;
+  from_name: string;
+  channel_id: string;
+}
+
 export interface SessionEvents {
   authenticated: {
     session_generation?: number;
@@ -218,6 +298,8 @@ export interface SessionEvents {
   };
   'new-message': IncomingMessage;
   'activity-changed': { user_id: string; game: string | null };
+  'flock-call': FlockCall;
+  'sound-played': { sound_id: string; user_id: string };
   'message-rejected': { client_msg_id: string; code: number; message: string };
   'user-speaking': { peer_id: number; is_speaking: boolean };
   'voice-levels': { levels: [peerId: number, level: number][] };

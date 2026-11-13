@@ -27,8 +27,12 @@ const clamp = (value: number) => Math.min(MAX_VOLUME, Math.max(MIN_VOLUME, value
 
 export const [volumes, setVolumes] = createSignal<Record<string, number>>(read());
 
-/** The remembered volume for `key` (a user id, or "screen:<user id>"). */
-export const volumeFor = (key: string) => volumes()[key] ?? DEFAULT_VOLUME;
+/** The soundboard is a little quieter than people by default. */
+export const SOUNDBOARD_VOLUME_KEY = 'soundboard';
+export const DEFAULT_SOUNDBOARD_VOLUME = 0.8;
+
+/** The remembered volume for `key` (a user id, "screen:<user id>", or the soundboard). */
+export const volumeFor = (key: string) => volumes()[key] ?? (key === SOUNDBOARD_VOLUME_KEY ? DEFAULT_SOUNDBOARD_VOLUME : DEFAULT_VOLUME);
 
 function persist() {
   try {

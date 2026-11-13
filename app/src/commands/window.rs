@@ -2,8 +2,19 @@
 
 use tauri::{AppHandle, Manager, State};
 
+use crate::notify::{self, Notice};
 use crate::state::AppState;
 use crate::tray::{self, TrayState};
+
+/// A Windows notification with the sender's picture (PNG bytes, optional) and buttons. Other
+/// systems get an error and use the notification plugin instead.
+#[tauri::command]
+pub async fn notify(notice: Notice, avatar_png: Option<Vec<u8>>, app: AppHandle) -> Result<(), String> {
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || notify::send(&app, notice, avatar_png, cache_dir))
+        .await
+        .map_err(|e| e.to_string())?
+}
 
 /// The invite link that started the app (cold start), handed over once.
 #[tauri::command]
