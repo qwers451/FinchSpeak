@@ -175,8 +175,8 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
         <section class="music-add">
           <h4 class="music-heading">{t('Add')}</h4>
           <div class="tabs" role="tablist">
-            <button type="button" role="tab" class={tabClass('library')} aria-selected={tab() === 'library'} onClick={() => setTab('library')}>{t('Library')}</button>
-            <button type="button" role="tab" class={tabClass('computer')} aria-selected={tab() === 'computer'} onClick={() => setTab('computer')}>{t('From my computer')}</button>
+            <button type="button" role="tab" class={tabClass('library')} aria-selected={tab() === 'library'} onClick={() => setTab('library')}><span class="trunc">{t('Library')}</span></button>
+            <button type="button" role="tab" class={tabClass('computer')} aria-selected={tab() === 'computer'} onClick={() => setTab('computer')}><span class="trunc">{t('From my computer')}</span></button>
           </div>
 
           <Show when={tab() === 'library'}>
@@ -190,7 +190,12 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
             />
             <Show
               when={filtered().length > 0}
-              fallback={<p class="t2 fs12">{tracks().length === 0 ? t('The library is empty.') : t('Nothing matches the search.')}</p>}
+              fallback={
+                <div class="music-empty">
+                  <Show when={tracks().length === 0}><FinchBird size={72} /></Show>
+                  <p class="t2 fs13">{tracks().length === 0 ? t('The library is empty.') : t('Nothing matches the search.')}</p>
+                </div>
+              }
             >
               <ul class="music-list" aria-label={t('Library')}>
                 <For each={filtered()}>

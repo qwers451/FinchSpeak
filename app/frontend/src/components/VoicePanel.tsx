@@ -79,7 +79,7 @@ export function VoicePanel() {
             <button type="button" class="music-now-chip" title={t('Music')} onClick={() => setMusicPanelOpen(true)}>
               <Icon name="music" size="sm" />
               <span class="trunc">{now().entry.track.title}</span>
-              <span class="t3 fs12 tabular">{formatClock(musicPosition())}</span>
+              <span class="t3 fs12 music-clock">{formatClock(musicPosition())}</span>
             </button>
           )}
         </Show>
