@@ -88,10 +88,18 @@ pub struct JitterBuffer {
 }
 
 impl JitterBuffer {
-    /// Create a new jitter buffer for a remote participant.
+    /// Create a new mono jitter buffer for a remote participant's voice.
     pub fn new() -> Result<Self, crate::opus::AudioOpusError> {
-        let decoder = OpusVoiceDecoder::new()?;
-        Ok(Self {
+        Ok(Self::with_decoder(OpusVoiceDecoder::new()?))
+    }
+
+    /// Create a jitter buffer for screen-share sound: same queue and playout, stereo output.
+    pub fn new_stereo() -> Result<Self, crate::opus::AudioOpusError> {
+        Ok(Self::with_decoder(OpusVoiceDecoder::new_stereo()?))
+    }
+
+    fn with_decoder(decoder: OpusVoiceDecoder) -> Self {
+        Self {
             last_seq: None,
             last_extended_seq: 0,
             next_playout_seq: None,
@@ -109,7 +117,7 @@ impl JitterBuffer {
             conceal_while_priming: false,
             priming_frames: 0,
             concealed_frames: 0,
-        })
+        }
     }
 
     /// Push an arriving media packet into the jitter buffer.
@@ -239,7 +247,7 @@ impl JitterBuffer {
         self.concealed_frames = 0;
     }
 
-    fn conceal(&mut self, output: &mut [f32; FRAME_SIZE_48K]) -> PlayoutResult {
+    fn conceal(&mut self, output: &mut [f32]) -> PlayoutResult {
         if self.queue.is_empty() && self.concealed_frames >= MAX_CONCEALMENT_FRAMES {
             self.finish_spurt();
             output.fill(0.0);
@@ -252,9 +260,11 @@ impl JitterBuffer {
         PlayoutResult::Concealed
     }
 
-    /// Read and decode the next 20 ms frame (960 samples @ 48 kHz).
+    /// Read and decode the next 20 ms frame: 960 samples per channel @ 48 kHz (`output` is
+    /// 960 long for voice, 1920 interleaved for screen-share sound).
     /// If the required packet has not arrived, synthesizes speech via Opus PLC.
-    pub fn pop_frame(&mut self, output: &mut [f32; FRAME_SIZE_48K]) -> PlayoutResult {
+    pub fn pop_frame(&mut self, output: &mut [f32]) -> PlayoutResult {
+        debug_assert_eq!(output.len(), FRAME_SIZE_48K * self.decoder.channels());
         let playout_seq = match self.next_playout_seq {
             Some(seq) => seq,
             None => {

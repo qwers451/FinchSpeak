@@ -50,6 +50,9 @@ pub const fn screen_audio_key(peer_id: u32) -> u32 {
 
 const SCREEN_AUDIO_FLAG: u32 = 0x4000_0000;
 
+/// One 20 ms screen-share frame: 960 interleaved L, R pairs.
+const STEREO_FRAME_SAMPLES: usize = FRAME_SIZE_48K * 2;
+
 /// How much of a fully panned voice still reaches the far ear. Real voices are never heard by
 /// one ear only; on headphones a hard pan sounds like a fault rather than a place.
 pub const FAR_EAR_LEVEL: f32 = 0.25;
@@ -86,6 +89,11 @@ impl RemoteSpeaker {
         }
         decoded
     }
+
+    /// Next screen-share frame as interleaved stereo. Screen sound has no avatar, so no speech level.
+    fn pop_stereo_frame(&mut self, frame: &mut [f32; STEREO_FRAME_SAMPLES]) -> bool {
+        matches!(self.jitter_buffer.pop_frame(frame), PlayoutResult::Normal | PlayoutResult::Concealed)
+    }
 }
 
 /// Multi-speaker audio mixer.
@@ -97,6 +105,8 @@ pub struct AudioMixer {
     pans: HashMap<u32, f32>,
     spatial: bool,
     scratch_buf: [f32; FRAME_SIZE_48K],
+    /// Interleaved stereo scratch for screen-share sound, preallocated like `scratch_buf`.
+    scratch_stereo: [f32; STEREO_FRAME_SAMPLES],
 }
 
 impl Default for AudioMixer {
@@ -113,6 +123,7 @@ impl AudioMixer {
             pans: HashMap::new(),
             spatial: false,
             scratch_buf: [0.0f32; FRAME_SIZE_48K],
+            scratch_stereo: [0.0f32; STEREO_FRAME_SAMPLES],
         }
     }
 
@@ -155,6 +166,7 @@ impl AudioMixer {
     pub fn clear_playout(&mut self) {
         self.speakers.clear();
         self.scratch_buf.fill(0.0);
+        self.scratch_stereo.fill(0.0);
     }
 
     /// End one stream without forgetting its local volume (e.g. stop watching a share).
@@ -209,7 +221,12 @@ impl AudioMixer {
         let speaker = match self.speakers.entry(peer_id) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                let jitter_buffer = match JitterBuffer::new() {
+                let created = if peer_id & SCREEN_AUDIO_FLAG == 0 {
+                    JitterBuffer::new()
+                } else {
+                    JitterBuffer::new_stereo()
+                };
+                let jitter_buffer = match created {
                     Ok(jb) => jb,
                     Err(err) => {
                         tracing::error!(
@@ -248,7 +265,7 @@ impl AudioMixer {
         None
     }
 
-    /// Feed a `ScreenAudio` packet (stereo Opus; decoded to mono) into the screen channel of its
+    /// Feed a `ScreenAudio` packet (stereo Opus, decoded as stereo) into the screen channel of its
     /// sender. Never reports speech.
     pub fn on_screen_audio_packet(&mut self, header: &MediaHeader, payload: Bytes, now: Instant) -> Option<(u32, bool)> {
         let mut as_voice = *header;
@@ -279,8 +296,17 @@ impl AudioMixer {
                 }
             }
 
-            // Pop next decoded 20 ms frame
-            if speaker.pop_frame(&mut self.scratch_buf) {
+            if speaker.peer_id & SCREEN_AUDIO_FLAG != 0 {
+                // Screen sound: the mono output takes the average of its two channels.
+                if speaker.pop_stereo_frame(&mut self.scratch_stereo) {
+                    let vol = speaker.volume;
+                    let (pairs, _) = self.scratch_stereo.as_chunks::<2>();
+                    for (out_sample, pair) in output.iter_mut().zip(pairs) {
+                        *out_sample += (pair[0] + pair[1]) * 0.5 * vol;
+                    }
+                }
+            } else if speaker.pop_frame(&mut self.scratch_buf) {
+                // Pop next decoded 20 ms frame
                 let vol = speaker.volume;
                 for (out_sample, &in_sample) in output.iter_mut().zip(self.scratch_buf.iter()) {
                     *out_sample += in_sample * vol;
@@ -297,8 +323,8 @@ impl AudioMixer {
     }
 
     /// Like [`Self::mix_frame`], but into left and right. With spatial audio off both sides get
-    /// the same mono mix; on, each voice is placed by its pan. The screen-share sound of a person
-    /// stays in the centre.
+    /// the same mono mix; on, each voice is placed by its pan. Screen-share sound is stereo: its
+    /// left and right are summed into the matching output channel, before the final limiter.
     pub fn mix_frame_stereo(
         &mut self,
         left: &mut [f32; FRAME_SIZE_48K],
@@ -318,7 +344,17 @@ impl AudioMixer {
                 }
             }
 
-            if speaker.pop_frame(&mut self.scratch_buf) {
+            if speaker.peer_id & SCREEN_AUDIO_FLAG != 0 {
+                // Screen sound keeps its channels: left stays left, right stays right. No pan.
+                if speaker.pop_stereo_frame(&mut self.scratch_stereo) {
+                    let vol = speaker.volume;
+                    let (pairs, _) = self.scratch_stereo.as_chunks::<2>();
+                    for ((l, r), pair) in left.iter_mut().zip(right.iter_mut()).zip(pairs) {
+                        *l += pair[0] * vol;
+                        *r += pair[1] * vol;
+                    }
+                }
+            } else if speaker.pop_frame(&mut self.scratch_buf) {
                 let pan = if self.spatial { self.pans.get(&speaker.peer_id).copied().unwrap_or(0.0) } else { 0.0 };
                 let (left_gain, right_gain) = pan_gains(pan);
                 let (left_gain, right_gain) = (left_gain * speaker.volume, right_gain * speaker.volume);
@@ -573,6 +609,41 @@ mod tests {
 
     fn energy(frame: &[f32; FRAME_SIZE_48K]) -> f32 {
         frame.iter().map(|s| s * s).sum()
+    }
+
+    #[test]
+    fn screen_sound_keeps_a_left_only_source_on_the_left() {
+        // The sender encodes screen sound as stereo Opus (finch-screen); reproduce that here.
+        let sender = audiopus::coder::Encoder::new(
+            audiopus::SampleRate::Hz48000,
+            audiopus::Channels::Stereo,
+            audiopus::Application::Audio,
+        )
+        .unwrap();
+        let now = Instant::now();
+        let mut mixer = AudioMixer::new();
+        let mut interleaved = [0.0f32; FRAME_SIZE_48K * 2];
+        let mut packet = [0u8; 1000];
+        for seq in 0..10u16 {
+            for i in 0..FRAME_SIZE_48K {
+                let t = (seq as usize * FRAME_SIZE_48K + i) as f32 / 48_000.0;
+                interleaved[2 * i] = 0.3 * (t * 440.0 * std::f32::consts::TAU).sin();
+                interleaved[2 * i + 1] = 0.0;
+            }
+            let len = sender.encode_float(&interleaved, &mut packet).unwrap();
+            let header = MediaHeader::new_audio(1, 7, seq, seq as u32 * 20, false, false);
+            mixer.on_screen_audio_packet(&header, Bytes::copy_from_slice(&packet[..len]), now);
+        }
+        let (mut left, mut right) = ([0.0; FRAME_SIZE_48K], [0.0; FRAME_SIZE_48K]);
+        let (mut left_energy, mut right_energy) = (0.0f32, 0.0f32);
+        for _ in 0..10 {
+            mixer.mix_frame_stereo(&mut left, &mut right, now);
+            left_energy += energy(&left);
+            right_energy += energy(&right);
+        }
+        assert!(left_energy > 0.0, "the left channel must carry the tone");
+        let ratio_db = 10.0 * (right_energy / left_energy).log10();
+        assert!(ratio_db < -30.0, "right channel is {ratio_db:.1} dB relative to left");
     }
 
     #[test]

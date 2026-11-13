@@ -88,33 +88,49 @@ impl OpusVoiceEncoder {
 
 pub struct OpusVoiceDecoder {
     decoder: Decoder,
+    /// Interleaved channels per frame: 1 for voice, 2 for screen-share sound.
+    channels: usize,
 }
 
 impl OpusVoiceDecoder {
+    /// Mono decoder for voice.
     pub fn new() -> Result<Self, AudioOpusError> {
         let decoder = Decoder::new(SampleRate::Hz48000, Channels::Mono)?;
-        Ok(Self { decoder })
+        Ok(Self { decoder, channels: 1 })
     }
 
-    pub fn decode(&mut self, payload: &[u8], output: &mut [f32; FRAME_SIZE_48K]) -> Result<usize, AudioOpusError> {
+    /// Stereo decoder for screen-share sound. Output is interleaved L, R, L, R, ...
+    pub fn new_stereo() -> Result<Self, AudioOpusError> {
+        let decoder = Decoder::new(SampleRate::Hz48000, Channels::Stereo)?;
+        Ok(Self { decoder, channels: 2 })
+    }
+
+    /// Number of interleaved channels this decoder writes.
+    pub fn channels(&self) -> usize {
+        self.channels
+    }
+
+    /// Decode one packet into `output`, which holds `FRAME_SIZE_48K * channels()` samples.
+    /// Returns the frames per channel decoded (at most `FRAME_SIZE_48K`).
+    pub fn decode(&mut self, payload: &[u8], output: &mut [f32]) -> Result<usize, AudioOpusError> {
         let packet: Packet = payload.try_into().map_err(|_| AudioOpusError::SignalConversion)?;
         let signals: MutSignals<f32> = (&mut output[..]).try_into().map_err(|_| AudioOpusError::SignalConversion)?;
         let decoded = self.decoder.decode_float(Some(packet), signals, false)?;
-        output[decoded..].fill(0.0);
+        output[decoded * self.channels..].fill(0.0);
         Ok(decoded)
     }
 
     /// Rebuild the frame that immediately precedes `next_payload` from the in-band FEC
     /// carried by the next packet. Call this only for a lost slot whose successor arrived.
-    pub fn decode_fec(&mut self, next_payload: &[u8], output: &mut [f32; FRAME_SIZE_48K]) -> Result<usize, AudioOpusError> {
+    pub fn decode_fec(&mut self, next_payload: &[u8], output: &mut [f32]) -> Result<usize, AudioOpusError> {
         let packet: Packet = next_payload.try_into().map_err(|_| AudioOpusError::SignalConversion)?;
         let signals: MutSignals<f32> = (&mut output[..]).try_into().map_err(|_| AudioOpusError::SignalConversion)?;
         let decoded = self.decoder.decode_float(Some(packet), signals, true)?;
-        output[decoded..].fill(0.0);
+        output[decoded * self.channels..].fill(0.0);
         Ok(decoded)
     }
 
-    pub fn decode_plc(&mut self, output: &mut [f32; FRAME_SIZE_48K]) -> Result<usize, AudioOpusError> {
+    pub fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, AudioOpusError> {
         let signals: MutSignals<f32> = (&mut output[..]).try_into().map_err(|_| AudioOpusError::SignalConversion)?;
         let decoded = self.decoder.decode_float(None::<Packet>, signals, false)?;
         Ok(decoded)
