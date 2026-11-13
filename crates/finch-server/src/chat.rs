@@ -72,16 +72,22 @@ pub async fn resolve_mentions(pool: &SqlitePool, content: &str) -> Vec<Uuid> {
 
 /// The quote shown above a reply to `reference`; `deleted` once the original is gone.
 pub async fn reply_ref(pool: &SqlitePool, reference: Uuid) -> ReplyRef {
-    let row = sqlx::query_as::<_, (String, String)>(
-        "SELECT COALESCE(NULLIF(TRIM(u.display_name), ''), u.username), m.content FROM messages m JOIN users u ON u.id = m.author_id WHERE m.id = ?",
+    let row = sqlx::query_as::<_, (String, String, String)>(
+        "SELECT COALESCE(NULLIF(TRIM(u.display_name), ''), u.username), m.content, m.author_id FROM messages m JOIN users u ON u.id = m.author_id WHERE m.id = ?",
     )
     .bind(reference.to_string())
     .fetch_optional(pool)
     .await
     .unwrap_or(None);
     match row {
-        Some((author_name, content)) => ReplyRef { message_id: reference, author_name, snippet: snippet(&content), deleted: false },
-        None => ReplyRef { message_id: reference, author_name: String::new(), snippet: String::new(), deleted: true },
+        Some((author_name, content, author_id)) => ReplyRef {
+            message_id: reference,
+            author_name,
+            snippet: snippet(&content),
+            deleted: false,
+            author_id: Uuid::parse_str(&author_id).ok(),
+        },
+        None => ReplyRef { message_id: reference, author_name: String::new(), snippet: String::new(), deleted: true, author_id: None },
     }
 }
 

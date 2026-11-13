@@ -7,11 +7,12 @@ import {
 } from '../../stores/profileStore';
 import { presence, serverFeatures, statusTexts } from '../../stores/sessionStore';
 import {
-  isChannelMuted, muteChannel, prefs, unmuteChannel, updateAppearance, updateNotifications, updatePrivacy,
+  isChannelMuted, muteChannel, prefs, unmuteChannel, updateAppearance, updateNotifications, updateOverlay, updatePrivacy,
 } from '../../stores/settingsStore';
 import { nestView, setNestView } from '../../stores/nestView';
 import { availableUpdate, setAvailableUpdate } from '../../stores/updateStore';
 import { activeVoiceChannel } from '../../stores/voiceStore';
+import { overlayOpen, setOverlayPref, toggleOverlay } from '../../stores/overlayStore';
 import type { UserStatus } from '../../types';
 import { Avatar, Button, Field, Icon, type IconName, Modal, pushToast, Slider, Toggle } from '../../ui';
 import { clock, dayLabel } from '../chat/chatFormat';
@@ -251,6 +252,9 @@ function NotificationsPage() {
       <Row title={t('Mentions')} hint={t('A notification when someone mentions you, even if the window is in the background.')} control={<Toggle label={t('Mentions')} checked={n().mentions} onChange={(v) => updateNotifications({ mentions: v })} />} />
       <Row title={t('Every message')} hint={t('Also for channels you are not looking at.')} control={<Toggle label={t('Every message')} checked={n().allMessages} onChange={(v) => updateNotifications({ allMessages: v })} />} />
       <Row title={t('Someone joins my voice room')} control={<Toggle label={t('Someone joins my voice room')} checked={n().voiceJoin} onChange={(v) => updateNotifications({ voiceJoin: v })} />} />
+      <Row title={t('Replies to my messages')} control={<Toggle label={t('Replies to my messages')} checked={n().replies} onChange={(v) => updateNotifications({ replies: v })} />} />
+      <Row title={t('Calls to fly to a room')} control={<Toggle label={t('Calls to fly to a room')} checked={n().flockCalls} onChange={(v) => updateNotifications({ flockCalls: v })} />} />
+      <Row title={t('Someone starts sharing a screen in my room')} control={<Toggle label={t('Someone starts sharing a screen in my room')} checked={n().screenShares} onChange={(v) => updateNotifications({ screenShares: v })} />} />
       <Row title={t('Sounds')} hint={t('A short tone for mentions and for people joining.')} control={<Toggle label={t('Sounds')} checked={n().sounds} onChange={(v) => updateNotifications({ sounds: v })} />} />
       <div class="setrow">
         <div class="col grow"><strong class="fs13">{t('Sound set')}</strong><span class="t3 fs12">{t('Birds are short synthesised chirps; soft are the gentler first tones.')}</span></div>
@@ -355,7 +359,21 @@ function AppearancePage() {
       <Row title={t('Reduce motion')} hint={t('Turns off pulsing rings and slides.')} control={<Toggle label={t('Reduce motion')} checked={a().reduceMotion} onChange={(v) => updateAppearance({ reduceMotion: v })} />} />
       <Row title={t('Start with Windows')} hint={t('Starts hidden in the tray and signs you in.')} control={<Toggle label={t('Start with Windows')} checked={autostart()} onChange={(v) => void changeAutostart(v)} />} />
       <Row title={t('Members panel')} hint={t('The list of people on the right.')} control={<Toggle label={t('Members panel')} checked={a().showMembers} onChange={(v) => updateAppearance({ showMembers: v })} />} />
+      <MiniWindowRows />
     </div>
+  );
+}
+
+/** The mini window block of the Appearance page: open it, show it during games, click-through, opacity. */
+function MiniWindowRows() {
+  const o = () => prefs().overlay;
+  return (
+    <>
+      <Row title={t('Mini window')} hint={t('Shows the people of your room over other windows.')} control={<Toggle label={t('Mini window')} checked={overlayOpen()} onChange={() => void toggleOverlay()} />} />
+      <Row title={t('Show during games')} hint={t('Windows does not show the mini window over exclusive full-screen games: set the game to windowed borderless mode.')} control={<Toggle label={t('Show during games')} checked={o().autoInGame} onChange={(v) => setOverlayPref({ autoInGame: v })} />} />
+      <Row title={t('Click-through')} hint={t('Mouse clicks go through the mini window to the window below it.')} control={<Toggle label={t('Click-through')} checked={o().clickThrough} onChange={(v) => setOverlayPref({ clickThrough: v })} />} />
+      <Row title={t('Opacity')} control={<div style={{ width: '180px' }}><Slider label={t('Opacity')} min={0.3} max={1} step={0.05} value={o().opacity} onChange={(v) => updateOverlay({ opacity: v })} /></div>} />
+    </>
   );
 }
 

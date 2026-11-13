@@ -1724,6 +1724,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "tauri-winrt-notification",
  "thiserror 2.0.21",
  "tokio",
  "tracing",

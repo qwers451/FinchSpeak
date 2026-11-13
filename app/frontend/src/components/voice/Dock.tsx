@@ -3,6 +3,7 @@ import { isSharing, stopSharing } from '../../stores/screenStore';
 import { musicAvailable, musicPanelOpen, musicState, setMusicPanelOpen } from '../../stores/musicStore';
 import { setSoundboardOpen, soundboardAvailable, soundboardOpen } from '../../stores/soundboardStore';
 import { isDeafened, isMuted, leaveVoice, pushToTalkKey, toggleDeafen, toggleMute, voiceSettings } from '../../stores/voiceStore';
+import { overlayOpen, toggleOverlay } from '../../stores/overlayStore';
 import { Icon, type IconName } from '../../ui';
 import { t } from '../../i18n';
 
@@ -37,6 +38,7 @@ export function Dock(props: { onShare: () => void; onSettings: () => void }) {
         <Show when={soundboardAvailable()}>
           <Ctl label={t('Soundboard')} icon="smile" pressed={soundboardOpen()} onClick={() => setSoundboardOpen(!soundboardOpen())} />
         </Show>
+        <Ctl label={t('Mini window')} icon="pip" pressed={overlayOpen()} onClick={() => void toggleOverlay()} />
         <Ctl label={t('Voice settings')} icon="sliders" onClick={props.onSettings} />
         <Ctl label={t('Leave the room')} icon="hangup" class="leave" onClick={() => void leaveVoice()} />
       </div>

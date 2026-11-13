@@ -156,6 +156,9 @@ pub struct ReplyRef {
     /// The original was deleted; `author_name` and `snippet` are empty then.
     #[serde(default)]
     pub deleted: bool,
+    /// Who wrote the original: lets the client tell a reply to one's own message from another one.
+    #[serde(default)]
+    pub author_id: Option<Uuid>,
 }
 
 /// Unread state of one channel for the signed-in user.

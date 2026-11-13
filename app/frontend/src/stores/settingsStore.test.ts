@@ -127,3 +127,9 @@ it('ignores the close-to-tray value an older version saved', () => {
   expect(old).toEqual(plain);
   expect('closeToTray' in old.appearance).toBe(false);
 });
+
+it('the reply, flock call and screen share notices are on by default and keep a saved off', () => {
+  expect(DEFAULT_PREFS.notifications).toMatchObject({ replies: true, flockCalls: true, screenShares: true });
+  const saved = parsePrefs(JSON.stringify({ notifications: { replies: false, flockCalls: 'yes' } }));
+  expect(saved.notifications).toMatchObject({ replies: false, flockCalls: true, screenShares: true });
+});

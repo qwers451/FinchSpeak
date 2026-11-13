@@ -53,6 +53,9 @@ pub struct Session {
 
 /// Something received from the server.
 #[derive(Debug, Clone)]
+// Control messages are the common case and are moved, not copied; boxing them would only add an
+// allocation per message to keep the rarer datagram variant small.
+#[allow(clippy::large_enum_variant)]
 pub enum SessionEvent {
     /// Control stream message (including `Pong`).
     Control(ServerMessage),

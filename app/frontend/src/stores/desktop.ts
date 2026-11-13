@@ -1,13 +1,15 @@
 import { createEffect, createMemo, createRoot, createSignal, onCleanup, untrack, type Accessor } from 'solid-js';
+import { listen } from '@tauri-apps/api/event';
 import { api } from '../services/api';
-import type { Message } from '../types';
+import type { FlockCall, Message, NoticeActivation } from '../types';
 import { currentUser } from './authStore';
 import { activeChannel, channels, selectChannel } from './chatStore';
 import { myStatus } from './sessionStore';
 import { unread } from './activityStore';
 import { isChannelMuted, prefs } from './settingsStore';
 import { isSharing } from './screenState';
-import { activeVoiceChannel, isDeafened, isLocalSpeaking, isMuted } from './voiceStore';
+import { acceptCall, dismissCall, flyToRoom, pendingCallTo } from './flockStore';
+import { activeVoiceChannel, allVoiceParticipants, isDeafened, isLocalSpeaking, isMuted } from './voiceStore';
 import { t } from '../i18n';
 import { playTone } from './tones';
 import { playJoinSound } from './joinSound';
@@ -19,25 +21,48 @@ export { TONES, playTone, type Tone } from './tones';
 
 // ---- notifications ----------------------------------------------------------------------------
 
-/** The channel of the last notification we showed; the platform does not report clicks, so a focus soon after stands in for one. */
-let lastNotified: { channelId: string; at: number } | null = null;
-/** A focus within this long after a notification opens its channel. */
-export const NOTIFICATION_JUMP_MS = 20_000;
+/** A notification to show: the Windows one with picture and buttons, or the plugin's elsewhere. */
+export interface NoticeDraft {
+  title: string;
+  body: string;
+  /** Whose picture to show round. */
+  avatarUserId?: string;
+  target: { kind: 'channel' | 'voice_room'; id: string } | { kind: 'none' };
+  /** Buttons; a click on one comes back to `handleNoticeActivated`. */
+  actions?: { id: 'fly' | 'stay'; label: string }[];
+}
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+const isWindows = () => typeof navigator !== 'undefined' && /Windows/.test(navigator.userAgent);
 
-/** Show an operating-system notification (only meaningful while the window is in the background). */
-export async function notifyDesktop(title: string, body: string, channelId?: string) {
-  if (!isTauri()) return;
+/** The plain notification of the notification plugin: title and text, no picture, no buttons. */
+async function notifyWithPlugin(title: string, body: string) {
   try {
     const { isPermissionGranted, requestPermission, sendNotification } = await import('@tauri-apps/plugin-notification');
     let granted = await isPermissionGranted();
     if (!granted) granted = (await requestPermission()) === 'granted';
-    if (granted) {
-      sendNotification({ title, body: body.slice(0, 200) });
-      if (channelId) lastNotified = { channelId, at: Date.now() };
-    }
+    if (granted) sendNotification({ title, body: body.slice(0, 200) });
   } catch { /* notifications are optional */ }
+}
+
+/** Show an operating-system notification (only meaningful while the window is in the background). */
+export async function showNotice(draft: NoticeDraft) {
+  if (!isTauri()) return;
+  if (isWindows()) {
+    try {
+      const avatar = draft.avatarUserId ? await api.downloadAvatar(draft.avatarUserId).catch(() => null) : null;
+      const actions = draft.actions ?? [];
+      await api.notify({
+        title: draft.title,
+        body: draft.body.slice(0, 200),
+        avatar_user_id: draft.avatarUserId ?? null,
+        target: draft.target,
+        actions,
+      }, avatar);
+      return;
+    } catch { /* the plugin below still tells the person */ }
+  }
+  await notifyWithPlugin(draft.title, draft.body);
 }
 
 async function flashTaskbar() {
@@ -55,7 +80,7 @@ export function isDoNotDisturb(): boolean {
 
 /** What to do about a message that just arrived (not ours): returns what was done, for tests. */
 export function reactToMessage(
-  message: Pick<Message, 'channel_id' | 'author_id' | 'author_name' | 'content' | 'mentions'>,
+  message: Pick<Message, 'channel_id' | 'author_id' | 'author_name' | 'content' | 'mentions' | 'reply_to'>,
   mentionedMe: boolean,
   focused = document.hasFocus(),
 ): 'none' | 'notified' {
@@ -66,11 +91,17 @@ export function reactToMessage(
   if (isChannelMuted(message.channel_id)) return 'none';
   const viewing = focused && activeChannel()?.id === message.channel_id;
   if (viewing) return 'none';
-  const wanted = mentionedMe ? settings.mentions : settings.allMessages;
+  const answersMe = message.reply_to?.author_id === user.id;
+  const wanted = mentionedMe ? settings.mentions : answersMe ? settings.replies : settings.allMessages;
   if (!wanted) return 'none';
   const channel = channels().find((candidate) => candidate.id === message.channel_id)?.name ?? t('a channel');
   if (!focused) {
-    void notifyDesktop(mentionedMe ? t('{name} mentioned you in #{channel}', { name: message.author_name, channel }) : t('{name} in #{channel}', { name: message.author_name, channel }), message.content, message.channel_id);
+    const title = mentionedMe
+      ? t('{name} mentioned you in #{channel}', { name: message.author_name, channel })
+      : answersMe
+        ? t('{name} replied to you in #{channel}', { name: message.author_name, channel })
+        : t('{name} in #{channel}', { name: message.author_name, channel });
+    void showNotice({ title, body: message.content, avatarUserId: message.author_id, target: { kind: 'channel', id: message.channel_id } });
     if (settings.flash) void flashTaskbar();
   }
   if (mentionedMe) playTone('mention');
@@ -83,7 +114,60 @@ export function reactToVoiceMovement(kind: 'join' | 'leave', name: string, userI
   if (!settings.voiceJoin || userId === currentUser()?.id) return;
   if (kind === 'join') void playJoinSound(userId);
   else playTone(kind);
-  if (kind === 'join' && !focused && !isDoNotDisturb()) void notifyDesktop(t('{name} joined {room}', { name, room: activeVoiceChannel()?.name ?? t('your voice room') }), '');
+  if (kind !== 'join' || focused || isDoNotDisturb()) return;
+  const room = activeVoiceChannel();
+  if (room && isChannelMuted(room.id)) return;
+  void showNotice({
+    title: t('{name} joined {room}', { name, room: room?.name ?? t('your voice room') }),
+    body: '',
+    avatarUserId: userId,
+    target: room ? { kind: 'voice_room', id: room.id } : { kind: 'none' },
+  });
+}
+
+/** Somebody started sharing a screen in the voice room I am in. */
+export function reactToShareStarted(userId: string, focused = document.hasFocus()) {
+  const room = activeVoiceChannel();
+  if (!prefs().notifications.screenShares || !room || focused || userId === currentUser()?.id) return;
+  if (isDoNotDisturb() || isChannelMuted(room.id)) return;
+  const sharer = allVoiceParticipants().find((participant) => participant.user_id === userId);
+  if (!sharer || sharer.channel_id !== room.id) return;
+  void showNotice({
+    title: t('{name} started sharing the screen', { name: sharer.username }),
+    body: '',
+    avatarUserId: userId,
+    target: { kind: 'voice_room', id: room.id },
+  });
+}
+
+/** A call to my room: a card in the app and, in the background, a notification with "Лететь" and "Остаться". */
+export function reactToFlockCall(call: FlockCall, focused = document.hasFocus()) {
+  if (!prefs().notifications.flockCalls || focused || isDoNotDisturb() || isChannelMuted(call.channel_id)) return;
+  const room = channels().find((channel) => channel.id === call.channel_id)?.name ?? t('your voice room');
+  void showNotice({
+    title: t('{name} is calling you to {room}', { name: call.from_name, room }),
+    body: '',
+    avatarUserId: call.from_user_id,
+    target: { kind: 'voice_room', id: call.channel_id },
+    actions: [{ id: 'fly', label: t('Fly') }, { id: 'stay', label: t('Stay') }],
+  });
+}
+
+/** A click on a notification: open its channel or room; a button answers the call to that room. */
+export function handleNoticeActivated({ target, action }: NoticeActivation) {
+  if (target.kind === 'channel' && target.id) {
+    const channel = channels().find((candidate) => candidate.id === target.id);
+    if (channel) void selectChannel(channel);
+    return;
+  }
+  if (target.kind !== 'voice_room' || !target.id) return;
+  const pending = pendingCallTo(target.id);
+  if (action === 'fly') {
+    if (pending) void acceptCall(pending.id);
+    else void flyToRoom(target.id);
+  } else if (action === 'stay' && pending) {
+    dismissCall(pending.id);
+  }
 }
 
 // ---- tray and window --------------------------------------------------------------------------
@@ -121,18 +205,8 @@ export function mentionCount(): number {
     .reduce((sum, [, entry]) => sum + (entry.mentions ?? (entry.mention ? 1 : 0)), 0);
 }
 
-/** The window came to the front: if that was soon after a notification, open its channel. */
-function jumpToNotifiedChannel() {
-  const last = lastNotified;
-  if (!last) return;
-  lastNotified = null;
-  if (Date.now() - last.at >= NOTIFICATION_JUMP_MS) return;
-  const channel = channels().find((candidate) => candidate.id === last.channelId);
-  if (channel) void selectChannel(channel);
-}
-
 let started = false;
-/** Keep the tray icon and the close behaviour in step with the app (once, for the life of the app). */
+/** Keep the tray icon, the close behaviour and notification clicks in step with the app (once, for the life of the app). */
 export function startDesktopSync() {
   if (started) return;
   started = true;
@@ -146,6 +220,7 @@ export function startDesktopSync() {
     createEffect(() => {
       void api.setAttention(mentionCount(), prefs().appearance.language).catch(() => {});
     });
-    window.addEventListener('focus', jumpToNotifiedChannel);
   });
+  // The backend has already brought the window up; this only moves to the right place.
+  void listen<NoticeActivation>('notice-activated', (event) => handleNoticeActivated(event.payload)).catch(() => {});
 }

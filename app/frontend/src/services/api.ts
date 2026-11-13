@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { AuditEntry, DeviceSession, Role, SearchHit, ServerHealth, ServerOverview,UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot, MusicCommand, MusicEvents, MusicTrack, SoundInfo, AttachmentInfo, VoiceNote } from '../types';
+import type { Notice, AuditEntry, DeviceSession, Role, SearchHit, ServerHealth, ServerOverview,UserStatus, AdminUser, Channel, IncomingMessage, Invite, MessageHistory, ScreenSources, User, AudioDevices, VoiceSettings, VoiceParticipant, SessionEvents, SessionSnapshot, MusicCommand, MusicEvents, MusicTrack, SoundInfo, AttachmentInfo, VoiceNote } from '../types';
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -544,6 +544,11 @@ export const api = {
     }
   },
 
+  /** A Windows notification with the sender's picture (PNG bytes, optional). Rejects on other systems. */
+  notify: async (notice: Notice, avatarPng: ArrayBuffer | null): Promise<void> => {
+    if (isTauri()) return invoke('notify', { notice, avatarPng: avatarPng ? Array.from(new Uint8Array(avatarPng)) : null });
+    throw new Error('Notifications need the desktop app');
+  },
   setTrayState: async (state: 'idle' | 'voice' | 'speaking' | 'muted' | 'live', language: 'ru' | 'en' = 'ru'): Promise<void> => {
     if (isTauri()) return invoke('set_tray_state', { state, language });
   },

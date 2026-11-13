@@ -13,6 +13,12 @@ export interface NotificationPrefs {
   allMessages: boolean;
   /** Tell me when someone joins the voice room I am in. */
   voiceJoin: boolean;
+  /** Tell me when someone answers one of my messages. */
+  replies: boolean;
+  /** Tell me when someone calls me to a voice room ("Позвать за собой" or "Позвать сюда"). */
+  flockCalls: boolean;
+  /** Tell me when someone starts sharing a screen in the voice room I am in. */
+  screenShares: boolean;
   sounds: boolean;
   /** Feedback tones for my own voice actions: joining and leaving, mute and deafen, push-to-talk. */
   voiceSounds: boolean;
@@ -38,17 +44,28 @@ export interface AppearancePrefs {
   showMembers: boolean;
 }
 
+export interface OverlayPrefs {
+  /** 0.3..1: how solid the mini window looks. */
+  opacity: number;
+  /** Show the mini window by itself while my game is running. */
+  autoInGame: boolean;
+  /** Mouse clicks pass through the mini window to what is below it. */
+  clickThrough: boolean;
+}
+
 export interface Prefs {
   privacy: { shareActivity: boolean };
   notifications: NotificationPrefs;
   appearance: AppearancePrefs;
+  overlay: OverlayPrefs;
   /** Channel id -> muted until (ms since 1970; Infinity as null = until turned back on). */
   mutedChannels: Record<string, number | null>;
 }
 
 export const DEFAULT_PREFS: Prefs = {
   privacy: { shareActivity: true },
-  notifications: { mentions: true, allMessages: false, voiceJoin: true, sounds: true, voiceSounds: true, soundVolume: 0.6, soundSet: 'birds', flash: true },
+  overlay: { opacity: 0.85, autoInGame: false, clickThrough: false },
+  notifications: { mentions: true, allMessages: false, voiceJoin: true, replies: true, flockCalls: true, screenShares: true, sounds: true, voiceSounds: true, soundVolume: 0.6, soundSet: 'birds', flash: true },
   appearance: { theme: 'bullfinch', brandTheme161: true, customColors: DEFAULT_THEME_COLORS, language: 'ru', density: 'comfortable', textSize: 'medium', reduceMotion: false, speakingStyle: 'pulse', showMembers: true },
   mutedChannels: {},
 };
@@ -72,6 +89,8 @@ export function parsePrefs(raw: string | null): Prefs {
   const a = saved.appearance ?? {};
   const d = DEFAULT_PREFS;
   const volume = typeof n.soundVolume === 'number' && Number.isFinite(n.soundVolume) ? Math.min(1, Math.max(0, n.soundVolume)) : d.notifications.soundVolume;
+  const o = saved.overlay ?? {};
+  const opacity = typeof o.opacity === 'number' && Number.isFinite(o.opacity) ? Math.min(1, Math.max(0.3, o.opacity)) : d.overlay.opacity;
   const muted: Record<string, number | null> = {};
   for (const [id, until] of Object.entries(saved.mutedChannels ?? {})) {
     if (until === null || (typeof until === 'number' && Number.isFinite(until))) muted[id] = until as number | null;
@@ -82,12 +101,16 @@ export function parsePrefs(raw: string | null): Prefs {
       mentions: bool(n.mentions, d.notifications.mentions),
       allMessages: bool(n.allMessages, d.notifications.allMessages),
       voiceJoin: bool(n.voiceJoin, d.notifications.voiceJoin),
+      replies: bool(n.replies, d.notifications.replies),
+      flockCalls: bool(n.flockCalls, d.notifications.flockCalls),
+      screenShares: bool(n.screenShares, d.notifications.screenShares),
       sounds: bool(n.sounds, d.notifications.sounds),
       voiceSounds: bool(n.voiceSounds, d.notifications.voiceSounds),
       soundVolume: volume,
       soundSet: pick(n.soundSet, ['birds', 'soft'] as const, d.notifications.soundSet),
       flash: bool(n.flash, d.notifications.flash),
     },
+    overlay: { opacity, autoInGame: bool(o.autoInGame, d.overlay.autoInGame), clickThrough: bool(o.clickThrough, d.overlay.clickThrough) },
     appearance: {
       // Bullfinch became the default with the 1.6.1 brand: saved prefs from before it switch over once; a later choice is kept.
       theme: a.brandTheme161 === true
@@ -126,6 +149,10 @@ export function updateNotifications(change: Partial<NotificationPrefs>) {
 
 export function updateAppearance(change: Partial<AppearancePrefs>) {
   setPrefs((previous) => ({ ...previous, appearance: { ...previous.appearance, ...change } }));
+}
+
+export function updateOverlay(change: Partial<OverlayPrefs>) {
+  setPrefs((previous) => ({ ...previous, overlay: { ...previous.overlay, ...change } }));
 }
 
 /** Mute a channel for `ms` milliseconds, or until turned back on when `ms` is null. */

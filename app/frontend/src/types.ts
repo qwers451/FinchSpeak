@@ -51,6 +51,33 @@ export interface ReplyRef {
   author_name: string;
   snippet: string;
   deleted?: boolean;
+  /** Who wrote the original; null or missing when it was deleted. */
+  author_id?: string | null;
+}
+
+/** A Windows notification as the interface sends it to the backend (see app/src/notify.rs). */
+export interface NoticeTarget {
+  kind: 'channel' | 'voice_room' | 'none';
+  id?: string;
+}
+
+export interface NoticeAction {
+  id: 'fly' | 'stay';
+  label: string;
+}
+
+export interface Notice {
+  title: string;
+  body: string;
+  avatar_user_id?: string | null;
+  target: NoticeTarget;
+  actions: NoticeAction[];
+}
+
+/** A click on a Windows notification: where to go, and the pressed button if any. */
+export interface NoticeActivation {
+  target: NoticeTarget;
+  action: 'fly' | 'stay' | null;
 }
 
 export interface ChannelUnread {

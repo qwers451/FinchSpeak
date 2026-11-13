@@ -7,6 +7,7 @@ mod capture_privacy;
 pub mod updater;
 pub mod commands;
 mod tray;
+mod overlay;
 pub mod hotkeys;
 pub mod connection;
 pub mod state;
@@ -14,6 +15,7 @@ pub mod activity;
 pub mod credentials;
 pub mod music;
 mod music_clock;
+mod notify;
 pub mod voice_note;
 
 use state::AppState;
@@ -211,6 +213,10 @@ pub fn run() {
             commands::window::set_tray_state,
             commands::window::set_attention,
             commands::window::show_main_window,
+            commands::window::notify,
+            overlay::overlay_show,
+            overlay::overlay_hide,
+            overlay::overlay_set_click_through,
             commands::window::system_idle_seconds,
             // Auth
             commands::auth::login,

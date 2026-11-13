@@ -64,6 +64,9 @@ async fn reply_carries_a_quote_live_and_in_history() -> anyhow::Result<()> {
     let history = alice.api.fetch_messages(channel, None, 50).await?;
     let reply = history.messages.iter().find(|m| m.content == "Count me in").expect("reply in history");
     assert_eq!(reply.reply_to.as_ref().map(|r| r.message_id), Some(original));
+    let original_author = history.messages.iter().find(|m| m.content == "Anyone up for a game tonight?").map(|m| m.author_id);
+    assert!(original_author.is_some());
+    assert_eq!(reply.reply_to.as_ref().and_then(|r| r.author_id), original_author);
     Ok(())
 }
 
