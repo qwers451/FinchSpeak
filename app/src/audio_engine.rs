@@ -23,6 +23,8 @@ use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
 use tauri::Emitter;
 use tracing::{error, info, warn};
+#[cfg(windows)]
+use windows_sys::Win32::System::Threading::{AvRevertMmThreadCharacteristics, AvSetMmThreadCharacteristicsW};
 
 /// More restarts than this inside `RESTART_WINDOW` means the devices keep failing: stop trying.
 const MAX_DEVICE_RESTARTS: usize = 5;
@@ -33,6 +35,62 @@ const DEVICE_SETTLE: Duration = Duration::from_millis(500);
 /// profile); it doubles up to [`OUTPUT_RETRY_MAX`] while they stay missing.
 const OUTPUT_RETRY: Duration = Duration::from_secs(1);
 const OUTPUT_RETRY_MAX: Duration = Duration::from_secs(8);
+/// How long the audio worker parks when the capture callback has not unparked it.
+const WORKER_IDLE_WAIT: Duration = Duration::from_millis(10);
+
+/// Parks the audio worker until the capture callback unparks it or `timeout` passes. A spurious
+/// wake-up is harmless: the caller processes whatever is ready and parks again.
+fn wait_for_work(timeout: Duration) {
+    std::thread::park_timeout(timeout);
+}
+
+/// Keeps the calling thread registered with MMCSS (multimedia class scheduler) under a task
+/// such as "Pro Audio" for as long as the guard lives. Dropping the guard reverts the thread.
+#[cfg(windows)]
+pub(crate) struct RealtimeGuard {
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+
+/// Off Windows there is no MMCSS: the guard is never created and nothing is reverted.
+#[cfg(not(windows))]
+#[allow(dead_code)]
+pub(crate) struct RealtimeGuard;
+
+#[cfg(windows)]
+impl RealtimeGuard {
+    /// Registers the calling thread under `task`. Returns `None` (after a warning) when the system
+    /// refuses; the thread then keeps normal priority and audio still runs.
+    pub(crate) fn register(task: &str) -> Option<Self> {
+        let name: Vec<u16> = task.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut task_index: u32 = 0;
+        // SAFETY: `name` is a NUL-terminated UTF-16 string alive for the call, and `task_index` is a
+        // valid out pointer. The returned handle is only used by this thread's guard.
+        let handle = unsafe { AvSetMmThreadCharacteristicsW(name.as_ptr(), &mut task_index) };
+        if handle.is_null() {
+            warn!("Could not register the audio worker with MMCSS task \"{}\"; it keeps normal priority", task);
+            None
+        } else {
+            Some(Self { handle })
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for RealtimeGuard {
+    fn drop(&mut self) {
+        // SAFETY: `handle` was returned by AvSetMmThreadCharacteristicsW for this thread, and is reverted once.
+        unsafe {
+            AvRevertMmThreadCharacteristics(self.handle);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+impl RealtimeGuard {
+    pub(crate) fn register(_task: &str) -> Option<Self> {
+        None
+    }
+}
 
 use crate::state::AppState;
 use crate::audio_diagnostics::{AudioDiagnostics, DeviceConfig, Metric};
@@ -623,6 +681,8 @@ fn open_output(state: &AppState, app_handle: &tauri::AppHandle, diagnostics: &Ar
 
 /// Dedicated OS thread function managing cpal streams, DSP, and lock-free ring buffers.
 fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
+    // Held for the whole life of this thread; a refusal is logged and audio runs at normal priority.
+    let _realtime = RealtimeGuard::register("Pro Audio");
     let mut pending_cmd: Option<AudioCommand> = None;
     let mut restart_times: std::collections::VecDeque<Instant> = std::collections::VecDeque::new();
     // Feeds processed frames to a voice message being recorded; kept across device restarts.
@@ -707,6 +767,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             let mut capture_clock = CaptureClock::default();
                             let input_diagnostics = diagnostics.clone();
                             let mut previous_input_callback: Option<(u64, Instant)> = None;
+                            // This stream is built on the worker thread, so this is the worker's handle.
+                            // The callback only unparks it: no locks and no allocation.
+                            let worker_thread = std::thread::current();
                             let stream_res = device.build_input_stream(
                                 &config.into(),
                                 move |data: &[f32], info: &cpal::InputCallbackInfo| {
@@ -735,6 +798,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     }
                                     input_diagnostics.add_at(diagnostic_epoch, Metric::CaptureDroppedSamples, dropped);
                                     input_diagnostics.maximum_at(diagnostic_epoch, Metric::CaptureHighWaterSamples, capture_prod.occupied_len() as u64);
+                                    worker_thread.unpark();
                                 },
                                 err_fn,
                                 None,
@@ -1287,7 +1351,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             let _ = app_handle.emit("voice-levels", VoiceLevels { levels: &voice_levels });
                         }
                     }
-                    std::thread::sleep(Duration::from_millis(5));
+                    wait_for_work(WORKER_IDLE_WAIT);
                 }
 
                 if voice_reports.should_emit(&[]) {
@@ -1695,5 +1759,40 @@ mod tests {
         assert_eq!(voice_bitrate_kbps(Some(0)), 16);
         assert_eq!(voice_bitrate_kbps(Some(500)), 128);
         assert_eq!(voice_bitrate_kbps(None), 64);
+    }
+
+    #[test]
+    fn realtime_registration_never_panics_and_fails_softly() {
+        // Off Windows there is no MMCSS, so registration must report "not registered" as None.
+        // On Windows it may succeed or fail; either way it must not panic, and dropping reverts it.
+        let guard = RealtimeGuard::register("Pro Audio");
+        if !cfg!(windows) {
+            assert!(guard.is_none());
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn parked_worker_wakes_on_unpark_long_before_its_timeout() {
+        // The park timeout is 2 s, so a wake within 500 ms can only come from the unpark.
+        const LONG_WAIT: Duration = Duration::from_secs(2);
+        let ready = Arc::new(AtomicBool::new(false));
+        let (woke_tx, woke_rx) = channel::<Instant>();
+        let worker_ready = ready.clone();
+        let worker = std::thread::spawn(move || {
+            while !worker_ready.load(Ordering::SeqCst) {
+                wait_for_work(LONG_WAIT);
+            }
+            let _ = woke_tx.send(Instant::now());
+        });
+        std::thread::sleep(Duration::from_millis(20));
+        ready.store(true, Ordering::SeqCst);
+        let sent = Instant::now();
+        worker.thread().unpark();
+        let woke = woke_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("worker did not wake up after unpark");
+        assert!(woke.duration_since(sent) < Duration::from_millis(500));
+        worker.join().expect("worker thread panicked");
     }
 }
