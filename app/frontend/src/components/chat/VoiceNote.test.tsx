@@ -2,11 +2,19 @@ import { render } from 'solid-js/web';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DEFAULT_PREFS, setPrefs } from '../../stores/settingsStore';
 import type { AttachmentInfo } from '../../types';
+import { api } from '../../services/api';
 import { Attachments } from './AttachmentView';
-import { clock, isVoiceNote, MIN_VOICE_MS, nextSpeed, shouldSendVoiceNote, speedLabel, voiceMessagesAvailable, VoiceNotePlayer, waveformBars } from './VoiceNote';
+import { cancelRecording, clock, isVoiceNote, MIN_VOICE_MS, nextSpeed, shouldSendVoiceNote, speedLabel, voiceMessagesAvailable, VoiceNotePlayer, VoiceRecordButton, waveformBars } from './VoiceNote';
 
 vi.mock('../../services/api', () => ({
-  api: { downloadFile: vi.fn(() => new Promise(() => {})), downloadThumb: vi.fn(() => new Promise(() => {})) },
+  api: {
+    downloadFile: vi.fn(() => new Promise(() => {})),
+    downloadThumb: vi.fn(() => new Promise(() => {})),
+    voiceNoteStart: vi.fn(() => Promise.resolve()),
+    voiceNoteStop: vi.fn(() => Promise.resolve({ bytes: [1, 2], duration_ms: 3000, waveform: new Array(64).fill(0) })),
+    voiceNoteCancel: vi.fn(() => Promise.resolve()),
+    uploadVoiceNote: vi.fn(() => Promise.resolve({ id: 'a1' })),
+  },
 }));
 
 let dispose: (() => void) | undefined;
@@ -92,4 +100,20 @@ it('a voice message in a chat shows the player, a plain file still a file chip',
   const host = mount(() => <Attachments attachments={[voice, { ...voice, id: 'f2', filename: 'notes.txt', content_type: 'text/plain', duration_ms: null, waveform: null }]} />);
   expect(host.querySelectorAll('.voice-note')).toHaveLength(1);
   expect(host.textContent).toContain('notes.txt');
+});
+
+it('holding the mic and releasing it sends the recording', async () => {
+  vi.useFakeTimers();
+  try {
+    const host = mount(() => <VoiceRecordButton disabled={false} />);
+    host.querySelector<HTMLButtonElement>('.voice-mic')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 200 }));
+    await vi.advanceTimersByTimeAsync(600);
+    window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 200 }));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(api.voiceNoteStop).toHaveBeenCalledTimes(1);
+    expect(api.uploadVoiceNote).toHaveBeenCalledTimes(1);
+  } finally {
+    await cancelRecording();
+    vi.useRealTimers();
+  }
 });

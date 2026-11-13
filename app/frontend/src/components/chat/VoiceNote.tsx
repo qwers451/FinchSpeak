@@ -198,6 +198,33 @@ export function VoiceRecordButton(props: { disabled: boolean }) {
   let pressedX = 0;
   let holding = false;
 
+  // The button leaves the DOM as soon as recording starts, so the rest of the press is followed on
+  // the window: a release or a swipe that lands anywhere still ends it.
+  const stopFollowing = () => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onCancel);
+  };
+  const onMove = (event: PointerEvent) => {
+    if (holding && phase() === 'holding' && pressedX - event.clientX > SWIPE_CANCEL_PX) {
+      holding = false;
+      stopFollowing();
+      void cancelRecording();
+    }
+  };
+  const onUp = () => {
+    stopFollowing();
+    if (!holding) return;
+    holding = false;
+    if (phase() !== 'holding') return;
+    if (Date.now() - pressedAt >= TAP_MS) void finishRecording();
+    else setPhase('locked');
+  };
+  const onCancel = () => {
+    stopFollowing();
+    holding = false;
+    void cancelRecording();
+  };
   const onDown = (event: PointerEvent) => {
     event.preventDefault();
     if (phase() === 'locked') {
@@ -208,21 +235,10 @@ export function VoiceRecordButton(props: { disabled: boolean }) {
     holding = true;
     pressedAt = Date.now();
     pressedX = event.clientX;
-    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
     void beginRecording('holding');
-  };
-  const onMove = (event: PointerEvent) => {
-    if (holding && phase() === 'holding' && pressedX - event.clientX > SWIPE_CANCEL_PX) {
-      holding = false;
-      void cancelRecording();
-    }
-  };
-  const onUp = () => {
-    if (!holding) return;
-    holding = false;
-    if (phase() !== 'holding') return;
-    if (Date.now() - pressedAt >= TAP_MS) void finishRecording();
-    else setPhase('locked');
   };
 
   return (
@@ -234,9 +250,6 @@ export function VoiceRecordButton(props: { disabled: boolean }) {
         title={t('Hold to record a voice message')}
         disabled={props.disabled}
         onPointerDown={onDown}
-        onPointerMove={onMove}
-        onPointerUp={onUp}
-        onPointerCancel={() => { holding = false; void cancelRecording(); }}
       >
         <Icon name="mic" size="sm" />
       </button>
