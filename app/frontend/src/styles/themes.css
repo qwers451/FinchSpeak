@@ -176,7 +176,7 @@ button:disabled { cursor:not-allowed; }
 .setnav .si { font-size:13px; font-weight:500; min-height:40px; height:auto; padding:10px; }
 .setnav .si.on { background:var(--bg-hover); box-shadow:none; color:var(--text); }
 .setnav .si.on .ic { color:var(--yellow); }
-.settings-page { padding:0 4px 0 0; }
+.settings-page { padding:0 4px 0 8px; }
 .setrow { padding:16px 0; gap:14px; }
 .setrow .seg { flex:none; }
 .tbl th { font-size:10px; font-weight:550; letter-spacing:.035em; }
