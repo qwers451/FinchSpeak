@@ -45,6 +45,14 @@ impl OpusVoiceEncoder {
         Ok(())
     }
 
+    /// Current target bitrate in bit/s. Only `BitsPerSecond` is ever set here; other modes report 0.
+    pub fn bitrate_bps(&self) -> Result<i32, AudioOpusError> {
+        Ok(match self.encoder.bitrate()? {
+            Bitrate::BitsPerSecond(bps) => bps,
+            _ => 0,
+        })
+    }
+
     pub fn set_packet_loss_perc(&mut self, loss_perc: u8) -> Result<(), AudioOpusError> {
         self.encoder.set_packet_loss_perc(loss_perc)?;
         Ok(())
@@ -94,6 +102,16 @@ impl OpusVoiceDecoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bitrate_is_applied_at_creation_and_changed_in_place() {
+        let mut encoder = OpusVoiceEncoder::new(96).unwrap();
+        assert_eq!(encoder.bitrate_bps().unwrap(), 96_000);
+        encoder.set_bitrate(16).unwrap();
+        assert_eq!(encoder.bitrate_bps().unwrap(), 16_000);
+        encoder.set_bitrate(128).unwrap();
+        assert_eq!(encoder.bitrate_bps().unwrap(), 128_000);
+    }
 
     #[test]
     fn shorter_packet_clears_unused_samples_in_reused_output() {

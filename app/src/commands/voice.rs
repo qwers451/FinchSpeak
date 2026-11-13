@@ -71,6 +71,7 @@ pub async fn join_voice_channel(
 ) -> Result<(), String> {
     let ch_uuid = Uuid::parse_str(&channel_id)
         .map_err(|e| format!("Invalid channel UUID: {}", e))?;
+    let bitrate_kbps = room_bitrate_kbps(&state, short_id).await;
     let _transition = state.voice_transition.lock().await;
 
     let tx_opt = state.control_tx.read().await.clone();
@@ -98,13 +99,37 @@ pub async fn join_voice_channel(
     }
 
     // Start audio engine capture and playback
+    state.voice_bitrate_kbps.store(bitrate_kbps, Ordering::Relaxed);
     let mut engine = state.audio_engine.lock().await;
     if let Err(e) = engine.start(short_id, (*state).clone(), app_handle) {
         return Err(format!("Failed to start audio engine: {}", e));
     }
 
-    info!("Joined voice channel {} (short_id: {})", channel_id, short_id);
+    info!("Joined voice channel {} (short_id: {}, {} kbit/s)", channel_id, short_id, bitrate_kbps);
     Ok(())
+}
+
+/// The bitrate of the voice channel with this short ID, clamped. The channel list is cached when
+/// it is fetched and on `ChannelUpdated`; when a channel is not known yet, the list is fetched once.
+async fn room_bitrate_kbps(state: &AppState, short_id: u32) -> u32 {
+    if let Some(kbps) = state.channel_bitrates.read().await.get(&short_id).copied() {
+        return crate::audio_engine::voice_bitrate_kbps(Some(kbps));
+    }
+    let api = state.api.read().await.clone();
+    let Some(api) = api else {
+        return crate::audio_engine::voice_bitrate_kbps(None);
+    };
+    match api.list_channels().await {
+        Ok(channels) => {
+            super::chat::remember_channel_bitrates(state, &channels).await;
+            let cached = state.channel_bitrates.read().await.get(&short_id).copied();
+            crate::audio_engine::voice_bitrate_kbps(cached)
+        }
+        Err(e) => {
+            tracing::warn!("Could not fetch channel bitrates, using the default: {}", e);
+            crate::audio_engine::voice_bitrate_kbps(None)
+        }
+    }
 }
 
 /// Leaves the voice room: tells the server and stops our audio, share and viewing. Used by the

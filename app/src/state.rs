@@ -165,6 +165,10 @@ pub struct AppState {
     pub control_tx: Arc<RwLock<Option<mpsc::Sender<ClientMessage>>>>,
     pub session_peer_id: Arc<AtomicU32>,
     pub current_voice_channel: Arc<RwLock<Option<u32>>>,
+    /// Opus bitrate (kbit/s, already clamped) of the room we are in; the audio worker applies changes.
+    pub voice_bitrate_kbps: Arc<AtomicU32>,
+    /// Bitrate of each voice channel we have learned about, by short ID.
+    pub channel_bitrates: Arc<RwLock<std::collections::HashMap<u32, u32>>>,
     pub is_muted: Arc<AtomicBool>,
     pub is_deafened: Arc<AtomicBool>,
     pub mixer: Arc<Mutex<AudioMixer>>,
@@ -345,6 +349,8 @@ impl AppState {
             pending_update: Arc::new(tokio::sync::Mutex::new(None)),
             quitting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             mic_test_request: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            voice_bitrate_kbps: Arc::new(AtomicU32::new(crate::audio_engine::voice_bitrate_kbps(None))),
+            channel_bitrates: Arc::new(RwLock::new(std::collections::HashMap::new())),
             voice_note: Arc::new(crate::voice_note::VoiceNoteState::default()),
             token_store: Arc::new(crate::credentials::KeyringStore),
             signed_in_key: Arc::new(RwLock::new(None)),

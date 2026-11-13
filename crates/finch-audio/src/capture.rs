@@ -176,6 +176,13 @@ impl VoiceCapture {
         }
     }
 
+    /// Change the Opus bitrate (kbit/s) in place; the encoder keeps its state, so no new pipeline is needed.
+    pub fn set_bitrate_kbps(&mut self, bitrate_kbps: u32) -> Result<(), CaptureError> {
+        self.encoder.set_bitrate(bitrate_kbps)?;
+        self.config.bitrate_kbps = bitrate_kbps;
+        Ok(())
+    }
+
     /// Toggle natural speech leveling without restarting capture.
     pub fn set_voice_enhancement(&mut self, enabled: bool) -> Result<(), ProcessingError> { self.gain.set_enabled(enabled) }
 
@@ -688,6 +695,15 @@ mod tests {
         let mut frame = tone_frame(10);
         let out = capture.process(&mut frame, 1, 200).unwrap();
         assert!(!out.packets.is_empty());
+    }
+
+    #[test]
+    fn the_bitrate_can_be_changed_while_running_without_a_new_pipeline() {
+        let mut capture = VoiceCapture::new(VoiceCaptureConfig { bitrate_kbps: 96, ..VoiceCaptureConfig::default() }).unwrap();
+        assert_eq!(capture.encoder.bitrate_bps().unwrap(), 96_000);
+        capture.set_bitrate_kbps(40).unwrap();
+        assert_eq!(capture.encoder.bitrate_bps().unwrap(), 40_000);
+        assert_eq!(capture.config.bitrate_kbps, 40);
     }
 
     #[test]

@@ -244,8 +244,19 @@ impl Drop for AudioEngine {
     }
 }
 
-fn capture_config(channel_id: u32, settings: &crate::state::VoiceSettings) -> VoiceCaptureConfig {
-    VoiceCaptureConfig { channel_short_id: channel_id, voice_enhancement: settings.voice_enhancement(), vad_threshold_db: settings.vad_threshold_db(), ..Default::default() }
+/// Opus bitrate of a voice room: the channel's own setting clamped to 16-128 kbit/s, 64 when unknown.
+pub(crate) fn voice_bitrate_kbps(channel_bitrate: Option<u32>) -> u32 {
+    channel_bitrate.map_or(64, |kbps| kbps.clamp(16, 128))
+}
+
+fn capture_config(channel_id: u32, channel_bitrate: Option<u32>, settings: &crate::state::VoiceSettings) -> VoiceCaptureConfig {
+    VoiceCaptureConfig {
+        channel_short_id: channel_id,
+        bitrate_kbps: voice_bitrate_kbps(channel_bitrate),
+        voice_enhancement: settings.voice_enhancement(),
+        vad_threshold_db: settings.vad_threshold_db(),
+        ..Default::default()
+    }
 }
 
 fn effective_monitor(settings: &crate::state::VoiceSettings, mic_test_active: bool) -> bool {
@@ -728,7 +739,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 state.voice_note.tap.set_live(capture_stream.is_some());
 
                 // 3. DSP pipeline for worker thread processing
-                let mut voice_capture = match VoiceCapture::new(capture_config(channel_id, &state.voice_settings)) {
+                let bitrate_kbps = state.voice_bitrate_kbps.load(Ordering::Relaxed);
+                let mut applied_bitrate_kbps = bitrate_kbps;
+                let mut voice_capture = match VoiceCapture::new(capture_config(channel_id, Some(bitrate_kbps), &state.voice_settings)) {
                     Ok(mut capture) => { capture.set_transmit_gate(false); Some(capture) },
                     Err(e) => {
                         is_running.store(false, Ordering::SeqCst);
@@ -1088,6 +1101,15 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         continue;
                                     }
                                     capture.set_vad_threshold_db(state.voice_settings.vad_threshold_db());
+                                    // The room's bitrate can change while we are in it (an admin edit): set it in
+                                    // place on this worker thread, keeping the encoder's state.
+                                    let wanted_bitrate_kbps = state.voice_bitrate_kbps.load(Ordering::Relaxed);
+                                    if wanted_bitrate_kbps != applied_bitrate_kbps {
+                                        applied_bitrate_kbps = wanted_bitrate_kbps;
+                                        if let Err(error) = capture.set_bitrate_kbps(wanted_bitrate_kbps) {
+                                            error!("Failed to change the voice bitrate: {}", error);
+                                        }
+                                    }
                                     // Recheck after processing/configuration work; opening requires
                                     // a complete chunk proven newer than the device-clock cutoff.
                                     let frame_gate = fresh
@@ -1601,9 +1623,28 @@ mod tests {
         wanted.voice_enhancement = false;
         wanted.vad_threshold_db = -52.0;
         settings.apply(&wanted);
-        let config = capture_config(7, &settings);
+        let config = capture_config(7, Some(64), &settings);
         assert!(!config.voice_enhancement);
         assert_eq!(config.vad_threshold_db, -52.0);
         assert_eq!(config.channel_short_id, 7);
+    }
+
+    #[test]
+    fn capture_encodes_at_the_channel_bitrate_and_falls_back_to_64() {
+        let settings = crate::state::VoiceSettings::default();
+        assert_eq!(capture_config(7, Some(96), &settings).bitrate_kbps, 96);
+        assert_eq!(capture_config(7, Some(200), &settings).bitrate_kbps, 128);
+        assert_eq!(capture_config(7, None, &settings).bitrate_kbps, 64);
+    }
+
+    #[test]
+    fn voice_bitrate_is_clamped_to_16_to_128_and_defaults_to_64() {
+        assert_eq!(voice_bitrate_kbps(Some(96)), 96);
+        assert_eq!(voice_bitrate_kbps(Some(16)), 16);
+        assert_eq!(voice_bitrate_kbps(Some(128)), 128);
+        assert_eq!(voice_bitrate_kbps(Some(4)), 16);
+        assert_eq!(voice_bitrate_kbps(Some(0)), 16);
+        assert_eq!(voice_bitrate_kbps(Some(500)), 128);
+        assert_eq!(voice_bitrate_kbps(None), 64);
     }
 }
