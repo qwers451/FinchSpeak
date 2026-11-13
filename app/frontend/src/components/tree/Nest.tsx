@@ -1,4 +1,5 @@
 import { createSignal, For, Show, type JSX } from 'solid-js';
+import { createPresence } from '../../ui/motion';
 import { participantsForChannel, speakingPeers, activeVoiceChannel, joinVoice, isMuted, isLocalSpeaking } from '../../stores/voiceStore';
 import { selectChannel } from '../../stores/chatStore';
 import { localPeerId, knownUsers } from '../../stores/sessionStore';
@@ -34,6 +35,8 @@ function NestFront() {
 export function Nest(props: { channel: Channel; actions?: (channel: Channel) => JSX.Element }) {
   const [dropping, setDropping] = createSignal(false);
   const people = () => participantsForChannel(props.channel.id);
+  // One stable entry per visible bird: a bird whose data changed keeps its node; a newcomer hops in.
+  const birds = createPresence(() => people().slice(0, VISIBLE), (participant) => participant.user_id, 0);
   const someoneSpeaking = () => people().some(isSpeaking);
   const mine = () => activeVoiceChannel()?.id === props.channel.id;
   const join = () => { void selectChannel(props.channel); if (!mine()) void joinVoice(props.channel); };
@@ -83,28 +86,28 @@ export function Nest(props: { channel: Channel; actions?: (channel: Channel) => 
       <div class="nest-art">
         <svg class="nest-back" viewBox="0 0 120 62" aria-hidden="true"><ellipse class="nest-hollow" cx="60" cy="32" rx="46" ry="9" /></svg>
         <div class="nest-birds">
-          <For each={people().slice(0, VISIBLE)}>
-            {(participant) => (
+          <For each={birds()}>
+            {(bird) => { const participant = () => bird.item(); return (
               <span
-                class="nest-bird"
-                title={participant.username}
+                class={`nest-bird${bird.entering ? ' nest-bird-enter' : ''}`}
+                title={participant().username}
                 tabindex="0"
-                draggable={canDrag(participant)}
-                onDragStart={(event) => dragStart(event, participant)}
+                draggable={canDrag(participant())}
+                onDragStart={(event) => dragStart(event, participant())}
                 onDragEnd={() => setActiveVoiceDrag(null)}
-                onContextMenu={(event) => participantContextMenu(event, participant.user_id, participant)}
-                onKeyDown={(event) => participantMenuKey(event, participant.user_id, participant)}
+                onContextMenu={(event) => participantContextMenu(event, participant().user_id, participant())}
+                onKeyDown={(event) => participantMenuKey(event, participant().user_id, participant())}
               >
-                <Avatar name={participant.username} id={participant.user_id} size={32} src={knownUsers().find((user) => user.id === participant.user_id)?.avatar_url} speaking={isSpeaking(participant)} />
-                <Show when={participant.is_muted}><Icon name="mic-off" size="sm" class="nest-badge nest-muted" title={t('Muted')} /></Show>
-                <Show when={!isMeParticipant(participant, localPeerId()) && isLocallyMuted(participant.user_id)}>
+                <Avatar name={participant().username} id={participant().user_id} size={32} src={knownUsers().find((user) => user.id === participant().user_id)?.avatar_url} speaking={isSpeaking(participant())} />
+                <Show when={participant().is_muted}><Icon name="mic-off" size="sm" class="nest-badge nest-muted" title={t('Muted')} /></Show>
+                <Show when={!isMeParticipant(participant(), localPeerId()) && isLocallyMuted(participant().user_id)}>
                   <Icon name="vol-off" size="sm" class="nest-badge nest-local-mute" title={t('You muted this person')} />
                 </Show>
-                <Show when={gameOf(participant.user_id)}>
+                <Show when={gameOf(participant().user_id)}>
                   {(game) => <Icon name="gamepad" size="sm" class="nest-badge nest-game" title={t('Playing {game}', { game: game() })} />}
                 </Show>
               </span>
-            )}
+            ); }}
           </For>
           <Show when={people().length > VISIBLE}><span class="nest-more">+{people().length - VISIBLE}</span></Show>
         </div>

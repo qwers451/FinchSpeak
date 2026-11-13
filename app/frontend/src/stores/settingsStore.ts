@@ -1,5 +1,6 @@
 import { createEffect, createRoot, createSignal } from 'solid-js';
 import { BULLFINCH_COLORS, DEFAULT_THEME_COLORS, isLightTheme, parseThemeColors, THEME_VARIABLE_NAMES, themeVariables, type ThemeColors } from './themeColors';
+import { canRevealTheme, revealTheme } from '../ui/motion';
 
 // Settings that live on this computer only: notifications, looks.
 
@@ -212,21 +213,29 @@ export function applyAppearance(appearance: AppearancePrefs, root: HTMLElement =
   const colors = painted ? JSON.stringify(palette) : null;
   const firstPaint = !root.dataset.theme;
   const changed = root.dataset.theme !== appearance.theme || colors !== paintedColors;
-  if (changed && !firstPaint) blendColors(root, appearance);
+  const switched = root.dataset.theme !== appearance.theme;
   paintedColors = colors;
-  if (painted) {
-    for (const [name, value] of Object.entries(themeVariables(palette))) root.style.setProperty(name, value);
-    root.style.colorScheme = isLightTheme(palette) ? 'light' : 'dark';
-  } else {
-    for (const name of THEME_VARIABLE_NAMES) root.style.removeProperty(name);
-    root.style.removeProperty('color-scheme');
+  const paint = () => {
+    if (painted) {
+      for (const [name, value] of Object.entries(themeVariables(palette))) root.style.setProperty(name, value);
+      root.style.colorScheme = isLightTheme(palette) ? 'light' : 'dark';
+    } else {
+      for (const name of THEME_VARIABLE_NAMES) root.style.removeProperty(name);
+      root.style.removeProperty('color-scheme');
+    }
+    root.dataset.theme = appearance.theme;
+    root.lang = appearance.language;
+    root.dataset.density = appearance.density;
+    root.dataset.reduceMotion = String(appearance.reduceMotion);
+    root.dataset.speakingStyle = appearance.speakingStyle;
+    root.style.setProperty('--zoom', String(TEXT_ZOOM[appearance.textSize]));
+  };
+  // Switching the theme opens the new one as a circle from the click point; other changes blend colors.
+  if (changed && !firstPaint && switched && canRevealTheme(appearance.reduceMotion)) revealTheme(paint, appearance.reduceMotion);
+  else {
+    if (changed && !firstPaint) blendColors(root, appearance);
+    paint();
   }
-  root.dataset.theme = appearance.theme;
-  root.lang = appearance.language;
-  root.dataset.density = appearance.density;
-  root.dataset.reduceMotion = String(appearance.reduceMotion);
-  root.dataset.speakingStyle = appearance.speakingStyle;
-  root.style.setProperty('--zoom', String(TEXT_ZOOM[appearance.textSize]));
 }
 
 // Remember changes and apply the looks, for the life of the app.

@@ -131,3 +131,72 @@ input.range:active:not(:disabled)::-moz-range-thumb { transform:scale(1.15); }
   .range-control:hover:not([data-disabled]) .range-value { opacity:1; transform:translateX(-50%); }
 }
 .toast[data-exiting="true"] { opacity:0; transform:translateX(12px); pointer-events:none; transition-duration:var(--motion-exit); transition-timing-function:var(--ease-in); }
+
+/* ---- Living motion (Task 13a). Tokens mirror ui/motion.ts. Every animation here is switched off by the
+   reduce-motion blocks above (`*` rules) and, where it is set by script, by ui/motion.ts. ---- */
+:root { --ease-spring:cubic-bezier(.34,1.56,.64,1); --motion-base:180ms; --motion-pop:240ms; --motion-reveal:260ms; --motion-swap:140ms; --motion-stagger:30ms; }
+
+/* 1. Chat: a new message rises 8 px and fades in; our own grows from 0.98. A wave staggers the last messages. */
+.msg.msg-enter { animation:msg-in var(--motion-base) var(--ease-out) both; animation-delay:calc(var(--i, 0) * var(--motion-stagger)); }
+.msg.msg-enter.own { animation-name:msg-in-own; }
+@keyframes msg-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+@keyframes msg-in-own { from { opacity:0; transform:scale(.98); } to { opacity:1; transform:none; } }
+.message-list .skel.pulse { animation-delay:calc(var(--i, 0) * var(--motion-stagger)); }
+/* Counters that roll and pop (scripted in ui/Rolling.tsx and ui/motion.ts). */
+.rolling, .badge, .react { transform-origin:center; }
+.rolling { display:inline-block; }
+
+/* 3. Voice room: a joiner grows from 0.9; a leaver shrinks and fades (kept in the DOM for 140 ms). */
+.vc.vc-enter { animation:tile-in var(--motion-enter) var(--ease-out) both; }
+.vc.vc-leave { animation:tile-out var(--motion-exit) var(--ease-in) both; pointer-events:none; }
+@keyframes tile-in { from { opacity:0; transform:scale(.9); } to { opacity:1; transform:none; } }
+@keyframes tile-out { to { opacity:0; transform:scale(.9); } }
+
+/* 4. Dock: the icon turns in when the state changes; a press shrinks to 0.96 and springs back. */
+.ctl-ico { display:inline-flex; animation:icon-turn var(--motion-swap) var(--ease-out) both; }
+@keyframes icon-turn { from { opacity:0; transform:rotate(-30deg) scale(.8); } to { opacity:1; transform:none; } }
+.dock .ctl { transition:transform var(--motion-base) var(--ease-spring), opacity var(--motion-small) var(--ease-out); }
+.dock .ctl:active:not(:disabled) { transform:scale(.96); transition-duration:var(--motion-small); transition-timing-function:var(--ease-out); }
+
+/* 6. Cards and toasts: entries spring in from the corner; the call card has a strip of its 30 seconds. */
+.toast { transition:opacity var(--motion-enter) var(--ease-out), transform var(--motion-enter) var(--ease-spring); }
+.toast[data-exiting="true"] { transition-timing-function:var(--ease-in); }
+.flock-card.flock-enter { animation:card-in var(--motion-enter) var(--ease-spring) both; }
+@keyframes card-in { from { opacity:0; transform:translate(-14px, 14px) scale(.96); } to { opacity:1; transform:none; } }
+.flock-timer { display:block; position:relative; height:3px; border-radius:3px; overflow:hidden; background:color-mix(in srgb, var(--cyan) 22%, transparent); }
+.flock-timer::after { content:""; position:absolute; inset:0; background:var(--cyan); transform-origin:left center; animation:flock-drain 30s linear forwards; }
+@keyframes flock-drain { from { transform:scaleX(1); } to { transform:scaleX(0); } }
+
+/* 7. Soundboard: a ring from the press point; the name of who played floats above their tile. */
+.soundboard-play { position:relative; overflow:hidden; }
+.ripple-dot { position:absolute; width:120px; height:120px; border-radius:50%; background:color-mix(in srgb, var(--cyan) 35%, transparent); pointer-events:none; }
+.vc .sb-said { position:absolute; top:6px; left:50%; z-index:3; padding:2px 8px; border-radius:999px; border:1px solid var(--line); background:var(--bg-card); color:var(--text); font-size:12px; line-height:18px; white-space:nowrap; pointer-events:none; animation:said-float 1.2s var(--ease-out) both; }
+@keyframes said-float { 0% { opacity:0; transform:translate(-50%, 6px); } 15% { opacity:1; transform:translate(-50%, 0); } 75% { opacity:1; transform:translate(-50%, -4px); } 100% { opacity:0; transform:translate(-50%, -14px); } }
+
+/* 8. The living bird (ui/FinchBird.tsx): whole-bird sway, eye blink, waves pulsing one after another. */
+.finch-bird { display:block; overflow:visible; transform-origin:40% 91%; }
+html:not([data-reduce-motion="true"]) .finch-bird { animation:bird-sway 4s ease-in-out infinite; }
+html:not([data-reduce-motion="true"]) .finch-bird .bird-eye { transform-box:fill-box; transform-origin:center; animation:bird-blink 5s ease-in-out infinite; }
+html:not([data-reduce-motion="true"]) .finch-bird .bird-wave { animation:bird-wave 1.2s ease-in-out infinite; }
+html:not([data-reduce-motion="true"]) .finch-bird .bird-wave + .bird-wave { animation-delay:200ms; }
+@keyframes bird-sway { 0%, 100% { transform:rotate(-2deg); } 50% { transform:rotate(2deg); } }
+@keyframes bird-blink { 0%, 96% { transform:scaleY(1); } 97.2% { transform:scaleY(.1); } 98.4%, 100% { transform:scaleY(1); } }
+@keyframes bird-wave { 0%, 100% { opacity:.35; } 50% { opacity:1; } }
+
+/* 9. Theme reveal: the new theme opens as a circle from the last click (View Transitions API). */
+::view-transition-old(root), ::view-transition-new(root) { animation:none; mix-blend-mode:normal; }
+::view-transition-new(root) { animation:theme-reveal var(--motion-reveal) var(--ease-out) both; }
+@keyframes theme-reveal { from { clip-path:circle(0px at var(--reveal-x, 50%) var(--reveal-y, 50%)); } to { clip-path:circle(150vmax at var(--reveal-x, 50%) var(--reveal-y, 50%)); } }
+html[data-reduce-motion="true"] ::view-transition-new(root) { animation:none; }
+@media (prefers-reduced-motion:reduce) { ::view-transition-new(root) { animation:none; } }
+
+/* 10. Finch mode: a nest sways on its branch under the pointer; an arriving bird hops into it. */
+.nest { transform-origin:50% 0; }
+@media (hover:hover) and (pointer:fine) { .nest:hover { animation:nest-sway var(--motion-reveal) ease-in-out; } }
+@keyframes nest-sway { 0% { transform:rotate(0); } 30% { transform:rotate(1.2deg); } 65% { transform:rotate(-.8deg); } 100% { transform:rotate(0); } }
+.nest-bird.nest-bird-enter { animation:bird-hop var(--motion-enter) var(--ease-spring) both; }
+@keyframes bird-hop { from { opacity:0; transform:translateY(-14px) scale(.8); } to { opacity:1; transform:none; } }
+
+/* 11. Server health: the sparkline draws from left to right when the view opens (dash offset is the exception). */
+.spark polyline { stroke-dasharray:1; stroke-dashoffset:0; animation:spark-draw var(--motion-reveal) ease-out both; }
+@keyframes spark-draw { from { stroke-dashoffset:1; } to { stroke-dashoffset:0; } }

@@ -9,3 +9,7 @@ export { Modal, ConfirmDialog } from './Modal';
 export { ToastHost } from './ToastHost';
 export { Titlebar } from './Titlebar';
 export { pushToast, dismissToast, clearToasts, toasts, MAX_TOASTS } from './toastStore';
+export { FinchBird } from './FinchBird';
+export { Rolling } from './Rolling';
+export { Badge } from './Badge';
+export { animateLayout, createPresence, popIn, rippleAt, revealTheme, canRevealTheme, prefersReducedMotion, staggerDelay, MOTION, EASE, type PresenceEntry } from './motion';

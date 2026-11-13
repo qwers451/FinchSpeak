@@ -1,4 +1,4 @@
-import { Show } from 'solid-js';
+import { For, Show } from 'solid-js';
 import { prefs } from '../../stores/settingsStore';
 import { isSharing, stopSharing } from '../../stores/screenStore';
 import { musicAvailable, musicPanelOpen, musicState, setMusicPanelOpen } from '../../stores/musicStore';
@@ -13,7 +13,8 @@ type CtlProps = { label: string; icon: IconName; class?: string; pressed?: boole
 function Ctl(props: CtlProps) {
   return (
     <button type="button" class={`ctl${props.class ? ` ${props.class}` : ''}`} aria-label={props.label} title={props.label} aria-pressed={props.pressed} onClick={props.onClick}>
-      <Icon name={props.icon} size="lg" />
+      {/* A new icon turns in when the state changes; the same icon is not rebuilt on re-render. */}
+      <For each={[props.icon]}>{(icon) => <span class="ctl-ico" aria-hidden="true"><Icon name={icon} size="lg" /></span>}</For>
     </button>
   );
 }

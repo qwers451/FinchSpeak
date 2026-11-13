@@ -36,6 +36,9 @@ export function setSoundboardHidden(hidden: boolean) {
 /** Whether the soundboard panel is open in the voice room. */
 export const [soundboardOpen, setSoundboardOpen] = createSignal(false);
 
+/** The latest sound played in the room, and who played it: the tile of that person shows their name for a moment. */
+export const [lastSound, setLastSound] = createSignal<{ userId: string; at: number } | null>(null);
+
 /** The server announces the soundboard only when it is switched on. */
 export const soundboardAvailable = (): boolean => serverFeatures().includes('soundboard');
 
@@ -96,6 +99,7 @@ async function playCached(soundId: string, volume: number): Promise<void> {
 
 /** Someone played a sound in my room. Each client plays it itself, at my own soundboard volume. */
 export function handleSoundPlayed(event: { sound_id: string; user_id: string }): void {
+  setLastSound({ userId: event.user_id, at: Date.now() });
   if (soundboardHidden() || isDeafened() || isLocallyMuted(event.user_id)) return;
   const volume = volumeFor(SOUNDBOARD_VOLUME_KEY);
   if (volume <= 0) return;

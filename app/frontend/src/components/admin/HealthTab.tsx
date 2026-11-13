@@ -1,5 +1,6 @@
 import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { api } from '../../services/api';
+import { Rolling } from '../../ui/Rolling';
 import type { HealthSample, ServerHealth } from '../../types';
 import { formatBytes, formatDuration, t } from '../../i18n';
 
@@ -31,10 +32,10 @@ function Tile(props: { label: string; value: string; series?: number[] }) {
   return (
     <div class="card stat health-tile">
       <span class="t3 fs12">{props.label}</span>
-      <strong>{props.value}</strong>
+      <strong><Rolling value={props.value} /></strong>
       <Show when={props.series && props.series.length > 1}>
         <svg class="spark" viewBox="0 0 120 32" preserveAspectRatio="none" aria-hidden="true">
-          <polyline points={sparkPoints(props.series ?? [])} />
+          <polyline pathLength="1" points={sparkPoints(props.series ?? [])} />
         </svg>
       </Show>
     </div>

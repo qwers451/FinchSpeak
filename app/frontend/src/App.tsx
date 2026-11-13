@@ -1,3 +1,4 @@
+import { FinchBird } from './ui/FinchBird';
 import { createEffect, createMemo, createSignal, onMount, onCleanup, Show } from 'solid-js';
 import { currentUser, setCurrentUser, resumeLastSession, resuming } from './stores/authStore';
 import { activeChannel, loadChannels } from './stores/chatStore';
@@ -92,7 +93,7 @@ export function App() {
             <Sidebar />
             <Show when={activeChannel()} fallback={
               <div class="splash" style={{ background: 'var(--bg-app)' }}>
-                <img src="/custom/assets/brand/finchspeak-tile.svg" alt="" width="260" />
+                <FinchBird size={260} />
                 <h2>{t('Welcome to FinchSpeak')}</h2>
                 <p class="t2">{t('Pick a channel on the left to start chatting or talking.')}</p>
               </div>

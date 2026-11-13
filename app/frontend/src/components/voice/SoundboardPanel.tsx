@@ -5,6 +5,7 @@ import { setAppError } from '../../stores/notificationStore';
 import { setVolume, SOUNDBOARD_VOLUME_KEY, volumeFor } from '../../stores/volumeStore';
 import type { SoundInfo } from '../../types';
 import { Button, Icon, Modal, Slider, Toggle } from '../../ui';
+import { rippleFromEvent } from '../../ui/motion';
 import { t } from '../../i18n';
 
 const NAME_MAX = 32;
@@ -69,7 +70,7 @@ export function SoundboardPanel() {
           <For each={shown()} fallback={<p class="t3 fs12">{boardSounds().length ? t('Nothing found') : t('No sounds yet')}</p>}>
             {(sound) => (
               <div class="soundboard-tile">
-                <button type="button" class="soundboard-play" title={sound.name} onClick={() => void playBoardSound(sound.id)}>
+                <button type="button" class="soundboard-play" title={sound.name} onClick={(event) => { rippleFromEvent(event); void playBoardSound(sound.id); }}>
                   <span aria-hidden="true">{sound.emoji ?? '♪'}</span>
                   <span class="trunc">{sound.name}</span>
                 </button>

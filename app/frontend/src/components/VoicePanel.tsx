@@ -1,8 +1,9 @@
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
 import { endedShare, watching } from '../stores/screenStore';
 import { localPeerId, serverFeatures } from '../stores/sessionStore';
 import { activeVoiceChannel, pingRtt, speakingPeers, voiceParticipants } from '../stores/voiceStore';
 import { Avatar, Button, Icon, Modal } from '../ui';
+import { animateLayout, createPresence, MOTION, prefersReducedMotion } from '../ui/motion';
 import { channels } from '../stores/chatStore';
 import { callFlock } from '../stores/flockStore';
 import { openContextMenu, type MenuItem } from '../ui/ContextMenu';
@@ -36,6 +37,11 @@ export function VoicePanel() {
   const [picker, setPicker] = createSignal(false);
   const [settings, setSettings] = createSignal(false);
   const arranged = createMemo(() => arrange(voiceParticipants(), localPeerId(), speakingPeers(), tileOrder()));
+  // Tiles keep their node per person; a leaving person stays for the exit animation.
+  const tilePresence = createPresence(() => arranged().grid, (participant) => participant.user_id, prefersReducedMotion() ? 0 : MOTION.exit);
+  let gridEl: HTMLDivElement | undefined;
+  // Someone joined, left or moved: the other tiles glide to their new places.
+  createEffect(on(() => tilePresence().map((entry) => entry.key).join('|'), () => { if (gridEl) animateLayout(gridEl); }, { defer: true }));
   const tiles = () => arranged().grid.length;
   const ping = () => pingLabel(pingRtt());
   const showViewer = () => !!watching() || !!endedShare();
@@ -98,13 +104,14 @@ export function VoicePanel() {
         <Show when={tiles() > 0} fallback={<div class="col center grow t2">{t('Nobody is here yet.')}</div>}>
           <div
             class={`room-grid${showViewer() ? ' compact' : ''}`}
+            ref={gridEl}
             style={{ '--rows': showViewer() ? 1 : gridRows(tiles()), 'grid-template-columns': `repeat(${showViewer() ? Math.min(6, Math.max(3, tiles())) : gridColumns(tiles())}, minmax(0, 1fr))`, 'grid-template-rows': showViewer() ? 'auto' : `repeat(${gridRows(tiles())}, minmax(0, 1fr))` }}
             role="list"
             aria-label={t('People in the room')}
           >
-            <For each={arranged().grid}>
-              {(participant) => (
-                <ParticipantTile participant={participant} isMe={isMeParticipant(participant, localPeerId())} avatarSize={showViewer() ? 56 : avatarSizeFor(tiles())} />
+            <For each={tilePresence()}>
+              {(entry) => (
+                <ParticipantTile participant={entry.item()} entering={entry.entering} leaving={entry.leaving()} isMe={isMeParticipant(entry.item(), localPeerId())} avatarSize={showViewer() ? 56 : avatarSizeFor(tiles())} />
               )}
             </For>
           </div>
