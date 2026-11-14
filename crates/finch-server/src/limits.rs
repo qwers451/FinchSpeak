@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 
+use finch_protocol::media::MAX_KEYFRAME_BYTES;
+
 use crate::config::LimitsConfig;
 
 const MAX_LOGIN_KEYS: usize = 10_000;
@@ -100,10 +102,14 @@ impl WindowLimiter {
     }
 }
 
-/// Media one participant may send: a token bucket over bytes and one over datagrams.
+/// Media one participant may send, in independent token buckets.
 ///
-/// Pure: the caller passes the clock, so tests drive time directly. A datagram passes only when
-/// both buckets have room, and a refused datagram takes nothing from either bucket.
+/// Datagrams (voice, screen deltas) are charged to the bytes and datagrams buckets. Keyframes,
+/// which arrive on uni-streams, are charged to their own bytes bucket, whose burst is one maximum
+/// keyframe: a keyframe never delays datagrams, and datagrams never delay a keyframe.
+///
+/// Pure: the caller passes the clock, so tests drive time directly. A refused message takes
+/// nothing from any bucket.
 pub struct MediaRateLimiter {
     bytes_per_sec: f64,
     burst_bytes: f64,
@@ -111,14 +117,18 @@ pub struct MediaRateLimiter {
     packets_per_sec: f64,
     burst_packets: f64,
     packets: f64,
+    keyframe_bytes_per_sec: f64,
+    keyframe_burst: f64,
+    keyframe_bytes: f64,
     last: Instant,
 }
 
 impl MediaRateLimiter {
-    /// A full bucket: a new participant may send one burst at once.
+    /// Full buckets: a new participant may send one burst at once.
     pub fn new(limits: &LimitsConfig, now: Instant) -> Self {
         let burst_bytes = limits.media_burst_bytes as f64;
         let burst_packets = limits.media_packets_per_sec as f64;
+        let keyframe_burst = MAX_KEYFRAME_BYTES as f64;
         Self {
             bytes_per_sec: limits.media_bytes_per_sec as f64,
             burst_bytes,
@@ -126,25 +136,41 @@ impl MediaRateLimiter {
             packets_per_sec: burst_packets,
             burst_packets,
             packets: burst_packets,
+            keyframe_bytes_per_sec: limits.media_keyframe_bytes_per_sec as f64,
+            keyframe_burst,
+            keyframe_bytes: keyframe_burst,
             last: now,
         }
     }
 
-    /// Charge one datagram of `bytes`. `false` when it is over the limit (nothing is taken then).
-    pub fn allow(&mut self, now: Instant, bytes: usize) -> bool {
+    fn refill(&mut self, now: Instant) {
         // A clock that goes back refills nothing and is not an error.
         if now > self.last {
             let elapsed = now.duration_since(self.last).as_secs_f64();
             self.bytes = (self.bytes + elapsed * self.bytes_per_sec).min(self.burst_bytes);
             self.packets = (self.packets + elapsed * self.packets_per_sec).min(self.burst_packets);
+            self.keyframe_bytes =
+                (self.keyframe_bytes + elapsed * self.keyframe_bytes_per_sec).min(self.keyframe_burst);
             self.last = now;
         }
+    }
+
+    /// Charge one keyframe of `bytes` to the keyframe bucket. `false` when it is over the limit.
+    pub fn allow_keyframe(&mut self, now: Instant, bytes: usize) -> bool {
+        self.refill(now);
         let bytes = bytes as f64;
-        // A message larger than the burst could never fit whole. It needs a full bucket and then runs
-        // the bucket into debt, which later traffic waits out: the long-run rate still holds, and the
-        // debt is never more than one message (a keyframe is bounded by the reader's size cap).
-        let needed = bytes.min(self.burst_bytes);
-        if self.bytes < needed || self.packets < 1.0 {
+        if self.keyframe_bytes < bytes {
+            return false;
+        }
+        self.keyframe_bytes -= bytes;
+        true
+    }
+
+    /// Charge one datagram of `bytes`. `false` when it is over the limit (nothing is taken then).
+    pub fn allow(&mut self, now: Instant, bytes: usize) -> bool {
+        self.refill(now);
+        let bytes = bytes as f64;
+        if self.bytes < bytes || self.packets < 1.0 {
             return false;
         }
         self.bytes -= bytes;
@@ -251,25 +277,33 @@ mod tests {
     }
 
     #[test]
-    fn an_oversized_message_passes_on_a_full_bucket_then_waits_out_its_debt() {
+    fn keyframes_have_their_own_bucket_that_datagrams_do_not_touch() {
         let t0 = Instant::now();
         let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
-        let idle = t0 + Duration::from_secs(60);
-        // A 3 MB keyframe is larger than the 256 KB burst: it passes on a full bucket.
-        assert!(bucket.allow(idle, 3_000_000), "an oversized message is not refused forever");
-        assert!(!bucket.allow(idle, 1), "the bucket is now in debt for that message");
-        // The debt (about 2.7 MB) takes about 1.8 s to refill at 1.5 MB/s.
-        assert!(!bucket.allow(idle + Duration::from_secs(1), 1));
-        assert!(bucket.allow(idle + Duration::from_millis(2500), 1));
+        assert!(bucket.allow(t0, 262_144), "a full datagram burst");
+        assert!(!bucket.allow(t0, 1), "datagrams are out");
+        assert!(bucket.allow_keyframe(t0, 3_000_000), "a keyframe still has its own budget");
     }
 
     #[test]
-    fn an_oversized_message_on_a_part_full_bucket_is_refused() {
+    fn a_keyframe_is_admitted_up_to_a_full_max_keyframe_then_refills_at_its_rate() {
         let t0 = Instant::now();
         let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
-        assert!(bucket.allow(t0, 200_000));
-        // 100 ms refills 150 000 bytes: 250 000 is short of a full burst, so the keyframe waits.
-        assert!(!bucket.allow(t0 + Duration::from_millis(100), 3_000_000));
+        assert!(bucket.allow_keyframe(t0, MAX_KEYFRAME_BYTES), "one maximum keyframe on a full bucket");
+        assert!(!bucket.allow_keyframe(t0, 1), "nothing is left in the same instant");
+        // The default keyframe rate is 1 MB/s.
+        let later = t0 + Duration::from_secs(1);
+        assert!(bucket.allow_keyframe(later, 1_000_000));
+        assert!(!bucket.allow_keyframe(later, 1));
+    }
+
+    #[test]
+    fn a_refused_keyframe_takes_nothing_from_the_keyframe_bucket() {
+        let t0 = Instant::now();
+        let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
+        assert!(bucket.allow_keyframe(t0, MAX_KEYFRAME_BYTES - 500_000));
+        assert!(!bucket.allow_keyframe(t0, 1_000_000), "only 500 000 bytes are left");
+        assert!(bucket.allow_keyframe(t0, 500_000), "and the refusal did not take them");
     }
 
     #[test]

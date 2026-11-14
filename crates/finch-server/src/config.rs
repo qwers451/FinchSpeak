@@ -40,11 +40,18 @@ pub struct LimitsConfig {
     pub media_burst_bytes: u64,
     /// Media datagrams one participant may send per second (the burst is one second's worth).
     pub media_packets_per_sec: u64,
+    /// Keyframe bytes one participant may send per second. The burst is one maximum keyframe.
+    pub media_keyframe_bytes_per_sec: u64,
 }
 
 impl Default for LimitsConfig {
     fn default() -> Self {
-        Self { media_bytes_per_sec: 1_500_000, media_burst_bytes: 262_144, media_packets_per_sec: 2000 }
+        Self {
+            media_bytes_per_sec: 1_500_000,
+            media_burst_bytes: 262_144,
+            media_packets_per_sec: 2000,
+            media_keyframe_bytes_per_sec: 1_000_000,
+        }
     }
 }
 
@@ -65,6 +72,10 @@ impl LimitsConfig {
         if self.media_packets_per_sec < 1 {
             tracing::warn!("[limits] media_packets_per_sec is 0; using 1");
             self.media_packets_per_sec = 1;
+        }
+        if self.media_keyframe_bytes_per_sec < 1 {
+            tracing::warn!("[limits] media_keyframe_bytes_per_sec is 0; using 1");
+            self.media_keyframe_bytes_per_sec = 1;
         }
         self
     }
@@ -478,11 +489,19 @@ mod tests {
 
     #[test]
     fn implausible_limits_are_clamped_to_usable_values() {
-        let clamped = LimitsConfig { media_bytes_per_sec: 1000, media_burst_bytes: 0, media_packets_per_sec: 0 }.validated();
+        let clamped = LimitsConfig {
+            media_bytes_per_sec: 1000,
+            media_burst_bytes: 0,
+            media_packets_per_sec: 0,
+            media_keyframe_bytes_per_sec: 0,
+        }
+        .validated();
         assert_eq!(clamped.media_burst_bytes, MIN_MEDIA_BURST_BYTES);
         assert_eq!(clamped.media_packets_per_sec, 1);
+        assert_eq!(clamped.media_keyframe_bytes_per_sec, 1);
         assert_eq!(clamped.media_bytes_per_sec, 1000, "other values are kept as configured");
         assert_eq!(LimitsConfig::default().validated().media_burst_bytes, 262_144);
+        assert_eq!(LimitsConfig::default().media_keyframe_bytes_per_sec, 1_000_000);
     }
 
     #[test]

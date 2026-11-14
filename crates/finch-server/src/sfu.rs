@@ -24,6 +24,14 @@ fn forward_datagram(connection: &quinn::Connection, datagram: Bytes) {
     }
 }
 
+/// Charge a keyframe to a participant's keyframe bucket; `false` when it is over the limit.
+fn admit_keyframe(budget: &Mutex<MediaRateLimiter>, bytes: usize) -> bool {
+    budget
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .allow_keyframe(Instant::now(), bytes)
+}
+
 /// Charge `bytes` to a participant's media budget; `false` when it is over the limit.
 fn admit(budget: &Mutex<MediaRateLimiter>, bytes: usize) -> bool {
     budget
@@ -139,7 +147,8 @@ impl SfuRouter {
     }
 
     /// Forward an IDR keyframe received on a Uni-Stream to all subscribed viewers. The keyframe is
-    /// charged to the sender's media budget like any datagram: it is larger, so it weighs more.
+    /// charged to the sender's keyframe bucket, and only when somebody is watching: nothing sent,
+    /// nothing charged. Datagram budgets are not touched.
     pub async fn route_uni_keyframe(
         &self,
         channel_id: u32,
@@ -154,16 +163,16 @@ impl SfuRouter {
                 return;
             }
         };
-        if !admit(&budget, MEDIA_HEADER_SIZE + payload.len()) {
-            TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
-            return;
-        }
         let room = match self.sessions.voice_rooms.get(&channel_id) {
             Some(r) => r,
             None => return,
         };
 
-        if let Some(viewers) = room.screen_subscribers.get(&auth_peer_id) {
+        if let Some(viewers) = room.screen_subscribers.get(&auth_peer_id).filter(|viewers| !viewers.is_empty()) {
+            if !admit_keyframe(&budget, MEDIA_HEADER_SIZE + payload.len()) {
+                TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
             let mut stamped_header = *header;
             stamped_header.sender_peer_id = auth_peer_id;
             let header_bytes = stamped_header.to_bytes();

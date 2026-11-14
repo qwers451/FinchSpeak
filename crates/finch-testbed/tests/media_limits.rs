@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use finch_client_core::session::SessionEvent;
-use finch_protocol::media::{MediaHeader, MEDIA_HEADER_SIZE};
+use finch_protocol::media::{MediaHeader, MAX_KEYFRAME_BYTES, MEDIA_HEADER_SIZE};
 use finch_protocol::messages::ClientMessage;
 use finch_protocol::models::VideoCodec;
 use finch_screen::slice_p_frame;
@@ -20,6 +20,7 @@ static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const FPS: u64 = 60;
 const LIMIT_BYTES_PER_SEC: f64 = 1_500_000.0;
 const LIMIT_BURST_BYTES: f64 = 262_144.0;
+const LIMIT_KEYFRAME_BYTES_PER_SEC: f64 = 1_000_000.0;
 
 fn dropped() -> u64 {
     TRAFFIC.datagrams_dropped.load(Ordering::Relaxed)
@@ -151,16 +152,16 @@ async fn keyframe_flood_on_uni_streams_is_capped_like_datagrams() -> anyhow::Res
     let server = TestServer::start().await?;
     let (a, mut b, voice_short) = streamer_and_viewer(&server).await?;
     let a_peer = a.session.session_peer_id;
-    let keyframe = vec![0x5a_u8; 64 * 1024];
+    let keyframe = vec![0x5a_u8; 1024 * 1024];
     let dropped_before = dropped();
 
-    // 5 MB/s of keyframes for 2 s, one 64 KB stream after another.
+    // 5 MB/s of 1 MB keyframes for 6 s: more than the keyframe burst can hold.
     let started = Instant::now();
     let mut sent_bytes = 0u64;
     let mut received_bytes = 0u64;
     let mut index = 0u64;
-    while started.elapsed() < Duration::from_secs(2) {
-        let target = started.elapsed().as_secs_f64() * LIMIT_BYTES_PER_SEC * (5.0 / 1.5);
+    while started.elapsed() < Duration::from_secs(6) {
+        let target = started.elapsed().as_secs_f64() * 5_000_000.0;
         while (sent_bytes as f64) < target {
             let header = MediaHeader::new_video_key(voice_short, a_peer, index as u16, (index * 33) as u32, index as u16, false);
             a.session.send_keyframe(&header, &keyframe).await?;
@@ -173,12 +174,100 @@ async fn keyframe_flood_on_uni_streams_is_capped_like_datagrams() -> anyhow::Res
     received_bytes += keyframe_bytes(&mut b).await;
     let elapsed = started.elapsed().as_secs_f64();
 
-    let cap = LIMIT_BYTES_PER_SEC * elapsed + LIMIT_BURST_BYTES + 2.0 * (keyframe.len() + MEDIA_HEADER_SIZE) as f64;
+    // Keyframe rate plus one maximum keyframe as burst, with a little slack for the last keyframes.
+    let cap = LIMIT_KEYFRAME_BYTES_PER_SEC * elapsed + MAX_KEYFRAME_BYTES as f64 + 2.0 * (keyframe.len() + MEDIA_HEADER_SIZE) as f64;
     assert!(
         (received_bytes as f64) <= cap,
         "receiver got {received_bytes} bytes of keyframes in {elapsed:.2} s, the limit allows about {cap:.0}"
     );
     assert!(dropped() > dropped_before, "refused keyframes are not counted in datagrams_dropped");
+    Ok(())
+}
+
+/// What a receiver got in one pump: datagrams (voice and screen deltas) and keyframe streams.
+#[derive(Default)]
+struct Received {
+    datagrams: usize,
+    keyframe_bytes: u64,
+}
+
+/// Collect every event until the receiver is idle for `idle`.
+async fn pump(receiver: &mut TestClient, idle: Duration, into: &mut Received) {
+    while let Ok(event) = receiver.next_event(idle).await {
+        match event {
+            SessionEvent::Datagram(_) => into.datagrams += 1,
+            SessionEvent::UniStream { payload, .. } => into.keyframe_bytes += (payload.len() + MEDIA_HEADER_SIZE) as u64,
+            _ => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_3_mb_keyframe_does_not_stall_the_datagrams_after_it() -> anyhow::Result<()> {
+    let _serial = SERIAL.lock().await;
+    let server = TestServer::start().await?;
+    let (a, mut b, voice_short) = streamer_and_viewer(&server).await?;
+    let a_peer = a.session.session_peer_id;
+    let dropped_before = dropped();
+
+    // A 3 MB keyframe, then voice and screen deltas straight after it.
+    let keyframe = vec![0x33_u8; 3 * 1024 * 1024];
+    a.session.send_keyframe(&MediaHeader::new_video_key(voice_short, a_peer, 0, 1000, 7, false), &keyframe).await?;
+    let mut sent = 0usize;
+    for seq in 0..20u16 {
+        a.session.send_datagram(audio_datagram(voice_short, a_peer, seq, 100))?;
+        sent += 1;
+    }
+    for packet in slice_p_frame(voice_short, a_peer, 100, 8, 2000, &vec![0x44_u8; 6000], false) {
+        a.session.send_datagram(packet.encode())?;
+        sent += 1;
+    }
+
+    let mut received = Received::default();
+    pump(&mut b, Duration::from_secs(1), &mut received).await;
+    assert_eq!(received.keyframe_bytes, (keyframe.len() + MEDIA_HEADER_SIZE) as u64, "the keyframe was not forwarded");
+    assert_eq!(received.datagrams, sent, "datagrams after a large keyframe were lost");
+    assert_eq!(dropped(), dropped_before, "the keyframe delayed or dropped the datagrams");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_1_mb_keyframe_is_admitted_while_a_7_mbit_share_runs() -> anyhow::Result<()> {
+    let _serial = SERIAL.lock().await;
+    let server = TestServer::start().await?;
+    let (a, mut b, voice_short) = streamer_and_viewer(&server).await?;
+    let a_peer = a.session.session_peer_id;
+    let frame: Vec<u8> = (0..14_583).map(|i| (i % 251) as u8).collect();
+    let keyframe = vec![0x55_u8; 1024 * 1024];
+    let dropped_before = dropped();
+
+    // 2 s of 7 Mbit/s screen deltas at 60 FPS, with a 1 MB keyframe in the middle.
+    let started = Instant::now();
+    let mut sent = 0usize;
+    let mut received = Received::default();
+    for index in 0..120u64 {
+        let due = started + Duration::from_micros(index * 1_000_000 / FPS);
+        while Instant::now() < due {
+            pump(&mut b, Duration::from_millis(1), &mut received).await;
+        }
+        if index == 60 {
+            let header = MediaHeader::new_video_key(voice_short, a_peer, 0, 1000, 9, false);
+            a.session.send_keyframe(&header, &keyframe).await?;
+        }
+        let timestamp = (index * 1000 / FPS) as u32;
+        for packet in slice_p_frame(voice_short, a_peer, (index * 64) as u16, index as u16, timestamp, &frame, false) {
+            a.session.send_datagram(packet.encode())?;
+            sent += 1;
+        }
+    }
+    pump(&mut b, Duration::from_secs(1), &mut received).await;
+    assert!(
+        received.keyframe_bytes >= (keyframe.len() + MEDIA_HEADER_SIZE) as u64,
+        "the 1 MB keyframe was refused during the share (got {} bytes)",
+        received.keyframe_bytes
+    );
+    assert_eq!(received.datagrams, sent, "the 7 Mbit/s share lost datagrams around the keyframe");
+    assert_eq!(dropped(), dropped_before, "the keyframe or the share was dropped");
     Ok(())
 }
 

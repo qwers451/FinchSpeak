@@ -39,3 +39,4 @@ keep_files = 14
 # media_bytes_per_sec = 1500000
 # media_burst_bytes = 262144
 # media_packets_per_sec = 2000
+# media_keyframe_bytes_per_sec = 1000000
