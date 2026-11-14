@@ -135,7 +135,7 @@ it('the library search matches the title and the artist', async () => {
   setRoomMusic({ queue: [], playing: null });
   const view = mount(() => <MusicPanel onClose={() => {}} />);
   await flush();
-  const search = view.querySelector<HTMLInputElement>('input[type="search"]')!;
+  const search = view.querySelector<HTMLInputElement>('.music-add .field input')!;
 
   search.value = 'beatles';
   search.dispatchEvent(new Event('input', { bubbles: true }));

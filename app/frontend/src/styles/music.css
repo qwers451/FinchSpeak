@@ -1,21 +1,12 @@
-/* Room music: the side panel beside the room, the dialog below 940 px, the header chip, the strip and perch notes. */
+/* Room music: the player dialog (an app-level window), the header chip and the room column. */
 
-/* Wide window: the room is a column and the music panel sits on its right, 340 px. */
-.voice-room.music-open { flex-direction: row; }
 .room-column { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 
-.music-panel {
-  width: 340px;
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: var(--bg-panel);
-  border-left: 1px solid var(--line-soft);
-}
+/* The dialog supplies the frame; the panel fills it, from 340 to 480 px, and never overlaps its own rows. */
+.music-panel { width: 100%; min-width: 0; display: flex; flex-direction: column; background: transparent; }
 .music-head { height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line-soft); flex: none; }
 .music-head h3 { font-size: 16px; margin: 0; min-width: 0; }
-.music-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 18px; }
+.music-body { flex: 1; min-width: 0; padding: 0; display: flex; flex-direction: column; gap: 18px; }
 .music-heading { margin: 0 0 8px; font-size: 12px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
 
 .music-now { display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--bg-card); border: 1px solid var(--line-soft); border-radius: var(--r-lg); min-width: 0; }
@@ -28,16 +19,16 @@
 .music-volume .range-control { flex: 1; min-width: 0; }
 
 .music-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.music-row { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 6px; border-radius: var(--r-sm); min-width: 0; }
-.music-row .col { min-width: 0; gap: 1px; }
+.music-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 44px; padding: 4px 6px; border-radius: var(--r-sm); min-width: 0; }
+.music-row .col { flex: 1 1 140px; min-width: 0; gap: 1px; }
+.music-row .btn { flex: none; }
 .music-queue-block { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .music-empty { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
 
-.music-add { display: flex; flex-direction: column; gap: 10px; }
+.music-add { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 /* The add block uses the shared tabs (.tabs / .tab); the two labels share the 340 px panel width. */
 .music-add .tabs { gap: 16px; }
 .music-add .tab { flex: 1 1 0; min-width: 0; justify-content: center; font-size: 13px; white-space: nowrap; }
-.music-search { width: 100%; min-width: 0; }
 .music-file-input { display: none; }
 
 .music-uploads { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -55,12 +46,6 @@
   animation: music-spin 0.9s linear infinite;
 }
 @keyframes music-spin { to { transform: rotate(360deg); } }
-
-/* Narrow window: the same panel inside a dialog; the dialog supplies the frame. */
-@media (max-width: 939px) {
-  .music-panel { width: 100%; border-left: 0; background: transparent; }
-  .music-body { overflow: visible; padding: 0; }
-}
 
 /* Header chip: the track and its running position, next to the room name. */
 .music-now-chip {
@@ -80,25 +65,3 @@
   cursor: pointer;
 }
 .music-now-chip .trunc { min-width: 0; }
-
-/* Narrow desktop windows: the side panel narrows and the member list gives way, so the room keeps its width. */
-@media (max-width:1150px) {
-  .music-panel { width:280px; }
-  .voice-room.music-open ~ .members { display:none; }
-}
-
-/* Note on the voice strip (sidebar) and on the perch (tree view). */
-.music-note {
-  flex: none;
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: var(--tint-signal);
-  color: var(--cyan);
-  cursor: pointer;
-}
-.music-note:focus-visible { outline: 2px solid var(--glow-focus); outline-offset: 2px; }

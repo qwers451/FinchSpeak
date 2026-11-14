@@ -4,6 +4,7 @@ export type TranslationParams = Record<string, string | number>;
 
 /** Russian UI copy keyed by its English source. User and server supplied strings stay untouched. */
 export const ru: Readonly<Record<string, string>> = {
+  'Screen': 'Экран', 'In the room': 'В комнате', 'Open the player': 'Открыть плеер', 'Open the soundboard': 'Открыть саундборд',
   'Soundboard': 'Саундборд', 'Search sounds': 'Поиск звуков', 'No sounds yet': 'Звуков пока нет', 'Remove sound': 'Удалить звук',
   'Sound name': 'Название звука', 'Emoji (optional)': 'Эмодзи (необязательно)', 'Add a sound': 'Добавить звук', 'Up to 5 seconds': 'До 5 секунд',
   'Soundboard volume': 'Громкость саундборда', "Don't play the soundboard for me": 'Не слышать саундборд', 'Name the sound first': 'Сначала укажите название звука',

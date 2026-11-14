@@ -48,7 +48,7 @@ it('truncates the track title and uses theme variables only', () => {
 it('the side column of the music panel is gone', () => {
   expect(music).not.toContain('music-open');
   expect(music).not.toMatch(/width:\s*340px/);
-  expect(source('components/VoicePanel.tsx')).not.toMatch(/music-open|sidePanel|MusicPanel|SoundboardPanel/);
+  expect(source('components/VoicePanel.tsx')).not.toMatch(/music-open|sidePanel|<MusicPanel|<SoundboardPanel/);
 });
 
 it('the music panel keeps its rows inside the dialog at 340 and 480 px: shrinking text, wrapping controls', () => {

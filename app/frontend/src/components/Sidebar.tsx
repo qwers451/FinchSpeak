@@ -22,7 +22,7 @@ import { participantContextMenu, participantMenuKey } from './voice/participantM
 import { isMeParticipant } from './voice/ParticipantTile';
 import { VOICE_USER_DRAG, canDrag, dropTarget, readVoiceDrag, type VoiceDrag } from './voice/voiceDrag';
 import { setNestView } from '../stores/nestView';
-import { musicAvailable, musicState, setMusicPanelOpen } from '../stores/musicStore';
+import { RoomTools } from './voice/RoomTools';
 import { connectionStatus, localPeerId, knownUsers, myStatus as ownStatus, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
 import { currentUser } from '../stores/authStore';
@@ -263,13 +263,12 @@ export function Sidebar() {
               <span class="t2 fs12 trunc">{channel().name}{pingRtt() !== null ? ` · ${pingRtt()} ms` : ''}</span>
               <Show when={isSharing()}><span class="row g6 fs12 tr"><Icon name="share" size="sm" />{t('You are sharing your screen')}</span></Show>
             </div>
-            <Show when={musicAvailable() && musicState()?.playing}>
-              <button type="button" class="music-note" aria-label={t('Music is playing')} title={t('Music')} onClick={() => setMusicPanelOpen(true)}><Icon name="music" size="sm" /></button>
-            </Show>
             <Button iconOnly size="sm" variant="danger" icon="hangup" label={t('Disconnect from voice')} title={t('Disconnect')} onClick={() => void leaveVoice()} />
           </div>
         )}
       </Show>
+
+      <RoomTools />
 
       <div class="upanel user-panel">
         <button type="button" class="row g12 grow profile-open" aria-label={t('Open profile')} title={currentUser()?.display_name || currentUser()?.username} onClick={() => setProfileOpen(true)}>

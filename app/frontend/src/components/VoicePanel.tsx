@@ -1,16 +1,14 @@
-import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, on, Show } from 'solid-js';
 import { endedShare, watching } from '../stores/screenStore';
 import { localPeerId, serverFeatures } from '../stores/sessionStore';
 import { activeVoiceChannel, pingRtt, speakingPeers, voiceParticipants } from '../stores/voiceStore';
-import { Avatar, Button, Icon, Modal } from '../ui';
+import { Avatar, Button, Icon } from '../ui';
 import { animateLayout, createPresence, MOTION, prefersReducedMotion } from '../ui/motion';
 import { channels } from '../stores/chatStore';
 import { callFlock } from '../stores/flockStore';
 import { openContextMenu, type MenuItem } from '../ui/ContextMenu';
-import { MusicPanel, formatClock } from './music/MusicPanel';
-import { SoundboardPanel } from './voice/SoundboardPanel';
-import { soundboardAvailable } from '../stores/soundboardStore';
-import { musicAvailable, musicPanelOpen, musicPosition, musicState, setMusicPanelOpen } from '../stores/musicStore';
+import { formatClock } from './music/MusicPanel';
+import { musicAvailable, musicPosition, musicState, setMusicPanelOpen } from '../stores/musicStore';
 import { SharePickerModal } from './screen/SharePickerModal';
 import { SharerPill } from './screen/SharerPill';
 import { EndedPanel, ViewerPanel } from './screen/ViewerPanel';
@@ -50,19 +48,9 @@ export function VoicePanel() {
   const openFlockMenu = (anchor: HTMLElement) => openContextMenu(anchor, otherRooms().map((room): MenuItem => ({
     kind: 'item', label: room.name, icon: 'vol', onSelect: () => void callFlock(room),
   })));
-  // Below 940 px the music panel is a dialog; wider, it is a 340 px column beside the room.
-  const [wide, setWide] = createSignal(window.innerWidth >= 940);
-  onMount(() => {
-    const onResize = () => setWide(window.innerWidth >= 940);
-    window.addEventListener('resize', onResize);
-    onCleanup(() => window.removeEventListener('resize', onResize));
-  });
-  const musicOpen = () => musicAvailable() && musicPanelOpen();
-  const sidePanel = () => musicOpen() && wide();
-  const closeMusic = () => setMusicPanelOpen(false);
 
   return (
-    <main class={`main voice-room${sidePanel() ? ' music-open' : ''}`}>
+    <main class="main voice-room">
       <div class="room-column">
       <div class="mhead">
         <Icon name="vol" size="lg" class="t3" />
@@ -140,13 +128,6 @@ export function VoicePanel() {
       <SharePickerModal open={picker()} onClose={() => setPicker(false)} />
       <VoiceSettingsModal open={settings()} onClose={() => setSettings(false)} />
       </div>
-      <Show when={sidePanel()}><MusicPanel onClose={closeMusic} /></Show>
-      <Show when={soundboardAvailable()}><SoundboardPanel /></Show>
-      <Show when={musicOpen() && !wide()}>
-        <Modal open onClose={closeMusic} title={t('Music')} width="340px">
-          <MusicPanel modal onClose={closeMusic} />
-        </Modal>
-      </Show>
     </main>
   );
 }

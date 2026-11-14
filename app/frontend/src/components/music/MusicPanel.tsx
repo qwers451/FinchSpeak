@@ -6,7 +6,7 @@ import { knownUsers } from '../../stores/sessionStore';
 import { musicPosition, musicState, musicVolume, sendMusicCommand, setMusicVolume } from '../../stores/musicStore';
 import { setAppError } from '../../stores/notificationStore';
 import type { MusicQueueEntry, MusicTrack } from '../../types';
-import { Button, ConfirmDialog, FinchBird, Icon, Slider } from '../../ui';
+import { Button, ConfirmDialog, Field, FinchBird, Icon, Slider } from '../../ui';
 import { formatDuration, t } from '../../i18n';
 
 /** Audio formats the server accepts (the picker filters on them; the server checks again). */
@@ -110,7 +110,7 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
             <section class="music-now">
               <h4 class="music-heading">{t('Now playing')}</h4>
               <div class="col music-titles">
-                <span class="b trunc">{now().entry.track.title}</span>
+                <span class="b trunc" title={now().entry.track.title}>{now().entry.track.title}</span>
                 <span class="t2 fs12 trunc">
                   {[now().entry.track.artist, t('Added by {name}', { name: nameOf(now().entry.added_by) })].filter(Boolean).join(' · ')}
                 </span>
@@ -158,7 +158,7 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
               {(item) => (
                 <li class="music-row">
                   <div class="col grow">
-                    <span class="trunc">{item.track.title}</span>
+                    <span class="trunc" title={item.track.title}>{item.track.title}</span>
                     <span class="t3 fs12 trunc">
                       {[item.track.artist, formatDuration(Math.floor(item.track.duration_ms / 1000)), t('Added by {name}', { name: nameOf(item.added_by) })].filter(Boolean).join(' · ')}
                     </span>
@@ -180,14 +180,7 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
           </div>
 
           <Show when={tab() === 'library'}>
-            <input
-              type="search"
-              class="field music-search"
-              placeholder={t('Search by title or artist')}
-              aria-label={t('Search by title or artist')}
-              value={query()}
-              onInput={(event) => setQuery(event.currentTarget.value)}
-            />
+            <Field label={t('Search by title or artist')} icon="search" placeholder={t('Search by title or artist')} value={query()} onInput={setQuery} />
             <Show
               when={filtered().length > 0}
               fallback={
@@ -202,7 +195,7 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
                   {(item) => (
                     <li class="music-row">
                       <div class="col grow">
-                        <span class="trunc">{item.title}</span>
+                        <span class="trunc" title={item.title}>{item.title}</span>
                         <span class="t3 fs12 trunc">{[item.artist, formatDuration(Math.floor(item.duration_ms / 1000))].filter(Boolean).join(' · ')}</span>
                       </div>
                       <Button size="sm" variant="secondary" onClick={() => void sendMusicCommand({ kind: 'enqueue', track_id: item.id })}>{t('Add to queue')}</Button>

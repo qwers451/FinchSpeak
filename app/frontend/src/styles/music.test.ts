@@ -65,7 +65,7 @@ it('the music chip in the room header uses the same clock class', () => {
 
 it('the panel lives in an app dialog: full width, transparent surface, the custom theme drops the panel edge', () => {
   expect(musicCss).toMatch(/.music-panel {[^}]*width: 100%[^}]*background: transparent/);
-  expect(readStyle('themes.css')).toMatch(/[data-theme="custom"] .modal .music-panel::before, [data-theme="custom"] .modal .music-panel::after { display:none; }/);
+  expect(readStyle('themes.css')).toContain('[data-theme="custom"] .modal .music-panel::before, [data-theme="custom"] .modal .music-panel::after { display:none; }');
 });
 
 it('the tab labels truncate with an ellipsis instead of wrapping at 280 px', () => {

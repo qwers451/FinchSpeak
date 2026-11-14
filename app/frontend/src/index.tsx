@@ -10,6 +10,7 @@ import './styles/user-theme.css';
 import './styles/spatial.css';
 import './styles/nest.css';
 import './styles/music.css';
+import './styles/roomTools.css';
 import './styles/soundboard.css';
 import './styles/voiceNote.css';
 
