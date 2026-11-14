@@ -4,7 +4,7 @@ import type { DeviceSession, SessionEvents, SessionSnapshot, User, UserStatus } 
 import { setPendingMismatch, setPendingTofu } from './tofuStore';
 import { receiveInviteLink, setPendingInvite } from './inviteLink';
 import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
-import { activeVoiceChannel, allVoiceParticipants, handlePushToTalk, toggleMute, handleHotkey, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, joinVoice, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
+import { activeVoiceChannel, allVoiceParticipants, handlePushToTalk, toggleMute, handleHotkey, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, joinVoice, lastJoinRequestedAt, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
 import { classifyEnd, sessionEnded, setSessionEnded } from './sessionEnd';
@@ -14,7 +14,8 @@ import { clearTyping, isMentioned, noteIncoming, noteTyping, resetActivity, setU
 import { handleMessageDeleted, handleMessageEdited, handleReactionChanged, renameAuthor } from './chatStore';
 import { currentUser, setCurrentUser } from './authStore';
 import { resetScreenState, resetScreenStateOnDisconnect, setWatching, watching } from './screenState';
-import { endWatching, screenHandlers } from './screenStore';
+import { endWatching, lastShareStartedAt, screenHandlers, stopSharing } from './screenStore';
+import { describeError } from '../i18n/errors';
 import { applySavedVolume } from './volumeStore';
 import { pushToast } from '../ui/toastStore';
 import { updateVoiceLevels } from './levelStore';
@@ -77,6 +78,19 @@ export function resetSessionState() {
   resetScreenState();
   resetActivity();
   setAppError(null);
+}
+
+/** A join or share can be refused when the server limits them. A refusal right after our own join or share
+ * means that action did not stand, so the local joined/sharing state is undone (locally and on the server). */
+const ROLLBACK_WINDOW_MS = 3000;
+
+function handleVoiceRefusal(error: { code: number; message: string }): boolean {
+  if (error.code !== 429 || !/^Wait \d+ s; too many voice changes/.test(error.message)) return false;
+  setAppError(describeError(`${error.code}: ${error.message}`));
+  const now = Date.now();
+  if (now - lastJoinRequestedAt() < ROLLBACK_WINDOW_MS) void leaveVoice();
+  if (now - lastShareStartedAt() < ROLLBACK_WINDOW_MS) void stopSharing();
+  return true;
 }
 
 export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEvents[K]) => void } = {
@@ -242,7 +256,8 @@ export const sessionHandlers: { [K in keyof SessionEvents]: (payload: SessionEve
     if (ended && !sessionEnded()) setSessionEnded(ended);
   },
   'server-error': (error) => {
-    if (!handleFlockRefusal(error)) setAppError(`${error.code}: ${error.message}`);
+    if (handleVoiceRefusal(error)) return;
+    if (!handleFlockRefusal(error)) setAppError(describeError(`${error.code}: ${error.message}`));
   },
   'audio-device-lost': () => {
     resetMicPreview();

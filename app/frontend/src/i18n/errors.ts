@@ -14,6 +14,8 @@ const RULES: readonly Rule[] = [
   { pattern: /certificate of .* changed since you trusted it/i, key: 'The server certificate has changed. Do not sign in until the admin confirms the change.' },
   { pattern: /^Logged out locally, but could not revoke/i, key: 'Signed out on this computer. The server could not be reached to end the session.' },
   { pattern: /^Invalid server address/i, key: 'The server address is not valid' },
+  // The server limits joins and screen shares; the refusal carries the seconds to wait.
+  { pattern: /^429: Wait (\d+) s; too many voice changes/, key: 'Too many changes. Wait {seconds} s', params: (m) => ({ seconds: m[1] }) },
   { pattern: /^Not authenticated$/i, key: 'Not authenticated' },
   // Room music errors from the server (and the client's own format probe).
   { pattern: /^Music file is too large/i, key: 'The music file is too large' },

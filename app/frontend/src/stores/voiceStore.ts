@@ -339,11 +339,19 @@ export function handlePushToTalk(pressed: boolean) {
   feedback(pressed ? 'ptt-on' : 'ptt-off');
 }
 
+let joinRequestedAt = 0;
+
+/** When the last join was sent (ms since epoch). A refusal right after it means the join did not stand. */
+export function lastJoinRequestedAt(): number {
+  return joinRequestedAt;
+}
+
 export async function joinVoice(channel: Channel) {
   await restoreAudioDevices();
   await restoreVoiceSettings();
   try {
     const previous = activeVoiceChannel();
+    joinRequestedAt = Date.now();
     await api.joinVoiceChannel(channel.id, channel.short_id);
     // The backend ends our share (announced by screen-share-ended) and stops the one we watched;
     // only the watched share is cleared here.
