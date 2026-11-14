@@ -82,7 +82,10 @@ pub async fn launch(mut config: ServerConfig) -> Result<RunningServer> {
     let http_task = tokio::spawn(https::serve(listener, https_config, app, http_shutdown_rx));
 
     let cleanup_task = crate::cleanup::spawn_with_music(pool.clone(), sessions.music.get().cloned());
-    let backup_task = config.backup.enabled.then(|| crate::backup::spawn(pool.clone(), config.backup.clone()));
+    let backup_task = config.backup.enabled.then(|| {
+        crate::backup::tighten_backups(std::path::Path::new(&config.backup.dir));
+        crate::backup::spawn(pool.clone(), config.backup.clone())
+    });
 
     let quic_endpoint = endpoint.clone();
     let jwt_secret = config.auth.jwt_secret.clone();

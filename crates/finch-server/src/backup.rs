@@ -8,15 +8,17 @@ use sqlx::SqlitePool;
 use tokio::task::JoinHandle;
 
 use crate::config::BackupConfig;
+use crate::secret_file;
 
 const PREFIX: &str = "finchspeak-";
 const SUFFIX: &str = ".db";
 /// Wait a little after start so a crash loop does not fill the disk with copies.
 const FIRST_BACKUP_DELAY: Duration = Duration::from_secs(60);
 
-/// Write a backup into `dir` (created if needed) and delete all but the newest `keep`.
+/// Write a backup into `dir` (created if needed, owner-only) and delete all but the newest `keep`.
+/// Backups hold password hashes, so they are owner-only (0600) from the moment they exist.
 pub async fn create_backup(pool: &SqlitePool, dir: &Path, keep: usize) -> Result<PathBuf> {
-    std::fs::create_dir_all(dir).with_context(|| format!("cannot create backup directory {dir:?}"))?;
+    secret_file::create_private_dir(dir).with_context(|| format!("cannot create backup directory {dir:?}"))?;
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
     // Name = time + counter, so sorting the names sorts the backups by age even within a second.
     // The counter continues after the highest one already present (older ones may be pruned).
@@ -30,24 +32,57 @@ pub async fn create_backup(pool: &SqlitePool, dir: &Path, keep: usize) -> Result
         .max()
         .map_or(0, |highest| highest + 1);
     let target = dir.join(format!("{same_second}{counter:03}{SUFFIX}"));
-    sqlx::query("VACUUM INTO ?")
+    // Create the empty file owner-only first and let SQLite write into it: the copy is then never
+    // readable by others, not even for a moment.
+    secret_file::create_owner_only_file(&target).with_context(|| format!("cannot create backup {target:?}"))?;
+    let copied = sqlx::query("VACUUM INTO ?")
         .bind(target.to_string_lossy().to_string())
         .execute(pool)
         .await
-        .with_context(|| format!("backup to {target:?} failed"))?;
+        .with_context(|| format!("backup to {target:?} failed"));
+    if copied.is_err() {
+        let _ = std::fs::remove_file(&target);
+    }
+    copied?;
     prune(dir, keep)?;
     Ok(target)
+}
+
+/// Startup: backups written by earlier versions may be world-readable. Restrict the backup
+/// directory and every backup in it to their owner. Problems are logged and do not stop startup.
+pub fn tighten_backups(dir: &Path) {
+    if !dir.is_dir() {
+        return;
+    }
+    if let Err(e) = secret_file::tighten_directory(dir) {
+        tracing::warn!("Could not restrict the backup directory {dir:?}: {e}");
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            tracing::warn!("Could not list the backup directory {dir:?}: {e}");
+            return;
+        }
+    };
+    let backups = entries.flatten().map(|entry| entry.path()).filter(|path| is_backup(path));
+    for path in backups {
+        if let Err(e) = secret_file::tighten_permissions(&path) {
+            tracing::warn!("Could not restrict backup {path:?}: {e}");
+        }
+    }
+}
+
+fn is_backup(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with(PREFIX) && name.ends_with(SUFFIX))
 }
 
 /// Keep the newest `keep` backups in `dir`.
 pub fn prune(dir: &Path, keep: usize) -> Result<()> {
     let mut backups: Vec<PathBuf> = std::fs::read_dir(dir)?
         .filter_map(|entry| entry.ok().map(|e| e.path()))
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with(PREFIX) && name.ends_with(SUFFIX))
-        })
+        .filter(|path| is_backup(path))
         .collect();
     backups.sort();
     let surplus = backups.len().saturating_sub(keep.max(1));
