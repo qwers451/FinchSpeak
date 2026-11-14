@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
 import { currentUser } from '../../stores/authStore';
-import { deleteMessage, discardFailed, editMessage, MAX_MESSAGE_CHARS, messages, retryMessage, toggleReaction } from '../../stores/chatStore';
+import { deleteMessage, discardFailed, editMessage, editRequest, MAX_MESSAGE_CHARS, messages, retryMessage, setEditRequest, toggleReaction } from '../../stores/chatStore';
 import { isMentioned } from '../../stores/activityStore';
 import { knownUsers } from '../../stores/sessionStore';
 import type { Message } from '../../types';
@@ -61,6 +61,16 @@ export function MessageItem(props: Props) {
     if (save && text.trim() && text.trim() !== msg().content) await editMessage(msg().id, text);
   };
   const copy = () => void navigator.clipboard?.writeText(msg().content);
+  // The composer's Up key asks for my last message: open it exactly as the Edit button does.
+  createEffect(() => {
+    if (editRequest() !== msg().id) return;
+    setEditRequest(null);
+    if (mine() && stored()) {
+      startEdit();
+      // The edit box takes focus on render; bring the whole row into view as well.
+      queueMicrotask(() => row?.scrollIntoView({ block: 'nearest' }));
+    }
+  });
 
   const Tools = () => (
     <div class="hover-tools" role="toolbar" aria-label={t('Message actions')}>
@@ -101,7 +111,7 @@ export function MessageItem(props: Props) {
             <button type="button" class={`reply-quote${quote().deleted ? ' gone' : ''}`} disabled={quote().deleted} onClick={() => props.onJump(quote().message_id)}>
               <Icon name="send" size="sm" class="flip" />
               <Show when={!quote().deleted} fallback={<span class="t3">{t('Original message deleted')}</span>}>
-                <strong>{quote().author_name}</strong><span class="trunc">{quote().snippet}</span>
+                <strong>{quote().author_name}</strong><span class="trunc" title={quote().snippet}>{quote().snippet}</span>
               </Show>
             </button>
           )}
@@ -138,7 +148,7 @@ export function MessageItem(props: Props) {
 
         <Show when={msg().state === 'failed'}>
           <div class="row g12" style={{ 'margin-top': '4px' }}>
-            <Show when={msg().failure}><span class="t3 fs12 trunc">{msg().failure}</span></Show>
+            <Show when={msg().failure}><span class="t3 fs12 trunc" title={msg().failure}>{msg().failure}</span></Show>
             <button type="button" class="link-btn ty" style={{ margin: 0 }} onClick={() => void retryMessage(msg().id)}>{t('Retry')}</button>
             <button type="button" class="link-btn t2" style={{ margin: 0 }} onClick={() => discardFailed(msg().id)}>{t('Delete')}</button>
           </div>

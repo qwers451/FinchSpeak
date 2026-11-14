@@ -10,7 +10,7 @@ import { isSharing } from '../../stores/screenState';
 import { connectionStatus, knownUsers, myStatus as ownStatus, presence, statusTexts } from '../../stores/sessionStore';
 import { currentUser } from '../../stores/authStore';
 import { branchPlan, setNestView } from '../../stores/nestView';
-import { musicAvailable, musicState, setMusicPanelOpen } from '../../stores/musicStore';
+import { RoomTools } from '../voice/RoomTools';
 import type { Channel, User, UserStatus } from '../../types';
 import { Avatar, Button, Icon } from '../../ui';
 import { locale, t } from '../../i18n';
@@ -116,7 +116,7 @@ export function TreeView() {
           <Button iconOnly size="sm" variant="ghost" icon={folded() ? 'chev-r' : 'chev-d'} class="tree-fold" aria-expanded={!folded()} label={folded() ? t('Show the tree') : t('Hide the tree')} onClick={() => setFolded(!folded())} />
           <Button iconOnly size="sm" variant="ghost" icon="x" class="tree-close" label={t('Back to the tree')} onClick={() => { setActiveChannel(null); setFolded(false); }} />
         </Show>
-        <Button iconOnly size="sm" variant="ghost" icon="bars" class="nest-toggle" label={t('Switch to classic mode')} onClick={() => setNestView(false)} />
+        <Button size="sm" variant="ghost" icon="bars" class="nest-toggle" title={t('Switch to classic mode')} onClick={() => setNestView(false)}>{t('Classic view')}</Button>
       </header>
 
       <div class="tree-scene" ref={scene} aria-label={t('Tree of rooms')}>
@@ -155,31 +155,30 @@ export function TreeView() {
       </Show>
 
       <footer class="tree-perch">
-        <button type="button" class="profile-open tree-me" aria-label={t('Open profile')} title={currentUser()?.display_name || currentUser()?.username} onClick={() => setProfileOpen(true)}>
+        {/* Not a control: the gear below is the one way into profile and settings. */}
+        <div class="profile-card tree-me" title={currentUser()?.display_name || currentUser()?.username}>
           <Avatar name={currentUser()?.display_name || currentUser()?.username} id={currentUser()?.id} size={40} status={myStatus()} speaking={isLocalSpeaking()} src={currentUser()?.avatar_url} />
           <span class="col tree-label">
             <span class="b trunc fs13">{currentUser()?.display_name || currentUser()?.username}</span>
             <span class="t3 fs12 trunc">{(currentUser() && statusTexts()[currentUser()!.id]) || statusLabel()}</span>
           </span>
-        </button>
+        </div>
         <Show when={activeVoiceChannel()} fallback={<span class="t3 fs12 grow trunc">{t('You are on the wire. Pick a nest to talk.')}</span>}>
           {(channel) => (
             <span class="col grow tree-voice">
               <span class="row g6 b fs13 tree-voice-state"><Icon name="bars" size="sm" />{connectionStatus() === 'connected' ? t('Voice connected') : t('Voice disconnected')}</span>
-              <span class="t2 fs12 trunc">{t('In the nest: {channel}', { channel: channel().name })}{pingRtt() !== null ? ` · ${pingRtt()} ms` : ''}</span>
+              <span class="t2 fs12 trunc" title={t('In the nest: {channel}', { channel: channel().name })}>{t('In the nest: {channel}', { channel: channel().name })}{pingRtt() !== null ? ` · ${pingRtt()} ms` : ''}</span>
               <Show when={isSharing()}><span class="row g6 fs12 sharing-note"><Icon name="share" size="sm" />{t('You are sharing your screen')}</span></Show>
             </span>
           )}
         </Show>
         <Button iconOnly size="sm" variant={isMuted() ? 'danger' : 'ghost'} icon={isMuted() ? 'mic-off' : 'mic'} label={isMuted() ? t('Unmute') : t('Mute')} onClick={() => void toggleMute()} />
         <Button iconOnly size="sm" variant={isDeafened() ? 'danger' : 'ghost'} icon={isDeafened() ? 'phones-off' : 'phones'} label={isDeafened() ? t('Undeafen') : t('Deafen')} onClick={() => void toggleDeafen()} />
-        <Show when={musicAvailable() && musicState()?.playing}>
-          <button type="button" class="music-note" aria-label={t('Music is playing')} title={t('Music')} onClick={() => setMusicPanelOpen(true)}><Icon name="music" size="sm" /></button>
-        </Show>
+        <RoomTools compact />
         <Show when={activeVoiceChannel()}>
-          <Button iconOnly size="sm" variant="danger" icon="hangup" class="tree-leave" label={t('Fly out of the nest')} onClick={() => void leaveVoice()} />
+          <Button iconOnly size="sm" variant="danger" icon="hangup" class="tree-leave" label={t('Leave room')} title={t('Fly out of the nest')} onClick={() => void leaveVoice()} />
         </Show>
-        <Button iconOnly size="sm" variant="ghost" icon="sliders" label={t('Profile and settings')} onClick={() => setProfileOpen(true)} />
+        <Button iconOnly size="sm" variant="ghost" icon="gear" label={t('Profile and settings')} onClick={() => setProfileOpen(true)} />
         <Show when={isStaff()}>
           <Button iconOnly size="sm" variant="ghost" icon="shield" label={t('Administration')} class="ty" onClick={() => setAdminOpen(true)} />
         </Show>

@@ -13,6 +13,7 @@ import {
 } from '../../stores/voiceStore';
 import { setVolumes } from '../../stores/volumeStore';
 import { clearToasts } from '../../ui';
+import { ContextMenuHost, closeContextMenu } from '../../ui/ContextMenu';
 import { VoicePanel } from '../VoicePanel';
 import { VoiceSettingsModal } from './VoiceSettingsModal';
 import { DEFAULT_PREFS, setPrefs } from '../../stores/settingsStore';
@@ -114,6 +115,18 @@ it('a crowded room shows twelve tiles and the rest in a roster, speakers first',
   expect(host.querySelector('.room-grid [data-peer-id="25"]')).not.toBeNull();
 });
 
+it('a roster row in the room has an actions button that opens the participant menu', async () => {
+  const crowd = Array.from({ length: 16 }, (_, i) => person(i + 10, { id: `x${i}`, username: `guest${i}` }));
+  setVoiceParticipants([person(1, me), ...crowd]);
+  const host = mount(() => <><ContextMenuHost /><VoicePanel /></>);
+  const more = host.querySelector<HTMLButtonElement>('.roster [aria-label^="Actions for guest"]');
+  expect(more).toBeTruthy();
+  more!.click();
+  await flush();
+  expect(document.querySelector('[role="menu"]')).toBeTruthy();
+  closeContextMenu();
+});
+
 it('the dock mutes, deafens and leaves', async () => {
   const state = vi.spyOn(api, 'setVoiceState').mockResolvedValue();
   const leave = vi.spyOn(api, 'leaveVoiceChannel').mockResolvedValue();
@@ -122,7 +135,7 @@ it('the dock mutes, deafens and leaves', async () => {
   await flush();
   expect(state).toHaveBeenCalledWith(true, false);
   expect(byLabel(host, 'Unmute').getAttribute('aria-pressed')).toBe('true');
-  byLabel(host, 'Leave the room').click();
+  byLabel(host, 'Leave room').click();
   await flush();
   expect(leave).toHaveBeenCalled();
 });

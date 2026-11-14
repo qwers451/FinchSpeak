@@ -20,6 +20,9 @@ export const [replyingTo, setReplyingTo] = createSignal<Message | null>(null);
 /** A message to scroll to and flash once it is on screen (from a search result). */
 export const [revealTarget, setRevealTarget] = createSignal<string | null>(null);
 
+/** The id of one of my messages to open for editing (the Up key in an empty composer). The row clears it. */
+export const [editRequest, setEditRequest] = createSignal<string | null>(null);
+
 export const HISTORY_PAGE = 50;
 export const MAX_MESSAGE_CHARS = 4000;
 

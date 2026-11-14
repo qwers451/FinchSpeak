@@ -27,6 +27,18 @@ it('supports keyboard selection, skips disabled options and returns focus', asyn
   expect(document.querySelector('[role="listbox"]')).toBeNull();
   trigger.click(); await flush(); press('Home'); press(' '); expect(change).toHaveBeenLastCalledWith('a');
 });
+it('stays open when an unrelated element scrolls and closes when the trigger scrolls', async () => {
+  const { trigger } = mount();
+  const chat = document.createElement('div');
+  const other = document.createElement('div');
+  document.body.append(chat, other);
+  chat.append(trigger);
+  trigger.click(); await flush();
+  other.dispatchEvent(new Event('scroll'));
+  expect(document.querySelector('[role="listbox"]')).toBeTruthy();
+  chat.dispatchEvent(new Event('scroll'));
+  expect(document.querySelector('[role="listbox"]')).toBeNull();
+});
 it('shows a missing value, cancels with Escape and closes on outside click', async () => {
   const { trigger, change } = mount('Unplugged USB');
   expect(trigger.textContent).toContain('Unplugged USB');
@@ -44,6 +56,8 @@ it('keeps the list inside the viewport and marks selected/disabled options', asy
       ? { left: window.innerWidth - 50, right: window.innerWidth, top: window.innerHeight - 40, bottom: window.innerHeight, width: 50, height: 40, x: 0, y: 0, toJSON() {} }
       : { left: 0, right: 240, top: 0, bottom: 160, width: 240, height: 160, x: 0, y: 0, toJSON() {} };
   });
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(240);
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(160);
   trigger.click(); await flush();
   const list = document.querySelector<HTMLElement>('[role="listbox"]')!;
   expect(parseFloat(list.style.getPropertyValue('--popover-x')) + 240).toBeLessThanOrEqual(window.innerWidth);

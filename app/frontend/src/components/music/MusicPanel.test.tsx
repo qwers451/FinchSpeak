@@ -135,7 +135,7 @@ it('the library search matches the title and the artist', async () => {
   setRoomMusic({ queue: [], playing: null });
   const view = mount(() => <MusicPanel onClose={() => {}} />);
   await flush();
-  const search = view.querySelector<HTMLInputElement>('input[type="search"]')!;
+  const search = view.querySelector<HTMLInputElement>('.music-add .field input')!;
 
   search.value = 'beatles';
   search.dispatchEvent(new Event('input', { bubbles: true }));
@@ -193,18 +193,6 @@ it('the computer tab says the file is removed after it plays', async () => {
   buttonNamed(view, 'From my computer')!.click();
   await flush();
   expect(view.textContent).toContain('The file is sent to the server for this session and removed after it plays.');
-});
-
-it('the dock shows the music button only when the server offers music', async () => {
-  setServerFeatures([]);
-  const without = mount(() => <Dock onShare={() => {}} onSettings={() => {}} />);
-  expect(allLabelled(without, 'Music')).toHaveLength(0);
-  dispose?.();
-  host?.remove();
-
-  setServerFeatures(['music']);
-  const withMusic = mount(() => <Dock onShare={() => {}} onSettings={() => {}} />);
-  expect(allLabelled(withMusic, 'Music')).toHaveLength(1);
 });
 
 it('the panel renders in the Finch layout too', async () => {

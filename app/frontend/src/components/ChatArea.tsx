@@ -11,7 +11,7 @@ import { Composer } from './chat/Composer';
 import { plural, t } from '../i18n';
 import { SearchBox } from './chat/SearchBox';
 import { MessageItem } from './chat/MessageItem';
-import { MAX_WAVE_ITEMS } from '../ui/motion';
+import { MAX_WAVE_ITEMS, prefersReducedMotion } from '../ui/motion';
 
 /** Closer than this to the bottom counts as "reading the latest messages". */
 const STICK_TO_BOTTOM_PX = 96;
@@ -49,7 +49,10 @@ export function ChatArea() {
   const [divider, setDivider] = createSignal<string | null>(null);
   const [dragging, setDragging] = createSignal(false);
   const [unseen, setUnseen] = createSignal(0);
+  /** More than a screen above the bottom: the jump-to-latest button shows. */
+  const [away, setAway] = createSignal(false);
   let list: HTMLDivElement | undefined;
+  let root: HTMLElement | undefined;
   let dragDepth = 0;
 
   // Typing hints expire on their own: re-evaluate twice a second.
@@ -84,7 +87,14 @@ export function ChatArea() {
   const ids = createMemo(() => messages().map(rowKey));
   const lastStored = () => [...messages()].reverse().find((message) => !message.state)?.id ?? null;
   const nearBottom = () => !list || list.scrollHeight - list.scrollTop - list.clientHeight < STICK_TO_BOTTOM_PX;
-  const toBottom = () => { if (list) list.scrollTop = list.scrollHeight; setUnseen(0); };
+  const measure = () => { if (list) setAway(list.scrollHeight - list.scrollTop - list.clientHeight > list.clientHeight); };
+  const toBottom = () => { if (list) list.scrollTop = list.scrollHeight; setUnseen(0); measure(); };
+  /** The jump button: smooth, or instant when the reader asked for less motion. */
+  // The count clears when the list reaches the bottom (onScroll), not on click: it stays while the jump runs.
+  const jumpToLatest = () => {
+    if (!list) return;
+    list.scrollTo({ top: list.scrollHeight, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  };
 
   // Opening a channel: remember where the unread part starts, then count the channel as read.
   createEffect(on(() => activeChannel()?.id, (channelId) => {
@@ -107,6 +117,7 @@ export function ChatArea() {
     if (!newest || !channel) { knownLast = null; return; }
     const isNew = knownLast !== null && rowKey(newest) !== knownLast && !loadingOlder();
     knownLast = rowKey(newest);
+    measure();
     if (!isNew) return;
     const ours = newest.author_id === currentUser()?.id;
     if (ours || nearBottom()) {
@@ -130,6 +141,7 @@ export function ChatArea() {
 
   const onScroll = () => {
     if (!list) return;
+    measure();
     if (list.scrollTop < LOAD_OLDER_PX && hasMoreHistory()) void loadOlder();
     if (nearBottom() && unseen() > 0) {
       setUnseen(0);
@@ -180,6 +192,19 @@ export function ChatArea() {
     const files = Array.from(event.dataTransfer?.files ?? []);
     if (files.length > 0) void attachFiles(files);
   };
+  // The jump button sits above the composer by the composer's real height (reply bar, attachments, long text).
+  onMount(() => {
+    const main = root;
+    const composer = main?.querySelector<HTMLElement>('.composer-area');
+    if (!main || !composer) return;
+    const measureComposer = () => main.style.setProperty('--composer-h', `${composer.offsetHeight}px`);
+    measureComposer();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measureComposer);
+    observer.observe(composer);
+    onCleanup(() => observer.disconnect());
+  });
+
   // A drop outside the chat must not navigate the window to the file.
   onMount(() => {
     const block = (event: DragEvent) => { if (hasFiles(event)) event.preventDefault(); };
@@ -189,13 +214,13 @@ export function ChatArea() {
   });
 
   return (
-    <main class="main chat" onDragEnter={onDragEnter} onDragLeave={onDragLeave} onDragOver={onDragOver} onDrop={onDrop}>
+    <main class="main chat" ref={root} onDragEnter={onDragEnter} onDragLeave={onDragLeave} onDragOver={onDragOver} onDrop={onDrop}>
       <div class="mhead">
         <Icon name="hash" size="lg" class="t3" />
         <h3 title={activeChannel()?.topic ?? undefined} style={{ 'font-size': '18px' }}>{activeChannel()?.name ?? t('select-channel')}</h3>
         <Show when={activeChannel()?.topic}>
           <span class="vsep topic-separator" style={{ height: '20px', 'align-self': 'center' }} />
-          <span class="t2 fs13 trunc grow channel-topic">{activeChannel()?.topic}</span>
+          <span class="t2 fs13 trunc grow channel-topic" title={activeChannel()?.topic ?? undefined}>{activeChannel()?.topic}</span>
         </Show>
         <Show when={!activeChannel()?.topic}><span class="grow" /></Show>
         <SearchBox />
@@ -233,9 +258,11 @@ export function ChatArea() {
         </For>
       </div>
 
-      <Show when={unseen() > 0}>
+      <Show when={away()}>
         <div class="jump-wrap">
-          <Button size="sm" variant="primary" icon="down" onClick={toBottom}>{plural(unseen(), { one: '{count} new message', other: '{count} new messages' })}</Button>
+          <Button size="sm" variant="primary" icon="down" onClick={jumpToLatest}>
+            {unseen() > 0 ? plural(unseen(), { one: '{count} new', other: '{count} new' }) : t('Jump to latest')}
+          </Button>
         </div>
       </Show>
 

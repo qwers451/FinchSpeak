@@ -38,3 +38,64 @@ Audit in code (no client run, no frame capture: the controller takes the capture
 Counts: 16 good, 4 fixed (rows 5, 6, 7, 20), 0 removed.
 
 Open concern (not changed): when the room has more people than tiles, the speaking set decides which tiles show, so a change of who is speaking reorders the grid and the tiles glide each time. This is by design of `arrange`; no frame capture was taken to judge how often it happens.
+
+## Клики после анимаций
+
+Audit in code and Vitest (happy-dom); the desktop client was not run. Verdicts as above. Tests: `ui/ContextMenu.test.tsx`, `ui/Select.test.tsx`, `ui/popover.test.ts`.
+
+Causes found:
+- (а) Scroll closed menus. `ContextMenuHost` and `Select` closed on any capturing `scroll` on the window, so a chat auto-scroll or smooth `scrollIntoView` (`ChatArea.tsx`) closed a menu the moment it opened. Fixed: a scroll closes only when it happens in the anchor, in its ancestors, or in the document (`scrollMovesAnchor`). A point anchor (right-click) takes the element under the point when the menu opens (`document.elementFromPoint`) and closes when that element or its ancestors scroll; with nothing under the point, only a document scroll closes it.
+- (б) Submenu closed on the way to it. Every sibling entry's `pointerenter` closed the submenu at once. Fixed: the close waits 150 ms (`SUBMENU_CLOSE_DELAY`); entering the submenu panel or its trigger cancels it.
+- (в) Placement measured the scaled panel. `placePopover` used `getBoundingClientRect` while the panel was in `@starting-style` (`scale(.98)`), so the size was about 2% small and a flipped panel overlapped its anchor by a few px. Fixed: the panel's size is `offsetWidth`/`offsetHeight`; the anchor stays `getBoundingClientRect`.
+- (г) Same-click open and close: checked, not found. The `mousedown` outside listener is added after the opening click has been dispatched; the `click` on an entry closes the menu before `onSelect` runs (test: one call, menu closed).
+
+| Element | What happens | Cause | Verdict |
+|---|---|---|---|
+| Participant menu (tile, sidebar, member row: `participantMenu.ts`) | closes when the chat or member list scrolls, including right after opening | (а) | fixed |
+| «Переместить» submenu in the participant menu | closes when the pointer crosses a sibling entry on the way in | (б) | fixed |
+| Submenu and menu placement near the right and bottom edges | 2% small size during the entrance; flipped panel overlaps the anchor by a few px | (в) | fixed |
+| Flock picker (`VoicePanel.tsx`, `openFlockMenu`) | same as the participant menu | (а), (в) | fixed |
+| Select listbox (`Select.tsx`; device and option pickers in the settings modals) | closed on any scroll, so a click could be lost after the chat moved | (а), (в) | fixed |
+| Emoji picker, mention menu, search results (`EmojiPicker.tsx`, `Composer.tsx`, `SearchBox.tsx`) | no scroll listener, no `pointer-events` issue in code; entrance is opacity and transform only | none | good (not clicked in the client) |
+| Channel, message, «Ещё» and server menus | no `openContextMenu` caller for them exists in the code (only the participant menu and the flock picker use it); nothing to test here | n/a | not found in code; check on the client |
+| `.vc.vc-leave` (leaving tile, `motion.css:151`) | kept in DOM for the exit | `pointer-events:none` already set | good |
+| `.overlay[data-exiting]` and the modal inside it (`Modal.tsx:72`, `motion.css:15-16`) | kept for 140 ms | `pointer-events:none` on the overlay during exit | good |
+| `.toast[data-exiting]` (`ToastHost.tsx:51`, `motion.css:133`) | kept for the exit | `pointer-events:none` already set | good |
+| `.drop-overlay` (`app.css:147`) | covers the chat while dragging | `pointer-events:none` already set | good |
+| `.viewer-hud` (`app.css:187-188`) | hidden at opacity 0 | `pointer-events:none` unless `.on` | good |
+| `.range-value`, `.ripple-dot`, `.btn-spinner`, `.sb-said`, `.jump-wrap` wrapper | decorative or hidden layers | `pointer-events:none` already set; `.jump-wrap .btn` re-enables clicks | good |
+| `.popover-host` (portal target) | no box, no position, no size rules | panels are `position:fixed` and nothing covers the page | good |
+| `createPresence` consumers: `Nest.tsx` (hold 0), `FlockCallCard.tsx` (hold 0), `VoicePanel.tsx` tiles (hold `MOTION.exit`) | an item is kept for one exit only | removed items are either gone at once or `vc-leave` with `pointer-events:none` | good |
+
+Counts: 9 good, 5 fixed (participant menu, submenu, placement, flock picker, Select listbox), 1 not found in code.
+
+Open concern (not changed): a submenu's anchor is still read with `getBoundingClientRect`. If the pointer reaches a submenu trigger within the 160 ms entrance of its parent, the anchor is about 2% off. The brief keeps the anchor rect; no client capture was taken.
+
+## Визуальный аудит
+
+Владелец: «не забудь проверить, где накладывается текст и формы и что везде всё стилизовано. Сейчас в панели музыки, например, есть наложения и нестилизованные части».
+
+**Как проверяли.** Настоящая вёрстка без сервера и без Tauri: вход `?qa=<экран>&theme=&lang=ru` (`app/frontend/src/qa/`, только `npm run dev`: подключение стоит под `import.meta.env.DEV` и в сборку не попадает — проверено поиском по `dist/`, и тестом на `index.tsx`). Экраны строятся из настоящих компонентов с подставными данными: длинные русские имена, 12 участников, 50 треков, загрузка и ошибка загрузки. Скрипт `target/release-qa-v1.7.1/visual-audit.mjs` запускает headless Edge по CDP и на каждом экране проверяет: текст без многоточия, вылезающий из блока; текст, обрезанный предком; многострочные метки и теги; пересечение блоков одного слоя (`getBoundingClientRect` с учётом прокрутки); кнопки и поля с браузерным стилем (`appearance` у select, системный шрифт Arial/monospace, `outset`-рамка, серый фон кнопки); цвет текста по умолчанию (чёрный, ссылочный); обрезка с многоточием без `title`.
+
+**Охват.** 19 экранов: текстовый канал, голосовая комната на 1, 4 и 12 участников, плеер (пустая очередь, длинные названия, загрузка, ошибка загрузки, библиотека на 50 треков, вкладка «С моего компьютера»), саундборд, режим Finch (блок «В комнате» в компактном виде), 5 страниц настроек, администрирование, контекстное меню (длинное и меню участника). Окна 1280×800, 900×600 (все четыре темы: claude, bullfinch, custom, user) и 1920×1080 (claude). 180 прогонов. Скриншоты: `target/release-qa-v1.7.1/visual/before/` и `visual/after/` (после — все прогоны), данные: `visual/before.json`, `visual/after.json`.
+
+**Итог.** До: 1046 срабатываний в 25 группах. После: 0. Нарочно оставлено и исключено из проверки: стопка аватаров в гнезде (отрицательный отступ), рисунок гнезда, заходящий под название на 4 px, перенос подписи «Клавиши и о программе» в боковом меню настроек на две строки (перенос — выбранное поведение, `.setnav .si`).
+
+| Экран | Проблема | Исправление | Тест |
+| --- | --- | --- | --- |
+| Левая панель, голосовые каналы, строка комнаты и список людей (все экраны с ≥2 в комнате) | Метка «В ЭФИРЕ» переносилась на две строки, налезала на название и счётчик | `.tag { white-space:nowrap; flex:none }` (`polish.css`) | `visualAudit.test.ts` «a tag never wraps…» |
+| Режим Finch, гнездо с трансляцией | То же: метка на две строки, шапка гнезда заезжала на рисунок | то же правило | то же |
+| Левая панель, шапка | Кнопка «Режим Finch» рядом с названием выходила на 23 px в соседнюю колонку (текстовый канал, голосовая комната) | кнопка переехала в свою строку под шапкой `.finch-switch` (`app.css`, `Sidebar.tsx`) | `visualAudit.test.ts` «Finch mode switch…», `Sidebar.test.tsx` |
+| Режим Finch, нижняя полоса | При играющем треке название не сжималось, «Голос подключён», имя и кнопки накладывались друг на друга | компактные «Инструменты комнаты»: название усекается (макс. 220 px), часы скрыты, кнопки не сжимаются; полоса переносит элементы на вторую строку, статус голоса может сжаться (`roomTools.css`, `nest.css`) | `visualAudit.test.ts` «compact room tools…», «perch…» |
+| Окно плеера, «Сейчас играет» | Пузырёк значения ползунка («31») лежал на строке «Исполнитель · Добавил…» | пузырёк у ползунка перемотки скрыт, позицию показывают часы рядом (`music.css`) | `visualAudit.test.ts` «music progress slider…» |
+| Блок «В комнате» (A9, перенесено) | Кнопки «Пауза» / «Следующий» были только текстом, в узкой панели и в режиме Finch обрезались | значки `pause`, `resume`, `next` (в наборах classic и custom), подпись `rt-label` скрывается в компактном режиме и на узкой панели, имя и подсказка остаются | `RoomTools.test.tsx` «music row buttons…», `roomTools.test.ts`, `customIcons.test.tsx` |
+| Администрирование, таблица участников | Заголовок «Последняя активность» выступал за ячейку на 2 px | `.members-table th { overflow-wrap:anywhere }` (`polish.css`) | `visualAudit.test.ts` «admin table header…» |
+| Плеер: очередь, библиотека, строка «Сейчас играет», загрузки (в том числе ошибка) | Длинные исполнитель, «Добавил: …», имя файла и текст ошибки обрезались многоточием без подсказки | `title` с полным текстом | `visualAudit.test.ts` «music rows and upload lines…» |
+| Правая панель участников | Имена обрезаются без подсказки | `title` с полным именем | `visualAudit.test.ts` «truncated names…» |
+| Левая панель, люди в комнате; заголовок голосовой комнаты | то же | `title` | там же |
+| Текстовый канал: тема канала, цитата ответа, текст ошибки отправки | то же | `title` | там же |
+| Режим Finch, нижняя полоса: «В гнезде: …» | то же | `title` | `visualAudit.test.ts` «perch shows the full nest name…» |
+
+Не найдено (проверено автоматически на всех экранах и четырёх темах): кнопок, полей и списков с браузерным стилем; текста цвета по умолчанию; вылезающего текста без многоточия в плеере, саундборде, всех страницах настроек, контекстных меню и в голосовой комнате на 12 участников.
+
+Ограничения проверки: проверка цвета ограничена теми, что видны как цвет по умолчанию браузера (произвольный цвет вне переменных темы автоматически не найти); окно 1920×1080 снято только в теме claude; настоящий клиент Tauri (шрифты, масштаб Windows 125 %) не запускался, это остаётся в «Не проверено человеком».

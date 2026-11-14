@@ -109,3 +109,7 @@
   .nest-eq i:nth-child(2) { animation-delay:150ms; }
   .nest-eq i:nth-child(3) { animation-delay:300ms; }
 }
+
+/* The perch wraps its controls onto a second line before anything can overlap. */
+.tree-perch { flex-wrap:wrap; row-gap:6px; }
+.tree-perch .tree-voice { flex:1 1 140px; min-width:0; }

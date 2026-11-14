@@ -25,6 +25,7 @@ import { FlockCallCards } from './components/voice/FlockCallCard';
 import { IconSprite, Titlebar, ToastHost } from './ui';
 import { AdminModal } from './components/admin/AdminModal';
 import { SettingsModal } from './components/settings/SettingsModal';
+import { RoomToolWindows } from './components/voice/RoomTools';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { startUpdateChecks } from './stores/updateStore';
 import { startAutoIdle } from './stores/idleStore';
@@ -113,6 +114,7 @@ export function App() {
       <CertChangedModal />
       <AdminModal />
       <SettingsModal />
+      <RoomToolWindows />
       <ToastHost />
       <FlockCallCards />
       <ContextMenuHost />

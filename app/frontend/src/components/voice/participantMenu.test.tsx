@@ -50,6 +50,41 @@ it('opens shared volume and mute actions from tile, sidebar and member row with 
   expect(document.querySelector('[role="menu"]')).toBeTruthy();
 });
 
+it('the left sidebar row and the members row each have an actions button that opens the same menu as a right click', async () => {
+  const root = mount();
+  for (const selector of ['.vp', '.members .mem']) {
+    const row = root.querySelector(selector) as HTMLElement;
+    const more = row.querySelector<HTMLButtonElement>('button[aria-label^="Actions for "]');
+    expect(more, selector).toBeTruthy();
+    more!.click();
+    await flush();
+    const menu = document.querySelector('[role="menu"]')!;
+    expect(menu.textContent).toContain('Mute for me');
+    expect(menu.querySelector('[aria-label="Volume"]')).toBeTruthy();
+    closeContextMenu();
+  }
+});
+
+it('the row actions button does not reach the row on click or drag', async () => {
+  const root = mount();
+  const row = root.querySelector('.vp') as HTMLElement;
+  const more = row.querySelector<HTMLButtonElement>('button[aria-label^="Actions for "]')!;
+  expect(more.getAttribute('draggable')).toBe('false');
+  const rowClick = vi.fn();
+  const rowDragStart = vi.fn();
+  row.addEventListener('click', rowClick);
+  row.addEventListener('dragstart', rowDragStart);
+  more.click();
+  await flush();
+  expect(rowClick).not.toHaveBeenCalled();
+  expect(document.querySelector('[role="menu"]')).toBeTruthy();
+  const drag = new Event('dragstart', { bubbles: true, cancelable: true });
+  more.dispatchEvent(drag);
+  expect(drag.defaultPrevented).toBe(true);
+  expect(rowDragStart).not.toHaveBeenCalled();
+  closeContextMenu();
+});
+
 it('keeps the existing member fallback until a voice profile has arrived', async () => {
   setCurrentUser({ ...me, role: 'moderator' });
   setKnownUsers([me]);

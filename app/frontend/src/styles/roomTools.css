@@ -1,0 +1,35 @@
+/* "In the room": the block above the profile panel in the left column (and on the perch in Finch mode). */
+.room-tools { flex: none; display: flex; flex-direction: column; gap: 8px; margin: 0 12px 8px; padding: 10px; background: var(--bg-card); border: 1px solid var(--line-soft); border-radius: var(--r-lg); min-width: 0; }
+.room-now { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.room-now-title { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; font-weight: 700; }
+.room-now .trunc { min-width: 0; }
+.room-now-actions { display: flex; gap: 6px; }
+.room-now-actions .btn { flex: 1 1 0; min-width: 0; }
+.room-tools-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.room-tools-buttons .btn { flex: 1 1 auto; min-width: 0; justify-content: center; }
+.room-tools-buttons .btn.live { border-color: var(--red); color: var(--red-text); }
+.room-tools.compact { margin: 0; padding: 0; border: 0; background: none; flex-direction: row; align-items: center; flex-wrap: wrap; }
+.room-tools.compact .rt-label { display: none; }
+.room-tools.compact .room-tools-buttons { flex-wrap: nowrap; }
+
+/* Narrow window (side panel 232 px and less): icons only; the buttons keep their tooltips. */
+@media (max-width:1150px) {
+  .room-tools { margin: 0 8px 8px; padding: 8px; }
+  .room-tools .rt-label { display: none; }
+}
+/* Short window: the music row shrinks to one line without the clock. */
+@media (max-height:700px) {
+  .room-now .music-clock { display: none; }
+  .room-now { flex-direction: row; align-items: center; }
+  .room-now-title { flex: 1 1 0; }
+  .room-now-actions { flex: none; }
+  .room-now-actions .btn { flex: none; }
+}
+
+/* Compact (the Finch mode perch): the track title shrinks to an ellipsis, the buttons stay whole and never run into the profile. */
+.room-tools.compact { min-width:0; flex:0 1 auto; }
+.room-tools.compact .room-now { flex-direction:row; align-items:center; min-width:0; max-width:220px; }
+.room-tools.compact .room-now-title { flex:1 1 0; }
+.room-tools.compact .music-clock { display:none; }
+.room-tools.compact .room-now-actions { flex:none; }
+.room-tools.compact .room-now-actions .btn { flex:none; }

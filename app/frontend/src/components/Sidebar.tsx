@@ -19,10 +19,11 @@ import {
 import { isLocallyMuted } from '../stores/localMuteStore';
 import { isSharing } from '../stores/screenState';
 import { participantContextMenu, participantMenuKey } from './voice/participantMenu';
-import { isMeParticipant } from './voice/ParticipantTile';
+import { isMeParticipant, RowActions } from './voice/ParticipantTile';
+import { openContextMenu } from '../ui/ContextMenu';
 import { VOICE_USER_DRAG, canDrag, dropTarget, readVoiceDrag, type VoiceDrag } from './voice/voiceDrag';
 import { setNestView } from '../stores/nestView';
-import { musicAvailable, musicState, setMusicPanelOpen } from '../stores/musicStore';
+import { RoomTools } from './voice/RoomTools';
 import { connectionStatus, localPeerId, knownUsers, myStatus as ownStatus, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
 import { currentUser } from '../stores/authStore';
@@ -43,19 +44,21 @@ export type ChannelDialog =
 const isAdmin = () => currentUser()?.role === 'admin';
 const isStaff = () => currentUser()?.role === 'admin' || currentUser()?.role === 'moderator';
 
-/** Up / down / rename / delete, shown on hover (and keyboard focus) to admins. */
+/** One "…" for admins, shown on hover (and keyboard focus): up, down, rename, delete in a menu anchored to the button. */
 export function ChannelActions(props: { channel: Channel; onDialog: (dialog: ChannelDialog) => void }) {
-  const act = (action: () => void) => (event: MouseEvent) => {
+  const openMenu = (event: MouseEvent) => {
     event.stopPropagation();
-    action();
+    openContextMenu(event.currentTarget as HTMLElement, [
+      { kind: 'item', label: t('Move up'), icon: 'up', onSelect: () => void moveChannel(props.channel, -1) },
+      { kind: 'item', label: t('Move down'), icon: 'down', onSelect: () => void moveChannel(props.channel, 1) },
+      { kind: 'item', label: t('Rename'), icon: 'edit', onSelect: () => props.onDialog({ kind: 'rename', channel: props.channel }) },
+      { kind: 'item', label: t('Delete'), icon: 'trash', danger: true, onSelect: () => props.onDialog({ kind: 'delete', channel: props.channel }) },
+    ]);
   };
   return (
     <Show when={isAdmin()}>
       <span class="acts">
-        <button type="button" aria-label={t('Move {channel} up', { channel: props.channel.name })} title={t('Move up')} onClick={act(() => void moveChannel(props.channel, -1))}><Icon name="up" /></button>
-        <button type="button" aria-label={t('Move {channel} down', { channel: props.channel.name })} title={t('Move down')} onClick={act(() => void moveChannel(props.channel, 1))}><Icon name="down" /></button>
-        <button type="button" aria-label={t('Rename {channel}', { channel: props.channel.name })} title={t('Rename')} onClick={act(() => props.onDialog({ kind: 'rename', channel: props.channel }))}><Icon name="edit" /></button>
-        <button type="button" aria-label={t('Delete {channel}', { channel: props.channel.name })} title={t('Delete')} onClick={act(() => props.onDialog({ kind: 'delete', channel: props.channel }))}><Icon name="trash" /></button>
+        <button type="button" aria-label={t('Actions for {name}', { name: props.channel.name })} title={t('Actions for {name}', { name: props.channel.name })} onClick={openMenu}><Icon name="more" /></button>
       </span>
     </Show>
   );
@@ -167,6 +170,9 @@ export function Sidebar() {
         <img src="/custom/assets/brand/finchspeak-tile-small.svg" alt="" />
         <span>FinchSpeak</span>
       </div>
+      <div class="finch-switch">
+        <Button size="sm" variant="ghost" icon="feather" class="nest-toggle brand-finch" title={t('Switch to Finch mode')} onClick={() => setNestView(true)}>{t('Finch mode')}</Button>
+      </div>
 
       <nav class="nav">
         <div class="cat">
@@ -205,7 +211,6 @@ export function Sidebar() {
             <button type="button" class="cat-toggle" aria-expanded={!collapsed().voice} onClick={() => toggleCategory('voice')}>
             <Icon name={collapsed().voice ? 'chev-r' : 'chev-d'} />{t('Voice channels')}
           </button>
-          <button type="button" class="cat-add nest-toggle" title={t('Switch to Finch mode')} aria-label={t('Switch to Finch mode')} onClick={() => setNestView(true)}><Icon name="feather" /></button>
           <Show when={isAdmin()}>
             <button type="button" class="cat-add" title={t('Create voice channel')} aria-label={t('Create voice channel')} onClick={() => setDialog({ kind: 'create', type: 'voice' })}><Icon name="plus" /></button>
           </Show>
@@ -238,11 +243,12 @@ export function Sidebar() {
                     <div class="vp" tabindex="0" draggable={canDrag(participant)}
                       onDragStart={(event) => dragStart(event, participant)} onDragEnd={() => { setDragged(null); setDropChannel(null); }} onContextMenu={(event) => participantContextMenu(event, participant.user_id, participant)} onKeyDown={(event) => participantMenuKey(event, participant.user_id, participant)}>
                       <Avatar name={participant.username} id={participant.user_id} size={24} src={knownUsers().find((user) => user.id === participant.user_id)?.avatar_url} speaking={speakingPeers().has(participant.peer_id) || (isMeParticipant(participant, localPeerId()) && !isMuted() && isLocalSpeaking())} levelPeerId={participant.peer_id} />
-                      <span class="grow trunc">{participant.username}</span><Show when={gameOf(participant.user_id)}><Icon name="gamepad" title={t('Playing {game}', { game: gameOf(participant.user_id)! })} /></Show>
+                      <span class="grow trunc" title={participant.username}>{participant.username}</span><Show when={gameOf(participant.user_id)}><Icon name="gamepad" title={t('Playing {game}', { game: gameOf(participant.user_id)! })} /></Show>
                       <Show when={!isMeParticipant(participant, localPeerId()) && isLocallyMuted(participant.user_id)}><Icon name="vol-off" title={t('You muted this person')} /></Show>
                       <Show when={participant.is_muted}><Icon name="mic-off" title={t('Muted')} class="tr" /></Show>
                       <Show when={participant.is_deafened}><Icon name="phones-off" title={t('Deafened')} class="tr" /></Show>
                       <Show when={participant.is_sharing}><span class="tag live" title={t('Sharing screen')}><Icon name="share" size="sm" /> {t('LIVE')}</span></Show>
+                      <RowActions userId={participant.user_id} name={participant.username} participant={participant} />
                     </div>
                   )}
                 </For>
@@ -255,33 +261,34 @@ export function Sidebar() {
 
       <Show when={activeVoiceChannel()}>
         {(channel) => (
+          // Two siblings: the text opens the room (a real button), the leave button sits beside it and never opens anything.
           <div class="vstrip voice-banner">
-            <div class="col grow">
-                <span class="row g6 b fs13 voice-connection">
+            <button type="button" class="voice-open col grow" aria-label={t('Open the room')} title={t('Open the room')} onClick={() => void selectChannel(channel())}>
+              <span class="row g6 b fs13 voice-connection">
                 <Icon name="bars" size="sm" />{connectionStatus() === 'connected' ? t('Voice connected') : t('Voice disconnected')}
               </span>
               <span class="t2 fs12 trunc">{channel().name}{pingRtt() !== null ? ` · ${pingRtt()} ms` : ''}</span>
               <Show when={isSharing()}><span class="row g6 fs12 tr"><Icon name="share" size="sm" />{t('You are sharing your screen')}</span></Show>
-            </div>
-            <Show when={musicAvailable() && musicState()?.playing}>
-              <button type="button" class="music-note" aria-label={t('Music is playing')} title={t('Music')} onClick={() => setMusicPanelOpen(true)}><Icon name="music" size="sm" /></button>
-            </Show>
-            <Button iconOnly size="sm" variant="danger" icon="hangup" label={t('Disconnect from voice')} title={t('Disconnect')} onClick={() => void leaveVoice()} />
+            </button>
+            <Button iconOnly size="sm" variant="danger" icon="hangup" class="voice-leave" label={t('Leave room')} title={t('Leave room')} onClick={() => void leaveVoice()} />
           </div>
         )}
       </Show>
 
+      <RoomTools />
+
       <div class="upanel user-panel">
-        <button type="button" class="row g12 grow profile-open" aria-label={t('Open profile')} title={currentUser()?.display_name || currentUser()?.username} onClick={() => setProfileOpen(true)}>
+        {/* Not a control: the gear below is the one way into profile and settings. */}
+        <div class="row g12 grow profile-card">
           <Avatar name={currentUser()?.display_name || currentUser()?.username} id={currentUser()?.id} size={40} status={myStatus()} speaking={isLocalSpeaking()} src={currentUser()?.avatar_url} levelPeerId={localPeerId() ?? undefined} />
           <div class="col grow">
             <span class="b trunc fs13">{currentUser()?.display_name || currentUser()?.username}</span>
             <span class="t3 fs12 trunc">{(currentUser() && statusTexts()[currentUser()!.id]) || statusLabel()}</span>
           </div>
-        </button>
+        </div>
         <Button iconOnly size="sm" variant={isMuted() ? 'danger' : 'ghost'} icon={isMuted() ? 'mic-off' : 'mic'} label={isMuted() ? t('Unmute') : t('Mute')} title={isMuted() ? t('Unmute') : t('Mute')} onClick={() => void toggleMute()} />
         <Button iconOnly size="sm" variant={isDeafened() ? 'danger' : 'ghost'} icon={isDeafened() ? 'phones-off' : 'phones'} label={isDeafened() ? t('Undeafen') : t('Deafen')} title={isDeafened() ? t('Undeafen') : t('Deafen')} onClick={() => void toggleDeafen()} />
-        <Button iconOnly size="sm" variant="ghost" icon="sliders" label={t('Profile and settings')} title={t('Profile and settings')} onClick={() => setProfileOpen(true)} />
+        <Button iconOnly size="sm" variant="ghost" icon="gear" label={t('Profile and settings')} title={t('Profile and settings')} onClick={() => setProfileOpen(true)} />
         <Show when={isStaff()}>
           <Button iconOnly size="sm" variant="ghost" icon="shield" label={t('Administration')} title={t('Administration')} class="ty" onClick={() => setAdminOpen(true)} />
         </Show>

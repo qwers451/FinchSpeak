@@ -59,7 +59,7 @@ button:disabled { cursor:not-allowed; }
 .vstrip { background:var(--tint-signal); border:0; margin:0 12px 12px; padding:12px; }
 .upanel { min-height:74px; height:auto; padding:12px 15px; border-top:1px solid var(--line-soft); background:transparent; }
 .upanel .btn.icon { width:30px; height:32px; }
-.profile-open .head { font-weight:600; }
+.profile-card .head { font-weight:600; }
 .main { position:relative; }
 .mhead { min-height:64px; height:auto; padding:12px 28px; gap:12px; background:var(--bg-app); }
 .mhead h3 { font-size:16px!important; font-weight:600; letter-spacing:-.025em; }
@@ -332,7 +332,7 @@ button:disabled { cursor:not-allowed; }
 
 /* Content-driven minimums keep names and controls readable in short windows. */
 .upanel { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; padding:12px; }
-.upanel .profile-open { grid-column:1 / -1; margin-bottom:6px; }
+.upanel .profile-card { grid-column:1 / -1; margin-bottom:6px; }
 .upanel > .btn.icon { justify-self:center; width:100%; }
 .voice-banner .b { color:var(--cyan)!important; }
 .room-grid { min-height:calc(var(--rows,1) * 220px); flex-shrink:0; }
