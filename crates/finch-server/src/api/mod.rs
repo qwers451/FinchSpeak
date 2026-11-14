@@ -86,7 +86,7 @@ pub fn create_router(pool: SqlitePool, mut config: ServerConfig, sessions: Sessi
     sessions.soundboard.get_or_init(|| config.soundboard.clone());
     health::mark_started();
     let monitor = crate::health::HealthMonitor::start(pool.clone(), &config, sessions.clone());
-    let auth_hash_gate = std::sync::Arc::new(tokio::sync::Semaphore::new(config.limits.clone().validated().auth_hash_concurrency));
+    let auth_hash_gate = std::sync::Arc::new(tokio::sync::Semaphore::new(config.limits.auth_hash_concurrency));
     auth::warm_dummy_hash();
     let cors = cors_layer(&config.server.allowed_origins);
     let shared_state = ArcSharedState { pool, config, sessions, login_guard: Default::default(), login_ip_hits: Default::default(), auth_hash_gate, register_hits: Default::default(), avatar_hits: Default::default() };

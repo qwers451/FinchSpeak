@@ -473,6 +473,13 @@ impl AuthConfig {
 
 impl ServerConfig {
     /// Load configuration from a TOML file path or fallback to defaults.
+    /// Clamp implausible `[limits]` once, here, so the rest of the server can trust them (each
+    /// clamp warns exactly once).
+    fn validated(mut self) -> Self {
+        self.limits = self.limits.validated();
+        self
+    }
+
     pub fn load_or_default(path: Option<&Path>) -> Result<Self> {
         match path {
             Some(p) if p.exists() => {
@@ -480,7 +487,7 @@ impl ServerConfig {
                     .with_context(|| format!("Failed to read config file at {:?}", p))?;
                 let config: Self = toml::from_str(&content)
                     .with_context(|| format!("Failed to parse TOML configuration from {:?}", p))?;
-                Ok(config)
+                Ok(config.validated())
             }
             _ => Ok(Self::default()),
         }
@@ -563,6 +570,19 @@ mod tests {
         assert_eq!(config.storage.max_file_size_mb, 50);
         assert_eq!(config.auth.jwt_secret, "CHANGE_ME_SECURE_JWT_SECRET_32_BYTES_MINIMUM");
         assert_eq!(config.auth.jwt_expiration_hours, 72);
+    }
+
+    #[test]
+    fn loading_a_config_clamps_implausible_limits_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("finch-server.toml");
+        std::fs::write(&path, "[limits]
+media_burst_bytes = 0
+auth_hash_concurrency = 0
+").unwrap();
+        let config = ServerConfig::load_or_default(Some(&path)).unwrap();
+        assert_eq!(config.limits.media_burst_bytes, MIN_MEDIA_BURST_BYTES);
+        assert_eq!(config.limits.auth_hash_concurrency, 1);
     }
 
     #[test]

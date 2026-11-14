@@ -137,9 +137,8 @@ impl SessionManager {
     }
 
     /// Set the media limits and the pre-sign-in limits (before the listeners accept clients).
-    /// Values that would break the media path or the sign-in gate are clamped here, with a warning.
+    /// `limits` must already be validated (the config loader does it once, with its warnings).
     pub fn set_media_limits(&self, limits: LimitsConfig) {
-        let limits = limits.validated();
         self.preauth.set(crate::limits::PreAuth::from_limits(&limits)).ok();
         self.media_config.set(limits).ok();
     }
