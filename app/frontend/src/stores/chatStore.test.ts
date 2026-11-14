@@ -56,6 +56,30 @@ describe('chat regressions', () => {
     expect(messages()).toHaveLength(2);
   });
 
+  it('keeps our pending message and outbox when another author reuses its client id', async () => {
+    vi.spyOn(api, 'sendTextMessage').mockResolvedValue();
+    await sendMessage('mine');
+    const pending = messages()[0];
+    handleIncomingMessage({ ...live('foreign-collision'), client_msg_id: pending.client_msg_id });
+    expect(messages().map((message) => message.id)).toContain(pending.id);
+    expect(messages()).toHaveLength(2);
+    expect(readOutbox().map((entry) => entry.client_msg_id)).toEqual([pending.client_msg_id]);
+  });
+
+  it('keeps our unsent outbox when history contains another author with the same client id', async () => {
+    vi.spyOn(api, 'sendTextMessage').mockResolvedValue();
+    await sendMessage('mine');
+    const pending = messages()[0];
+    setMessages([]);
+    vi.spyOn(api, 'fetchChannelMessages').mockResolvedValue({ channel_id: 'chat', has_more: false, messages: [
+      { id: 'foreign-history-collision', author_id: 'other', author_name: 'Other', content: 'theirs', attachments: [], timestamp: 1, client_msg_id: pending.client_msg_id },
+    ] });
+    await selectChannel(channel);
+    expect(messages().map((message) => message.id)).toContain(pending.id);
+    expect(messages()).toHaveLength(2);
+    expect(readOutbox().map((entry) => entry.client_msg_id)).toEqual([pending.client_msg_id]);
+  });
+
   it('does not overwrite a newer channel selection with slow history', async () => {
     let resolveFirst!: (value: { channel_id: string; messages: []; has_more: boolean }) => void;
     vi.spyOn(api, 'fetchChannelMessages').mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
