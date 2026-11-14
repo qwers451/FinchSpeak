@@ -1,6 +1,6 @@
 //! Session management, peer IDs allocation, and active voice room registry.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -78,6 +78,8 @@ pub struct SessionManager {
     message_hits: Arc<crate::limits::WindowLimiter>,
     /// Other things a person could repeat endlessly (status changes).
     action_hits: Arc<crate::limits::WindowLimiter>,
+    /// Recent keyframe requests per (viewer peer, streamer peer), kept for the last second.
+    keyframe_hits: Arc<DashMap<(u32, u32), VecDeque<std::time::Instant>>>,
     /// Per-participant media limits, set with the router; unset means the defaults.
     media_config: Arc<std::sync::OnceLock<LimitsConfig>>,
     /// One media budget per user, shared by all of that user's sessions; dropped with the last session.
@@ -122,6 +124,7 @@ impl SessionManager {
             message_rule: Arc::new(std::sync::Mutex::new((30, std::time::Duration::from_secs(10)))),
             message_hits: Arc::new(crate::limits::WindowLimiter::default()),
             action_hits: Arc::new(crate::limits::WindowLimiter::default()),
+            keyframe_hits: Arc::new(DashMap::new()),
             media_config: Arc::new(std::sync::OnceLock::new()),
             media_budgets: Arc::new(DashMap::new()),
             preauth: Arc::new(std::sync::OnceLock::new()),
@@ -165,6 +168,47 @@ impl SessionManager {
     /// Count one `kind` of action of `user`: at most `max` per `window`; `Err(seconds)` when over.
     pub fn allow_action(&self, user: Uuid, kind: &str, max: usize, window: std::time::Duration) -> Result<(), u64> {
         self.action_hits.hit(&format!("{kind}:{user}"), std::time::Instant::now(), max, window)
+    }
+
+    /// True when `viewer_peer_id` is subscribed to the screen share of `streamer_peer_id`.
+    pub fn is_screen_viewer(&self, viewer_peer_id: u32, streamer_peer_id: u32) -> bool {
+        let short_id = self.sessions.get(&streamer_peer_id).and_then(|s| s.current_voice_channel);
+        short_id.is_some_and(|short_id| {
+            self.voice_rooms.get(&short_id).is_some_and(|room| {
+                room.screen_subscribers
+                    .get(&streamer_peer_id)
+                    .is_some_and(|viewers| viewers.contains(&viewer_peer_id))
+            })
+        })
+    }
+
+    /// Keyframe requests from one viewer to one streamer: at most two per second. A request over
+    /// the limit is dropped (`false`); a request after the window has passed goes through.
+    pub fn allow_keyframe_request(&self, viewer_peer_id: u32, streamer_peer_id: u32) -> bool {
+        const MAX_PER_WINDOW: usize = 2;
+        const WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
+        // Pairs that went quiet are swept once the table grows; a small table is left alone.
+        const SWEEP_AT: usize = 256;
+
+        let now = std::time::Instant::now();
+        let mut queue = self.keyframe_hits.entry((viewer_peer_id, streamer_peer_id)).or_default();
+        while queue.front().is_some_and(|first| now.duration_since(*first) >= WINDOW) {
+            queue.pop_front();
+        }
+        if queue.len() >= MAX_PER_WINDOW {
+            return false;
+        }
+        queue.push_back(now);
+        drop(queue);
+        if self.keyframe_hits.len() > SWEEP_AT {
+            self.keyframe_hits.retain(|_, hits| hits.back().is_some_and(|last| now.duration_since(*last) < WINDOW));
+        }
+        true
+    }
+
+    /// Forget the keyframe request counts that involve `peer_id` (it left the room or disconnected).
+    pub fn forget_keyframe_pairs(&self, peer_id: u32) {
+        self.keyframe_hits.retain(|(viewer, streamer), _| *viewer != peer_id && *streamer != peer_id);
     }
 
     /// Count a message of `user`; `Err(seconds)` when they are sending too fast.
@@ -212,6 +256,7 @@ impl SessionManager {
                     entry.remove();
                 }
             }
+            self.forget_keyframe_pairs(peer_id);
             // The media budget is the user's: it goes when the user's last session does.
             if !self.sessions.iter().any(|active| active.user_id == session.user_id) {
                 self.media_budgets.remove(&session.user_id);
@@ -264,6 +309,7 @@ impl SessionManager {
             }
             if room.participants.is_empty() { room.music.clear() } else { Vec::new() }
         } else { Vec::new() };
+        self.forget_keyframe_pairs(peer_id);
         if let Some(music) = self.music.get() { music.dispose_tracks(removed); }
     }
 
@@ -322,6 +368,9 @@ impl SessionManager {
             if let Some((user_id, was_sharing)) = info {
                 evicted.push((peer_id, user_id, was_sharing));
             }
+        }
+        for (peer_id, _, _) in &evicted {
+            self.forget_keyframe_pairs(*peer_id);
         }
         if let Some((_, mut room)) = self.voice_rooms.remove(&short_id)
             && let Some(music) = self.music.get()

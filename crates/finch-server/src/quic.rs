@@ -536,6 +536,20 @@ fn refuse_call(sessions: &SessionManager, peer_id: u32, code: u16, message: impl
     sessions.send_control_to_peer(peer_id, &ServerMessage::Error { code, message: message.into() });
 }
 
+/// Joining, muting and starting a screen share each make the whole room react: ten per person per 10 seconds.
+const VOICE_CHANGE_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Count one voice change of `kind`; replies with an error and returns `true` when it is over the limit.
+fn refuse_voice_change(sessions: &SessionManager, peer_id: u32, user_id: Uuid, kind: &str) -> bool {
+    match sessions.allow_action(user_id, kind, 10, VOICE_CHANGE_WINDOW) {
+        Ok(()) => false,
+        Err(seconds) => {
+            refuse_call(sessions, peer_id, 429, format!("Wait {seconds} s; too many voice changes"));
+            true
+        }
+    }
+}
+
 async fn is_voice_channel(pool: &SqlitePool, channel_id: Uuid) -> bool {
     sqlx::query_scalar::<_, String>("SELECT channel_type FROM channels WHERE id = ?")
         .bind(channel_id.to_string())
@@ -779,6 +793,9 @@ async fn handle_client_message(
         }
 
         ClientMessage::JoinVoice { channel_id } => {
+            if refuse_voice_change(sessions, peer_id, user_id, "join_voice") {
+                return;
+            }
             if let Some(short_id) = sessions.channel_to_short.get(&channel_id).map(|s| *s) {
                 let old_room = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
                 if let Some(old_room) = old_room.filter(|old| *old != short_id) {
@@ -820,6 +837,9 @@ async fn handle_client_message(
         }
 
         ClientMessage::UpdateVoiceState { muted, deafened } => {
+            if refuse_voice_change(sessions, peer_id, user_id, "voice_state") {
+                return;
+            }
             let updated = if let Some(mut session) = sessions.sessions.get_mut(&peer_id) {
                 session.muted = muted;
                 session.deafened = deafened;
@@ -844,6 +864,9 @@ async fn handle_client_message(
             height,
             fps,
         } => {
+            if refuse_voice_change(sessions, peer_id, user_id, "screen_start") {
+                return;
+            }
             let short_id = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
             if let Some(short_id) = short_id {
                 sessions.set_sharing(peer_id, true);
@@ -941,7 +964,11 @@ async fn handle_client_message(
         }
 
         ClientMessage::RequestKeyframe { target_peer_id } => {
-            let tx = sessions.sessions.get(&target_peer_id).map(|s| s.control_tx.clone());
+            // Only a viewer of that share may ask its streamer for a keyframe, and not more than twice a second.
+            if !sessions.is_screen_viewer(peer_id, target_peer_id) || !sessions.allow_keyframe_request(peer_id, target_peer_id) {
+                return;
+            }
+            let tx =sessions.sessions.get(&target_peer_id).map(|s| s.control_tx.clone());
             if let Some(tx) = tx {
                 let _ = tx.send(ServerMessage::KeyframeRequested).await;
             }
