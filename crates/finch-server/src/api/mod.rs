@@ -15,17 +15,70 @@ pub mod soundboard;
 pub mod state;
 
 use axum::extract::DefaultBodyLimit;
+use axum::http::{header, HeaderName, HeaderValue, Method};
 use axum::routing::{get, post};
 use axum::Router;
 use sqlx::SqlitePool;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use crate::api::auth::ArcSharedState;
 use crate::config::ServerConfig;
 use crate::session::SessionManager;
 
+/// Origins of the desktop app's webview (Tauri 2 on each platform). Always allowed.
+const APP_ORIGINS: [&str; 3] = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"];
+
+/// Turn `[server] allowed_origins` entries into header values. An entry must be `http://`, `https://`
+/// or `tauri://` followed by a host, with no path, query, user info, wildcard or whitespace; anything
+/// else is skipped with a warning.
+pub(crate) fn parse_allowed_origins(entries: &[String]) -> Vec<HeaderValue> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let trimmed = entry.trim();
+            let valid = trimmed.split_once("://").is_some_and(|(scheme, host)| {
+                matches!(scheme, "http" | "https" | "tauri")
+                    && !host.is_empty()
+                    && !host.chars().any(|c| matches!(c, '/' | '?' | '#' | '@' | '*') || c.is_whitespace())
+            });
+            match HeaderValue::from_str(trimmed) {
+                Ok(value) if valid => Some(value),
+                _ => {
+                    tracing::warn!("[server] allowed_origins: skipping invalid origin {entry:?}");
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+/// CORS for the HTTP API: the desktop app's origins plus the configured ones. Only the methods and
+/// headers the API uses are allowed. Requests without an Origin header (the native client) are not
+/// affected by CORS.
+pub(crate) fn cors_layer(allowed_origins: &[String]) -> CorsLayer {
+    let origins = APP_ORIGINS
+        .iter()
+        .map(|origin| HeaderValue::from_static(origin))
+        .chain(parse_allowed_origins(allowed_origins));
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE, Method::OPTIONS])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            header::IF_NONE_MATCH,
+            HeaderName::from_static("x-finch-file-name"),
+            HeaderName::from_static("x-finch-keep"),
+        ])
+}
+
 /// Build the Axum router for the FinchSpeak REST API.
-pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionManager) -> Router {
+pub fn create_router(pool: SqlitePool, mut config: ServerConfig, sessions: SessionManager) -> Router {
+    config.storage = config.storage.validated();
+    let swept = files::sweep_stale_parts(std::path::Path::new(&config.storage.upload_dir));
+    if swept > 0 {
+        tracing::info!("Removed {swept} unfinished uploads");
+    }
     // axum caps request bodies at 2 MB by default; uploads follow the configured limit instead.
     let upload_limit = files::upload_body_limit(config.storage.max_file_size_mb);
     let music_upload_limit = config.music.max_track_mb.saturating_mul(crate::music::MIB).saturating_add(64 * 1024).min(usize::MAX as u64) as usize;
@@ -33,12 +86,10 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
     sessions.soundboard.get_or_init(|| config.soundboard.clone());
     health::mark_started();
     let monitor = crate::health::HealthMonitor::start(pool.clone(), &config, sessions.clone());
-    let shared_state = ArcSharedState { pool, config, sessions, login_guard: Default::default(), register_hits: Default::default(), avatar_hits: Default::default() };
-
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    let auth_hash_gate = std::sync::Arc::new(tokio::sync::Semaphore::new(config.limits.auth_hash_concurrency));
+    auth::warm_dummy_hash();
+    let cors = cors_layer(&config.server.allowed_origins);
+    let shared_state = ArcSharedState { pool, config, sessions, login_guard: Default::default(), login_ip_hits: Default::default(), auth_hash_gate, register_hits: Default::default(), avatar_hits: Default::default() };
 
     Router::new()
         .route("/health", get(health::health_handler))
@@ -112,4 +163,39 @@ pub fn create_router(pool: SqlitePool, config: ServerConfig, sessions: SessionMa
         .route("/api/files/{id}/thumb", get(files::download_thumb_handler))
         .layer(cors)
         .with_state(shared_state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_allowed_origins;
+
+    #[test]
+    fn configured_origins_must_be_scheme_and_host_only() {
+        let entries = [
+            "https://finch.example.com".to_string(),
+            "  http://192.168.1.20:8443 ".to_string(),
+            "tauri://localhost".to_string(),
+            "https://finch.example.com/".to_string(),
+            "https://finch.example.com/path".to_string(),
+            "*".to_string(),
+            "https://*.example.com".to_string(),
+            "ftp://files.example.com".to_string(),
+            "not an origin".to_string(),
+            "https://".to_string(),
+            "https://user@finch.example.com".to_string(),
+            "".to_string(),
+        ];
+        let kept: Vec<String> = parse_allowed_origins(&entries)
+            .into_iter()
+            .map(|value| value.to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            kept,
+            vec![
+                "https://finch.example.com".to_string(),
+                "http://192.168.1.20:8443".to_string(),
+                "tauri://localhost".to_string(),
+            ]
+        );
+    }
 }

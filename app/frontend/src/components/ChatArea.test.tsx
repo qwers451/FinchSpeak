@@ -3,8 +3,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../services/api';
 import { setCurrentUser } from '../stores/authStore';
 import { setUnread, resetActivity } from '../stores/activityStore';
-import { replyingTo, setActiveChannel, setChatLoading, setMessages, setReplyingTo } from '../stores/chatStore';
+import { handleIncomingMessage, messages, replyingTo, sendMessage, setActiveChannel, setChatLoading, setMessages, setReplyingTo } from '../stores/chatStore';
 import { setPendingFiles } from '../stores/attachmentStore';
+import { resetDraftCache } from '../stores/drafts';
 import { DEFAULT_PREFS, setPrefs } from '../stores/settingsStore';
 import { setConnectionStatus, setKnownUsers } from '../stores/sessionStore';
 import type { Channel, Message, User } from '../types';
@@ -41,6 +42,7 @@ const button = (host: ParentNode, label: string) => host.querySelector<HTMLButto
 
 beforeEach(() => {
   localStorage.clear();
+  resetDraftCache();
   Object.defineProperty(Element.prototype, 'scrollIntoView', { value: vi.fn(), configurable: true });
   vi.spyOn(document, 'hasFocus').mockReturnValue(true);
   resetActivity();
@@ -57,6 +59,7 @@ afterEach(() => {
   dispose?.();
   dispose = undefined;
   document.body.innerHTML = '';
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -258,32 +261,117 @@ it('ru: the reaction tooltip calls me "Вы" and an unknown reactor "Кто-то
   expect(tip).not.toMatch(/\b(You|Someone)\b/);
 });
 
-it('the jump button counts unseen messages with the right plural form', async () => {
-  const jumpLabel = () => document.querySelector('.jump-wrap button')?.textContent?.replace(/\s+/g, ' ').trim();
-  const arriveWhileScrolledUp = async (language: 'ru' | 'en', total: number) => {
-    setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language } });
-    setMessages([msg('m0', bob, 0)]);
-    const host = mount();
-    const list = host.querySelector('.message-list') as HTMLElement;
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
-    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+const jumpButton = (host: ParentNode) => host.querySelector<HTMLButtonElement>('.jump-wrap button');
+const jumpLabel = () => document.querySelector('.jump-wrap button')?.textContent?.replace(/\s+/g, ' ').trim();
+const sizeList = (list: HTMLElement) => {
+  Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 5000 });
+  Object.defineProperty(list, 'clientHeight', { configurable: true, value: 400 });
+};
+const scrollList = (list: HTMLElement, top: number) => {
+  list.scrollTop = top;
+  list.dispatchEvent(new Event('scroll'));
+};
+
+it('the jump button appears only after scrolling more than a screen up, and hides near the bottom', async () => {
+  setMessages([msg('m0', bob, 0)]);
+  const host = mount();
+  const list = host.querySelector<HTMLElement>('.message-list')!;
+  sizeList(list);
+  await flush();
+  scrollList(list, 4600); // at the bottom
+  await flush();
+  expect(jumpButton(host)).toBeNull();
+  scrollList(list, 4000); // 600px above the bottom: more than the 400px screen
+  await flush();
+  expect(jumpLabel()).toBe('Jump to latest');
+  scrollList(list, 4300); // 300px above: within a screen again
+  await flush();
+  expect(jumpButton(host)).toBeNull();
+});
+
+it('the jump button counts messages that arrive while scrolled away, and the count clears once the list reaches the bottom', async () => {
+  setMessages([msg('m0', bob, 0)]);
+  const host = mount();
+  const list = host.querySelector<HTMLElement>('.message-list')!;
+  sizeList(list);
+  await flush();
+  const scrollTo = vi.fn();
+  Object.defineProperty(list, 'scrollTo', { configurable: true, value: scrollTo });
+  scrollList(list, 0);
+  await flush();
+  expect(jumpLabel()).toBe('Jump to latest');
+
+  setMessages([msg('m0', bob, 0), msg('m1', bob, 1)]);
+  await flush();
+  expect(jumpLabel()).toBe('1 new');
+  setMessages([msg('m0', bob, 0), msg('m1', bob, 1), msg('m2', dave, 2)]);
+  await flush();
+  expect(jumpLabel()).toBe('2 new');
+
+  jumpButton(host)!.click();
+  await flush();
+  expect(scrollTo).toHaveBeenCalledWith({ top: 5000, behavior: 'smooth' });
+  expect(jumpLabel()).toBe('2 new'); // the count stays until the list actually reaches the bottom
+  scrollList(list, 4600);
+  await flush();
+  expect(jumpButton(host)).toBeNull();
+});
+
+it('the count also clears when the reader scrolls back to the bottom by hand', async () => {
+  setMessages([msg('m0', bob, 0)]);
+  const host = mount();
+  const list = host.querySelector<HTMLElement>('.message-list')!;
+  sizeList(list);
+  await flush();
+  scrollList(list, 0);
+  await flush();
+  setMessages([msg('m0', bob, 0), msg('m1', bob, 1)]);
+  await flush();
+  expect(jumpLabel()).toBe('1 new');
+  scrollList(list, 4600);
+  await flush();
+  expect(jumpButton(host)).toBeNull();
+  scrollList(list, 0);
+  await flush();
+  expect(jumpLabel()).toBe('Jump to latest');
+});
+
+it('the jump scrolls instantly when the reader asked for less motion', async () => {
+  setMessages([msg('m0', bob, 0)]);
+  const host = mount();
+  const list = host.querySelector<HTMLElement>('.message-list')!;
+  sizeList(list);
+  await flush();
+  const scrollTo = vi.fn();
+  Object.defineProperty(list, 'scrollTo', { configurable: true, value: scrollTo });
+  document.documentElement.dataset.reduceMotion = 'true';
+  try {
+    scrollList(list, 0);
     await flush();
-    list.scrollTop = 0; // the reader has scrolled up, so new messages are only counted
-    const seen: string[] = [];
-    for (let i = 1; i <= total; i++) {
-      setMessages([...Array.from({ length: i + 1 }, (_, n) => msg(`m${n}`, bob, n))]);
-      await flush();
-      seen.push(jumpLabel() ?? '');
-    }
-    return seen;
-  };
-  const ru = await arriveWhileScrolledUp('ru', 5);
-  expect(ru).toEqual(['1 новое сообщение', '2 новых сообщения', '3 новых сообщения', '4 новых сообщения', '5 новых сообщений']);
-  dispose?.();
-  dispose = undefined;
-  document.body.innerHTML = '';
-  const en = await arriveWhileScrolledUp('en', 2);
-  expect(en).toEqual(['1 new message', '2 new messages']);
+    jumpButton(host)!.click();
+    expect(scrollTo).toHaveBeenCalledWith({ top: 5000, behavior: 'auto' });
+  } finally {
+    delete document.documentElement.dataset.reduceMotion;
+  }
+});
+
+it('the jump button is labelled in Russian, with the plural form of the count', async () => {
+  setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'ru' } });
+  setMessages([msg('m0', bob, 0)]);
+  const host = mount();
+  const list = host.querySelector<HTMLElement>('.message-list')!;
+  sizeList(list);
+  await flush();
+  scrollList(list, 0);
+  await flush();
+  expect(jumpLabel()).toBe('К последним');
+  const seen: string[] = [];
+  for (let i = 1; i <= 5; i++) {
+    setMessages(Array.from({ length: i + 1 }, (_, n) => msg(`m${n}`, bob, n)));
+    await flush();
+    seen.push(jumpLabel() ?? '');
+  }
+  expect(seen).toEqual(['1 новое', '2 новых', '3 новых', '4 новых', '5 новых']);
 });
 
 it('dropping files on the chat attaches them, with an overlay while dragging', async () => {
@@ -337,4 +425,226 @@ it('an open emoji picker and an unsaved edit survive the clock ticking and new m
   } finally {
     vi.useRealTimers();
   }
+});
+
+it('a sent message is one row: the confirmed copy replaces the pending one in place and does not animate again', async () => {
+  vi.spyOn(api, 'sendTextMessage').mockResolvedValue();
+  setMessages([msg('a', bob, 0)]);
+  const host = mount();
+  await sendMessage('hello there');
+  await flush();
+  const pending = host.querySelector<HTMLElement>('.msg.sending')!;
+  expect(pending).not.toBeNull();
+  expect(pending.classList.contains('msg-enter')).toBe(true);
+  const clientMsgId = messages()[1].client_msg_id!;
+
+  handleIncomingMessage({ message_id: 'srv-1', client_msg_id: clientMsgId, channel_id: 'c1', author_id: 'me', author_name: 'Alice Cooper', content: 'hello there', attachments: [], timestamp: Math.floor(Date.now() / 1000) });
+  await flush();
+
+  const rows = host.querySelectorAll<HTMLElement>('.msg');
+  expect(rows).toHaveLength(2);
+  expect(rows[1]).toBe(pending); // same DOM node: nothing was unmounted, so nothing animates a second time
+  expect(rows[1].dataset.messageId).toBe('srv-1');
+  expect(rows[1].classList.contains('sending')).toBe(false);
+  expect(rows[1].classList.contains('msg-enter')).toBe(true);
+  expect(rows[1].style.getPropertyValue('--i')).toBe('0');
+});
+
+it('scrolls to our own message once it is rendered', async () => {
+  vi.spyOn(api, 'sendTextMessage').mockResolvedValue();
+  setMessages([msg('a', bob, 0)]);
+  const host = mount();
+  const list = host.querySelector<HTMLElement>('.message-list')!;
+  Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => 1000 });
+  Object.defineProperty(list, 'clientHeight', { configurable: true, get: () => 200 });
+  await sendMessage('mine');
+  await flush();
+  expect(list.scrollTop).toBe(1000);
+});
+
+it('Up in an empty composer opens my last message in this channel for editing', async () => {
+  setMessages([msg('a', me, 0), msg('b', bob, 60), msg('c', me, 120)]);
+  const host = mount();
+  press(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!, 'ArrowUp');
+  await flush();
+  const edit = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit message"]');
+  expect(edit?.value).toBe('text c');
+  expect(host.querySelector('[data-message-id="c"] .edit-box')).not.toBeNull();
+});
+
+it('Up does nothing when the composer has text, when I have no message here, or with a modifier or the emoji picker open', async () => {
+  setMessages([msg('a', me, 0)]);
+  const host = mount();
+  const box = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+  type(box, 'not empty');
+  press(box, 'ArrowUp');
+  await flush();
+  expect(host.querySelector('.edit-box')).toBeNull();
+
+  type(box, '');
+  press(box, 'ArrowUp', { shiftKey: true });
+  await flush();
+  expect(host.querySelector('.edit-box')).toBeNull();
+
+  button(host, 'Emoji').click();
+  await flush();
+  press(box, 'ArrowUp');
+  await flush();
+  expect(host.querySelector('.edit-box')).toBeNull();
+  expect(host.querySelector('.emoji-picker')).not.toBeNull();
+
+  setMessages([msg('b', bob, 0)]);
+  await flush();
+  button(host, 'Emoji').click(); // close the picker
+  await flush();
+  press(box, 'ArrowUp');
+  await flush();
+  expect(host.querySelector('.edit-box')).toBeNull();
+});
+
+it('each channel keeps its own draft: switching away and back restores it', async () => {
+  const other: Channel = { id: 'c2', short_id: 2, name: 'random', channel_type: 'text', position: 1, bitrate_kbps: 64 };
+  const host = mount();
+  const box = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+  type(box, 'half a thought');
+  setActiveChannel(other);
+  await flush();
+  expect(box.value).toBe('');
+  type(box, 'other draft');
+  setActiveChannel(channel);
+  await flush();
+  expect(box.value).toBe('half a thought');
+});
+
+it('a draft survives a reload and is stored under the channel id', async () => {
+  vi.useFakeTimers();
+  const host = mount();
+  type(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!, 'keep me');
+  await vi.advanceTimersByTimeAsync(320);
+  expect(localStorage.getItem('finchspeak.draft.c1')).toBe('keep me');
+  dispose?.();
+  dispose = undefined;
+  document.body.innerHTML = '';
+  resetDraftCache(); // as after a reload: nothing is held in memory, only localStorage
+  const reloaded = mount();
+  expect(reloaded.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!.value).toBe('keep me');
+});
+
+it('sending clears the draft of the channel it was sent from and no other', async () => {
+  vi.useFakeTimers();
+  vi.spyOn(api, 'sendTextMessage').mockResolvedValue();
+  localStorage.setItem('finchspeak.draft.c2', 'later');
+  const host = mount();
+  const box = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+  type(box, 'now');
+  press(box, 'Enter');
+  await vi.advanceTimersByTimeAsync(320);
+  expect(localStorage.getItem('finchspeak.draft.c1')).toBeNull();
+  expect(localStorage.getItem('finchspeak.draft.c2')).toBe('later');
+});
+
+it('an emptied draft is removed from storage rather than kept', async () => {
+  vi.useFakeTimers();
+  const host = mount();
+  const box = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+  type(box, 'abc');
+  await vi.advanceTimersByTimeAsync(320);
+  expect(localStorage.getItem('finchspeak.draft.c1')).toBe('abc');
+  type(box, '');
+  await vi.advanceTimersByTimeAsync(320);
+  expect(localStorage.getItem('finchspeak.draft.c1')).toBeNull();
+});
+
+it('a storage that refuses writes does not stop typing', async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+  const host = mount();
+  const box = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+  type(box, 'still typing');
+  await vi.advanceTimersByTimeAsync(320);
+  expect(box.value).toBe('still typing');
+});
+
+it('the jump button position follows the composer through a CSS variable with its height', async () => {
+  const host = mount();
+  await flush();
+  const main = host.querySelector<HTMLElement>('main')!;
+  expect(main.style.getPropertyValue('--composer-h')).toMatch(/^\d+(\.\d+)?px$/);
+});
+
+it('Up with the caret away from the start of the field does nothing', async () => {
+  setMessages([msg('a', me, 0)]);
+  const host = mount();
+  const box = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+  type(box, 'abc');
+  box.setSelectionRange(1, 1);
+  press(box, 'ArrowUp');
+  await flush();
+  expect(host.querySelector('.edit-box')).toBeNull();
+  expect(box.value).toBe('abc');
+});
+
+it('Up in an open mention list moves through the list and never opens an edit', async () => {
+  setMessages([msg('a', me, 0)]);
+  const host = mount();
+  const box = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+  type(box, 'ping @da');
+  await flush();
+  expect(host.querySelector('[role="listbox"]')).not.toBeNull();
+  press(box, 'ArrowUp');
+  await flush();
+  expect(host.querySelector('.edit-box')).toBeNull();
+  expect(host.querySelector('[role="listbox"]')).not.toBeNull();
+});
+
+it('Up during an IME composition does nothing, and Up with the key code 229 does nothing', async () => {
+  setMessages([msg('a', me, 0)]);
+  const host = mount();
+  const box = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+  press(box, 'ArrowUp', { isComposing: true });
+  await flush();
+  expect(host.querySelector('.edit-box')).toBeNull();
+  const composing = new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true });
+  Object.defineProperty(composing, 'keyCode', { value: 229 });
+  box.dispatchEvent(composing);
+  await flush();
+  expect(host.querySelector('.edit-box')).toBeNull();
+  press(box, 'ArrowUp'); // the control: a plain Up does open the edit
+  await flush();
+  expect(host.querySelector('.edit-box')).not.toBeNull();
+});
+
+it('after Up opens the editor, the edited message is scrolled into view', async () => {
+  const scroll = vi.fn();
+  Object.defineProperty(Element.prototype, 'scrollIntoView', { value: scroll, configurable: true });
+  setMessages([msg('a', me, 0), msg('b', bob, 60), msg('c', me, 120)]);
+  const host = mount();
+  press(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!, 'ArrowUp');
+  await flush();
+  expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
+  expect(scroll.mock.contexts).toContain(host.querySelector('[data-message-id="c"]'));
+});
+
+it('switching channels writes the draft being typed to the old channel key at once', async () => {
+  vi.useFakeTimers();
+  const other: Channel = { id: 'c2', short_id: 2, name: 'random', channel_type: 'text', position: 1, bitrate_kbps: 64 };
+  const host = mount();
+  type(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!, 'half');
+  setActiveChannel(other);
+  await vi.advanceTimersByTimeAsync(0); // no debounce wait: the write happens on the switch itself
+  expect(localStorage.getItem('finchspeak.draft.c1')).toBe('half');
+  expect(localStorage.getItem('finchspeak.draft.c2')).toBeNull();
+});
+
+it('two people who happen to use the same client id keep separate rows', async () => {
+  setMessages([
+    msg('s1', bob, 0, { client_msg_id: 'same' }),
+    msg('s2', me, 1, { client_msg_id: 'same' }),
+  ]);
+  const host = mount();
+  await flush();
+  const rows = host.querySelectorAll<HTMLElement>('.msg');
+  expect(rows).toHaveLength(2);
+  expect(rows[0].dataset.messageId).toBe('s1');
+  expect(rows[1].dataset.messageId).toBe('s2');
 });

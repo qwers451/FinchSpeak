@@ -17,6 +17,10 @@ it.each([
   ['Logged out locally, but could not revoke the session', 'Вы вышли на этом компьютере. Сервер недоступен, поэтому сессия на нём не завершена.'],
   ['Invalid server address: x', 'Неверный адрес сервера'],
   ['Not authenticated', 'Вы не вошли в аккаунт'],
+  ['429: Wait 4 s; too many room joins', 'Слишком часто входите в комнаты. Подождите 4 с'],
+  ['429: Wait 4 s; too many screen shares', 'Слишком часто запускаете демонстрацию экрана. Подождите 4 с'],
+  ['Login failed: HTTP 429: Too many attempts. Try again in 42 seconds', 'Слишком много попыток входа. Повторите через 1 мин'],
+  ['Login failed: {"error":"Too many attempts. Try again in 600 seconds","status":429}', 'Слишком много попыток входа. Повторите через 10 мин'],
 ])('translates %s', (raw, expected) => {
   expect(describeError(raw)).toBe(expected);
 });
@@ -53,4 +57,13 @@ it.each([
 
 it('a lost QUIC connection reason is shown in Russian', () => {
   expect(describeError('connection lost')).toBe('Связь потеряна');
+});
+
+it.each([
+  ['HTTP 413: File exceeds maximum allowed size of 50 MB', 'HTTP 413: Файл слишком большой для этого сервера'],
+  ['{"error":"File exceeds maximum allowed size of 50 MB","status":413}', 'Файл слишком большой для этого сервера'],
+  ['HTTP 413: Storage quota exceeded: each user may keep up to 1024 MB of files', 'HTTP 413: Хранилище ваших файлов на сервере заполнено. Удалите часть файлов и попробуйте снова.'],
+  ['HTTP 429: Too many uploads. Try again in 42 seconds', 'HTTP 429: Слишком много загрузок. Повторите через 42 с'],
+])('upload refusals are in Russian: %s', (raw, expected) => {
+  expect(describeError(raw)).toBe(expected);
 });

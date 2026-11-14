@@ -86,9 +86,10 @@ async fn main() -> Result<()> {
 
     // 1. Load configuration
     let config_path = Path::new(CONFIG_FILE);
-    let config = ServerConfig::load_or_default(Some(config_path))
+    let config = ServerConfig::read_or_default(Some(config_path))
         .context("Failed to load server configuration")?;
     let _log_guard = init_logging(&config);
+    let config = config.validated();
     if let Some(dir) = switched_to {
         tracing::info!("Using the configuration next to the executable: {dir:?}");
     }

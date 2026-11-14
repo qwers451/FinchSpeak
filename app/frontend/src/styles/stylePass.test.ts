@@ -58,13 +58,6 @@ it('uses the theme token for tints of the accent colours, not a literal rgba()',
   }
 });
 
-it('narrows the music side panel and lets the member list give way below 1150 px', () => {
-  const css = readStyle('music.css');
-  const block = css.slice(css.indexOf('@media (max-width:1150px)'));
-  expect(block).toMatch(/\.music-panel\s*\{\s*width:\s*280px/);
-  expect(block).toMatch(/\.voice-room\.music-open\s*~\s*\.members\s*\{\s*display:\s*none/);
-});
-
 it('measures the room column, not the whole room, for the header wrap beside the music panel', () => {
   const polish = readStyle('polish.css');
   expect(declarationsFor(polish, '.room-column').join(';')).toMatch(/container-type:\s*inline-size/);

@@ -4,6 +4,7 @@ export type TranslationParams = Record<string, string | number>;
 
 /** Russian UI copy keyed by its English source. User and server supplied strings stay untouched. */
 export const ru: Readonly<Record<string, string>> = {
+  'Screen': 'Экран', 'In the room': 'В комнате', 'Open the player': 'Открыть плеер', 'Open the room': 'Открыть комнату', 'Open the soundboard': 'Открыть саундборд',
   'Soundboard': 'Саундборд', 'Search sounds': 'Поиск звуков', 'No sounds yet': 'Звуков пока нет', 'Remove sound': 'Удалить звук',
   'Sound name': 'Название звука', 'Emoji (optional)': 'Эмодзи (необязательно)', 'Add a sound': 'Добавить звук', 'Up to 5 seconds': 'До 5 секунд',
   'Soundboard volume': 'Громкость саундборда', "Don't play the soundboard for me": 'Не слышать саундборд', 'Name the sound first': 'Сначала укажите название звука',
@@ -50,6 +51,9 @@ export const ru: Readonly<Record<string, string>> = {
   'unknown': 'неизвестно', 'Welcome to FinchSpeak': 'Добро пожаловать в FinchSpeak', 'Pick a channel on the left to start chatting or talking.': 'Выберите канал слева, чтобы начать переписку или разговор.',
   'Not authenticated': 'Вы не вошли в аккаунт',
   'The music file is too large': 'Файл слишком большой',
+  'The file is too large for this server': 'Файл слишком большой для этого сервера',
+  'Your file storage on this server is full. Delete some files and try again.': 'Хранилище ваших файлов на сервере заполнено. Удалите часть файлов и попробуйте снова.',
+  'Too many uploads. Try again in {seconds} s': 'Слишком много загрузок. Повторите через {seconds} с',
   'This music format is not supported. Use MP3, OGG, FLAC or WAV.': 'Этот формат не поддерживается. Используйте MP3, OGG, FLAC или WAV.',
   'The music quota is used up. Remove a track and try again.': 'Квота музыки исчерпана. Удалите трек и попробуйте снова.',
   'The music queue is full. Wait for a track to finish.': 'Очередь музыки полна. Дождитесь окончания трека.',
@@ -98,7 +102,7 @@ export const ru: Readonly<Record<string, string>> = {
   'Join the flock': 'Присоединиться к сообществу', 'Welcome back': 'С возвращением', 'Create your account on this server.': 'Создайте аккаунт на этом сервере.', 'Sign in to continue to your server.': 'Войдите, чтобы подключиться к серверу.',
   'Stay signed in': 'Не выходить из аккаунта', 'Retry': 'Повторить', 'Already have an account?': 'Уже есть аккаунт?', 'New here?': 'Впервые здесь?', 'Sign in': 'Войти', 'Create an account': 'Создать аккаунт', 'Encrypted with TLS · certificate pinned on first use': 'Зашифровано по TLS · сертификат закрепляется при первом подключении',
   'Welcome to #{channel}!': 'Добро пожаловать в #{channel}!', 'This is the start of the conversation. Say hello — someone is always listening.': 'Это начало переписки. Поздоровайтесь — вас услышат.',
-  'New messages': 'Новые сообщения', 'Drop files to attach': 'Перетащите файлы для отправки', 'Up to 10 files, 10 MB each': 'До 10 файлов размером до 10 МБ каждый',
+  'New messages': 'Новые сообщения', 'Jump to latest': 'К последним', 'Drop files to attach': 'Перетащите файлы для отправки', 'Up to 10 files, 10 MB each': 'До 10 файлов размером до 10 МБ каждый',
   'Starting FinchSpeak…': 'Запуск FinchSpeak…', 'Online — {count}': 'В сети — {count}', 'Admins — {count}': 'Администраторы — {count}', 'Moderators — {count}': 'Модераторы — {count}', 'Offline — {count}': 'Не в сети — {count}', 'Save': 'Сохранить', 'Create': 'Создать',
   'Reconnecting… try {attempt}, next one in {seconds} s': 'Повторное подключение… попытка {attempt}, следующая через {seconds} с', 'Reconnecting…': 'Повторное подключение…', 'Could not reconnect': 'Не удалось восстановить соединение', 'Connection lost': 'Соединение потеряно', 'connection lost': 'Связь потеряна', 'Retry now': 'Повторить сейчас',
   'Messages': 'Сообщения', 'Loading older messages…': 'Загрузка старых сообщений…', 'select-channel': 'выбрать канал',
@@ -138,10 +142,9 @@ export const ru: Readonly<Record<string, string>> = {
   'Rename channel': 'Переименовать канал', 'New voice channel': 'Новый голосовой канал', 'New text channel': 'Новый текстовый канал', 'Channel name': 'Название канала', 'Quiet corner': 'Тихий уголок', 'general': 'общий',
   'Text channels': 'Текстовые каналы', 'Create text channel': 'Создать текстовый канал', 'Voice channels': 'Голосовые каналы', 'Create voice channel': 'Создать голосовой канал',
   'Voice connected': 'Голос подключён', 'Voice disconnected': 'Голос отключён', 'Unmute': 'Включить микрофон', 'Mute': 'Выключить микрофон', 'Undeafen': 'Включить звук', 'Deafen': 'Выключить звук',
-  'Profile and settings': 'Профиль и настройки', 'Administration': 'Администрирование', 'Move up': 'Переместить вверх', 'Move down': 'Переместить вниз', 'Rename': 'Переименовать', 'Delete': 'Удалить',
+  'Profile and settings': 'Профиль и настройки', 'Administration': 'Администрирование', 'Move up': 'Выше', 'Move down': 'Ниже', 'Rename': 'Переименовать', 'Delete': 'Удалить',
   'Move {channel} up': 'Переместить канал {channel} вверх', 'Move {channel} down': 'Переместить канал {channel} вниз', 'Rename {channel}': 'Переименовать канал {channel}', 'Delete {channel}': 'Удалить канал {channel}',
-  'You were mentioned': 'Вас упомянули', 'Unread messages': 'Непрочитанные сообщения', 'Deafened': 'Звук выключен', 'Sharing screen': 'Показывает экран', 'LIVE': 'В ЭФИРЕ', 'You are sharing your screen': 'Вы демонстрируете экран', 'Disconnect from voice': 'Отключиться от голосовой комнаты', 'Disconnect': 'Отключиться',
-  'Trust this server?': 'Доверять этому серверу?', "This server's certificate changed": 'Сертификат сервера изменился',
+  'You were mentioned': 'Вас упомянули', 'Unread messages': 'Непрочитанные сообщения', 'Deafened': 'Звук выключен', 'Sharing screen': 'Показывает экран', 'LIVE': 'В ЭФИРЕ', 'You are sharing your screen': 'Вы демонстрируете экран',  'Trust this server?': 'Доверять этому серверу?', "This server's certificate changed": 'Сертификат сервера изменился',
   'The certificate of {host} is not the one you trusted before. This can happen after a server reinstall — or when someone is intercepting your connection. Your password was not sent.': 'Сертификат сервера {host} отличается от ранее доверенного. Это возможно после переустановки сервера или при перехвате соединения. Ваш пароль не отправлялся.',
   'To continue anyway, type the server name': 'Чтобы продолжить, введите имя сервера',
   'never': 'никогда', 'just now': 'только что', '{count} min ago': '{count} мин. назад', '{count} h ago': '{count} ч назад', '{count} d ago': '{count} дн. назад',
@@ -153,7 +156,7 @@ export const ru: Readonly<Record<string, string>> = {
   'Health': 'Здоровье', 'Updated every 5 seconds': 'Обновляется каждые 5 секунд', 'Process CPU': 'Процессор сервера', 'Process memory': 'Память сервера', 'System memory': 'Память системы', 'Used {used} of {total}': 'Занято {used} из {total}', 'Container limit': 'Лимит контейнера', 'None': 'Нет', 'Free disk': 'Свободно на диске', 'Database': 'База данных', 'Sessions': 'Сеансы', 'People in voice': 'Люди в голосе', 'Incoming traffic': 'Входящий трафик', 'Outgoing traffic': 'Исходящий трафик', 'Lost datagrams': 'Потерянные датаграммы', 'Warnings': 'Предупреждения', 'No warnings': 'Предупреждений нет', 'Memory is close to the limit': 'Память близка к лимиту', 'Little disk space is left under the data folder': 'Под папкой данных мало свободного места', 'Could not read the server health. Trying again.': 'Не удалось получить данные о состоянии сервера. Попробуем снова.',
   'The picture could not be loaded.': 'Не удалось загрузить изображение.', 'Download': 'Скачать', 'Search emoji': 'Поиск эмодзи', 'Nothing found': 'Ничего не найдено',
   'Message actions': 'Действия с сообщением', 'Add reaction': 'Добавить реакцию', 'Reply': 'Ответить', 'Copy text': 'Скопировать текст', 'Edit message': 'Изменить сообщение', 'Edit': 'Изменить', 'Delete message': 'Удалить сообщение', 'sending…': 'отправка…', 'Not sent': 'Не отправлено', 'Edited': 'Изменено', 'edited': 'изменено', 'Original message deleted': 'Исходное сообщение удалено', 'Esc to cancel · Enter to save': 'Esc — отменить · Enter — сохранить', '{names} and {count} others': '{names} и ещё {count}', 'Delete this message?': 'Удалить это сообщение?', 'It disappears for everyone. This cannot be undone.': 'Сообщение исчезнет у всех. Это действие нельзя отменить.',
-  'Loading messages': 'Загрузка сообщений', 'Scroll up to load older messages.': 'Прокрутите вверх, чтобы загрузить старые сообщения.', 'Position your picture': 'Расположение изображения', 'Preview of your picture': 'Предпросмотр изображения', 'Zoom': 'Масштаб', 'Settings sections': 'Разделы настроек', 'Open profile': 'Открыть профиль', 'Done': 'Готово',
+  'Loading messages': 'Загрузка сообщений', 'Scroll up to load older messages.': 'Прокрутите вверх, чтобы загрузить старые сообщения.', 'Position your picture': 'Расположение изображения', 'Preview of your picture': 'Предпросмотр изображения', 'Zoom': 'Масштаб', 'Settings sections': 'Разделы настроек', 'Done': 'Готово',
   'At most {count} files fit in one message': 'К одному сообщению можно прикрепить не более {count} файлов', 'Message not sent: {error}': 'Не удалось отправить сообщение: {error}', 'The new passwords do not match': 'Новые пароли не совпадают', 'Screen sound is not shared: {reason}': 'Звук экрана не передаётся: {reason}', 'Screen sharing stopped: {reason}': 'Демонстрация экрана остановлена: {reason}', 'A moderator sent you out. You can join again.': 'Модератор отключил вас. Вы можете присоединиться снова.', 'Move to…': 'Переместить в…', 'A moderator moved you to {room}': 'Модератор перенёс вас в «{room}»',
   'An audio device was disconnected; reopening the audio devices...': 'Аудиоустройство отключилось. Повторное открытие аудиоустройств…', 'Voice processing stopped: {message}. Rejoin the voice channel to retry.': 'Обработка голоса остановлена: {message}. Переподключитесь к голосовому каналу, чтобы повторить попытку.', 'The audio devices keep failing. Check them, then rejoin the voice channel.': 'Аудиоустройства продолжают сбоить. Проверьте их и переподключитесь к голосовому каналу.', '"{wanted}" is not available; using the system default {kind} device instead.': 'Устройство «{wanted}» недоступно; используется системное устройство {kind} по умолчанию.', 'input': 'входное', 'output': 'выходное',
   'Actions for {name}': 'Действия: {name}', 'Volume': 'Громкость', 'Mute for me': 'Заглушить у себя',
@@ -163,11 +166,11 @@ export const ru: Readonly<Record<string, string>> = {
   'Wait a moment before calling again': 'Подождите немного, прежде чем звать снова', 'This person is offline': 'Этот человек не в сети',
   'Silence for everyone': 'Заглушить для всех', 'Remove from the room': 'Убрать из комнаты',
   'You muted this person': 'Вы заглушили этого человека',
-  'Voice controls': 'Управление голосом', 'Voice settings': 'Настройки голоса', 'Leave the room': 'Покинуть комнату', 'Live': 'В эфире', 'is sharing a screen': 'демонстрирует экран', 'Watch': 'Смотреть', 'Watching': 'Просмотр', 'Silenced by a moderator': 'Модератор отключил микрофон', 'Good connection': 'Хорошее соединение', 'Fair connection': 'Среднее соединение', 'Poor connection': 'Плохое соединение', '(you)': '(вы)', 'Speaking': 'Говорит', 'Allow to speak': 'Разрешить говорить', 'Silence': 'Отключить микрофон', 'Volume of {name}': 'Громкость: {name}', 'talking': 'говорит', 'push to talk': 'нажмите, чтобы говорить',
+  'Voice controls': 'Управление голосом', 'Voice settings': 'Настройки голоса', 'Leave room': 'Выйти из комнаты', 'Live': 'В эфире', 'is sharing a screen': 'демонстрирует экран', 'Watch': 'Смотреть', 'Watching': 'Просмотр', 'Silenced by a moderator': 'Модератор отключил микрофон', 'Good connection': 'Хорошее соединение', 'Fair connection': 'Среднее соединение', 'Poor connection': 'Плохое соединение', '(you)': '(вы)', 'Speaking': 'Говорит', 'Allow to speak': 'Разрешить говорить', 'Silence': 'Отключить микрофон', 'Volume of {name}': 'Громкость: {name}', 'talking': 'говорит', 'push to talk': 'нажмите, чтобы говорить',
   'Minimize': 'Свернуть', 'Maximize': 'Развернуть', 'Restore': 'Восстановить', 'Dismiss': 'Закрыть уведомление',
   'That message is further up': 'Это сообщение находится выше', 'You were removed from the voice room': 'Вас отключили от голосовой комнаты', 'Full screen is not available': 'Полноэкранный режим недоступен', 'Picture-in-picture is not available': 'Режим «картинка в картинке» недоступен', 'Details copied': 'Сведения скопированы', 'Code copied': 'Код скопирован', 'Backup made': 'Резервная копия создана',
   '{name} is disconnected and cannot sign in for {duration}.': '{name} отключён и не сможет войти. Срок блокировки: {duration}.', '{name} is disconnected and cannot sign in until you lift the ban.': '{name} отключён и не сможет войти, пока вы не снимете блокировку.',
-  'Could not join voice: {error}': 'Не удалось подключиться к голосовому каналу: {error}', 'Could not switch audio device: {error}': 'Не удалось переключить аудиоустройство: {error}', 'Choose a push-to-talk key first': 'Сначала выберите клавишу активации микрофона',
+  'Could not join voice: {error}': 'Не удалось подключиться к голосовому каналу: {error}', 'Too many sign-in attempts. Try again in {minutes} min': 'Слишком много попыток входа. Повторите через {minutes} мин', 'Too many room joins. Wait {seconds} s': 'Слишком часто входите в комнаты. Подождите {seconds} с', 'Too many screen shares. Wait {seconds} s': 'Слишком часто запускаете демонстрацию экрана. Подождите {seconds} с', 'Could not switch audio device: {error}': 'Не удалось переключить аудиоустройство: {error}', 'Choose a push-to-talk key first': 'Сначала выберите клавишу активации микрофона',
   'excellent': 'отличное', '{count} ms · {quality}': '{count} мс · {quality}',
   'good': 'хорошее', 'fair': 'среднее', 'poor': 'плохое',
   'Ban': 'Заблокировать', '1 day': '1 день', '1 week': '1 неделя', 'For good': 'Навсегда', 'a while': 'некоторое время',
@@ -248,7 +251,7 @@ export const ru: Readonly<Record<string, string>> = {
   'Apply theme': 'Применить тему',
   'Not now': 'Не сейчас',
   'Switch to Finch mode': 'Перейти в режим Finch',
-  'Switch to classic mode': 'Перейти в классический режим',
+  'Switch to classic mode': 'Перейти в классический режим', 'Finch mode': 'Режим Finch', 'Classic view': 'Классический вид',
   'Empty nest': 'Пустое гнездо',
   'Interface': 'Интерфейс', 'Classic': 'Классический', 'Finch': 'Finch',
   'Finch turns the whole window into a tree: voice rooms are nests, text channels are birdhouses.': 'Finch превращает всё окно в дерево: голосовые комнаты — гнёзда, текстовые каналы — скворечники.',
@@ -266,6 +269,7 @@ export const ru: Readonly<Record<string, string>> = {
 /** Russian plural forms, keyed by the English `other` form that `plural()` is called with. */
 export const ruPlurals: Readonly<Record<string, Partial<Record<Intl.LDMLPluralRule, string>> & { other: string }>> = {
   '{count} new messages': { one: '{count} новое сообщение', few: '{count} новых сообщения', many: '{count} новых сообщений', other: '{count} новых сообщения' },
+  '{count} new': { one: '{count} новое', few: '{count} новых', many: '{count} новых', other: '{count} новых' },
 };
 const pluralRules = { ru: new Intl.PluralRules('ru-RU'), en: new Intl.PluralRules('en-GB') };
 

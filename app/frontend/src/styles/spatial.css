@@ -3,7 +3,7 @@
 .spatial-head { margin-bottom:4px; min-height:28px; }
 .spatial-head .sec-label { display:inline-flex; align-items:center; gap:6px; }
 .stage-area {
-  position:relative; height:96px; border-radius:var(--r-md); overflow:hidden; touch-action:none; user-select:none;
+  position:relative; height:96px; border-radius:var(--r-md); overflow:hidden; touch-action:none; user-select:none; container-type:inline-size;
   background:
     radial-gradient(120% 140% at 50% 115%, var(--tint-signal) 0 34%, transparent 35%),
     radial-gradient(160% 190% at 50% 115%, color-mix(in srgb, var(--tint-signal) 55%, transparent) 0 44%, transparent 45%),
@@ -17,17 +17,21 @@
 .stage-empty { position:absolute; inset:0 0 34px; display:flex; align-items:center; justify-content:center; text-align:center; padding:0 24px; }
 
 .seat {
-  position:absolute; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:3px;
+  position:absolute; left:50%; top:0; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:3px;
   max-width:84px; padding:3px 4px; border:0; border-radius:var(--r-sm); background:transparent; color:var(--text-2);
   cursor:grab; touch-action:none;
-  transition:left 260ms var(--ease-out), top 260ms var(--ease-out), color 140ms var(--ease-out), background-color 140ms var(--ease-out);
+  transition:transform 260ms var(--ease-out), color 140ms var(--ease-out), background-color 140ms var(--ease-out);
 }
 .seat:hover { color:var(--text); background:color-mix(in srgb, var(--bg-hover) 70%, transparent); }
 .seat:focus-visible { outline:2px solid var(--yellow); outline-offset:1px; }
-.seat.moving { cursor:grabbing; color:var(--text); transition:top 120ms var(--ease-out); z-index:2; }
+/* While a seat is dragged it follows the pointer at once: no transform transition here. */
+.seat.moving { cursor:grabbing; color:var(--text); transition:color 140ms var(--ease-out), background-color 140ms var(--ease-out); z-index:2; }
 .seat.moving .av { transform:scale(1.12); box-shadow:0 6px 18px #0005; }
 .seat .av { transition:transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out); }
 .seat.pinned .seat-name::after { content:''; display:inline-block; width:4px; height:4px; margin-left:4px; vertical-align:middle; border-radius:50%; background:var(--yellow); }
 .seat-name { max-width:80px; font:550 11px/1.2 var(--font-ui); }
 .stage-area.dragging { cursor:grabbing; }
 @keyframes stage-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+/* Seats jump to their place under reduced motion, in the app setting as well as in the system. */
+@media (prefers-reduced-motion:reduce) { .seat { transition:none; } }
+[data-reduce-motion="true"] .seat { transition:none; }

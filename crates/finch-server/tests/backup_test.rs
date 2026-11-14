@@ -62,3 +62,46 @@ async fn pruning_ignores_files_that_are_not_backups() -> anyhow::Result<()> {
     assert!(dir.path().join("finchspeak-000000000003-000.db").exists());
     Ok(())
 }
+
+#[cfg(unix)]
+fn mode_of(path: &std::path::Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+/// Backups hold password hashes: the directory and every backup are owner-only from creation.
+#[cfg(unix)]
+#[tokio::test]
+async fn backups_and_their_directory_are_owner_only() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let pool = database_with_a_user(dir.path()).await?;
+    let backups = dir.path().join("backups");
+
+    let backup = create_backup(&pool, &backups, 7).await?;
+    assert_eq!(mode_of(&backup), 0o600);
+    assert_eq!(mode_of(&backups), 0o700);
+    Ok(())
+}
+
+/// Backups written by an earlier version are tightened at startup; other files are left alone.
+#[cfg(unix)]
+#[test]
+fn startup_tightens_existing_backups_only() -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir()?;
+    let backups = dir.path().join("backups");
+    std::fs::create_dir(&backups)?;
+    std::fs::set_permissions(&backups, std::fs::Permissions::from_mode(0o755))?;
+    let old = backups.join("finchspeak-000000000001-000.db");
+    std::fs::write(&old, "x")?;
+    std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o644))?;
+    let notes = backups.join("notes.txt");
+    std::fs::write(&notes, "not a backup")?;
+    std::fs::set_permissions(&notes, std::fs::Permissions::from_mode(0o644))?;
+
+    finch_server::backup::tighten_backups(&backups);
+    assert_eq!(mode_of(&backups), 0o700);
+    assert_eq!(mode_of(&old), 0o600);
+    assert_eq!(mode_of(&notes), 0o644);
+    Ok(())
+}

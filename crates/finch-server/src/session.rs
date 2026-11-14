@@ -1,13 +1,16 @@
 //! Session management, peer IDs allocation, and active voice room registry.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use dashmap::DashMap;
 use finch_protocol::messages::ServerMessage;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
+
+use crate::config::LimitsConfig;
+use crate::limits::MediaRateLimiter;
 
 /// A connected client session.
 #[derive(Clone)]
@@ -32,6 +35,10 @@ pub struct ClientSession {
     pub last_activity_update: Option<std::time::Instant>,
     pub connection: quinn::Connection,
     pub control_tx: Sender<ServerMessage>,
+    /// Media this participant may send per second; checked for every datagram it sends (see `sfu.rs`).
+    pub media: Arc<Mutex<MediaRateLimiter>>,
+    /// Throttles the wrong-channel warning for this session's datagrams (see `sfu.rs`).
+    pub wrong_channel_warn: Arc<crate::sfu::WarnThrottle>,
 }
 
 /// A voice room tracking active participants.
@@ -73,6 +80,16 @@ pub struct SessionManager {
     message_hits: Arc<crate::limits::WindowLimiter>,
     /// Other things a person could repeat endlessly (status changes).
     action_hits: Arc<crate::limits::WindowLimiter>,
+    /// Recent keyframe requests per (viewer peer, streamer peer), kept for the last second.
+    keyframe_hits: Arc<DashMap<(u32, u32), VecDeque<std::time::Instant>>>,
+    /// Users whose mute/deafen broadcast is waiting for the window to free (one trailing broadcast each).
+    voice_broadcast_pending: Arc<DashMap<u32, ()>>,
+    /// Per-participant media limits, set with the router; unset means the defaults.
+    media_config: Arc<std::sync::OnceLock<LimitsConfig>>,
+    /// One media budget per user, shared by all of that user's sessions; dropped with the last session.
+    media_budgets: Arc<DashMap<Uuid, Arc<Mutex<MediaRateLimiter>>>>,
+    /// Sign-in deadline and unauthenticated slots, set with the limits; unset means the defaults.
+    preauth: Arc<std::sync::OnceLock<crate::limits::PreAuth>>,
 }
 
 impl Default for SessionManager {
@@ -111,7 +128,38 @@ impl SessionManager {
             message_rule: Arc::new(std::sync::Mutex::new((30, std::time::Duration::from_secs(10)))),
             message_hits: Arc::new(crate::limits::WindowLimiter::default()),
             action_hits: Arc::new(crate::limits::WindowLimiter::default()),
+            keyframe_hits: Arc::new(DashMap::new()),
+            voice_broadcast_pending: Arc::new(DashMap::new()),
+            media_config: Arc::new(std::sync::OnceLock::new()),
+            media_budgets: Arc::new(DashMap::new()),
+            preauth: Arc::new(std::sync::OnceLock::new()),
         }
+    }
+
+    /// Set the media limits and the pre-sign-in limits (before the listeners accept clients).
+    /// `limits` must already be validated (the config loader does it once, with its warnings).
+    pub fn set_media_limits(&self, limits: LimitsConfig) {
+        self.preauth.set(crate::limits::PreAuth::from_limits(&limits)).ok();
+        self.media_config.set(limits).ok();
+    }
+
+    /// The sign-in deadline and unauthenticated slot pool shared by all connections.
+    pub fn preauth(&self) -> crate::limits::PreAuth {
+        self.preauth
+            .get_or_init(|| crate::limits::PreAuth::from_limits(&LimitsConfig::default()))
+            .clone()
+    }
+
+    /// The media budget of `user_id`: shared by all of the user's sessions, created with the first one.
+    pub fn media_budget(&self, user_id: Uuid) -> Arc<Mutex<MediaRateLimiter>> {
+        self.media_budgets
+            .entry(user_id)
+            .or_insert_with(|| {
+                let limits = self.media_config.get().cloned().unwrap_or_default();
+                Arc::new(Mutex::new(MediaRateLimiter::new(&limits, std::time::Instant::now())))
+            })
+            .value()
+            .clone()
     }
 
     /// Set how many messages one person may send per window.
@@ -124,6 +172,57 @@ impl SessionManager {
     /// Count one `kind` of action of `user`: at most `max` per `window`; `Err(seconds)` when over.
     pub fn allow_action(&self, user: Uuid, kind: &str, max: usize, window: std::time::Duration) -> Result<(), u64> {
         self.action_hits.hit(&format!("{kind}:{user}"), std::time::Instant::now(), max, window)
+    }
+
+    /// True when `viewer_peer_id` is subscribed to the screen share of `streamer_peer_id`.
+    pub fn is_screen_viewer(&self, viewer_peer_id: u32, streamer_peer_id: u32) -> bool {
+        let short_id = self.sessions.get(&streamer_peer_id).and_then(|s| s.current_voice_channel);
+        short_id.is_some_and(|short_id| {
+            self.voice_rooms.get(&short_id).is_some_and(|room| {
+                room.screen_subscribers
+                    .get(&streamer_peer_id)
+                    .is_some_and(|viewers| viewers.contains(&viewer_peer_id))
+            })
+        })
+    }
+
+    /// Keyframe requests from one viewer to one streamer: at most two per second. A request over
+    /// the limit is dropped (`false`); a request after the window has passed goes through.
+    pub fn allow_keyframe_request(&self, viewer_peer_id: u32, streamer_peer_id: u32) -> bool {
+        const MAX_PER_WINDOW: usize = 2;
+        const WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
+        // Pairs that went quiet are swept once the table grows; a small table is left alone.
+        const SWEEP_AT: usize = 256;
+
+        let now = std::time::Instant::now();
+        let mut queue = self.keyframe_hits.entry((viewer_peer_id, streamer_peer_id)).or_default();
+        while queue.front().is_some_and(|first| now.duration_since(*first) >= WINDOW) {
+            queue.pop_front();
+        }
+        if queue.len() >= MAX_PER_WINDOW {
+            return false;
+        }
+        queue.push_back(now);
+        drop(queue);
+        if self.keyframe_hits.len() > SWEEP_AT {
+            self.keyframe_hits.retain(|_, hits| hits.back().is_some_and(|last| now.duration_since(*last) < WINDOW));
+        }
+        true
+    }
+
+    /// Forget the keyframe request counts that involve `peer_id` (it left the room or disconnected).
+    pub fn forget_keyframe_pairs(&self, peer_id: u32) {
+        self.keyframe_hits.retain(|(viewer, streamer), _| *viewer != peer_id && *streamer != peer_id);
+    }
+
+    /// Mark `peer` as having a trailing voice-state broadcast scheduled. `false` when one already is.
+    pub fn mark_voice_broadcast_pending(&self, peer: u32) -> bool {
+        self.voice_broadcast_pending.insert(peer, ()).is_none()
+    }
+
+    /// The trailing voice-state broadcast of `peer` has run (or is no longer needed).
+    pub fn clear_voice_broadcast_pending(&self, peer: u32) {
+        self.voice_broadcast_pending.remove(&peer);
     }
 
     /// Count a message of `user`; `Err(seconds)` when they are sending too fast.
@@ -170,6 +269,11 @@ impl SessionManager {
                 } else {
                     entry.remove();
                 }
+            }
+            self.forget_keyframe_pairs(peer_id);
+            // The media budget is the user's: it goes when the user's last session does.
+            if !self.sessions.iter().any(|active| active.user_id == session.user_id) {
+                self.media_budgets.remove(&session.user_id);
             }
             if let Some(short_id) = session.current_voice_channel {
                 self.leave_voice(peer_id, short_id);
@@ -219,6 +323,7 @@ impl SessionManager {
             }
             if room.participants.is_empty() { room.music.clear() } else { Vec::new() }
         } else { Vec::new() };
+        self.forget_keyframe_pairs(peer_id);
         if let Some(music) = self.music.get() { music.dispose_tracks(removed); }
     }
 
@@ -277,6 +382,9 @@ impl SessionManager {
             if let Some((user_id, was_sharing)) = info {
                 evicted.push((peer_id, user_id, was_sharing));
             }
+        }
+        for (peer_id, _, _) in &evicted {
+            self.forget_keyframe_pairs(*peer_id);
         }
         if let Some((_, mut room)) = self.voice_rooms.remove(&short_id)
             && let Some(music) = self.music.get()
@@ -377,6 +485,77 @@ fn deliver(targets: Vec<(u32, Sender<ServerMessage>, quinn::Connection)>, msg: &
 }
 
 #[cfg(test)]
+mod keyframe_pair_tests {
+    use super::*;
+
+    fn manager() -> SessionManager {
+        SessionManager::new()
+    }
+
+    /// A request time that is long past the one-second window.
+    fn stale() -> std::time::Instant {
+        std::time::Instant::now() - std::time::Duration::from_secs(5)
+    }
+
+    #[test]
+    fn forgetting_a_peer_drops_every_pair_it_is_in() {
+        let sessions = manager();
+        sessions.keyframe_hits.insert((1, 2), VecDeque::from([stale()]));
+        sessions.keyframe_hits.insert((3, 1), VecDeque::from([stale()]));
+        sessions.keyframe_hits.insert((4, 5), VecDeque::from([stale()]));
+
+        sessions.forget_keyframe_pairs(1);
+
+        assert_eq!(sessions.keyframe_hits.len(), 1);
+        assert!(sessions.keyframe_hits.contains_key(&(4, 5)));
+    }
+
+    #[test]
+    fn stale_pairs_are_swept_once_the_table_grows_past_256() {
+        let sessions = manager();
+        for i in 0..300u32 {
+            sessions.keyframe_hits.insert((i, 9_999), VecDeque::from([stale()]));
+        }
+
+        // A fresh request from a new pair takes the sweep path (table is over 256 entries).
+        assert!(sessions.allow_keyframe_request(1, 2));
+
+        assert_eq!(sessions.keyframe_hits.len(), 1, "only the fresh pair should be left");
+        assert!(sessions.keyframe_hits.contains_key(&(1, 2)));
+    }
+
+    #[test]
+    fn a_small_table_keeps_stale_pairs_until_it_grows() {
+        let sessions = manager();
+        sessions.keyframe_hits.insert((7, 8), VecDeque::from([stale()]));
+
+        assert!(sessions.allow_keyframe_request(1, 2));
+
+        assert!(sessions.keyframe_hits.contains_key(&(7, 8)));
+    }
+
+    #[test]
+    fn pending_voice_broadcast_is_marked_once_until_cleared() {
+        let sessions = manager();
+        let peer = 1001;
+
+        assert!(sessions.mark_voice_broadcast_pending(peer));
+        assert!(!sessions.mark_voice_broadcast_pending(peer));
+        sessions.clear_voice_broadcast_pending(peer);
+        assert!(sessions.mark_voice_broadcast_pending(peer));
+    }
+
+    #[test]
+    fn pending_voice_broadcast_is_per_session_not_per_user() {
+        // Two sessions of one person: the old session's pending flag must not block the new one.
+        let sessions = manager();
+
+        assert!(sessions.mark_voice_broadcast_pending(1001));
+        assert!(sessions.mark_voice_broadcast_pending(1002));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -389,12 +568,14 @@ mod tests {
         let mut receivers = Vec::new();
         for (peer_id, client_level) in [(1001, 0), (1002, 149), (1003, 150)] {
             let (control_tx, control_rx) = tokio::sync::mpsc::channel(8);
+            let user_id = Uuid::new_v4();
             manager.register_session(ClientSession {
-                token_id: String::new(), peer_id, user_id: Uuid::new_v4(),
+                token_id: String::new(), peer_id, user_id,
                 username: "client".into(), role: "member".into(), current_voice_channel: None,
                 muted: false, deafened: false, sharing_screen: false, server_muted: false,
                 supports_voice_extensions: true, client_level, activity: None, last_activity_update: None,
-                connection: connection.clone(), control_tx,
+                connection: connection.clone(), control_tx, media: manager.media_budget(user_id),
+                wrong_channel_warn: Default::default(),
             });
             manager.join_voice(peer_id, room);
             receivers.push((client_level, control_rx));
@@ -443,7 +624,8 @@ mod tests {
                 peer_id, user_id, username: "alice".into(), role: "member".into(),
                 current_voice_channel: None, muted: false, deafened: false, sharing_screen: false, server_muted: false,
                 supports_voice_extensions: false, client_level: 0, activity: None, last_activity_update: None,
-                connection: connection.clone(), control_tx,
+                connection: connection.clone(), control_tx, media: manager.media_budget(user_id),
+                wrong_channel_warn: Default::default(),
             });
         }
         (manager, user_id, server, client, remote)
@@ -454,6 +636,24 @@ mod tests {
         let (manager, user, _server, _client, _remote) = registered_twice().await;
         manager.unregister_session(1001);
         assert_eq!(manager.user_to_peer.get(&user).map(|peer| *peer), Some(1002));
+    }
+
+    #[tokio::test]
+    async fn two_sessions_of_one_user_share_one_media_budget() {
+        let (manager, user, _server, _client, _remote) = registered_twice().await;
+        let first = manager.media_budget(user);
+        assert!(Arc::ptr_eq(&first, &manager.media_budget(user)), "a second session reuses the budget");
+        assert!(!Arc::ptr_eq(&first, &manager.media_budget(Uuid::new_v4())), "other users have their own");
+    }
+
+    #[tokio::test]
+    async fn the_media_budget_is_released_with_the_last_session_of_the_user() {
+        let (manager, user, _server, _client, _remote) = registered_twice().await;
+        let before = manager.media_budget(user);
+        manager.unregister_session(1001);
+        assert!(Arc::ptr_eq(&before, &manager.media_budget(user)), "one session is still open");
+        manager.unregister_session(1002);
+        assert!(!Arc::ptr_eq(&before, &manager.media_budget(user)), "the last session released it");
     }
 
     #[tokio::test]

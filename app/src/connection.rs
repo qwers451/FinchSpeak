@@ -599,6 +599,16 @@ async fn handle_control(state: &AppState, msg: ServerMessage, emit: impl FnOnce(
         ServerMessage::UserLeftVoice { peer_id, .. } | ServerMessage::UserJoinedVoice { peer_id, .. } => {
             state.mixer.lock().await.remove_speaker(*peer_id);
         }
+        ServerMessage::ChannelUpdated { channel } => {
+            state.channel_bitrates.write().await.insert(channel.short_id, channel.bitrate_kbps);
+            // An admin's change applies to the room we are in; the audio worker picks it up in place.
+            if *state.current_voice_channel.read().await == Some(channel.short_id) {
+                state.voice_bitrate_kbps.store(
+                    crate::audio_engine::voice_bitrate_kbps(Some(channel.bitrate_kbps)),
+                    Ordering::Relaxed,
+                );
+            }
+        }
         _ => {}
     }
     track_watched_share(state, &msg).await;

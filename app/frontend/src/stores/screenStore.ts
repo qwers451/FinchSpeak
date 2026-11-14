@@ -20,6 +20,13 @@ export async function loadScreenSources() {
   }
 }
 
+let shareStartedAt = 0;
+
+/** When the last share was started (ms since epoch). A refusal right after it means the share did not stand. */
+export function lastShareStartedAt(): number {
+  return shareStartedAt;
+}
+
 /** Start sharing; returns the reason when it did not work (the picker shows it), else `null`. */
 export async function startSharing(kind: 'monitor' | 'window', id: number, withAudio = false, label = '', audioScope: 'system' | 'window' = 'system', fps: 30 | 60 = 30): Promise<string | null> {
   const epoch = screenShareEpoch();
@@ -30,6 +37,7 @@ export async function startSharing(kind: 'monitor' | 'window', id: number, withA
     setScreenShareGeneration(typeof generation === 'number' ? generation : null);
     setIsSharing(true);
     setSharingInfo({ label, audio: withAudio, fps });
+    shareStartedAt = Date.now();
     return null;
   } catch (err) {
     const reason = String(err).replace(/^Error:\s*/, '');

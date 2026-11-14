@@ -55,6 +55,7 @@ thiserror = { workspace = true }
 
 # Bytes
 bytes = { workspace = true }
+tokio-util = { version = "0.7", features = ["io"] }
 
 # Config
 toml = "0.8"

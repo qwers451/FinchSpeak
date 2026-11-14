@@ -1,4 +1,4 @@
-import { createSignal } from 'solid-js';
+import { createEffect, createRoot, createSignal, on } from 'solid-js';
 import { api } from '../services/api';
 import { describeError } from '../i18n/errors';
 import type { MusicCommand, MusicEvents, MusicRoomState } from '../types';
@@ -17,8 +17,11 @@ const [clock, setClock] = createSignal(Date.now());
 let timer: ReturnType<typeof setInterval> | undefined;
 let volumeBeforeMute: number | null = null;
 
-/** Whether the room music panel is open (the dock button, the strips and the room header open it). */
+/** Whether the room music panel is open (the room tools block and the room header open it). */
 export const [musicPanelOpen, setMusicPanelOpen] = createSignal(false);
+
+// Leaving the room (or the session ending) closes the player window.
+createRoot(() => createEffect(on(activeVoiceChannel, (room) => { if (!room) setMusicPanelOpen(false); }, { defer: true })));
 
 const clampUnit = (value: number) => (Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : DEFAULT_MUSIC_VOLUME);
 

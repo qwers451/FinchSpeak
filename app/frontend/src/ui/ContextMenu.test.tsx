@@ -5,7 +5,9 @@ import { ContextMenuHost, openContextMenu, closeContextMenu } from './ContextMen
 let dispose: (() => void) | undefined;
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 const press = (key: string) => document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
-afterEach(() => { closeContextMenu(); dispose?.(); document.body.innerHTML = ''; vi.restoreAllMocks(); });
+afterEach(() => { closeContextMenu(); dispose?.(); document.body.innerHTML = ''; vi.useRealTimers(); vi.restoreAllMocks(); });
+const settle = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
+const entry = (label: string) => [...document.querySelectorAll<HTMLElement>('.ctx-entry')].find((e) => e.textContent?.includes(label))!;
 
 function mount() {
   const root = document.createElement('div');
@@ -63,7 +65,8 @@ it('selects once with Space and lets a slider adjust without closing', async () 
 
 it('flips at viewport edges and dismisses on outside pointer, scroll, resize and blur', async () => {
   const trigger = mount();
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 240, bottom: 160, width: 240, height: 160, toJSON() {} });
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(240);
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(160);
   for (const event of ['mousedown', 'scroll', 'resize', 'blur']) {
     openContextMenu({ x: window.innerWidth - 1, y: window.innerHeight - 1 }, [{ kind: 'item', label: 'Item', onSelect() {} }]);
     await flush();
@@ -73,4 +76,96 @@ it('flips at viewport edges and dismisses on outside pointer, scroll, resize and
     (event === 'mousedown' ? trigger : window).dispatchEvent(new Event(event, { bubbles: true }));
     expect(document.querySelector('[role="menu"]')).toBeNull();
   }
+});
+
+function mountWithScrollers() {
+  const root = document.createElement('div');
+  root.innerHTML = '<div class="chat"><button class="anchor">Member</button></div><div class="list"></div>';
+  document.body.append(root);
+  const host = document.createElement('div');
+  document.body.append(host);
+  dispose = render(() => <ContextMenuHost />, host);
+  return { chat: root.querySelector<HTMLElement>('.chat')!, list: root.querySelector<HTMLElement>('.list')!, anchor: root.querySelector<HTMLElement>('.anchor')! };
+}
+
+it('ignores scrolling outside its anchor, closes when the anchor scrolls, and stays open on scroll inside itself', async () => {
+  const { chat, list, anchor } = mountWithScrollers();
+  openContextMenu(anchor, [{ kind: 'item', label: 'Mute', onSelect() {} }]);
+  await flush();
+  list.dispatchEvent(new Event('scroll'));
+  expect(document.querySelector('[role="menu"]')).toBeTruthy();
+  document.querySelector('[role="menu"]')!.dispatchEvent(new Event('scroll'));
+  expect(document.querySelector('[role="menu"]')).toBeTruthy();
+  chat.dispatchEvent(new Event('scroll'));
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+});
+
+it('closes a point-anchored menu when the region under its point scrolls, not when an unrelated container scrolls', async () => {
+  const { chat, list } = mountWithScrollers();
+  vi.spyOn(document, 'elementFromPoint').mockReturnValue(chat.querySelector('.anchor'));
+  openContextMenu({ x: 20, y: 20 }, [{ kind: 'item', label: 'Mute', onSelect() {} }]);
+  await flush();
+  list.dispatchEvent(new Event('scroll'));
+  expect(document.querySelector('[role="menu"]')).toBeTruthy();
+  chat.dispatchEvent(new Event('scroll'));
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+});
+
+it('a point-anchored menu with nothing under its point ignores container scrolls', async () => {
+  const { list } = mountWithScrollers();
+  vi.spyOn(document, 'elementFromPoint').mockReturnValue(null);
+  openContextMenu({ x: 20, y: 20 }, [{ kind: 'item', label: 'Mute', onSelect() {} }]);
+  await flush();
+  list.dispatchEvent(new Event('scroll'));
+  expect(document.querySelector('[role="menu"]')).toBeTruthy();
+});
+
+it('keeps a submenu open while the pointer travels from its trigger into the submenu', async () => {
+  vi.useFakeTimers();
+  mount();
+  openContextMenu({ x: 20, y: 20 }, [
+    { kind: 'submenu', label: 'Move', items: [{ kind: 'item', label: 'Room', onSelect() {} }] },
+    { kind: 'item', label: 'Leave', onSelect() {} },
+  ]);
+  await settle();
+  entry('Move').dispatchEvent(new Event('pointerenter'));
+  await settle();
+  expect(document.querySelectorAll('[role="menu"]').length).toBe(2);
+  entry('Leave').dispatchEvent(new Event('pointerenter'));
+  vi.advanceTimersByTime(60);
+  document.querySelectorAll('[role="menu"]')[1].dispatchEvent(new Event('pointerenter'));
+  vi.advanceTimersByTime(300);
+  await settle();
+  expect(document.querySelectorAll('[role="menu"]').length).toBe(2);
+  expect(document.body.textContent).toContain('Room');
+});
+
+it('closes a submenu about 150 ms after the pointer leaves it for a sibling', async () => {
+  vi.useFakeTimers();
+  mount();
+  openContextMenu({ x: 20, y: 20 }, [
+    { kind: 'submenu', label: 'Move', items: [{ kind: 'item', label: 'Room', onSelect() {} }] },
+    { kind: 'item', label: 'Leave', onSelect() {} },
+  ]);
+  await settle();
+  entry('Move').dispatchEvent(new Event('pointerenter'));
+  await settle();
+  entry('Leave').dispatchEvent(new Event('pointerenter'));
+  vi.advanceTimersByTime(140);
+  expect(document.querySelectorAll('[role="menu"]').length).toBe(2);
+  vi.advanceTimersByTime(20);
+  await settle();
+  expect(document.querySelectorAll('[role="menu"]').length).toBe(1);
+});
+
+it('runs the action once on click and closes the menu', async () => {
+  mount();
+  const onSelect = vi.fn();
+  openContextMenu({ x: 20, y: 20 }, [{ kind: 'item', label: 'Mute', onSelect }]);
+  await flush();
+  entry('Mute').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+  expect(document.querySelector('[role="menu"]')).toBeTruthy();
+  entry('Mute').click();
+  expect(onSelect).toHaveBeenCalledTimes(1);
+  expect(document.querySelector('[role="menu"]')).toBeNull();
 });

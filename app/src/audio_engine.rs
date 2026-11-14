@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::Stream;
@@ -23,6 +23,8 @@ use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
 use tauri::Emitter;
 use tracing::{error, info, warn};
+#[cfg(windows)]
+use windows_sys::Win32::System::Threading::{AvRevertMmThreadCharacteristics, AvSetMmThreadCharacteristicsW};
 
 /// More restarts than this inside `RESTART_WINDOW` means the devices keep failing: stop trying.
 const MAX_DEVICE_RESTARTS: usize = 5;
@@ -33,6 +35,187 @@ const DEVICE_SETTLE: Duration = Duration::from_millis(500);
 /// profile); it doubles up to [`OUTPUT_RETRY_MAX`] while they stay missing.
 const OUTPUT_RETRY: Duration = Duration::from_secs(1);
 const OUTPUT_RETRY_MAX: Duration = Duration::from_secs(8);
+/// How long the audio worker parks when the capture callback has not unparked it.
+const WORKER_IDLE_WAIT: Duration = Duration::from_millis(10);
+
+/// Parks the audio worker until the capture callback unparks it or `timeout` passes. A spurious
+/// wake-up is harmless: the caller processes whatever is ready and parks again.
+fn wait_for_work(timeout: Duration) {
+    std::thread::park_timeout(timeout);
+}
+
+/// Interleaved samples converted per pass inside a capture callback. The scratch buffers are
+/// allocated once, before the stream exists; a longer device buffer is converted in several passes.
+const CAPTURE_SCRATCH_SAMPLES: usize = 4096;
+
+/// Signed 16-bit PCM to f32 in [-1, 1].
+fn i16_to_f32(sample: i16) -> f32 {
+    f32::from(sample) / 32_768.0
+}
+
+/// Unsigned 16-bit PCM (midpoint 32768 is silence) to f32 in [-1, 1].
+fn u16_to_f32(sample: u16) -> f32 {
+    (f32::from(sample) - 32_768.0) / 32_768.0
+}
+
+/// Signed 32-bit PCM to f32 in [-1, 1].
+fn i32_to_f32(sample: i32) -> f32 {
+    (f64::from(sample) / 2_147_483_648.0) as f32
+}
+
+/// Converts as many samples as both slices hold and returns how many were written.
+fn convert_samples<T: Copy>(src: &[T], convert: fn(T) -> f32, dst: &mut [f32]) -> usize {
+    let count = src.len().min(dst.len());
+    for (out, &input) in dst[..count].iter_mut().zip(&src[..count]) {
+        *out = convert(input);
+    }
+    count
+}
+
+/// One mono sample per whole frame of `interleaved`, written to `mono`; returns the frame count.
+/// One channel is kept as it is, stereo is averaged, and with more than two channels only channel 0
+/// is taken: averaging every channel mixes out-of-phase signals and weakens the voice.
+fn downmix_to_mono(interleaved: &[f32], channels: usize, mono: &mut [f32]) -> usize {
+    if channels == 0 {
+        return 0;
+    }
+    let frames = (interleaved.len() / channels).min(mono.len());
+    for (index, out) in mono[..frames].iter_mut().enumerate() {
+        let frame = &interleaved[index * channels..(index + 1) * channels];
+        *out = match channels {
+            2 => (frame[0] + frame[1]) / 2.0,
+            _ => frame[0],
+        };
+    }
+    frames
+}
+
+/// Everything the capture callback owns. Built on the worker thread before the stream is opened;
+/// the callback itself takes no locks and allocates nothing.
+struct CaptureSink {
+    privacy: Arc<crate::state::VoiceSettings>,
+    clock: CaptureClock<cpal::StreamInstant>,
+    producer: HeapProd<CapturedSample>,
+    diagnostics: Arc<AudioDiagnostics>,
+    previous_callback: Option<(u64, Instant)>,
+    channels: usize,
+    /// Whole frames converted per pass; `raw` holds `frames_per_pass * channels` samples.
+    frames_per_pass: usize,
+    raw: Vec<f32>,
+    mono: Vec<f32>,
+    worker: std::thread::Thread,
+}
+
+impl CaptureSink {
+    fn new(
+        privacy: Arc<crate::state::VoiceSettings>,
+        producer: HeapProd<CapturedSample>,
+        diagnostics: Arc<AudioDiagnostics>,
+        channels: usize,
+        worker: std::thread::Thread,
+    ) -> Self {
+        let channels = channels.max(1);
+        let frames_per_pass = (CAPTURE_SCRATCH_SAMPLES / channels).max(1);
+        Self {
+            privacy,
+            clock: CaptureClock::default(),
+            producer,
+            diagnostics,
+            previous_callback: None,
+            channels,
+            frames_per_pass,
+            raw: vec![0.0; frames_per_pass * channels],
+            mono: vec![0.0; frames_per_pass],
+            worker,
+        }
+    }
+}
+
+/// The capture callback for any device sample type: `convert` maps one device sample to f32.
+fn capture_callback<T: Copy + 'static>(
+    mut sink: CaptureSink,
+    convert: fn(T) -> f32,
+) -> impl FnMut(&[T], &cpal::InputCallbackInfo) + Send + 'static {
+    move |data: &[T], info: &cpal::InputCallbackInfo| {
+        let channels = sink.channels;
+        let (generation, open) = sink.privacy.privacy_snapshot();
+        let timestamp = info.timestamp();
+        let tag = sink.clock.tag(generation, open, timestamp.capture, timestamp.callback);
+        let diagnostic_epoch = sink.diagnostics.epoch();
+        if diagnostic_epoch != 0 {
+            let now = Instant::now();
+            let gap = sink.previous_callback.filter(|(epoch, _)| *epoch == diagnostic_epoch)
+                .map(|(_, last)| now.duration_since(last).as_micros() as u64).unwrap_or(0);
+            sink.previous_callback = Some((diagnostic_epoch, now));
+            sink.diagnostics.callback_at(diagnostic_epoch, true, data.len() / channels, gap);
+        } else {
+            sink.previous_callback = None;
+        }
+        let mut dropped = 0;
+        // Passes hold whole frames, so a frame is never split between two passes.
+        let pass_len = sink.frames_per_pass * channels;
+        for pass in data.chunks(pass_len) {
+            let converted = convert_samples(pass, convert, &mut sink.raw);
+            let frames = downmix_to_mono(&sink.raw[..converted], channels, &mut sink.mono);
+            for &sample in &sink.mono[..frames] {
+                if sink.producer.try_push(CapturedSample { sample, generation: tag }).is_err() {
+                    dropped += 1;
+                }
+            }
+        }
+        sink.diagnostics.add_at(diagnostic_epoch, Metric::CaptureDroppedSamples, dropped);
+        sink.diagnostics.maximum_at(diagnostic_epoch, Metric::CaptureHighWaterSamples, sink.producer.occupied_len() as u64);
+        sink.worker.unpark();
+    }
+}
+
+/// Keeps the calling thread registered with MMCSS (multimedia class scheduler) under a task
+/// such as "Pro Audio" for as long as the guard lives. Dropping the guard reverts the thread.
+#[cfg(windows)]
+pub(crate) struct RealtimeGuard {
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+
+/// Off Windows there is no MMCSS: the guard is never created and nothing is reverted.
+#[cfg(not(windows))]
+#[allow(dead_code)]
+pub(crate) struct RealtimeGuard;
+
+#[cfg(windows)]
+impl RealtimeGuard {
+    /// Registers the calling thread under `task`. Returns `None` (after a warning) when the system
+    /// refuses; the thread then keeps normal priority and audio still runs.
+    pub(crate) fn register(task: &str) -> Option<Self> {
+        let name: Vec<u16> = task.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut task_index: u32 = 0;
+        // SAFETY: `name` is a NUL-terminated UTF-16 string alive for the call, and `task_index` is a
+        // valid out pointer. The returned handle is only used by this thread's guard.
+        let handle = unsafe { AvSetMmThreadCharacteristicsW(name.as_ptr(), &mut task_index) };
+        if handle.is_null() {
+            warn!("Could not register the audio worker with MMCSS task \"{}\"; it keeps normal priority", task);
+            None
+        } else {
+            Some(Self { handle })
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for RealtimeGuard {
+    fn drop(&mut self) {
+        // SAFETY: `handle` was returned by AvSetMmThreadCharacteristicsW for this thread, and is reverted once.
+        unsafe {
+            AvRevertMmThreadCharacteristics(self.handle);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+impl RealtimeGuard {
+    pub(crate) fn register(_task: &str) -> Option<Self> {
+        None
+    }
+}
 
 use crate::state::AppState;
 use crate::audio_diagnostics::{AudioDiagnostics, DeviceConfig, Metric};
@@ -244,8 +427,57 @@ impl Drop for AudioEngine {
     }
 }
 
-fn capture_config(channel_id: u32, settings: &crate::state::VoiceSettings) -> VoiceCaptureConfig {
-    VoiceCaptureConfig { channel_short_id: channel_id, voice_enhancement: settings.voice_enhancement(), vad_threshold_db: settings.vad_threshold_db(), ..Default::default() }
+/// Opus bitrate of a voice room: the channel's own setting clamped to 16-128 kbit/s, 64 when unknown.
+pub(crate) fn voice_bitrate_kbps(channel_bitrate: Option<u32>) -> u32 {
+    channel_bitrate.map_or(64, |kbps| kbps.clamp(16, 128))
+}
+
+/// How often the voice connection's packet loss is measured for the encoder's FEC.
+const LOSS_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Starts the sampler that tracks the packet loss of the voice connection for the channel `short_id`.
+/// Every 2 s it takes the loss and sent counts since the previous sample and stores the FEC percentage
+/// for the audio worker. It stops when the user is no longer in that channel or a newer sampler starts.
+pub(crate) fn spawn_expected_loss_sampler(state: AppState, short_id: u32) {
+    state.voice_expected_loss_pct.store(5, Ordering::Relaxed);
+    let generation = state.voice_loss_sampler_generation.fetch_add(1, Ordering::SeqCst) + 1;
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(LOSS_SAMPLE_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut previous: Option<(u64, u64)> = None;
+        loop {
+            interval.tick().await;
+            if state.voice_loss_sampler_generation.load(Ordering::SeqCst) != generation {
+                break;
+            }
+            if *state.current_voice_channel.read().await != Some(short_id) {
+                break;
+            }
+            let path = match state.quic_connection.read().await.as_ref() {
+                Some(connection) => connection.stats().path,
+                None => continue,
+            };
+            let (lost, sent) = (path.lost_packets, path.sent_packets);
+            if let Some((previous_lost, previous_sent)) = previous {
+                let percent = finch_audio::loss_to_fec_percent(
+                    lost.saturating_sub(previous_lost),
+                    sent.saturating_sub(previous_sent),
+                );
+                state.voice_expected_loss_pct.store(percent as u32, Ordering::Relaxed);
+            }
+            previous = Some((lost, sent));
+        }
+    });
+}
+
+fn capture_config(channel_id: u32, channel_bitrate: Option<u32>, settings: &crate::state::VoiceSettings) -> VoiceCaptureConfig {
+    VoiceCaptureConfig {
+        channel_short_id: channel_id,
+        bitrate_kbps: voice_bitrate_kbps(channel_bitrate),
+        voice_enhancement: settings.voice_enhancement(),
+        vad_threshold_db: settings.vad_threshold_db(),
+        ..Default::default()
+    }
 }
 
 fn effective_monitor(settings: &crate::state::VoiceSettings, mic_test_active: bool) -> bool {
@@ -574,10 +806,14 @@ fn open_output(state: &AppState, app_handle: &tauri::AppHandle, diagnostics: &Ar
 
 /// Dedicated OS thread function managing cpal streams, DSP, and lock-free ring buffers.
 fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
+    // Held for the whole life of this thread; a refusal is logged and audio runs at normal priority.
+    let _realtime = RealtimeGuard::register("Pro Audio");
     let mut pending_cmd: Option<AudioCommand> = None;
     let mut restart_times: std::collections::VecDeque<Instant> = std::collections::VecDeque::new();
     // Feeds processed frames to a voice message being recorded; kept across device restarts.
     let mut note_feed = crate::voice_note::TapFeed::default();
+    // Packet timestamps stay monotonic across device restarts: the counter lives as long as the thread.
+    let mut frame_clock = FrameClock::default();
 
     loop {
         let cmd = match pending_cmd.take() {
@@ -623,7 +859,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
 
                 // 2. Input (Capture) Ring Buffer & cpal Stream
                 let capture_rb = HeapRb::<CapturedSample>::new(RING_BUFFER_CAPACITY);
-                let (mut capture_prod, mut capture_cons) = capture_rb.split();
+                let (capture_prod, mut capture_cons) = capture_rb.split();
 
                 let mut capture_stream: Option<Stream> = None;
                 let mut input_resampler: Option<InputResampler> = None;
@@ -654,42 +890,42 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                 error!("Audio input error: {}", err);
                                 failed.store(true, Ordering::SeqCst);
                             };
-                            let privacy = state.voice_settings.clone();
-                            let mut capture_clock = CaptureClock::default();
-                            let input_diagnostics = diagnostics.clone();
-                            let mut previous_input_callback: Option<(u64, Instant)> = None;
-                            let stream_res = device.build_input_stream(
-                                &config.into(),
-                                move |data: &[f32], info: &cpal::InputCallbackInfo| {
-                                    let (generation, open) = privacy.privacy_snapshot();
-                                    let timestamp = info.timestamp();
-                                    let tag = capture_clock.tag(generation, open, timestamp.capture, timestamp.callback);
-                                    if channels == 0 {
-                                        return;
-                                    }
-                                    let diagnostic_epoch = input_diagnostics.epoch();
-                                    if diagnostic_epoch != 0 {
-                                        let now = Instant::now();
-                                        let gap = previous_input_callback.filter(|(epoch, _)| *epoch == diagnostic_epoch)
-                                            .map(|(_, last)| now.duration_since(last).as_micros() as u64).unwrap_or(0);
-                                        previous_input_callback = Some((diagnostic_epoch, now));
-                                        input_diagnostics.callback_at(diagnostic_epoch, true, data.len() / channels, gap);
-                                    } else { previous_input_callback = None; }
-                                    let mut dropped = 0;
-                                    for frame in data.chunks(channels) {
-                                        let mut sum = 0.0f32;
-                                        for &s in frame {
-                                            sum += s;
-                                        }
-                                        let mono = sum / (channels as f32);
-                                        if capture_prod.try_push(CapturedSample { sample: mono, generation: tag }).is_err() { dropped += 1; }
-                                    }
-                                    input_diagnostics.add_at(diagnostic_epoch, Metric::CaptureDroppedSamples, dropped);
-                                    input_diagnostics.maximum_at(diagnostic_epoch, Metric::CaptureHighWaterSamples, capture_prod.occupied_len() as u64);
-                                },
-                                err_fn,
-                                None,
-                            );
+                            // This stream is built on the worker thread, so this is the worker's handle.
+                            // The callback only unparks it: no locks and no allocation.
+                            let worker_thread = std::thread::current();
+                            let sample_format = config.sample_format();
+                            let stream_config: cpal::StreamConfig = config.into();
+                            let sink = CaptureSink::new(state.voice_settings.clone(), capture_prod, diagnostics.clone(), channels, worker_thread);
+                            let stream_res = match sample_format {
+                                cpal::SampleFormat::F32 => device.build_input_stream(
+                                    &stream_config,
+                                    capture_callback::<f32>(sink, |s| s),
+                                    err_fn,
+                                    None,
+                                ),
+                                cpal::SampleFormat::I16 => device.build_input_stream(
+                                    &stream_config,
+                                    capture_callback::<i16>(sink, i16_to_f32),
+                                    err_fn,
+                                    None,
+                                ),
+                                cpal::SampleFormat::U16 => device.build_input_stream(
+                                    &stream_config,
+                                    capture_callback::<u16>(sink, u16_to_f32),
+                                    err_fn,
+                                    None,
+                                ),
+                                cpal::SampleFormat::I32 => device.build_input_stream(
+                                    &stream_config,
+                                    capture_callback::<i32>(sink, i32_to_f32),
+                                    err_fn,
+                                    None,
+                                ),
+                                other => {
+                                    error!("Unsupported microphone sample format {:?}; supported: i16, u16, i32, f32", other);
+                                    Err(cpal::BuildStreamError::StreamConfigNotSupported)
+                                }
+                            };
 
                             match stream_res {
                                 Ok(stream) => {
@@ -728,7 +964,11 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                 state.voice_note.tap.set_live(capture_stream.is_some());
 
                 // 3. DSP pipeline for worker thread processing
-                let mut voice_capture = match VoiceCapture::new(capture_config(channel_id, &state.voice_settings)) {
+                let bitrate_kbps = state.voice_bitrate_kbps.load(Ordering::Relaxed);
+                let mut applied_bitrate_kbps = bitrate_kbps;
+                // A new capture starts with the encoder's default expected loss of 5 %.
+                let mut applied_loss_pct: u32 = 5;
+                let mut voice_capture = match VoiceCapture::new(capture_config(channel_id, Some(bitrate_kbps), &state.voice_settings)) {
                     Ok(mut capture) => { capture.set_transmit_gate(false); Some(capture) },
                     Err(e) => {
                         is_running.store(false, Ordering::SeqCst);
@@ -1039,6 +1279,9 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     if capture_raw_buf.len() != needed {
                                         break;
                                     }
+                                    // Every captured frame advances the clock, muted or dropped, so the
+                                    // stamps keep tracking real audio time across silent gaps.
+                                    let frame_ms = frame_clock.next_ms();
 
                                     if state.is_muted.load(Ordering::Relaxed) {
                                         local_peak = None;
@@ -1070,10 +1313,6 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         continue;
                                     };
 
-                                    let now_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
-                                        Ok(dur) => dur.as_millis() as u32,
-                                        Err(_) => 0,
-                                    };
                                     let sender_id = state.session_peer_id.load(Ordering::Relaxed);
                                     let settings = capture.set_voice_enhancement(state.voice_settings.voice_enhancement())
                                         .and_then(|_| capture.set_input_gain(state.voice_settings.input_gain()));
@@ -1088,6 +1327,24 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                         continue;
                                     }
                                     capture.set_vad_threshold_db(state.voice_settings.vad_threshold_db());
+                                    // The room's bitrate can change while we are in it (an admin edit): set it in
+                                    // place on this worker thread, keeping the encoder's state.
+                                    let wanted_bitrate_kbps = state.voice_bitrate_kbps.load(Ordering::Relaxed);
+                                    if wanted_bitrate_kbps != applied_bitrate_kbps {
+                                        applied_bitrate_kbps = wanted_bitrate_kbps;
+                                        if let Err(error) = capture.set_bitrate_kbps(wanted_bitrate_kbps) {
+                                            error!("Failed to change the voice bitrate: {}", error);
+                                        }
+                                    }
+                                    // The measured packet loss sets how much in-band FEC the encoder adds; applied on
+                                    // this worker thread only when the sampler has changed it.
+                                    let wanted_loss_pct = state.voice_expected_loss_pct.load(Ordering::Relaxed);
+                                    if wanted_loss_pct != applied_loss_pct {
+                                        applied_loss_pct = wanted_loss_pct;
+                                        if let Err(error) = capture.set_expected_loss(wanted_loss_pct.min(100) as u8) {
+                                            error!("Failed to change the expected voice packet loss: {}", error);
+                                        }
+                                    }
                                     // Recheck after processing/configuration work; opening requires
                                     // a complete chunk proven newer than the device-clock cutoff.
                                     let frame_gate = fresh
@@ -1096,7 +1353,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                                     let dsp_epoch = diagnostics.epoch();
                                     capture.set_diagnostics_enabled(dsp_epoch != 0);
                                     let dsp_started = (dsp_epoch != 0).then(Instant::now);
-                                    let processed = capture.process(&mut capture_frame_48k, sender_id, now_ms);
+                                    let processed = capture.process(&mut capture_frame_48k, sender_id, frame_ms);
                                     if let Some(started) = dsp_started { diagnostics.dsp_frame_at(dsp_epoch, started.elapsed().as_micros() as u64); }
                                     let output = match processed {
                                         Ok(output) => output,
@@ -1216,7 +1473,7 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
                             let _ = app_handle.emit("voice-levels", VoiceLevels { levels: &voice_levels });
                         }
                     }
-                    std::thread::sleep(Duration::from_millis(5));
+                    wait_for_work(WORKER_IDLE_WAIT);
                 }
 
                 if voice_reports.should_emit(&[]) {
@@ -1252,9 +1509,38 @@ fn run_worker(cmd_rx: Receiver<AudioCommand>, is_running: Arc<AtomicBool>) {
     }
 }
 
+/// Packet timestamps of one voice stream, in milliseconds, taken from the 48 kHz sample counter:
+/// each captured frame is 960 samples (20 ms), so the stamps follow the audio itself and not the
+/// scheduler or the wall clock.
+#[derive(Debug, Default)]
+struct FrameClock {
+    samples: u64,
+}
+
+impl FrameClock {
+    /// Stamp for the next captured frame, then advance the counter by one frame.
+    fn next_ms(&mut self) -> u32 {
+        let ms = (self.samples / 48) as u32;
+        self.samples += FRAME_SIZE_48K as u64;
+        ms
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_clock_stamps_every_frame_twenty_milliseconds_apart_from_zero() {
+        let mut clock = FrameClock::default();
+        let stamps: Vec<u32> = (0..4).map(|_| clock.next_ms()).collect();
+        assert_eq!(stamps, vec![0, 20, 40, 60]);
+        let mut long = FrameClock::default();
+        for _ in 0..49 {
+            long.next_ms();
+        }
+        assert_eq!(long.next_ms(), 980, "stamps keep counting in whole frames");
+    }
 
     #[test]
     fn voice_levels_publish_every_sixty_milliseconds_and_clear_once() {
@@ -1601,9 +1887,147 @@ mod tests {
         wanted.voice_enhancement = false;
         wanted.vad_threshold_db = -52.0;
         settings.apply(&wanted);
-        let config = capture_config(7, &settings);
+        let config = capture_config(7, Some(64), &settings);
         assert!(!config.voice_enhancement);
         assert_eq!(config.vad_threshold_db, -52.0);
         assert_eq!(config.channel_short_id, 7);
+    }
+
+    #[test]
+    fn capture_encodes_at_the_channel_bitrate_and_falls_back_to_64() {
+        let settings = crate::state::VoiceSettings::default();
+        assert_eq!(capture_config(7, Some(96), &settings).bitrate_kbps, 96);
+        assert_eq!(capture_config(7, Some(200), &settings).bitrate_kbps, 128);
+        assert_eq!(capture_config(7, None, &settings).bitrate_kbps, 64);
+    }
+
+    #[test]
+    fn voice_bitrate_is_clamped_to_16_to_128_and_defaults_to_64() {
+        assert_eq!(voice_bitrate_kbps(Some(96)), 96);
+        assert_eq!(voice_bitrate_kbps(Some(16)), 16);
+        assert_eq!(voice_bitrate_kbps(Some(128)), 128);
+        assert_eq!(voice_bitrate_kbps(Some(4)), 16);
+        assert_eq!(voice_bitrate_kbps(Some(0)), 16);
+        assert_eq!(voice_bitrate_kbps(Some(500)), 128);
+        assert_eq!(voice_bitrate_kbps(None), 64);
+    }
+
+    #[test]
+    fn realtime_registration_never_panics_and_fails_softly() {
+        // Off Windows there is no MMCSS, so registration must report "not registered" as None.
+        // On Windows it may succeed or fail; either way it must not panic, and dropping reverts it.
+        let guard = RealtimeGuard::register("Pro Audio");
+        if !cfg!(windows) {
+            assert!(guard.is_none());
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn parked_worker_wakes_on_unpark_long_before_its_timeout() {
+        // The park timeout is 2 s, so a wake within 500 ms can only come from the unpark.
+        const LONG_WAIT: Duration = Duration::from_secs(2);
+        let ready = Arc::new(AtomicBool::new(false));
+        let (woke_tx, woke_rx) = channel::<Instant>();
+        let worker_ready = ready.clone();
+        let worker = std::thread::spawn(move || {
+            while !worker_ready.load(Ordering::SeqCst) {
+                wait_for_work(LONG_WAIT);
+            }
+            let _ = woke_tx.send(Instant::now());
+        });
+        std::thread::sleep(Duration::from_millis(20));
+        ready.store(true, Ordering::SeqCst);
+        let sent = Instant::now();
+        worker.thread().unpark();
+        let woke = woke_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("worker did not wake up after unpark");
+        assert!(woke.duration_since(sent) < Duration::from_millis(500));
+        worker.join().expect("worker thread panicked");
+    }
+
+    #[test]
+    fn i16_samples_map_to_the_unit_range() {
+        assert_eq!(i16_to_f32(i16::MIN), -1.0);
+        assert_eq!(i16_to_f32(0), 0.0);
+        assert!((i16_to_f32(i16::MAX) - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn u16_samples_are_centred_on_the_midpoint() {
+        assert_eq!(u16_to_f32(0), -1.0);
+        assert_eq!(u16_to_f32(32_768), 0.0);
+        assert!((u16_to_f32(u16::MAX) - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn i32_samples_map_to_the_unit_range() {
+        assert_eq!(i32_to_f32(i32::MIN), -1.0);
+        assert_eq!(i32_to_f32(0), 0.0);
+        assert!((i32_to_f32(i32::MAX) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn slice_conversion_fills_the_buffer_and_stops_at_its_length() {
+        let mut dst = [9.0f32; 4];
+        let written = convert_samples(&[i16::MIN, 0, i16::MAX], i16_to_f32, &mut dst);
+        assert_eq!(written, 3);
+        assert_eq!(dst[0], -1.0);
+        assert_eq!(dst[1], 0.0);
+        assert!((dst[2] - 1.0).abs() < 1e-4);
+        assert_eq!(dst[3], 9.0, "samples past the converted input are untouched");
+
+        let mut small = [0.0f32; 2];
+        assert_eq!(convert_samples(&[1.0f32, 0.5, 0.25], |s: f32| s, &mut small), 2);
+        assert_eq!(small, [1.0, 0.5]);
+    }
+
+    /// A 48 kHz tone on channel 0 and different signals on the other channels of a 4-channel device.
+    fn four_channel_frames(frames: usize) -> Vec<f32> {
+        let mut interleaved = Vec::with_capacity(frames * 4);
+        for n in 0..frames {
+            let t = n as f32 / 48_000.0;
+            interleaved.push(0.5 * (2.0 * std::f32::consts::PI * 440.0 * t).sin());
+            interleaved.push(0.9);
+            interleaved.push(-0.7);
+            interleaved.push(0.3 * (2.0 * std::f32::consts::PI * 1_000.0 * t).sin());
+        }
+        interleaved
+    }
+
+    #[test]
+    fn multichannel_input_uses_channel_zero_only() {
+        let interleaved = four_channel_frames(480);
+        let mut mono = [0.0f32; 480];
+        assert_eq!(downmix_to_mono(&interleaved, 4, &mut mono), 480);
+        for (n, sample) in mono.iter().enumerate() {
+            assert_eq!(*sample, interleaved[n * 4], "frame {n} must be channel 0 unchanged");
+        }
+    }
+
+    #[test]
+    fn stereo_input_is_averaged() {
+        let interleaved = [0.5f32, -0.25, 1.0, 0.0];
+        let mut mono = [0.0f32; 2];
+        assert_eq!(downmix_to_mono(&interleaved, 2, &mut mono), 2);
+        assert_eq!(mono, [0.125, 0.5]);
+    }
+
+    #[test]
+    fn mono_input_is_passed_through() {
+        let interleaved = [0.1f32, -0.2, 0.3];
+        let mut mono = [0.0f32; 3];
+        assert_eq!(downmix_to_mono(&interleaved, 1, &mut mono), 3);
+        assert_eq!(mono, [0.1, -0.2, 0.3]);
+    }
+
+    #[test]
+    fn downmix_never_writes_past_the_output_or_reads_a_partial_frame() {
+        let interleaved = [0.5f32, 0.5, 0.5, 0.5, 0.5]; // 2 whole stereo frames and one stray sample
+        let mut mono = [0.0f32; 1];
+        assert_eq!(downmix_to_mono(&interleaved, 2, &mut mono), 1);
+        assert_eq!(mono, [0.5]);
+        assert_eq!(downmix_to_mono(&interleaved, 0, &mut mono), 0, "zero channels yields nothing");
     }
 }

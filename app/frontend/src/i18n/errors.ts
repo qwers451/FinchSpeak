@@ -9,12 +9,22 @@ const RULES: readonly Rule[] = [
   { pattern: /^Registered, but the QUIC connection failed/i, key: 'Registered, but the voice connection failed. Check that UDP port 4433 is open.' },
   // The reason may itself be a backend error ("HTTP 400: ..."), so it is translated too.
   { pattern: /^Registration failed: ([\s\S]*)/i, key: 'Registration failed: {reason}', params: (m) => ({ reason: describeError(m[1]) }) },
+  // Too many sign-in attempts: the server names the wait in seconds, shown here in whole minutes. The Tauri
+  // client prefixes "HTTP 429: "; the browser client sends the raw JSON body. Registration is not matched.
+  { pattern: /^(?:Login failed: )?(?:HTTP 429: )?(?:\{"error":")?Too many attempts\. Try again in (\d+) seconds/, key: 'Too many sign-in attempts. Try again in {minutes} min', params: (m) => ({ minutes: Math.max(1, Math.ceil(Number(m[1]) / 60)) }) },
   { pattern: /^Login failed: ([\s\S]*)/i, key: 'Sign-in failed: {reason}', params: (m) => ({ reason: describeError(m[1]) }) },
   { pattern: /is not trusted yet/i, key: 'Confirm the server certificate, then sign in.' },
   { pattern: /certificate of .* changed since you trusted it/i, key: 'The server certificate has changed. Do not sign in until the admin confirms the change.' },
   { pattern: /^Logged out locally, but could not revoke/i, key: 'Signed out on this computer. The server could not be reached to end the session.' },
   { pattern: /^Invalid server address/i, key: 'The server address is not valid' },
+  // The server limits joins and screen shares; each refusal names its action and carries the seconds to wait.
+  { pattern: /^429: Wait (\d+) s; too many room joins/, key: 'Too many room joins. Wait {seconds} s', params: (m) => ({ seconds: m[1] }) },
+  { pattern: /^429: Wait (\d+) s; too many screen shares/, key: 'Too many screen shares. Wait {seconds} s', params: (m) => ({ seconds: m[1] }) },
   { pattern: /^Not authenticated$/i, key: 'Not authenticated' },
+  // File attachments: size limit, per-user storage quota and upload rate (the browser client sends the raw JSON body).
+  { pattern: /^(?:\{"error":")?File exceeds maximum allowed size/, key: 'The file is too large for this server' },
+  { pattern: /^(?:\{"error":")?Storage quota exceeded/, key: 'Your file storage on this server is full. Delete some files and try again.' },
+  { pattern: /^(?:\{"error":")?Too many uploads\. Try again in (\d+) seconds/, key: 'Too many uploads. Try again in {seconds} s', params: (m) => ({ seconds: m[1] }) },
   // Room music errors from the server (and the client's own format probe).
   { pattern: /^Music file is too large/i, key: 'The music file is too large' },
   { pattern: /^Unsupported music format/i, key: 'This music format is not supported. Use MP3, OGG, FLAC or WAV.' },

@@ -53,10 +53,11 @@ impl Room {
         for peer in 1..=4 {
             let (tx, rx) = mpsc::channel(128);
             receivers.push(rx);
+            let user_id = Uuid::new_v4();
             sessions.register_session(ClientSession {
                 token_id: format!("token{peer}"),
                 peer_id: peer,
-                user_id: Uuid::new_v4(),
+                user_id,
                 username: format!("User {peer}"),
                 role: if peer == 1 { "admin" } else { "member" }.into(),
                 current_voice_channel: None,
@@ -70,6 +71,8 @@ impl Room {
                 last_activity_update: None,
                 connection: local.clone(),
                 control_tx: tx,
+                media: sessions.media_budget(user_id),
+                wrong_channel_warn: Default::default(),
             });
         }
         Ok(Self {

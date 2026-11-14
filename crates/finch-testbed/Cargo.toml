@@ -34,3 +34,5 @@ serde_json = { workspace = true }
 openh264 = "0.9"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+futures-util = { version = "0.3", default-features = false }

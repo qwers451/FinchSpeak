@@ -71,7 +71,7 @@ const NOT_INTERFACE_TEXT: [RegExp, string][] = [
   [/^Root element not found/, 'developer error in index.tsx'],
 ];
 /** Files whose messages only ever appear outside the desktop app (the browser stand) or in logs. */
-const NOT_INTERFACE_FILES = ['services/api.ts', 'services/sessionEvents.ts', 'components/chat/markdown.ts' /* a parser: regular expressions, no interface text */];
+const NOT_INTERFACE_FILES = ['services/api.ts', 'services/sessionEvents.ts', 'components/chat/markdown.ts' /* a parser: regular expressions, no interface text */, 'qa/fixtures.ts' /* dev-only fixture names for the visual audit */, 'qa/qa.tsx'];
 
 /** The English forms handed to plural(): { one, other } pairs found in the sources. */
 function pluralCalls() {

@@ -1,9 +1,9 @@
-import { createResource, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createResource, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
 import { listen } from '@tauri-apps/api/event';
 import { api } from '../../services/api';
-import { sendMessage } from '../../stores/chatStore';
+import { activeChannel, sendMessage } from '../../stores/chatStore';
 import { setAppError } from '../../stores/notificationStore';
-import type { AttachmentInfo, VoiceNote as VoiceNoteData } from '../../types';
+import type { AttachmentInfo } from '../../types';
 import { Button, Icon } from '../../ui';
 import { t } from '../../i18n';
 import { describeError } from '../../i18n/errors';
@@ -130,57 +130,96 @@ type Phase = 'idle' | 'holding' | 'locked' | 'sending';
 const [phase, setPhase] = createSignal<Phase>('idle');
 const [level, setLevel] = createSignal(0);
 const [startedAt, setStartedAt] = createSignal(0);
-let starting: Promise<void> | null = null;
+interface RecordingSession {
+  channelId: string;
+  start: Promise<void>;
+  started: boolean;
+  cancelled: boolean;
+  stopping: boolean;
+  stopped: boolean;
+  cancelling?: Promise<void>;
+}
+let recording: RecordingSession | null = null;
 let listening = false;
 
 export const isRecording = () => phase() !== 'idle';
 
-/** Upload the finished recording as a voice attachment and send it on its own. */
-async function sendVoiceNote(note: VoiceNoteData) {
-  const info = await api.uploadVoiceNote(note.bytes, note.duration_ms, note.waveform);
-  await sendMessage(VOICE_NOTE_TEXT, [info.id]);
+const isCurrentRecording = (session: RecordingSession) =>
+  recording === session && !session.cancelled && activeChannel()?.id === session.channelId;
+
+function clearRecording(session: RecordingSession) {
+  if (recording !== session) return;
+  recording = null;
+  setPhase('idle');
 }
 
 export async function beginRecording(mode: 'holding' | 'locked') {
-  if (phase() !== 'idle') return;
+  const channel = activeChannel();
+  if (recording || !channel || channel.channel_type !== 'text') return;
+  const session: RecordingSession = {
+    channelId: channel.id, start: Promise.resolve(), started: false, cancelled: false, stopping: false, stopped: false,
+  };
+  recording = session;
   setPhase(mode);
   setLevel(0);
-  starting = api.voiceNoteStart().then(
-    () => { setStartedAt(Date.now()); },
+  session.start = api.voiceNoteStart().then(
+    () => {
+      session.started = true;
+      if (isCurrentRecording(session)) setStartedAt(Date.now());
+    },
     (err) => {
-      setPhase('idle');
-      setAppError(t('Recording failed: {error}', { error: describeError(err) }));
+      if (isCurrentRecording(session)) setAppError(t('Recording failed: {error}', { error: describeError(err) }));
+      clearRecording(session);
     },
   );
-  await starting;
-  starting = null;
+  await session.start;
 }
 
 /** Stop and send. A recording shorter than the minimum is dropped without a message. */
 export async function finishRecording() {
-  if (starting) await starting;
-  if (phase() === 'idle' || phase() === 'sending') return;
+  const session = recording;
+  if (!session) return;
+  await session.start;
+  if (!isCurrentRecording(session) || session.stopping) return;
+  session.stopping = true;
   setPhase('sending');
   try {
     const note = await api.voiceNoteStop();
-    setPhase('idle');
-    if (shouldSendVoiceNote(note.duration_ms)) await sendVoiceNote(note);
+    session.stopped = true;
+    if (!isCurrentRecording(session) || !shouldSendVoiceNote(note.duration_ms)) return;
+    const info = await api.uploadVoiceNote(note.bytes, note.duration_ms, note.waveform);
+    // sendMessage reads its channel synchronously. Never let a cancelled/stale upload reach it.
+    if (isCurrentRecording(session)) await sendMessage(VOICE_NOTE_TEXT, [info.id]);
   } catch (err) {
-    setPhase('idle');
-    setAppError(t('Recording failed: {error}', { error: describeError(err) }));
+    if (isCurrentRecording(session)) setAppError(t('Recording failed: {error}', { error: describeError(err) }));
+  } finally {
+    clearRecording(session);
   }
 }
 
-/** Throw the recording away. */
+/** Throw the recording away, invalidating any pending start, stop or upload immediately. */
 export async function cancelRecording() {
-  if (starting) await starting;
-  if (phase() === 'idle') return;
-  setPhase('idle');
-  try {
-    await api.voiceNoteCancel();
-  } catch {
-    // Nothing is sent either way; the recorder stops on its own when it cannot continue.
+  const session = recording;
+  if (!session) return;
+  session.cancelled = true;
+  if (session.cancelling) return session.cancelling;
+  if (session.stopping) {
+    // The old native worker detaches the shared tap on exit: reserve the recorder until stop
+    // settles. Once only upload remains, a new recording can safely start.
+    if (session.stopped) clearRecording(session);
+    return;
   }
+  session.cancelling = (async () => {
+    await session.start;
+    try {
+      if (session.started) await api.voiceNoteCancel();
+    } catch {
+      // Nothing is sent either way; the recorder stops on its own when it cannot continue.
+    } finally {
+      clearRecording(session);
+    }
+  })();
+  return session.cancelling;
 }
 
 /** Listens once for the level meter and for the two-minute limit (the recording then stops itself). */
@@ -198,6 +237,44 @@ export function VoiceRecordButton(props: { disabled: boolean }) {
   let pressedX = 0;
   let holding = false;
 
+  // The button leaves the DOM as soon as recording starts, so the rest of the press is followed on
+  // the window: a release or a swipe that lands anywhere still ends it.
+  const stopFollowing = () => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onCancel);
+  };
+  const onMove = (event: PointerEvent) => {
+    if (holding && phase() === 'holding' && pressedX - event.clientX > SWIPE_CANCEL_PX) {
+      holding = false;
+      stopFollowing();
+      void cancelRecording();
+    }
+  };
+  const onUp = () => {
+    stopFollowing();
+    if (!holding) return;
+    holding = false;
+    if (phase() !== 'holding') return;
+    if (Date.now() - pressedAt >= TAP_MS) void finishRecording();
+    else setPhase('locked');
+  };
+  const onCancel = () => {
+    stopFollowing();
+    holding = false;
+    void cancelRecording();
+  };
+  const cancelOnLeave = () => {
+    stopFollowing();
+    holding = false;
+    void cancelRecording();
+  };
+  // Text-to-text navigation keeps this component mounted. Its recording still belongs to the
+  // original channel, including a locked press and native start/stop/upload in flight.
+  createEffect(on(() => activeChannel()?.id, (channelId) => {
+    if (recording && recording.channelId !== channelId) cancelOnLeave();
+  }, { defer: true }));
+  onCleanup(cancelOnLeave);
   const onDown = (event: PointerEvent) => {
     event.preventDefault();
     if (phase() === 'locked') {
@@ -208,21 +285,10 @@ export function VoiceRecordButton(props: { disabled: boolean }) {
     holding = true;
     pressedAt = Date.now();
     pressedX = event.clientX;
-    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
     void beginRecording('holding');
-  };
-  const onMove = (event: PointerEvent) => {
-    if (holding && phase() === 'holding' && pressedX - event.clientX > SWIPE_CANCEL_PX) {
-      holding = false;
-      void cancelRecording();
-    }
-  };
-  const onUp = () => {
-    if (!holding) return;
-    holding = false;
-    if (phase() !== 'holding') return;
-    if (Date.now() - pressedAt >= TAP_MS) void finishRecording();
-    else setPhase('locked');
   };
 
   return (
@@ -234,9 +300,6 @@ export function VoiceRecordButton(props: { disabled: boolean }) {
         title={t('Hold to record a voice message')}
         disabled={props.disabled}
         onPointerDown={onDown}
-        onPointerMove={onMove}
-        onPointerUp={onUp}
-        onPointerCancel={() => { holding = false; void cancelRecording(); }}
       >
         <Icon name="mic" size="sm" />
       </button>

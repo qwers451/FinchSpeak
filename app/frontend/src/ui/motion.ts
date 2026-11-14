@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, type Accessor } from 'solid-js';
+import { createEffect, createSignal, onCleanup, untrack, type Accessor } from 'solid-js';
 
 /**
  * Shared motion tokens. The numbers mirror the `--motion-*` custom properties in `styles/motion.css`
@@ -43,32 +43,70 @@ export function staggerDelay(index: number): number {
 
 const canAnimate = (element: Element) => typeof element.animate === 'function' && !prefersReducedMotion();
 
-/** Positions measured by the previous call, per container. */
-const layouts = new WeakMap<HTMLElement, Map<string, DOMRect>>();
+/** Where a tile was measured, relative to its room (scrolling the room does not change it). */
+type Spot = { left: number; top: number };
+/** The spots measured by the last call, and the room size they were measured at. */
+type Snapshot = { geometry: string; spots: Map<string, Spot> };
+const layouts = new WeakMap<HTMLElement, Snapshot>();
+
+/** A glide that is running: its start offset, so the next call can continue from where the tile is. */
+type Flight = { animation: Animation; dx: number; dy: number };
+const flights = new WeakMap<HTMLElement, Flight>();
+
+/** The room size and the window size: a change of either reflows the tiles without a reorder. */
+const geometryOf = (container: HTMLElement) => `${container.clientWidth}x${window.innerWidth}x${window.innerHeight}`;
+
+/** True while a CSS animation (an entrance or an exit) runs on the tile: a glide would fight it. */
+const isAnimating = (element: HTMLElement) => typeof element.getAnimations === 'function'
+  && element.getAnimations().some((animation) => animation.playState === 'running');
+
+/** Stops the glide of a tile (if any) and returns the offset it still had on screen. */
+function stopFlight(tile: HTMLElement): { dx: number; dy: number } {
+  const flight = flights.get(tile);
+  if (!flight) return { dx: 0, dy: 0 };
+  flights.delete(tile);
+  const progress = flight.animation.effect?.getComputedTiming().progress ?? 1;
+  flight.animation.cancel();
+  return { dx: flight.dx * (1 - progress), dy: flight.dy * (1 - progress) };
+}
 
 /**
- * FLIP for a reorderable container. Children with `data-flip="<key>"` are measured now; the positions
+ * FLIP for a reorderable container. Children with `data-flip="<key>"` are measured now; the spots
  * measured by the previous call are the "before" state. Children that moved glide from their old place
  * (transform only). Call it right after the DOM order changed. Returns how many children were animated.
- * Under reduced motion nothing animates: the final positions are already in place.
+ * A glide still running is continued from its visible place, not stacked on top of the old one.
+ * When the room or the window was resized since the last call, nothing glides: the tiles reflowed by
+ * themselves, so the old spots would make them move for no reason. Under reduced motion nothing animates.
  */
 export function animateLayout(container: HTMLElement): number {
   const tiles = [...container.querySelectorAll<HTMLElement>('[data-flip]')];
-  const current = new Map<string, DOMRect>();
-  for (const tile of tiles) current.set(tile.dataset.flip ?? '', tile.getBoundingClientRect());
+  const carries = new Map(tiles.map((tile) => [tile, stopFlight(tile)] as const));
+  const origin = container.getBoundingClientRect();
+  const current = new Map<string, Spot>();
+  for (const tile of tiles) {
+    // A tile still in its own CSS animation is measured on a later call, when its box is at rest.
+    if (isAnimating(tile)) continue;
+    const rect = tile.getBoundingClientRect();
+    current.set(tile.dataset.flip ?? '', { left: rect.left - origin.left + container.scrollLeft, top: rect.top - origin.top + container.scrollTop });
+  }
+  const geometry = geometryOf(container);
   const previous = layouts.get(container);
-  layouts.set(container, current);
-  if (!previous) return 0;
+  layouts.set(container, { geometry, spots: current });
+  if (!previous || previous.geometry !== geometry) return 0;
   let moved = 0;
   for (const tile of tiles) {
     const key = tile.dataset.flip ?? '';
-    const from = previous.get(key);
+    const from = previous.spots.get(key);
     const to = current.get(key);
     if (!from || !to || !canAnimate(tile)) continue;
-    const dx = from.left - to.left;
-    const dy = from.top - to.top;
+    const carry = carries.get(tile) ?? { dx: 0, dy: 0 };
+    const dx = from.left + carry.dx - to.left;
+    const dy = from.top + carry.dy - to.top;
     if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
-    tile.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }], { duration: MOTION.base, easing: EASE.out });
+    const animation = tile.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }], { duration: MOTION.base, easing: EASE.out });
+    const flight: Flight = { animation, dx, dy };
+    flights.set(tile, flight);
+    animation.onfinish = () => { if (flights.get(tile) === flight) flights.delete(tile); };
     moved++;
   }
   return moved;
@@ -173,8 +211,10 @@ export function createPresence<T>(source: Accessor<T[]>, key: (item: T) => strin
 
   createEffect(() => {
     const next = source();
+    const before = untrack(list);
     const seen = new Set<string>();
     const out: PresenceEntry<T>[] = [];
+    const leaving: { entry: StoredEntry<T>; slot: number }[] = [];
     for (const item of next) {
       const id = key(item);
       seen.add(id);
@@ -202,8 +242,12 @@ export function createPresence<T>(source: Accessor<T[]>, key: (item: T) => strin
           setList((current) => current.filter((candidate) => candidate.key !== id));
         }, hold);
       }
-      out.push(entry);
+      leaving.push({ entry, slot: before.findIndex((candidate) => candidate.key === id) });
     }
+    // A leaving entry keeps the slot it had, so the others do not jump past it while it exits.
+    const slotOf = (slot: number) => (slot < 0 ? Number.MAX_SAFE_INTEGER : slot);
+    leaving.sort((a, b) => slotOf(a.slot) - slotOf(b.slot));
+    for (const { entry, slot } of leaving) out.splice(Math.min(slotOf(slot), out.length), 0, entry);
     first = false;
     setList(out);
   });

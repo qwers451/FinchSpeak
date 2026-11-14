@@ -266,3 +266,47 @@ async fn share_end_reason_room_deleted() -> anyhow::Result<()> {
     assert_eq!(reason, ShareEndReason::RoomClosed);
     Ok(())
 }
+
+/// Open a key frame stream that sends its header and then stalls; true when the server stopped it
+/// quickly (it refused the stream before reading the body).
+async fn keyframe_stream_is_stopped(sender: &TestClient, voice_short: u32) -> anyhow::Result<bool> {
+    let header = MediaHeader::new_video_key(voice_short, sender.session.session_peer_id, 0, 1000, 9, false);
+    let mut uni = sender.session.connection.open_uni().await?;
+    uni.write_all(&header.to_bytes()).await?;
+    uni.write_all(&[7u8; 100]).await?; // never finished
+    Ok(matches!(tokio::time::timeout(Duration::from_secs(2), uni.stopped()).await, Ok(Ok(Some(_)))))
+}
+
+/// A key frame stream is only read when its sender shares a screen that somebody watches: others
+/// are stopped after the header, so a stalled or huge body is never buffered.
+#[tokio::test]
+async fn keyframe_streams_of_a_non_sharer_are_stopped_unread() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let mut a = TestClient::register(&server, "alice").await?;
+    let mut b = TestClient::register(&server, "bob").await?;
+    let (_, voice_short) = a.join_voice().await?;
+    b.join_voice().await?;
+
+    assert!(keyframe_stream_is_stopped(&a, voice_short).await?, "a non-sharer's key frame stream was read");
+    let deadline = Instant::now() + Duration::from_millis(300);
+    while Instant::now() < deadline {
+        if let Ok(SessionEvent::UniStream { .. }) = b.next_event(Duration::from_millis(50)).await {
+            panic!("a key frame was forwarded to the viewer");
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn keyframe_streams_of_a_sharer_without_viewers_are_stopped_unread() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let mut a = TestClient::register(&server, "alice").await?;
+    let mut b = TestClient::register(&server, "bob").await?;
+    let (_, voice_short) = a.join_voice().await?;
+    b.join_voice().await?;
+    a.send(ClientMessage::StartScreenShare { codec: VideoCodec::H264, width: 1280, height: 720, fps: 30 }).await?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    assert!(keyframe_stream_is_stopped(&a, voice_short).await?, "a keyframe stream nobody watches was read");
+    Ok(())
+}

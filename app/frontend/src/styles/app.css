@@ -1,4 +1,7 @@
 /* Base and app-level rules on top of the design tokens/components in finch.css. */
+/* Depth scale for every theme (custom-tokens.css repeats it for the custom theme). Without --z-popover a select list
+   falls back to z-index: auto and paints under the modal overlay (z-index: 50). */
+:root { --z-base: 0; --z-panel: 10; --z-popover: 100; --z-overlay: 200; --z-modal: 300; --z-toast: 400; --z-titlebar: 500; }
 html, body, #root { height: 100%; margin: 0; }
 body { overflow: hidden; user-select: none; background: var(--bg-app); color: var(--text); font-family: var(--font-ui); }
 input, textarea, [contenteditable] { user-select: text; }
@@ -57,7 +60,7 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 /* Sidebar details */
 .cat { justify-content: space-between; }
 .cat-toggle { all: unset; display: flex; align-items: center; gap: 6px; flex: 1; height: 28px; cursor: pointer; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
-.cat-toggle:focus-visible, .cat-add:focus-visible, .ch:focus-visible, .profile-open:focus-visible, .ch .acts button:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; border-radius: 6px; }
+.cat-toggle:focus-visible, .cat-add:focus-visible, .ch:focus-visible, .ch .acts button:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; border-radius: 6px; }
 .cat-add { all: unset; display: flex; align-items: center; cursor: pointer; color: var(--text-3); padding: 2px; border-radius: 6px; }
 .cat-add:hover { color: var(--text); background: var(--bg-hover); }
 .nav { overflow-y: auto; }
@@ -68,7 +71,7 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 .ch:focus-within { background: var(--bg-hover); }
 .ch .acts button { all: unset; display: flex; cursor: pointer; padding: 2px; border-radius: 4px; }
 .ch .acts button:hover { color: var(--text); background: var(--bg-card); }
-.profile-open { all: unset; display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; cursor: pointer; border-radius: 8px; }
+.profile-card { all: unset; display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; border-radius: 8px; }
 .app-layout { flex: 1; display: flex; min-height: 0; min-width: 0; }
 .vstrip .btn, .upanel .btn { flex: none; }
 .trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -136,7 +139,8 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 .img-viewer { display: flex; align-items: center; justify-content: center; min-height: 200px; max-height: 70vh; overflow: auto; background: var(--bg-deep); border-radius: 12px; }
 .img-viewer img { max-width: 100%; max-height: 70vh; object-fit: contain; }
 .msg-preview { padding: 8px 10px; border-radius: 10px; background: var(--bg-card); display: flex; }
-.jump-wrap { position: absolute; left: 0; right: 0; bottom: 110px; display: flex; justify-content: center; pointer-events: none; }
+/* Above the composer: its measured height (set by ChatArea) plus the typing line (20px) and a gap. */
+.jump-wrap { position: absolute; left: 0; right: 0; bottom: calc(var(--composer-h, 0px) + 28px); display: flex; justify-content: center; pointer-events: none; }
 .jump-wrap .btn { pointer-events: auto; box-shadow: var(--shadow-pop); }
 .typing { height: 20px; }
 .typing i { animation: pulse 1.2s ease-in-out infinite; }
@@ -243,12 +247,20 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 .vc .participant-actions { position:absolute; top:6px; right:6px; z-index:2; opacity:0; }
 .vc:hover .participant-actions,.vc:focus-within .participant-actions { opacity:1; }
 .vc .badges { top:42px; }
+/* "…" at the end of a person's row: hidden until the row is hovered or has keyboard focus, never removed from Tab order. */
+.row-actions { flex:none; opacity:0; transition:opacity var(--motion-small, .12s) var(--ease-out, ease-out); }
+.vp:hover .row-actions, .vp:focus-within .row-actions, .mem:hover .row-actions, .mem:focus-within .row-actions, .row-actions:focus-visible { opacity:1; }
+.voice-open { all:unset; display:flex; flex-direction:column; min-width:0; cursor:pointer; border-radius:6px; }
+.voice-open:focus-visible { outline:2px solid var(--yellow); outline-offset:2px; }
+/* The Finch mode switch has its own row: next to the name its Russian label ran past the panel edge. */
+.finch-switch { flex:none; display:flex; padding:0 12px 6px; }
+.finch-switch .brand-finch { flex:1 1 auto; min-width:0; justify-content:flex-start; }
 .drop-target { outline:2px solid var(--cyan); outline-offset:-2px; }
 .vp[draggable="true"] { cursor:grab; }
 .voice-people { border-radius:var(--r-sm); }
 .ch > .badge,.ch > .channel-live,.ch > .channel-count { margin-left:auto; }
 .ch > .channel-count.with-live { margin-left:0; }
-.profile-open .col { text-align:left; }
+.profile-card .col { text-align:left; }
 .viewer-volume { width:120px; }
 .ended-overlay { background:rgba(5,8,15,.9); }
 .source-placeholder { position:absolute; inset:0; border-radius:0; }

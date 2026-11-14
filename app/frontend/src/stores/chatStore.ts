@@ -20,6 +20,9 @@ export const [replyingTo, setReplyingTo] = createSignal<Message | null>(null);
 /** A message to scroll to and flash once it is on screen (from a search result). */
 export const [revealTarget, setRevealTarget] = createSignal<string | null>(null);
 
+/** The id of one of my messages to open for editing (the Up key in an empty composer). The row clears it. */
+export const [editRequest, setEditRequest] = createSignal<string | null>(null);
+
 export const HISTORY_PAGE = 50;
 export const MAX_MESSAGE_CHARS = 4000;
 
@@ -117,8 +120,9 @@ export async function selectChannel(channel: Channel) {
       const historyMessages = history.messages.map((message) => ({ ...message, channel_id: channel.id }));
       const historyIds = new Set(historyMessages.map((message) => message.id));
       // Pending messages the server already stored (e.g. sent just before a reconnect).
-      const stored = new Set(historyMessages.flatMap((message) => message.client_msg_id ? [`local-${message.client_msg_id}`] : []));
-      for (const message of historyMessages) if (message.client_msg_id) removeFromOutbox(message.client_msg_id);
+      const ownHistory = historyMessages.filter((message) => message.author_id === currentUser()?.id);
+      const stored = new Set(ownHistory.flatMap((message) => message.client_msg_id ? [`local-${message.client_msg_id}`] : []));
+      for (const message of ownHistory) if (message.client_msg_id) removeFromOutbox(message.client_msg_id);
       const outbox = outboxForChannel(channel.id).map(failedFromOutbox);
       setHasMoreHistory(history.has_more);
       setMessages((previous) => {
@@ -234,7 +238,7 @@ export function handleIncomingMessage(incoming: IncomingMessage | Message) {
   const msg: Message = 'message_id' in incoming
     ? (({ message_id, ...rest }) => ({ ...rest, id: message_id }))(incoming)
     : incoming;
-  if (msg.client_msg_id) removeFromOutbox(msg.client_msg_id);
+  if (msg.client_msg_id && msg.author_id === currentUser()?.id) removeFromOutbox(msg.client_msg_id);
   const current = activeChannel();
   if (current && msg.channel_id === current.id) {
     if (receivedMessageIds.has(msg.id)) return;
@@ -242,7 +246,7 @@ export function handleIncomingMessage(incoming: IncomingMessage | Message) {
     setMessages((prev) => {
       // By id when the server echoed one; by author and text only for servers that do not.
       const pendingIndex = msg.client_msg_id
-        ? prev.findIndex((message) => message.id === `local-${msg.client_msg_id}`)
+        ? prev.findIndex((message) => message.id === `local-${msg.client_msg_id}` && message.author_id === msg.author_id && message.channel_id === msg.channel_id)
         : prev.findIndex((message) => isLocal(message.id) && message.state !== 'failed' &&
             message.author_id === msg.author_id && message.content === msg.content);
       const filtered = prev.filter((_, index) => index !== pendingIndex);

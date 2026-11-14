@@ -5,6 +5,9 @@ host = "0.0.0.0"
 quic_port = 4433
 http_port = 8443          # HTTPS REST (TLS only)
 tls_dir = "./data/tls"    # persistent certificate; clients pin its fingerprint
+# Browser origins allowed to call the HTTP API (CORS), besides the desktop app's own
+# (tauri://localhost, http(s)://tauri.localhost). Example: ["https://finch.example.com"]. Default: none.
+# allowed_origins = []
 
 [database]
 url = "sqlite://finchspeak.db?mode=rwc"
@@ -12,6 +15,9 @@ url = "sqlite://finchspeak.db?mode=rwc"
 [storage]
 upload_dir = "./data/uploads"
 max_file_size_mb = 50
+# Per-user upload limits: total size of one user's files, and uploads per minute (defaults: 1024 MB, 30).
+# user_quota_mb = 1024
+# uploads_per_minute = 30
 
 [auth]
 # No jwt_secret here: a random one is generated on first start and kept in jwt_secret_file.
@@ -31,3 +37,19 @@ max_track_minutes = 180
 [soundboard]
 enabled = true
 max_sounds = 48
+
+# Media rate limits per participant: the SFU drops (and counts in the health panel) media above them.
+# Defaults: 12 Mbit/s with a 1 MB burst, and 2000 datagrams per second.
+# [limits]
+# media_bytes_per_sec = 1500000
+# media_burst_bytes = 1048576
+# media_packets_per_sec = 2000
+# media_keyframe_bytes_per_sec = 1000000
+# Sign-in gate: a new connection must sign in within preauth_timeout_secs seconds. One address may
+# hold preauth_per_ip connections that have not signed in yet, and the server preauth_total in all.
+# Defaults: 10 seconds, 8 per address, 256 in total.
+# preauth_timeout_secs = 10
+# preauth_per_ip = 8
+# preauth_total = 256
+# Argon2 password hashes or checks running at once (each needs about 19 MiB). Sign-ins wait their turn; default 2, at least 1.
+# auth_hash_concurrency = 2

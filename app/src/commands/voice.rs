@@ -71,6 +71,7 @@ pub async fn join_voice_channel(
 ) -> Result<(), String> {
     let ch_uuid = Uuid::parse_str(&channel_id)
         .map_err(|e| format!("Invalid channel UUID: {}", e))?;
+    let bitrate_kbps = room_bitrate_kbps(&state, short_id).await;
     let _transition = state.voice_transition.lock().await;
 
     let tx_opt = state.control_tx.read().await.clone();
@@ -97,14 +98,59 @@ pub async fn join_voice_channel(
         state.stop_watching().await;
     }
 
-    // Start audio engine capture and playback
+    // Start audio engine capture and playback. A ChannelUpdated that arrived while joining has already
+    // updated the cache, so the cache is read again rather than trusting the value read before the join.
+    let bitrate_kbps = match state.channel_bitrates.read().await.get(&short_id).copied() {
+        Some(latest) => crate::audio_engine::voice_bitrate_kbps(Some(latest)),
+        None => bitrate_kbps,
+    };
+    state.voice_bitrate_kbps.store(bitrate_kbps, Ordering::Relaxed);
     let mut engine = state.audio_engine.lock().await;
     if let Err(e) = engine.start(short_id, (*state).clone(), app_handle) {
         return Err(format!("Failed to start audio engine: {}", e));
     }
+    crate::audio_engine::spawn_expected_loss_sampler((*state).clone(), short_id);
 
-    info!("Joined voice channel {} (short_id: {})", channel_id, short_id);
+    info!("Joined voice channel {} (short_id: {}, {} kbit/s)", channel_id, short_id, bitrate_kbps);
     Ok(())
+}
+
+/// The bitrate of the voice channel with this short ID, clamped. The channel list is cached when
+/// it is fetched and on `ChannelUpdated`; when a channel is not known yet, the list is fetched once.
+async fn room_bitrate_kbps(state: &AppState, short_id: u32) -> u32 {
+    if let Some(kbps) = state.channel_bitrates.read().await.get(&short_id).copied() {
+        return crate::audio_engine::voice_bitrate_kbps(Some(kbps));
+    }
+    let api = state.api.read().await.clone();
+    let Some(api) = api else {
+        return crate::audio_engine::voice_bitrate_kbps(None);
+    };
+    // A join must not wait out the client's full request timeout for a bitrate; the default is used instead.
+    let fetched = match tokio::time::timeout(LOOKUP_TIMEOUT, api.list_channels()).await {
+        Ok(Ok(channels)) => {
+            super::chat::remember_channel_bitrates(state, &channels).await;
+            let cached = state.channel_bitrates.read().await.get(&short_id).copied();
+            Ok(cached)
+        }
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err("timed out".to_string()),
+    };
+    if let Err(reason) = &fetched {
+        tracing::warn!("Could not fetch channel bitrates, using the default: {}", reason);
+    }
+    lookup_bitrate_kbps(fetched)
+}
+
+/// Longest a join waits for the channel list when the bitrate is not cached yet.
+const LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The room bitrate for a channel lookup result: the channel's own value, or the default when the
+/// channel is not listed or the lookup failed.
+fn lookup_bitrate_kbps(lookup: Result<Option<u32>, String>) -> u32 {
+    match lookup {
+        Ok(Some(kbps)) => crate::audio_engine::voice_bitrate_kbps(Some(kbps)),
+        Ok(None) | Err(_) => crate::audio_engine::voice_bitrate_kbps(None),
+    }
 }
 
 /// Leaves the voice room: tells the server and stops our audio, share and viewing. Used by the
@@ -315,6 +361,14 @@ pub fn get_audio_diagnostics(state: State<'_, AppState>) -> Result<String, Strin
 #[cfg(test)]
 mod room_change_tests {
     use super::*;
+
+    #[test]
+    fn a_failed_or_slow_channel_lookup_joins_at_the_default_bitrate() {
+        assert_eq!(lookup_bitrate_kbps(Ok(Some(96))), 96);
+        assert_eq!(lookup_bitrate_kbps(Ok(Some(500))), 128);
+        assert_eq!(lookup_bitrate_kbps(Ok(None)), 64, "channel not in the list");
+        assert_eq!(lookup_bitrate_kbps(Err("timed out".to_string())), 64);
+    }
 
     #[tokio::test]
     async fn room_change_ends_our_share_once_and_reports_its_generation() {

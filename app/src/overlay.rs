@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
+use tauri::utils::config::{BackgroundThrottlingPolicy, WindowConfig};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 use crate::state::AppState;
@@ -74,18 +75,39 @@ fn screens_of(window: &WebviewWindow) -> tauri::Result<Vec<Screen>> {
         .collect())
 }
 
+/// The settings the mini window copies from the main window's configuration.
+#[derive(Debug, Default, PartialEq)]
+struct InheritedSettings {
+    browser_args: Option<String>,
+    background_throttling: Option<BackgroundThrottlingPolicy>,
+    drag_drop_disabled: bool,
+}
+
+/// Copy the browser arguments, background throttling and drag-drop setting from the `main` window.
+/// Without a `main` window nothing is copied.
+fn inherited_settings(windows: &[WindowConfig]) -> InheritedSettings {
+    match windows.iter().find(|window| window.label == "main") {
+        Some(main) => InheritedSettings {
+            browser_args: main.additional_browser_args.clone(),
+            background_throttling: main.background_throttling.clone(),
+            drag_drop_disabled: !main.drag_drop_enabled,
+        },
+        None => InheritedSettings::default(),
+    }
+}
+
 fn create(app: &AppHandle, dir: Option<PathBuf>) -> tauri::Result<WebviewWindow> {
     // WebView2 refuses a second webview whose browser arguments differ from the first one
     // (error 0x8007139F), so the overlay takes the main window's arguments and policies.
-    let main_config = app.config().app.windows.iter().find(|window| window.label == "main");
+    let inherited = inherited_settings(&app.config().app.windows);
     let mut builder = WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App(PathBuf::from("index.html?view=overlay")));
-    if let Some(args) = main_config.and_then(|window| window.additional_browser_args.as_deref()) {
+    if let Some(args) = inherited.browser_args.as_deref() {
         builder = builder.additional_browser_args(args);
     }
-    if let Some(policy) = main_config.and_then(|window| window.background_throttling.clone()) {
+    if let Some(policy) = inherited.background_throttling {
         builder = builder.background_throttling(policy);
     }
-    if main_config.is_some_and(|window| !window.drag_drop_enabled) {
+    if inherited.drag_drop_disabled {
         builder = builder.disable_drag_drop_handler();
     }
     let window = builder
@@ -201,6 +223,46 @@ mod tests {
 
     fn screen(x: i32, y: i32, width: u32, height: u32) -> Screen {
         Screen { x, y, width, height }
+    }
+
+    #[test]
+    fn main_window_keeps_smartscreen_and_the_mini_window_inherits_its_arguments() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let windows = config["app"]["windows"].as_array().unwrap();
+        let main = windows.iter().find(|window| window["label"] == "main").unwrap();
+        let args = main["additionalBrowserArgs"].as_str().unwrap();
+        assert_eq!(
+            args,
+            "--disable-features=msWebOOUI,msPdfOOUI,CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows",
+            "SmartScreen (msSmartScreenProtection) must stay enabled in the WebView"
+        );
+    }
+
+    fn window(json: serde_json::Value) -> WindowConfig {
+        serde_json::from_value(json).expect("window config")
+    }
+
+    #[test]
+    fn mini_window_copies_the_main_window_browser_settings() {
+        let windows = vec![
+            window(serde_json::json!({
+                "label": "main",
+                "additionalBrowserArgs": "--main-args",
+                "backgroundThrottling": "disabled",
+                "dragDropEnabled": false
+            })),
+            window(serde_json::json!({ "label": "other", "additionalBrowserArgs": "--other-args", "dragDropEnabled": true })),
+        ];
+        let inherited = inherited_settings(&windows);
+        assert_eq!(inherited.browser_args.as_deref(), Some("--main-args"));
+        assert_eq!(inherited.background_throttling, Some(BackgroundThrottlingPolicy::Disabled));
+        assert!(inherited.drag_drop_disabled);
+    }
+
+    #[test]
+    fn mini_window_without_a_main_window_copies_nothing() {
+        let windows = vec![window(serde_json::json!({ "label": "other", "additionalBrowserArgs": "--other-args" }))];
+        assert_eq!(inherited_settings(&windows), InheritedSettings::default());
     }
 
     #[test]

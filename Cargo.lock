@@ -1693,7 +1693,7 @@ dependencies = [
 
 [[package]]
 name = "finch-app"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1736,7 +1736,7 @@ dependencies = [
 
 [[package]]
 name = "finch-audio"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "audiopus",
  "bytes",
@@ -1754,7 +1754,7 @@ dependencies = [
 
 [[package]]
 name = "finch-client-core"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1778,7 +1778,7 @@ dependencies = [
 
 [[package]]
 name = "finch-protocol"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -1790,7 +1790,7 @@ dependencies = [
 
 [[package]]
 name = "finch-screen"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "audiopus",
  "bytes",
@@ -1809,7 +1809,7 @@ dependencies = [
 
 [[package]]
 name = "finch-server"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1836,6 +1836,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "toml 0.8.23",
  "tower",
  "tower-http",
@@ -1847,7 +1848,7 @@ dependencies = [
 
 [[package]]
 name = "finch-testbed"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1858,12 +1859,14 @@ dependencies = [
  "finch-protocol",
  "finch-screen",
  "finch-server",
+ "futures-util",
  "hound",
  "image",
  "jsonwebtoken",
  "openh264",
  "quinn",
  "rand 0.8.8",
+ "reqwest 0.12.28",
  "rubato",
  "rustls",
  "serde",
@@ -4769,12 +4772,14 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams 0.4.2",
  "web-sys",
  "webpki-roots",
 ]
@@ -4809,7 +4814,7 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-streams",
+ "wasm-streams 0.5.0",
  "web-sys",
 ]
 
@@ -7208,6 +7213,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23f0c9c52aa7cd7d77769a4cfe2a9adb1b331f489a41d912ce14513d5ab995c6"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "wasm-streams"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

@@ -1,6 +1,7 @@
 //! QUIC listener, connection lifecycle, signaling stream, and media routing.
 
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
@@ -17,6 +18,7 @@ use finch_protocol::models::{
 };
 
 use crate::api::auth::check_active_jwt;
+use crate::health::TRAFFIC;
 use crate::session::{ClientSession, SessionManager};
 use crate::sfu::SfuRouter;
 
@@ -43,6 +45,10 @@ pub fn load_or_create_cert(
 
     if cert_path.exists() && key_path.exists() {
         let cert = std::fs::read(&cert_path).with_context(|| format!("Failed to read {cert_path:?}"))?;
+        // Keys written by older versions may be world-readable; restrict them before use.
+        if let Err(e) = crate::secret_file::tighten_permissions(&key_path) {
+            tracing::warn!("Could not restrict permissions of {key_path:?}: {e}");
+        }
         let key = std::fs::read(&key_path).with_context(|| format!("Failed to read {key_path:?}"))?;
         let key = rustls::pki_types::PrivateKeyDer::try_from(key)
             .map_err(|e| anyhow::anyhow!("failed to parse private key {key_path:?}: {e}"))?;
@@ -52,7 +58,8 @@ pub fn load_or_create_cert(
     let (cert, key) = generate_self_signed_cert()?;
     std::fs::create_dir_all(dir).with_context(|| format!("Failed to create {dir:?}"))?;
     std::fs::write(&cert_path, cert.as_ref()).with_context(|| format!("Failed to write {cert_path:?}"))?;
-    std::fs::write(&key_path, key.secret_der()).with_context(|| format!("Failed to write {key_path:?}"))?;
+    crate::secret_file::write_private(&key_path, key.secret_der())
+        .with_context(|| format!("Failed to write {key_path:?}"))?;
     tracing::info!("Generated a new TLS certificate in {dir:?}");
     Ok((cert, key))
 }
@@ -170,6 +177,12 @@ async fn reject_and_flush(send_stream: &mut quinn::SendStream, err: &ServerMessa
     }
 }
 
+/// Close code for a connection that did not sign in before the deadline.
+pub const CLOSE_PREAUTH_TIMEOUT: u32 = 4001;
+/// Close code for a connection refused because its address or the server already holds the
+/// maximum number of unsigned connections.
+pub const CLOSE_PREAUTH_REFUSED: u32 = 4002;
+
 /// Handle a single authenticated QUIC connection.
 pub async fn handle_connection(
     conn: quinn::Connection,
@@ -178,34 +191,51 @@ pub async fn handle_connection(
     sfu: SfuRouter,
     jwt_secret: String,
 ) -> Result<()> {
-    // 1. Accept first bi-directional stream (Control Stream)
-    let (mut send_stream, mut recv_stream) = conn.accept_bi().await?;
-    let mut frame_buf = BytesMut::new();
-    let mut read_buf = vec![0u8; 4096];
-
-    // 2. Wait for Authenticate message
-    let (token, supports_voice_extensions, client_level) = loop {
-        let n = recv_stream
-            .read(&mut read_buf)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Stream closed before authentication"))?;
-
-        frame_buf.extend_from_slice(&read_buf[..n]);
-
-        match decode_message::<ClientMessage>(&mut frame_buf) {
-            Ok(ClientMessage::Authenticate { token, supports_voice_extensions, client_level }) => break (token, supports_voice_extensions, client_level),
-            Ok(_) => {
-                let err = ServerMessage::Error {
-                    code: 401,
-                    message: "First message must be Authenticate".to_string(),
-                };
-                reject_and_flush(&mut send_stream, &err).await;
-                return Err(anyhow::anyhow!("Unauthenticated first message"));
-            }
-            Err(finch_protocol::codec::CodecError::Incomplete { .. }) => continue,
-            Err(e) => return Err(e.into()),
-        }
+    // 0. Only a few unsigned connections per address and in total. The permit is returned at sign-in.
+    let preauth = sessions.preauth();
+    let Some(permit) = preauth.slots.try_acquire(conn.remote_address().ip()) else {
+        conn.close(CLOSE_PREAUTH_REFUSED.into(), b"too many connections before sign-in");
+        return Err(anyhow::anyhow!("Unsigned connection limit reached"));
     };
+
+    // 1. + 2. The Control Stream and its Authenticate message must arrive within the sign-in deadline.
+    let signing_in = async {
+        let (mut send_stream, mut recv_stream) = conn.accept_bi().await?;
+        let mut frame_buf = BytesMut::new();
+        let mut read_buf = vec![0u8; 4096];
+
+        let login = loop {
+            let n = recv_stream
+                .read(&mut read_buf)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("Stream closed before authentication"))?;
+
+            frame_buf.extend_from_slice(&read_buf[..n]);
+
+            match decode_message::<ClientMessage>(&mut frame_buf) {
+                Ok(ClientMessage::Authenticate { token, supports_voice_extensions, client_level }) => break (token, supports_voice_extensions, client_level),
+                Ok(_) => {
+                    let err = ServerMessage::Error {
+                        code: 401,
+                        message: "First message must be Authenticate".to_string(),
+                    };
+                    reject_and_flush(&mut send_stream, &err).await;
+                    return Err(anyhow::anyhow!("Unauthenticated first message"));
+                }
+                Err(finch_protocol::codec::CodecError::Incomplete { .. }) => continue,
+                Err(e) => return Err(e.into()),
+            }
+        };
+        Ok::<_, anyhow::Error>((send_stream, recv_stream, frame_buf, read_buf, login))
+    };
+    let (mut send_stream, mut recv_stream, mut frame_buf, mut read_buf, (token, supports_voice_extensions, client_level)) =
+        match tokio::time::timeout(preauth.timeout, signing_in).await {
+            Ok(result) => result?,
+            Err(_) => {
+                conn.close(CLOSE_PREAUTH_TIMEOUT.into(), b"sign-in timed out");
+                return Err(anyhow::anyhow!("Sign-in timed out"));
+            }
+        };
 
     // 3. Verify JWT
     let claims = match check_active_jwt(&token, &jwt_secret, &pool).await {
@@ -223,6 +253,9 @@ pub async fn handle_connection(
             return Err(anyhow::anyhow!("Invalid JWT token"));
         }
     };
+
+    // Signed in: this connection no longer counts against the unsigned limits.
+    drop(permit);
 
     let user_id = Uuid::parse_str(&claims.sub)?;
     let peer_id = sessions.allocate_peer_id();
@@ -263,6 +296,8 @@ pub async fn handle_connection(
         last_activity_update: None,
         connection: conn.clone(),
         control_tx: control_tx.clone(),
+        media: sessions.media_budget(user_id),
+        wrong_channel_warn: Default::default(),
     };
     sessions.register_session(session);
     initial_state.activities = sessions.activities();
@@ -356,7 +391,7 @@ pub async fn handle_connection(
     // Datagram forwarder
     let datagram_task = tokio::spawn(async move {
         while let Ok(data) = conn_datagram.read_datagram().await {
-            sfu_datagram.route_datagram(&data, peer_id).await;
+            sfu_datagram.route_datagram(data, peer_id).await;
         }
     });
 
@@ -370,8 +405,22 @@ pub async fn handle_connection(
             let readers = readers.clone();
             tokio::spawn(async move {
                 let Ok(_permit) = readers.acquire_owned().await else { return };
-                match tokio::time::timeout(KEYFRAME_READ_TIMEOUT, read_keyframe(&mut recv)).await {
-                    Ok(Some((hdr, payload))) => {
+                // Header first: the body is only read for a sender that shares a screen somebody
+                // watches. Anything else is stopped before a byte of it is buffered.
+                let Ok(Some(hdr)) = tokio::time::timeout(KEYFRAME_READ_TIMEOUT, read_keyframe_header(&mut recv)).await else {
+                    tracing::debug!("Peer {peer_id}: malformed key frame header");
+                    return;
+                };
+                if !sfu.keyframe_wanted(hdr.channel_id, peer_id) {
+                    TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
+                    let _ = recv.stop(0u32.into());
+                    return;
+                }
+                // One budget follows a body through reading, queued forwarding and Quinn's
+                // retransmit buffers; no payload is read while waiting for it.
+                let Ok(global) = KEYFRAME_GLOBAL_READERS.clone().acquire_owned().await else { return };
+                match tokio::time::timeout(KEYFRAME_READ_TIMEOUT, read_keyframe_body(&mut recv, global)).await {
+                    Ok(Some(payload)) => {
                         sfu.route_uni_keyframe(hdr.channel_id, peer_id, &hdr, payload).await;
                     }
                     Ok(None) => tracing::debug!("Peer {peer_id}: malformed or oversized key frame stream"),
@@ -461,13 +510,35 @@ const KEYFRAME_READERS: usize = 4;
 /// A key frame stream must complete within this time.
 const KEYFRAME_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Read one key frame stream: media header, then the payload up to `MAX_KEYFRAME_BYTES`.
-async fn read_keyframe(recv: &mut quinn::RecvStream) -> Option<(MediaHeader, Bytes)> {
+/// Distinct key frame bodies retained across reading and all recipients' sends. Four maximum
+/// frames use 40 MiB, leaving room for thumbnail decode, sign-in hashing and read assembly.
+const KEYFRAME_GLOBAL_LIMIT: usize = 4;
+static KEYFRAME_GLOBAL_READERS: LazyLock<Arc<tokio::sync::Semaphore>> =
+    LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(KEYFRAME_GLOBAL_LIMIT)));
+
+/// Read the media header that starts a key frame stream.
+async fn read_keyframe_header(recv: &mut quinn::RecvStream) -> Option<MediaHeader> {
     let mut hdr_bytes = [0u8; MEDIA_HEADER_SIZE];
     recv.read_exact(&mut hdr_bytes).await.ok()?;
-    let header = MediaHeader::from_slice(&hdr_bytes).ok()?;
-    let payload = recv.read_to_end(MAX_KEYFRAME_BYTES).await.ok()?;
-    Some((header, Bytes::from(payload)))
+    MediaHeader::from_slice(&hdr_bytes).ok()
+}
+
+/// The permit belongs to the allocation, including every forwarded or retransmitted Bytes slice.
+struct KeyframeBody {
+    bytes: Vec<u8>,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+}
+
+impl AsRef<[u8]> for KeyframeBody {
+    fn as_ref(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+/// Read at most `MAX_KEYFRAME_BYTES`; release the budget only after the last body reference drops.
+async fn read_keyframe_body(recv: &mut quinn::RecvStream, permit: tokio::sync::OwnedSemaphorePermit) -> Option<Bytes> {
+    let bytes = recv.read_to_end(MAX_KEYFRAME_BYTES).await.ok()?;
+    Some(Bytes::from_owner(KeyframeBody { bytes, _permit: permit }))
 }
 
 /// Maximum length of a chat message in characters.
@@ -502,6 +573,54 @@ const FLOCK_CALL_WINDOW: std::time::Duration = std::time::Duration::from_secs(10
 
 fn refuse_call(sessions: &SessionManager, peer_id: u32, code: u16, message: impl Into<String>) {
     sessions.send_control_to_peer(peer_id, &ServerMessage::Error { code, message: message.into() });
+}
+
+/// Joining and starting a screen share make the whole room react: at most this many per person per window.
+const VOICE_CHANGE_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+const VOICE_CHANGE_MAX: usize = 20;
+
+/// Count one voice change of `kind`; replies with an error and returns `true` when it is over the limit.
+/// `what` names the refused action in the message ("room joins", "screen shares"), so the client can tell them apart.
+fn refuse_voice_change(sessions: &SessionManager, peer_id: u32, user_id: Uuid, kind: &str, what: &str) -> bool {
+    match sessions.allow_action(user_id, kind, VOICE_CHANGE_MAX, VOICE_CHANGE_WINDOW) {
+        Ok(()) => false,
+        Err(seconds) => {
+            refuse_call(sessions, peer_id, 429, format!("Wait {seconds} s; too many {what}"));
+            true
+        }
+    }
+}
+
+/// Mute and deafen changes are always stored. Only their broadcast is limited: when the window is
+/// full, one trailing broadcast of the state as it is then is scheduled, so the room ends up with
+/// the final state and the sender is never refused.
+async fn broadcast_voice_state(sessions: &SessionManager, peer_id: u32, user_id: Uuid, muted: bool, deafened: bool) {
+    const VOICE_STATE_BROADCASTS: usize = 10;
+    match sessions.allow_action(user_id, "voice_state", VOICE_STATE_BROADCASTS, VOICE_CHANGE_WINDOW) {
+        // Sent inline, not in a task: two quick toggles must reach the room in the order they were sent.
+        Ok(()) => {
+            sessions.broadcast_all(ServerMessage::UserVoiceStateChanged { peer_id, muted, deafened }).await;
+        }
+        Err(wait_secs) => {
+            // Keyed by peer, not user: a new session of the same person must not inherit an old one's flag.
+            if !sessions.mark_voice_broadcast_pending(peer_id) {
+                return;
+            }
+            let sessions = sessions.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
+                sessions.clear_voice_broadcast_pending(peer_id);
+                let current = sessions
+                    .sessions
+                    .get(&peer_id)
+                    .filter(|session| session.current_voice_channel.is_some())
+                    .map(|session| (session.muted, session.deafened));
+                if let Some((muted, deafened)) = current {
+                    sessions.broadcast_all(ServerMessage::UserVoiceStateChanged { peer_id, muted, deafened }).await;
+                }
+            });
+        }
+    }
 }
 
 async fn is_voice_channel(pool: &SqlitePool, channel_id: Uuid) -> bool {
@@ -747,6 +866,13 @@ async fn handle_client_message(
         }
 
         ClientMessage::JoinVoice { channel_id } => {
+            // Re-joining the room the session is already in changes nothing, so it is not counted.
+            let already_in_room = sessions.channel_to_short.get(&channel_id).map(|s| *s).is_some_and(|short| {
+                sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel) == Some(short)
+            });
+            if !already_in_room && refuse_voice_change(sessions, peer_id, user_id, "join_voice", "room joins") {
+                return;
+            }
             if let Some(short_id) = sessions.channel_to_short.get(&channel_id).map(|s| *s) {
                 let old_room = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
                 if let Some(old_room) = old_room.filter(|old| *old != short_id) {
@@ -797,12 +923,7 @@ async fn handle_client_message(
             };
 
             if updated {
-                let event = ServerMessage::UserVoiceStateChanged {
-                    peer_id,
-                    muted,
-                    deafened,
-                };
-                sessions.broadcast_all(event).await;
+                broadcast_voice_state(sessions, peer_id, user_id, muted, deafened).await;
             }
         }
 
@@ -812,6 +933,9 @@ async fn handle_client_message(
             height,
             fps,
         } => {
+            if refuse_voice_change(sessions, peer_id, user_id, "screen_start", "screen shares") {
+                return;
+            }
             let short_id = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
             if let Some(short_id) = short_id {
                 sessions.set_sharing(peer_id, true);
@@ -909,6 +1033,10 @@ async fn handle_client_message(
         }
 
         ClientMessage::RequestKeyframe { target_peer_id } => {
+            // Only a viewer of that share may ask its streamer for a keyframe, and not more than twice a second.
+            if !sessions.is_screen_viewer(peer_id, target_peer_id) || !sessions.allow_keyframe_request(peer_id, target_peer_id) {
+                return;
+            }
             let tx = sessions.sessions.get(&target_peer_id).map(|s| s.control_tx.clone());
             if let Some(tx) = tx {
                 let _ = tx.send(ServerMessage::KeyframeRequested).await;
@@ -920,8 +1048,53 @@ async fn handle_client_message(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    pub(crate) async fn keyframe_connection_pair(stream_window: u32) -> Result<(quinn::Endpoint, quinn::Endpoint, quinn::Connection, quinn::Connection)> {
+        let (cert, key) = generate_self_signed_cert()?;
+        let server = quinn::Endpoint::server(make_server_config_with(cert.clone(), key)?, "127.0.0.1:0".parse()?)?;
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(cert)?;
+        let mut tls = rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth();
+        tls.alpn_protocols = vec![b"finchspeak/0.1".to_vec()];
+        let crypto = quinn::crypto::rustls::QuicClientConfig::try_from(tls)?;
+        let mut config = quinn::ClientConfig::new(Arc::new(crypto));
+        let mut transport = quinn::TransportConfig::default();
+        transport.stream_receive_window(stream_window.into());
+        config.transport_config(Arc::new(transport));
+        let mut client = quinn::Endpoint::client("127.0.0.1:0".parse()?)?;
+        client.set_default_client_config(config);
+        let connecting = client.connect(server.local_addr()?, "localhost")?;
+        let incoming = async { server.accept().await.context("test endpoint closed")?.await.context("test handshake failed") };
+        let (remote, local) = tokio::time::timeout(std::time::Duration::from_secs(3), async { tokio::join!(connecting, incoming) }).await?;
+        Ok((server, client, local?, remote?))
+    }
+
+    /// Exercise the production reader so forwarding tests inherit exactly its payload ownership.
+    pub(crate) async fn test_keyframe_body(gate: Arc<tokio::sync::Semaphore>, data: Vec<u8>) -> Result<Bytes> {
+        let (_server, _client, receiver, sender) = keyframe_connection_pair(8192).await?;
+        let mut stream = sender.open_uni().await?;
+        stream.write_all(&data).await?;
+        stream.finish()?;
+        let mut receive = receiver.accept_uni().await?;
+        read_keyframe_body(&mut receive, gate.acquire_owned().await?).await.context("test body was refused")
+    }
+
+    #[tokio::test]
+    async fn a_keyframe_read_permit_follows_every_body_clone() -> Result<()> {
+        let gate = Arc::new(tokio::sync::Semaphore::new(1));
+        let body = test_keyframe_body(gate.clone(), vec![7; 128]).await?;
+        assert!(gate.clone().try_acquire_owned().is_err(), "a buffered body must keep its read permit");
+        let viewer_one = body.clone();
+        let viewer_two = body.slice(64..);
+        drop(body);
+        drop(viewer_one);
+        assert!(gate.clone().try_acquire_owned().is_err(), "the last viewer's slice must retain the whole body budget");
+        drop(viewer_two);
+        assert_eq!(gate.available_permits(), 1);
+        Ok(())
+    }
 
     /// The certificate must survive restarts, otherwise every client's pinned
     /// fingerprint breaks on each server start (AUD-005).
@@ -932,5 +1105,24 @@ mod tests {
         let (cert_second, _) = load_or_create_cert(&dir).unwrap();
         assert_eq!(cert_first.as_ref(), cert_second.as_ref());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The private key is owner-only when created, and a key left world-readable by an
+    /// older version is restricted at the next start. Unix only: Windows has no mode bits.
+    #[cfg(unix)]
+    #[test]
+    fn private_key_is_owner_only_and_tightened_on_start() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("key.der");
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+
+        load_or_create_cert(dir.path()).unwrap();
+        assert_eq!(mode(&key_path), 0o600, "new key must be owner-only");
+
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        load_or_create_cert(dir.path()).unwrap();
+        assert_eq!(mode(&key_path), 0o600, "existing key must be tightened at startup");
     }
 }

@@ -21,11 +21,21 @@ async fn api_client(state: &AppState) -> Result<ApiClient, String> {
 
 #[tauri::command]
 pub async fn list_channels(state: State<'_, AppState>) -> Result<Vec<ChannelInfoDto>, String> {
-    api_client(&state)
+    let channels = api_client(&state)
         .await?
         .list_channels()
         .await
-        .map_err(|e| format!("Failed to fetch channels: {}", e))
+        .map_err(|e| format!("Failed to fetch channels: {}", e))?;
+    remember_channel_bitrates(&state, &channels).await;
+    Ok(channels)
+}
+
+/// Keeps each voice channel's bitrate so joining a room can use it without another request.
+pub(crate) async fn remember_channel_bitrates(state: &AppState, channels: &[ChannelInfoDto]) {
+    let mut cache = state.channel_bitrates.write().await;
+    for channel in channels {
+        cache.insert(channel.short_id, channel.bitrate_kbps);
+    }
 }
 
 #[tauri::command]

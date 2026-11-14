@@ -1,4 +1,4 @@
-import { createSignal } from 'solid-js';
+import { createEffect, createRoot, createSignal, on } from 'solid-js';
 import { describeError } from '../i18n/errors';
 import { api } from '../services/api';
 import type { SoundInfo } from '../types';
@@ -8,7 +8,7 @@ import { isLocallyMuted } from './localMuteStore';
 import { setAppError } from './notificationStore';
 import { serverFeatures } from './sessionStore';
 import { audioContext } from './tones';
-import { isDeafened } from './voiceStore';
+import { activeVoiceChannel, isDeafened } from './voiceStore';
 import { SOUNDBOARD_VOLUME_KEY, volumeFor } from './volumeStore';
 
 // The shared soundboard. Nothing is mixed into voice: each client plays a played sound from its own cache.
@@ -35,6 +35,9 @@ export function setSoundboardHidden(hidden: boolean) {
 
 /** Whether the soundboard panel is open in the voice room. */
 export const [soundboardOpen, setSoundboardOpen] = createSignal(false);
+
+// Leaving the room closes the board, so joining again does not pop it open.
+createRoot(() => createEffect(on(activeVoiceChannel, (room) => { if (!room) setSoundboardOpen(false); }, { defer: true })));
 
 /** The latest sound played in the room, and who played it: the tile of that person shows their name for a moment. */
 export const [lastSound, setLastSound] = createSignal<{ userId: string; at: number } | null>(null);
@@ -83,6 +86,13 @@ function bufferOf(soundId: string): Promise<AudioBuffer | null> {
   return loading;
 }
 
+/** Same perceptual curve as `volume_gain` in finch-audio: squared up to 100 %, linear to 200 %. */
+export function volumeGain(fraction: number): number {
+  if (!Number.isFinite(fraction)) return 0;
+  const p = Math.min(2, Math.max(0, fraction));
+  return p <= 1 ? p * p : p;
+}
+
 async function playCached(soundId: string, volume: number): Promise<void> {
   const buffer = await bufferOf(soundId);
   const context = audioContext();
@@ -91,7 +101,7 @@ async function playCached(soundId: string, volume: number): Promise<void> {
     const source = context.createBufferSource();
     const gain = context.createGain();
     source.buffer = buffer;
-    gain.gain.value = volume;
+    gain.gain.value = volumeGain(volume);
     source.connect(gain).connect(context.destination);
     source.start();
   } catch { /* the sound is skipped */ }

@@ -50,6 +50,41 @@ it('opens shared volume and mute actions from tile, sidebar and member row with 
   expect(document.querySelector('[role="menu"]')).toBeTruthy();
 });
 
+it('the left sidebar row and the members row each have an actions button that opens the same menu as a right click', async () => {
+  const root = mount();
+  for (const selector of ['.vp', '.members .mem']) {
+    const row = root.querySelector(selector) as HTMLElement;
+    const more = row.querySelector<HTMLButtonElement>('button[aria-label^="Actions for "]');
+    expect(more, selector).toBeTruthy();
+    more!.click();
+    await flush();
+    const menu = document.querySelector('[role="menu"]')!;
+    expect(menu.textContent).toContain('Mute for me');
+    expect(menu.querySelector('[aria-label="Volume"]')).toBeTruthy();
+    closeContextMenu();
+  }
+});
+
+it('the row actions button does not reach the row on click or drag', async () => {
+  const root = mount();
+  const row = root.querySelector('.vp') as HTMLElement;
+  const more = row.querySelector<HTMLButtonElement>('button[aria-label^="Actions for "]')!;
+  expect(more.getAttribute('draggable')).toBe('false');
+  const rowClick = vi.fn();
+  const rowDragStart = vi.fn();
+  row.addEventListener('click', rowClick);
+  row.addEventListener('dragstart', rowDragStart);
+  more.click();
+  await flush();
+  expect(rowClick).not.toHaveBeenCalled();
+  expect(document.querySelector('[role="menu"]')).toBeTruthy();
+  const drag = new Event('dragstart', { bubbles: true, cancelable: true });
+  more.dispatchEvent(drag);
+  expect(drag.defaultPrevented).toBe(true);
+  expect(rowDragStart).not.toHaveBeenCalled();
+  closeContextMenu();
+});
+
 it('keeps the existing member fallback until a voice profile has arrived', async () => {
   setCurrentUser({ ...me, role: 'moderator' });
   setKnownUsers([me]);
@@ -78,4 +113,25 @@ it('moderators can act on members, and stale permissions are checked again on se
   root.querySelector('.vc')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await flush();
   expect(document.querySelector('[role="menu"]')?.textContent).toContain('Remove from the room');
+});
+
+it('the menu slider and the tile slider always show the same stored volume', async () => {
+  vi.spyOn(api, 'setSpeakerVolume').mockResolvedValue();
+  const root = mount();
+  root.querySelector('.vc')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await flush();
+  const menuSlider = document.querySelector<HTMLInputElement>('[role="menu"] input[aria-label="Volume"]')!;
+  const tileSlider = root.querySelector<HTMLInputElement>('.vc input[aria-label^="Volume of"]')!;
+  // The tile moves while the menu is open: the menu follows.
+  tileSlider.value = '0.4';
+  tileSlider.dispatchEvent(new Event('input', { bubbles: true }));
+  await flush();
+  expect(menuSlider.value).toBe('0.4');
+  expect(document.querySelector('[role="menu"] output')!.textContent).toBe('40%');
+  // The menu moves: the tile follows.
+  menuSlider.value = '0.15';
+  menuSlider.dispatchEvent(new Event('input', { bubbles: true }));
+  await flush();
+  expect(tileSlider.value).toBe('0.15');
+  expect(document.querySelector('[role="menu"] output')!.textContent).toBe('15%');
 });

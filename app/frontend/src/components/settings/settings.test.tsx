@@ -7,11 +7,13 @@ import { logoutUser } from '../../stores/authStore';
 import { endSession, loadSessions, profileOpen, setProfileMessage, setProfileOpen } from '../../stores/profileStore';
 import { resetSessionState, sessionHandlers, setKnownUsers, setServerFeatures } from '../../stores/sessionStore';
 import { DEFAULT_PREFS, prefs, setPrefs } from '../../stores/settingsStore';
+import { playTone } from '../../stores/tones';
 import { setChannels } from '../../stores/chatStore';
 import { nestView, setNestView } from '../../stores/nestView';
 import { clearToasts } from '../../ui';
 import { checkAvatarFile, CROP_SIDE, placement } from './AvatarCropDialog';
 import { SettingsModal } from './SettingsModal';
+import { declarationsFor, readStyle } from '../../styles/cssTest';
 
 vi.mock('../../stores/authStore', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../stores/authStore')>()), logoutUser: vi.fn().mockResolvedValue(undefined) }));
 
@@ -108,6 +110,76 @@ it('notification choices are remembered', async () => {
   await flush();
   expect(Object.keys(prefs().mutedChannels)).toEqual(['c1']);
   expect(document.body.textContent).toContain('Turn on');
+});
+
+/** A press the way a user makes it: pointer down, mouse down, mouse up, click. */
+const pressLikeUser = (element: HTMLElement) => {
+  for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click']) element.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
+};
+
+it('the sound set picked in the settings modal is applied and remembered', async () => {
+  button('Notifications').click();
+  await flush();
+  pressLikeUser(document.querySelector<HTMLElement>('[role="combobox"][aria-label="Sound set"]')!);
+  await flush();
+  const soft = Array.from(document.querySelectorAll<HTMLElement>('[role="listbox"] [role="option"]')).find((o) => o.textContent?.includes('Soft'))!;
+  pressLikeUser(soft);
+  await flush();
+  expect(prefs().notifications.soundSet).toBe('soft');
+  expect(JSON.parse(localStorage.getItem('finchspeak.prefs') ?? '{}').notifications.soundSet).toBe('soft');
+
+  // The next tone uses the soft set: a mention is two notes at 741 Hz and 989 Hz (birds would be 2000 Hz).
+  const started: number[] = [];
+  class FakeAudioContext {
+    currentTime = 0;
+    destination = {};
+    createOscillator() {
+      return {
+        type: '',
+        frequency: { set value(hz: number) { started.push(hz); }, get value() { return 0; }, exponentialRampToValueAtTime() {} },
+        connect(node: unknown) { return node; },
+        start() {},
+        stop() {},
+      };
+    }
+    createGain() {
+      return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect(node: unknown) { return node; } };
+    }
+    createBiquadFilter() {
+      return { type: '', frequency: { value: 0 }, connect(node: unknown) { return node; } };
+    }
+  }
+  vi.stubGlobal('AudioContext', FakeAudioContext);
+  playTone('mention', 1);
+  expect(started).toEqual([741, 989]);
+});
+
+it('the microphone select inside the voice page opens in the same popover layer as the sound set select', async () => {
+  vi.spyOn(api, 'getAudioDevices').mockResolvedValue({ inputs: [], outputs: [], selected_input: null, selected_output: null });
+  button('Voice and audio').click();
+  await flush();
+  pressLikeUser(document.querySelector<HTMLElement>('[role="combobox"][aria-label="Microphone"]')!);
+  await flush();
+  const list = document.querySelector<HTMLElement>('[role="listbox"][aria-label="Microphone"]');
+  expect(list).not.toBeNull();
+  // Portalled out of the modal overlay, and styled as a floating panel (its z-index comes from --z-popover).
+  expect(list!.closest('.overlay')).toBeNull();
+  expect(list!.classList.contains('floating-panel')).toBe(true);
+});
+
+it('a select list opened inside the settings modal paints above the modal overlay in the default theme', () => {
+  // The list is portalled to <body> with class floating-panel (z-index: var(--z-popover)); the modal is .overlay (z-index: 50).
+  // If the token is undefined for the default theme the list falls back to z-index auto and sits under the overlay,
+  // so clicks land on the overlay (which closes the settings) instead of the option.
+  const app = readStyle('app.css');
+  const defaultTheme = ['app.css', 'themes.css', 'custom-tokens.css'].map(readStyle)
+    .flatMap((css) => [...declarationsFor(css, ':root'), ...declarationsFor(css, '[data-theme="claude"]')]).join('\n');
+  const popoverZ = defaultTheme.match(/--z-popover:\s*(\d+)/)?.[1];
+  const overlayZ = app.match(/\.overlay\s*\{[^}]*?z-index:\s*(\d+)/)?.[1];
+  expect(popoverZ, 'the default theme defines --z-popover').toBeDefined();
+  expect(Number(popoverZ)).toBeGreaterThan(Number(overlayZ));
+  // The floating panel must take its z-index from the token, not a hard-coded value.
+  expect(declarationsFor(app, '.floating-panel').join('\n')).toMatch(/z-index:\s*var\(--z-popover\)/);
 });
 
 it('appearance changes reach the page', async () => {

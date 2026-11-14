@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use finch_audio::mixer::volume_gain;
 use finch_audio::music::MusicDecoder;
 use finch_client_core::api::ApiClient;
 use finch_protocol::models::{MusicRoomState, MusicTrack, Playing};
@@ -103,15 +104,17 @@ impl Default for MusicPlayer {
             output: Mutex::new(None),
             generation: AtomicU64::new(0),
             paused: AtomicBool::new(false),
-            volume: AtomicU32::new(0.5f32.to_bits()),
+            volume: AtomicU32::new(volume_gain(50.0).to_bits()),
             job: Mutex::new(None),
         }
     }
 }
 
 impl MusicPlayer {
+    /// `volume` is the slider value (0..1); the stored gain follows the same perceptual curve as participants.
     pub fn set_volume(&self, volume: f32) {
-        self.volume.store(if volume.is_finite() { volume.clamp(0.0, 1.0).to_bits() } else { 0.5f32.to_bits() }, Ordering::Relaxed);
+        let percent = if volume.is_finite() { volume.clamp(0.0, 1.0) * 100.0 } else { 50.0 };
+        self.volume.store(volume_gain(percent).to_bits(), Ordering::Relaxed);
     }
 
     pub fn set_room(&self, room: Option<Uuid>) {
@@ -526,8 +529,24 @@ mod tests {
     }
 
     #[test]
+    fn music_volume_follows_the_perceptual_curve() {
+        let player = MusicPlayer::default();
+        let gain = |v: f32| {
+            player.set_volume(v);
+            f32::from_bits(player.volume.load(Ordering::Relaxed))
+        };
+        assert_eq!(gain(1.0), 1.0);
+        assert_eq!(gain(0.5), 0.25);
+        assert_eq!(gain(0.0), 0.0);
+        assert!((gain(0.3) - 0.09).abs() < 1e-6);
+        assert_eq!(gain(f32::NAN), 0.25, "a bad value falls back to the 50 % default");
+        assert_eq!(f32::from_bits(MusicPlayer::default().volume.load(Ordering::Relaxed)), 0.25);
+    }
+
+    #[test]
     fn music_stereo_mix_respects_local_gain_pause_and_deafen() {
         let player = MusicPlayer::default();
+        player.set_volume(1.0);
         let (mut producer, consumer) = HeapRb::new(4).split();
         let frames = Arc::new(AtomicU64::new(0));
         *player.output.lock().unwrap() = Some(Output { consumer, frames: frames.clone() });
@@ -538,8 +557,8 @@ mod tests {
         assert_eq!(frames.load(Ordering::Relaxed), 0);
         player.paused.store(false, Ordering::SeqCst);
         player.mix_frame(&mut left, &mut right, false);
-        assert!((left[0] - 0.3).abs() < 0.001);
-        assert!((right[0] - 0.1).abs() < 0.001);
+        assert!((left[0] - 0.5).abs() < 0.001);
+        assert!((right[0] - 0.0).abs() < 0.001);
         producer.try_push([0.4, -0.2]).unwrap();
         let (mut left, mut right) = ([0.0], [0.0]);
         player.mix_frame(&mut left, &mut right, true);

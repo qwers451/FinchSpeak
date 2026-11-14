@@ -15,6 +15,16 @@ it('sign-out clears the device list so the next account never sees it', async ()
   vi.restoreAllMocks();
 });
 
+it('sign-out removes the saved drafts of every channel', async () => {
+  localStorage.setItem('finchspeak.draft.c1', 'mine');
+  localStorage.setItem('finchspeak.draft.c2', 'also mine');
+  vi.spyOn(api, 'logout').mockResolvedValue();
+  await logoutUser();
+  expect(localStorage.getItem('finchspeak.draft.c1')).toBeNull();
+  expect(localStorage.getItem('finchspeak.draft.c2')).toBeNull();
+  vi.restoreAllMocks();
+});
+
 it('preserves mute preferences when Rust logout preserves its audio flags', async () => {
   vi.spyOn(api, 'logout').mockResolvedValue();
   setIsMuted(true);
