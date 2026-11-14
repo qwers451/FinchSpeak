@@ -472,22 +472,29 @@ impl AuthConfig {
 }
 
 impl ServerConfig {
-    /// Load configuration from a TOML file path or fallback to defaults.
-    /// Clamp implausible `[limits]` once, here, so the rest of the server can trust them (each
-    /// clamp warns exactly once).
-    fn validated(mut self) -> Self {
+    /// Clamp implausible `[limits]`, warning once for each value changed.
+    /// Install logging before calling this when the warnings must be persisted.
+    pub fn validated(mut self) -> Self {
         self.limits = self.limits.validated();
         self
     }
 
+    /// Load and validate configuration, or use defaults when the file is absent.
     pub fn load_or_default(path: Option<&Path>) -> Result<Self> {
+        Self::read_or_default(path).map(Self::validated)
+    }
+
+    /// Read configuration without validating limits, or use defaults when the file is absent.
+    /// Startup uses this to configure logging first, then must call [`Self::validated`] before
+    /// passing the configuration to the server.
+    pub fn read_or_default(path: Option<&Path>) -> Result<Self> {
         match path {
             Some(p) if p.exists() => {
                 let content = fs::read_to_string(p)
                     .with_context(|| format!("Failed to read config file at {:?}", p))?;
                 let config: Self = toml::from_str(&content)
                     .with_context(|| format!("Failed to parse TOML configuration from {:?}", p))?;
-                Ok(config.validated())
+                Ok(config)
             }
             _ => Ok(Self::default()),
         }
