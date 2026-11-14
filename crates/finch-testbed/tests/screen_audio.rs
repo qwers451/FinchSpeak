@@ -6,10 +6,11 @@ use std::time::{Duration, Instant};
 
 use finch_audio::{screen_audio_key, AudioMixer, FRAME_SIZE_48K};
 use finch_client_core::screen::ScreenAudioForwarder;
+use finch_client_core::session::SessionEvent;
 use finch_protocol::media::{MediaHeader, MediaPacket, MediaType, MEDIA_HEADER_SIZE};
 use finch_protocol::messages::{ClientMessage, ServerMessage};
 use finch_protocol::models::VideoCodec;
-use finch_screen::{ScreenAudioEncoder, STEREO_FRAME_SAMPLES};
+use finch_screen::{slice_p_frame, ScreenAudioEncoder, STEREO_FRAME_SAMPLES};
 use finch_testbed::client::TestClient;
 use finch_testbed::server::TestServer;
 
@@ -120,5 +121,107 @@ async fn viewers_receive_the_screen_sound_even_when_the_sharer_is_muted() -> any
         }
     }
     forwarder.stop();
+    Ok(())
+}
+
+/// Screen media that reached one viewer during a wait.
+#[derive(Debug, Default)]
+struct ScreenMediaSeen {
+    screen_audio: usize,
+    video: usize,
+    keyframes: usize,
+}
+
+/// Send one burst of screen media from `a`: screen sound, a P-frame, and an IDR on a uni-stream.
+async fn send_screen_media(a: &TestClient, channel: u32, peer: u32, frames: usize) -> anyhow::Result<()> {
+    for packet in screen_audio_packets(channel, peer, frames) {
+        a.session.send_datagram(packet.encode())?;
+    }
+    let delta: Vec<u8> = (0..3000).map(|i| (i % 199) as u8).collect();
+    for packet in slice_p_frame(channel, peer, 1, 2, 1033, &delta, false) {
+        a.session.send_datagram(packet.encode())?;
+    }
+    let header = MediaHeader::new_video_key(channel, peer, 0, 1000, 1, false);
+    let mut uni = a.session.connection.open_uni().await?;
+    uni.write_all(&header.to_bytes()).await?;
+    uni.write_all(&[7u8; 4096]).await?;
+    uni.finish()?;
+    Ok(())
+}
+
+/// Count the screen media that reaches `viewer` for `wait`.
+async fn screen_media_seen(viewer: &mut TestClient, wait: Duration) -> ScreenMediaSeen {
+    let mut seen = ScreenMediaSeen::default();
+    viewer
+        .pump_events(tokio::time::Instant::now() + wait, |event| match event {
+            SessionEvent::Datagram(datagram) => match MediaHeader::from_slice(datagram) {
+                Ok(header) if header.media_type == MediaType::ScreenAudio => seen.screen_audio += 1,
+                Ok(header) if header.media_type == MediaType::VideoDelta => seen.video += 1,
+                _ => {}
+            },
+            SessionEvent::UniStream { .. } => seen.keyframes += 1,
+            _ => {}
+        })
+        .await;
+    seen
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn screen_media_without_a_share_is_not_forwarded() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let mut a = TestClient::register(&server, "alice").await?;
+    let mut b = TestClient::register(&server, "bob").await?;
+    let (_, voice_short) = a.join_voice().await?;
+    b.join_voice().await?;
+    let a_peer = a.session.session_peer_id;
+    // Bob watches Alice, who has not started a share.
+    b.send(ClientMessage::SubscribeScreenShare { target_user_id: a.session.user_id }).await?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    send_screen_media(&a, voice_short, a_peer, 10).await?;
+    let before = screen_media_seen(&mut b, Duration::from_millis(500)).await;
+    assert_eq!(
+        (before.screen_audio, before.video, before.keyframes),
+        (0, 0, 0),
+        "screen media without a started share reached a viewer"
+    );
+
+    // Once the share starts, the same media is forwarded.
+    a.send(ClientMessage::StartScreenShare { codec: VideoCodec::H264, width: 1280, height: 720, fps: 30 }).await?;
+    b.expect_control(WAIT, |m| matches!(m, ServerMessage::ScreenShareStarted { peer_id, .. } if *peer_id == a_peer).then_some(())).await?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    send_screen_media(&a, voice_short, a_peer, 10).await?;
+    let after = screen_media_seen(&mut b, Duration::from_millis(500)).await;
+    assert!(after.screen_audio > 0, "screen sound of a live share was not forwarded");
+    assert!(after.video > 0, "screen video of a live share was not forwarded");
+    assert!(after.keyframes > 0, "keyframes of a live share were not forwarded");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_muted_sharer_keeps_video_but_not_screen_sound() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let boss = TestClient::register(&server, "boss").await?;
+    let moderator = TestClient::register(&server, "moddy").await?;
+    boss.api.set_user_role(moderator.session.user_id, "moderator").await?;
+    let mut a = TestClient::register(&server, "alice").await?;
+    let mut b = TestClient::register(&server, "bob").await?;
+    let (_, voice_short) = a.join_voice().await?;
+    b.join_voice().await?;
+    let a_peer = a.session.session_peer_id;
+
+    a.send(ClientMessage::StartScreenShare { codec: VideoCodec::H264, width: 1280, height: 720, fps: 30 }).await?;
+    b.expect_control(WAIT, |m| matches!(m, ServerMessage::ScreenShareStarted { peer_id, .. } if *peer_id == a_peer).then_some(())).await?;
+    b.send(ClientMessage::SubscribeScreenShare { target_user_id: a.session.user_id }).await?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // A moderator silences Alice while her share goes on.
+    moderator.api.moderate_voice(a.session.user_id, "mute").await?;
+    b.expect_control(WAIT, |m| matches!(m, ServerMessage::ServerMuteChanged { peer_id, server_muted: true } if *peer_id == a_peer).then_some(())).await?;
+
+    send_screen_media(&a, voice_short, a_peer, 10).await?;
+    let seen = screen_media_seen(&mut b, Duration::from_millis(500)).await;
+    assert_eq!(seen.screen_audio, 0, "screen sound of a server-muted sharer reached a viewer");
+    assert!(seen.video > 0, "screen video of a server-muted sharer must still reach viewers");
     Ok(())
 }

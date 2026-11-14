@@ -40,6 +40,17 @@ fn admit(budget: &Mutex<MediaRateLimiter>, bytes: usize) -> bool {
         .allow(Instant::now(), bytes)
 }
 
+/// Whether a sender in this state may send a datagram of `media_type`. Screen video needs a started
+/// share; screen sound needs one too, and a moderator's server mute silences it. Voice is governed
+/// by the mute check in `route_datagram`.
+fn may_send(media_type: MediaType, sharing: bool, server_muted: bool) -> bool {
+    match media_type {
+        MediaType::Audio => true,
+        MediaType::ScreenAudio => sharing && !server_muted,
+        MediaType::VideoDelta | MediaType::VideoKey => sharing,
+    }
+}
+
 /// SFU Media Router.
 #[derive(Clone)]
 pub struct SfuRouter {
@@ -55,27 +66,34 @@ impl SfuRouter {
     pub async fn route_datagram(&self, datagram: Bytes, auth_peer_id: u32) {
         TRAFFIC.bytes_in.fetch_add(datagram.len() as u64, Ordering::Relaxed);
 
-        // The participant's media budget (bytes and datagrams per second) is charged for every
-        // datagram it sends, malformed ones included, before anything is routed.
-        let (voice_channel, sending_muted, budget) = match self.sessions.sessions.get(&auth_peer_id) {
-            Some(s) => (s.current_voice_channel, s.muted || s.server_muted, s.media.clone()),
+        // Everything the sender's state is needed for is copied out of its session here, so the
+        // hot path takes no extra lock.
+        let (voice_channel, sending_muted, server_muted, sharing, budget) = match self.sessions.sessions.get(&auth_peer_id) {
+            Some(s) => (s.current_voice_channel, s.muted || s.server_muted, s.server_muted, s.sharing_screen, s.media.clone()),
             None => {
                 TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
                 return;
             }
         };
+
+        // A datagram the sender may not send at all is refused before it is charged: it spends no budget.
+        let header = MediaHeader::from_slice(&datagram).ok();
+        if header.as_ref().is_some_and(|h| !may_send(h.media_type, sharing, server_muted)) {
+            TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+
+        // The participant's media budget (bytes and datagrams per second) is charged for every
+        // datagram it sends that may be sent, malformed ones included, before anything is routed.
         if !admit(&budget, datagram.len()) {
             TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
             return;
         }
 
-        let header = match MediaHeader::from_slice(&datagram) {
-            Ok(h) => h,
-            Err(_) => {
-                // Too short, or an unknown media type: there is nothing to route.
-                TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
-                return;
-            }
+        let Some(header) = header else {
+            // Too short, or an unknown media type: there is nothing to route.
+            TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
+            return;
         };
 
         // 1. Validate that the sender is in the room specified in the header
@@ -93,10 +111,6 @@ impl SfuRouter {
         if sending_muted && header.media_type == MediaType::Audio {
             return;
         }
-
-        // C4 hook: check here that the sender may send this media type. Screen video and screen
-        // audio only while the sender has a screen share started. A refused datagram is dropped
-        // with `TRAFFIC.datagrams_dropped` counted, like the cases above.
 
         // 2. Rewrite sender_peer_id to the verified auth_peer_id. The datagram's own buffer is
         // reused when nothing else holds it; a shared buffer is copied.
@@ -156,13 +170,18 @@ impl SfuRouter {
         header: &MediaHeader,
         payload: Bytes,
     ) {
-        let budget = match self.sessions.sessions.get(&auth_peer_id) {
-            Some(s) => s.media.clone(),
+        let (budget, sharing) = match self.sessions.sessions.get(&auth_peer_id) {
+            Some(s) => (s.media.clone(), s.sharing_screen),
             None => {
                 TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
                 return;
             }
         };
+        // Keyframes are screen video: only a sender with a started share may send them.
+        if !may_send(MediaType::VideoKey, sharing, false) {
+            TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
         let room = match self.sessions.voice_rooms.get(&channel_id) {
             Some(r) => r,
             None => return,
