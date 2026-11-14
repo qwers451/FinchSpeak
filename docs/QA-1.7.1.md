@@ -38,3 +38,35 @@ Audit in code (no client run, no frame capture: the controller takes the capture
 Counts: 16 good, 4 fixed (rows 5, 6, 7, 20), 0 removed.
 
 Open concern (not changed): when the room has more people than tiles, the speaking set decides which tiles show, so a change of who is speaking reorders the grid and the tiles glide each time. This is by design of `arrange`; no frame capture was taken to judge how often it happens.
+
+## Клики после анимаций
+
+Audit in code and Vitest (happy-dom); the desktop client was not run. Verdicts as above. Tests: `ui/ContextMenu.test.tsx`, `ui/Select.test.tsx`, `ui/popover.test.ts`.
+
+Causes found:
+- (а) Scroll closed menus. `ContextMenuHost` and `Select` closed on any capturing `scroll` on the window, so a chat auto-scroll or smooth `scrollIntoView` (`ChatArea.tsx`) closed a menu the moment it opened. Fixed: a scroll closes only when it happens in the anchor, in its ancestors, or in the document (`scrollMovesAnchor`). A point anchor closes only on document scroll.
+- (б) Submenu closed on the way to it. Every sibling entry's `pointerenter` closed the submenu at once. Fixed: the close waits 150 ms (`SUBMENU_CLOSE_DELAY`); entering the submenu panel or its trigger cancels it.
+- (в) Placement measured the scaled panel. `placePopover` used `getBoundingClientRect` while the panel was in `@starting-style` (`scale(.98)`), so the size was about 2% small and a flipped panel overlapped its anchor by a few px. Fixed: the panel's size is `offsetWidth`/`offsetHeight`; the anchor stays `getBoundingClientRect`.
+- (г) Same-click open and close: checked, not found. The `mousedown` outside listener is added after the opening click has been dispatched; the `click` on an entry closes the menu before `onSelect` runs (test: one call, menu closed).
+
+| Element | What happens | Cause | Verdict |
+|---|---|---|---|
+| Participant menu (tile, sidebar, member row: `participantMenu.ts`) | closes when the chat or member list scrolls, including right after opening | (а) | fixed |
+| «Переместить» submenu in the participant menu | closes when the pointer crosses a sibling entry on the way in | (б) | fixed |
+| Submenu and menu placement near the right and bottom edges | 2% small size during the entrance; flipped panel overlaps the anchor by a few px | (в) | fixed |
+| Flock picker (`VoicePanel.tsx`, `openFlockMenu`) | same as the participant menu | (а), (в) | fixed |
+| Select listbox (`Select.tsx`; device and option pickers in the settings modals) | closed on any scroll, so a click could be lost after the chat moved | (а), (в) | fixed |
+| Emoji picker, mention menu, search results (`EmojiPicker.tsx`, `Composer.tsx`, `SearchBox.tsx`) | no scroll listener, no `pointer-events` issue in code; entrance is opacity and transform only | none | good (not clicked in the client) |
+| Channel, message, «Ещё» and server menus | no `openContextMenu` caller for them exists in the code (only the participant menu and the flock picker use it); nothing to test here | n/a | not found in code; check on the client |
+| `.vc.vc-leave` (leaving tile, `motion.css:151`) | kept in DOM for the exit | `pointer-events:none` already set | good |
+| `.overlay[data-exiting]` and the modal inside it (`Modal.tsx:72`, `motion.css:15-16`) | kept for 140 ms | `pointer-events:none` on the overlay during exit | good |
+| `.toast[data-exiting]` (`ToastHost.tsx:51`, `motion.css:133`) | kept for the exit | `pointer-events:none` already set | good |
+| `.drop-overlay` (`app.css:147`) | covers the chat while dragging | `pointer-events:none` already set | good |
+| `.viewer-hud` (`app.css:187-188`) | hidden at opacity 0 | `pointer-events:none` unless `.on` | good |
+| `.range-value`, `.ripple-dot`, `.btn-spinner`, `.sb-said`, `.jump-wrap` wrapper | decorative or hidden layers | `pointer-events:none` already set; `.jump-wrap .btn` re-enables clicks | good |
+| `.popover-host` (portal target) | no box, no position, no size rules | panels are `position:fixed` and nothing covers the page | good |
+| `createPresence` consumers: `Nest.tsx` (hold 0), `FlockCallCard.tsx` (hold 0), `VoicePanel.tsx` tiles (hold `MOTION.exit`) | an item is kept for one exit only | removed items are either gone at once or `vc-leave` with `pointer-events:none` | good |
+
+Counts: 9 good, 5 fixed (participant menu, submenu, placement, flock picker, Select listbox), 1 not found in code.
+
+Open concern (not changed): a submenu's anchor is still read with `getBoundingClientRect`. If the pointer reaches a submenu trigger within the 160 ms entrance of its parent, the anchor is about 2% off. The brief keeps the anchor rect; no client capture was taken.

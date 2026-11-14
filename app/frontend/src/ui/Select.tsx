@@ -1,7 +1,7 @@
 import { createEffect, createSignal, createUniqueId, For, onCleanup, Show } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { Icon } from './Icon';
-import { placePopover } from './popover';
+import { placePopover, scrollMovesAnchor } from './popover';
 
 export type SelectProps<T extends string> = {
   value: T;
@@ -48,14 +48,18 @@ export function Select<T extends string>(props: SelectProps<T>) {
     const outside = (event: Event) => {
       if (!list?.contains(event.target as Node) && !trigger.contains(event.target as Node)) close(false);
     };
+    // Only a scroll of the trigger (or its ancestors, or the document) closes the list; other scrolling does not.
+    const scrolled = (event: Event) => {
+      if (!list?.contains(event.target as Node) && scrollMovesAnchor(event.target, trigger)) close(false);
+    };
     const dismiss = () => close();
     document.addEventListener('mousedown', outside, true);
-    window.addEventListener('scroll', outside, true);
+    window.addEventListener('scroll', scrolled, true);
     window.addEventListener('resize', dismiss);
     window.addEventListener('blur', dismiss);
     onCleanup(() => {
       document.removeEventListener('mousedown', outside, true);
-      window.removeEventListener('scroll', outside, true);
+      window.removeEventListener('scroll', scrolled, true);
       window.removeEventListener('resize', dismiss);
       window.removeEventListener('blur', dismiss);
     });
