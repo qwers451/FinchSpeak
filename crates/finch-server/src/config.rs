@@ -48,6 +48,28 @@ impl Default for LimitsConfig {
     }
 }
 
+/// Smallest burst that still lets a full media datagram through with room to spare.
+pub const MIN_MEDIA_BURST_BYTES: u64 = 2048;
+
+impl LimitsConfig {
+    /// Clamp values that would make media unusable (a burst smaller than a datagram, no packets at
+    /// all), warning about each one that is changed.
+    pub fn validated(mut self) -> Self {
+        if self.media_burst_bytes < MIN_MEDIA_BURST_BYTES {
+            tracing::warn!(
+                "[limits] media_burst_bytes {} is below {MIN_MEDIA_BURST_BYTES}; using {MIN_MEDIA_BURST_BYTES}",
+                self.media_burst_bytes
+            );
+            self.media_burst_bytes = MIN_MEDIA_BURST_BYTES;
+        }
+        if self.media_packets_per_sec < 1 {
+            tracing::warn!("[limits] media_packets_per_sec is 0; using 1");
+            self.media_packets_per_sec = 1;
+        }
+        self
+    }
+}
+
 /// The shared soundboard: sounds are stored in the database; `enabled = false` hides the feature.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -452,6 +474,15 @@ mod tests {
         assert_eq!(config.storage.max_file_size_mb, 50);
         assert_eq!(config.auth.jwt_secret, "CHANGE_ME_SECURE_JWT_SECRET_32_BYTES_MINIMUM");
         assert_eq!(config.auth.jwt_expiration_hours, 72);
+    }
+
+    #[test]
+    fn implausible_limits_are_clamped_to_usable_values() {
+        let clamped = LimitsConfig { media_bytes_per_sec: 1000, media_burst_bytes: 0, media_packets_per_sec: 0 }.validated();
+        assert_eq!(clamped.media_burst_bytes, MIN_MEDIA_BURST_BYTES);
+        assert_eq!(clamped.media_packets_per_sec, 1);
+        assert_eq!(clamped.media_bytes_per_sec, 1000, "other values are kept as configured");
+        assert_eq!(LimitsConfig::default().validated().media_burst_bytes, 262_144);
     }
 
     #[test]

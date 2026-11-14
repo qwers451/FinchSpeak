@@ -263,7 +263,7 @@ pub async fn handle_connection(
         last_activity_update: None,
         connection: conn.clone(),
         control_tx: control_tx.clone(),
-        media: sessions.media_budget(),
+        media: sessions.media_budget(user_id),
     };
     sessions.register_session(session);
     initial_state.activities = sessions.activities();

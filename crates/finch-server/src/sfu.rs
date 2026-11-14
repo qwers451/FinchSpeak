@@ -4,13 +4,14 @@
 //! rewrites `sender_peer_id` to prevent spoofing, and fans out media to subscribers.
 
 use std::sync::atomic::Ordering;
-use std::sync::PoisonError;
+use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
 use bytes::{Bytes, BytesMut};
-use finch_protocol::media::{MediaHeader, MediaType};
+use finch_protocol::media::{MediaHeader, MediaType, MEDIA_HEADER_SIZE};
 
 use crate::health::TRAFFIC;
+use crate::limits::MediaRateLimiter;
 use crate::session::SessionManager;
 
 /// Hand one datagram to a receiver and count it: bytes out, or a drop when it could not be sent.
@@ -21,6 +22,14 @@ fn forward_datagram(connection: &quinn::Connection, datagram: Bytes) {
     } else {
         TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
     }
+}
+
+/// Charge `bytes` to a participant's media budget; `false` when it is over the limit.
+fn admit(budget: &Mutex<MediaRateLimiter>, bytes: usize) -> bool {
+    budget
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .allow(Instant::now(), bytes)
 }
 
 /// SFU Media Router.
@@ -42,13 +51,12 @@ impl SfuRouter {
         // datagram it sends, malformed ones included, before anything is routed.
         let (voice_channel, sending_muted, budget) = match self.sessions.sessions.get(&auth_peer_id) {
             Some(s) => (s.current_voice_channel, s.muted || s.server_muted, s.media.clone()),
-            None => return,
+            None => {
+                TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
         };
-        let allowed = budget
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .allow(Instant::now(), datagram.len());
-        if !allowed {
+        if !admit(&budget, datagram.len()) {
             TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
             return;
         }
@@ -69,6 +77,7 @@ impl SfuRouter {
                 header.channel_id,
                 voice_channel
             );
+            TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
             return;
         }
 
@@ -129,7 +138,8 @@ impl SfuRouter {
         }
     }
 
-    /// Forward an IDR keyframe received on a Uni-Stream to all subscribed viewers.
+    /// Forward an IDR keyframe received on a Uni-Stream to all subscribed viewers. The keyframe is
+    /// charged to the sender's media budget like any datagram: it is larger, so it weighs more.
     pub async fn route_uni_keyframe(
         &self,
         channel_id: u32,
@@ -137,6 +147,17 @@ impl SfuRouter {
         header: &MediaHeader,
         payload: Bytes,
     ) {
+        let budget = match self.sessions.sessions.get(&auth_peer_id) {
+            Some(s) => s.media.clone(),
+            None => {
+                TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+        };
+        if !admit(&budget, MEDIA_HEADER_SIZE + payload.len()) {
+            TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
         let room = match self.sessions.voice_rooms.get(&channel_id) {
             Some(r) => r,
             None => return,

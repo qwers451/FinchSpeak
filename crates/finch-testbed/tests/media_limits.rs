@@ -4,11 +4,13 @@
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use finch_client_core::session::SessionEvent;
+use finch_protocol::media::{MediaHeader, MEDIA_HEADER_SIZE};
 use finch_protocol::messages::ClientMessage;
 use finch_protocol::models::VideoCodec;
 use finch_screen::slice_p_frame;
 use finch_server::health::TRAFFIC;
-use finch_testbed::client::TestClient;
+use finch_testbed::client::{audio_datagram, connect_with_token, TestClient};
 use finch_testbed::server::TestServer;
 use tokio::time::Instant;
 
@@ -129,5 +131,114 @@ async fn flood_of_5_mb_per_s_is_capped_and_counted() -> anyhow::Result<()> {
     );
     assert!(outcome.received_packets < outcome.sent_packets, "no datagram was refused");
     assert!(dropped() > dropped_before, "refused datagrams are not counted in datagrams_dropped");
+    Ok(())
+}
+
+/// Keyframes received on uni-streams since the last call.
+async fn keyframe_bytes(receiver: &mut TestClient) -> u64 {
+    let mut bytes = 0;
+    while let Ok(event) = receiver.next_event(Duration::from_millis(1)).await {
+        if let SessionEvent::UniStream { payload, .. } = event {
+            bytes += (payload.len() + MEDIA_HEADER_SIZE) as u64;
+        }
+    }
+    bytes
+}
+
+#[tokio::test]
+async fn keyframe_flood_on_uni_streams_is_capped_like_datagrams() -> anyhow::Result<()> {
+    let _serial = SERIAL.lock().await;
+    let server = TestServer::start().await?;
+    let (a, mut b, voice_short) = streamer_and_viewer(&server).await?;
+    let a_peer = a.session.session_peer_id;
+    let keyframe = vec![0x5a_u8; 64 * 1024];
+    let dropped_before = dropped();
+
+    // 5 MB/s of keyframes for 2 s, one 64 KB stream after another.
+    let started = Instant::now();
+    let mut sent_bytes = 0u64;
+    let mut received_bytes = 0u64;
+    let mut index = 0u64;
+    while started.elapsed() < Duration::from_secs(2) {
+        let target = started.elapsed().as_secs_f64() * LIMIT_BYTES_PER_SEC * (5.0 / 1.5);
+        while (sent_bytes as f64) < target {
+            let header = MediaHeader::new_video_key(voice_short, a_peer, index as u16, (index * 33) as u32, index as u16, false);
+            a.session.send_keyframe(&header, &keyframe).await?;
+            sent_bytes += (keyframe.len() + MEDIA_HEADER_SIZE) as u64;
+            index += 1;
+        }
+        received_bytes += keyframe_bytes(&mut b).await;
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    received_bytes += keyframe_bytes(&mut b).await;
+    let elapsed = started.elapsed().as_secs_f64();
+
+    let cap = LIMIT_BYTES_PER_SEC * elapsed + LIMIT_BURST_BYTES + 2.0 * (keyframe.len() + MEDIA_HEADER_SIZE) as f64;
+    assert!(
+        (received_bytes as f64) <= cap,
+        "receiver got {received_bytes} bytes of keyframes in {elapsed:.2} s, the limit allows about {cap:.0}"
+    );
+    assert!(dropped() > dropped_before, "refused keyframes are not counted in datagrams_dropped");
+    Ok(())
+}
+
+#[tokio::test]
+async fn two_sessions_of_one_user_share_one_limit() -> anyhow::Result<()> {
+    let _serial = SERIAL.lock().await;
+    let server = TestServer::start().await?;
+    let mut alice = TestClient::register(&server, "alice").await?;
+    let mut bob = TestClient::register(&server, "bob").await?;
+    let (channel_id, voice_short) = alice.join_voice().await?;
+    bob.join_voice().await?;
+
+    // A second session of the same user, in the same voice channel.
+    let token = alice.api.token().ok_or_else(|| anyhow::anyhow!("alice has no token"))?;
+    let (second, _events) = connect_with_token(&server, token).await?;
+    second
+        .control_tx
+        .send(ClientMessage::JoinVoice { channel_id })
+        .await
+        .map_err(|_| anyhow::anyhow!("control channel closed"))?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let senders = [alice.session.session_peer_id, second.session_peer_id];
+    let dropped_before = dropped();
+    // Each session sends 2.5 MB/s of 1020-byte audio datagrams: 5 MB/s from one user.
+    let started = Instant::now();
+    let mut sent = [0u64; 2];
+    let mut seq = [0u16; 2];
+    let mut received_bytes = 0u64;
+    while started.elapsed() < Duration::from_secs(2) {
+        let per_session_target = started.elapsed().as_secs_f64() * 2_500_000.0 / 1020.0;
+        for (slot, &peer) in senders.iter().enumerate() {
+            let session = if slot == 0 { &alice.session } else { &second };
+            while (sent[slot] as f64) < per_session_target {
+                let datagram = audio_datagram(voice_short, peer, seq[slot], 1000);
+                let _ = session.send_datagram(datagram);
+                sent[slot] += 1;
+                seq[slot] = seq[slot].wrapping_add(1);
+            }
+        }
+        for datagram in bob.drain_datagrams() {
+            received_bytes += datagram.len() as u64;
+        }
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < deadline {
+        for datagram in bob.drain_datagrams() {
+            received_bytes += datagram.len() as u64;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let elapsed = started.elapsed().as_secs_f64();
+
+    // One user's budget: about 1.5 MB/s in total, not 1.5 MB/s per session.
+    let cap = LIMIT_BYTES_PER_SEC * elapsed + LIMIT_BURST_BYTES + 64.0 * 1024.0;
+    assert!(
+        (received_bytes as f64) <= cap,
+        "bob got {received_bytes} bytes from one user's two sessions in {elapsed:.2} s; the shared limit allows about {cap:.0}"
+    );
+    assert!(dropped() > dropped_before, "the shared budget refused nothing");
     Ok(())
 }

@@ -140,7 +140,11 @@ impl MediaRateLimiter {
             self.last = now;
         }
         let bytes = bytes as f64;
-        if self.bytes < bytes || self.packets < 1.0 {
+        // A message larger than the burst could never fit whole. It needs a full bucket and then runs
+        // the bucket into debt, which later traffic waits out: the long-run rate still holds, and the
+        // debt is never more than one message (a keyframe is bounded by the reader's size cap).
+        let needed = bytes.min(self.burst_bytes);
+        if self.bytes < needed || self.packets < 1.0 {
             return false;
         }
         self.bytes -= bytes;
@@ -242,8 +246,30 @@ mod tests {
         let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
         assert!(bucket.allow(t0, 262_144));
         let idle = t0 + Duration::from_secs(60);
-        assert!(!bucket.allow(idle, 262_145), "a minute of silence does not buy more than the burst");
-        assert!(bucket.allow(idle, 262_144));
+        assert!(bucket.allow(idle, 262_144), "a minute of silence refills exactly one burst");
+        assert!(!bucket.allow(idle, 1), "and not more than that");
+    }
+
+    #[test]
+    fn an_oversized_message_passes_on_a_full_bucket_then_waits_out_its_debt() {
+        let t0 = Instant::now();
+        let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
+        let idle = t0 + Duration::from_secs(60);
+        // A 3 MB keyframe is larger than the 256 KB burst: it passes on a full bucket.
+        assert!(bucket.allow(idle, 3_000_000), "an oversized message is not refused forever");
+        assert!(!bucket.allow(idle, 1), "the bucket is now in debt for that message");
+        // The debt (about 2.7 MB) takes about 1.8 s to refill at 1.5 MB/s.
+        assert!(!bucket.allow(idle + Duration::from_secs(1), 1));
+        assert!(bucket.allow(idle + Duration::from_millis(2500), 1));
+    }
+
+    #[test]
+    fn an_oversized_message_on_a_part_full_bucket_is_refused() {
+        let t0 = Instant::now();
+        let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
+        assert!(bucket.allow(t0, 200_000));
+        // 100 ms refills 150 000 bytes: 250 000 is short of a full burst, so the keyframe waits.
+        assert!(!bucket.allow(t0 + Duration::from_millis(100), 3_000_000));
     }
 
     #[test]

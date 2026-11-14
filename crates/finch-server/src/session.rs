@@ -80,6 +80,8 @@ pub struct SessionManager {
     action_hits: Arc<crate::limits::WindowLimiter>,
     /// Per-participant media limits, set with the router; unset means the defaults.
     media_config: Arc<std::sync::OnceLock<LimitsConfig>>,
+    /// One media budget per user, shared by all of that user's sessions; dropped with the last session.
+    media_budgets: Arc<DashMap<Uuid, Arc<Mutex<MediaRateLimiter>>>>,
 }
 
 impl Default for SessionManager {
@@ -119,18 +121,26 @@ impl SessionManager {
             message_hits: Arc::new(crate::limits::WindowLimiter::default()),
             action_hits: Arc::new(crate::limits::WindowLimiter::default()),
             media_config: Arc::new(std::sync::OnceLock::new()),
+            media_budgets: Arc::new(DashMap::new()),
         }
     }
 
-    /// Set the per-participant media limits (before the listeners accept clients).
+    /// Set the per-participant media limits (before the listeners accept clients). Values that
+    /// would break the media path are clamped here, with a warning.
     pub fn set_media_limits(&self, limits: LimitsConfig) {
-        self.media_config.set(limits).ok();
+        self.media_config.set(limits.validated()).ok();
     }
 
-    /// A fresh media budget for a newly registered participant.
-    pub fn media_budget(&self) -> Arc<Mutex<MediaRateLimiter>> {
-        let limits = self.media_config.get().cloned().unwrap_or_default();
-        Arc::new(Mutex::new(MediaRateLimiter::new(&limits, std::time::Instant::now())))
+    /// The media budget of `user_id`: shared by all of the user's sessions, created with the first one.
+    pub fn media_budget(&self, user_id: Uuid) -> Arc<Mutex<MediaRateLimiter>> {
+        self.media_budgets
+            .entry(user_id)
+            .or_insert_with(|| {
+                let limits = self.media_config.get().cloned().unwrap_or_default();
+                Arc::new(Mutex::new(MediaRateLimiter::new(&limits, std::time::Instant::now())))
+            })
+            .value()
+            .clone()
     }
 
     /// Set how many messages one person may send per window.
@@ -189,6 +199,10 @@ impl SessionManager {
                 } else {
                     entry.remove();
                 }
+            }
+            // The media budget is the user's: it goes when the user's last session does.
+            if !self.sessions.iter().any(|active| active.user_id == session.user_id) {
+                self.media_budgets.remove(&session.user_id);
             }
             if let Some(short_id) = session.current_voice_channel {
                 self.leave_voice(peer_id, short_id);
@@ -408,12 +422,13 @@ mod tests {
         let mut receivers = Vec::new();
         for (peer_id, client_level) in [(1001, 0), (1002, 149), (1003, 150)] {
             let (control_tx, control_rx) = tokio::sync::mpsc::channel(8);
+            let user_id = Uuid::new_v4();
             manager.register_session(ClientSession {
-                token_id: String::new(), peer_id, user_id: Uuid::new_v4(),
+                token_id: String::new(), peer_id, user_id,
                 username: "client".into(), role: "member".into(), current_voice_channel: None,
                 muted: false, deafened: false, sharing_screen: false, server_muted: false,
                 supports_voice_extensions: true, client_level, activity: None, last_activity_update: None,
-                connection: connection.clone(), control_tx, media: manager.media_budget(),
+                connection: connection.clone(), control_tx, media: manager.media_budget(user_id),
             });
             manager.join_voice(peer_id, room);
             receivers.push((client_level, control_rx));
@@ -462,7 +477,7 @@ mod tests {
                 peer_id, user_id, username: "alice".into(), role: "member".into(),
                 current_voice_channel: None, muted: false, deafened: false, sharing_screen: false, server_muted: false,
                 supports_voice_extensions: false, client_level: 0, activity: None, last_activity_update: None,
-                connection: connection.clone(), control_tx, media: manager.media_budget(),
+                connection: connection.clone(), control_tx, media: manager.media_budget(user_id),
             });
         }
         (manager, user_id, server, client, remote)
@@ -473,6 +488,24 @@ mod tests {
         let (manager, user, _server, _client, _remote) = registered_twice().await;
         manager.unregister_session(1001);
         assert_eq!(manager.user_to_peer.get(&user).map(|peer| *peer), Some(1002));
+    }
+
+    #[tokio::test]
+    async fn two_sessions_of_one_user_share_one_media_budget() {
+        let (manager, user, _server, _client, _remote) = registered_twice().await;
+        let first = manager.media_budget(user);
+        assert!(Arc::ptr_eq(&first, &manager.media_budget(user)), "a second session reuses the budget");
+        assert!(!Arc::ptr_eq(&first, &manager.media_budget(Uuid::new_v4())), "other users have their own");
+    }
+
+    #[tokio::test]
+    async fn the_media_budget_is_released_with_the_last_session_of_the_user() {
+        let (manager, user, _server, _client, _remote) = registered_twice().await;
+        let before = manager.media_budget(user);
+        manager.unregister_session(1001);
+        assert!(Arc::ptr_eq(&before, &manager.media_budget(user)), "one session is still open");
+        manager.unregister_session(1002);
+        assert!(!Arc::ptr_eq(&before, &manager.media_budget(user)), "the last session released it");
     }
 
     #[tokio::test]
