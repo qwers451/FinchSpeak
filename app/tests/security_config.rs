@@ -93,7 +93,8 @@ fn webview_keeps_running_when_minimized() {
     assert_eq!(window["backgroundThrottling"], "disabled", "screen share must keep flowing while minimized");
     let args = window["additionalBrowserArgs"].as_str().expect("additionalBrowserArgs");
     // Setting this replaces wry's defaults, so they must be repeated.
-    assert!(args.contains("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"));
+    assert!(args.contains("--disable-features=msWebOOUI,msPdfOOUI,CalculateNativeWinOcclusion"));
+    assert!(!args.contains("msSmartScreenProtection"), "SmartScreen must stay enabled in the WebView");
     for flag in ["--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows"] {
         assert!(args.contains(flag), "missing {flag}");
     }

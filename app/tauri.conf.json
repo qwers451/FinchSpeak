@@ -23,7 +23,7 @@
         "transparent": false,
         "visible": false,
         "backgroundThrottling": "disabled",
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows"
       }
     ],
     "security": {

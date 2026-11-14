@@ -204,6 +204,23 @@ mod tests {
     }
 
     #[test]
+    fn main_window_keeps_smartscreen_and_the_mini_window_inherits_its_arguments() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let windows = config["app"]["windows"].as_array().unwrap();
+        let main = windows.iter().find(|window| window["label"] == "main").unwrap();
+        let args = main["additionalBrowserArgs"].as_str().unwrap();
+        assert_eq!(
+            args,
+            "--disable-features=msWebOOUI,msPdfOOUI,CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows",
+            "SmartScreen (msSmartScreenProtection) must stay enabled in the WebView"
+        );
+        // The mini window has no args of its own: it must copy the main window's, or WebView2 refuses it.
+        let source = include_str!("overlay.rs");
+        assert!(source.contains("window.additional_browser_args.as_deref()"));
+        assert!(source.contains("builder.additional_browser_args(args)"));
+    }
+
+    #[test]
     fn overlay_saved_position_on_a_monitor_is_restored() {
         let screens = [screen(0, 0, 1920, 1080), screen(1920, 0, 2560, 1440)];
         let inside = SavedPosition { x: 2000, y: 100 };

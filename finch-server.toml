@@ -5,6 +5,9 @@ host = "0.0.0.0"
 quic_port = 4433
 http_port = 8443          # HTTPS REST (TLS only)
 tls_dir = "./data/tls"    # persistent certificate; clients pin its fingerprint
+# Browser origins allowed to call the HTTP API (CORS), besides the desktop app's own
+# (tauri://localhost, http(s)://tauri.localhost). Example: ["https://finch.example.com"]. Default: none.
+# allowed_origins = []
 
 [database]
 url = "sqlite://finchspeak.db?mode=rwc"

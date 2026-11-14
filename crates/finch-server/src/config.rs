@@ -230,6 +230,10 @@ pub struct NetworkConfig {
     /// Directory with the persistent TLS certificate and key (`cert.der`, `key.der`).
     #[serde(default = "default_tls_dir")]
     pub tls_dir: String,
+    /// Extra browser origins allowed to call the HTTP API (CORS), e.g. `"https://finch.example.com"`.
+    /// The desktop app's own origins are always allowed. Invalid entries are skipped with a warning.
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
 }
 
 impl Default for NetworkConfig {
@@ -239,6 +243,7 @@ impl Default for NetworkConfig {
             quic_port: default_quic_port(),
             http_port: default_http_port(),
             tls_dir: default_tls_dir(),
+            allowed_origins: Vec::new(),
         }
     }
 }
@@ -485,6 +490,15 @@ impl ServerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn allowed_origins_default_to_empty_and_parse_from_the_server_section() {
+        assert!(ServerConfig::default().server.allowed_origins.is_empty());
+        let config: ServerConfig = toml::from_str("[server]\nallowed_origins = [\"https://finch.example.com\"]\n").unwrap();
+        assert_eq!(config.server.allowed_origins, vec!["https://finch.example.com".to_string()]);
+        let without: ServerConfig = toml::from_str("[server]\nquic_port = 4433\n").unwrap();
+        assert!(without.server.allowed_origins.is_empty());
+    }
 
     #[test]
     fn test_default_config() {
