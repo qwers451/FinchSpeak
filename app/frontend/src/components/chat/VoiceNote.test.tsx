@@ -1,10 +1,11 @@
 import { render } from 'solid-js/web';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DEFAULT_PREFS, setPrefs } from '../../stores/settingsStore';
-import type { AttachmentInfo } from '../../types';
+import type { AttachmentInfo, Channel, VoiceNote } from '../../types';
 import { api } from '../../services/api';
+import { resetChatState, setActiveChannel } from '../../stores/chatStore';
 import { Attachments } from './AttachmentView';
-import { cancelRecording, clock, isVoiceNote, MIN_VOICE_MS, nextSpeed, shouldSendVoiceNote, speedLabel, voiceMessagesAvailable, VoiceNotePlayer, VoiceRecordButton, waveformBars } from './VoiceNote';
+import { beginRecording, cancelRecording, clock, finishRecording, isVoiceNote, MIN_VOICE_MS, nextSpeed, shouldSendVoiceNote, speedLabel, voiceMessagesAvailable, VoiceNotePlayer, VoiceRecordButton, waveformBars } from './VoiceNote';
 
 vi.mock('../../services/api', () => ({
   api: {
@@ -14,6 +15,7 @@ vi.mock('../../services/api', () => ({
     voiceNoteStop: vi.fn(() => Promise.resolve({ bytes: [1, 2], duration_ms: 3000, waveform: new Array(64).fill(0) })),
     voiceNoteCancel: vi.fn(() => Promise.resolve()),
     uploadVoiceNote: vi.fn(() => Promise.resolve({ id: 'a1' })),
+    sendTextMessage: vi.fn(() => Promise.resolve()),
   },
 }));
 
@@ -31,14 +33,29 @@ const voice: AttachmentInfo = {
   duration_ms: 3000, waveform,
 };
 
+const originalChannel: Channel = { id: 'text-a', short_id: 1, name: 'A', channel_type: 'text', position: 0, bitrate_kbps: 64 };
+const otherChannel: Channel = { ...originalChannel, id: 'text-b', short_id: 2, name: 'B' };
+const note: VoiceNote = { bytes: [1, 2], duration_ms: 3000, waveform: new Array(64).fill(0) };
+const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+const lockRecording = async () => {
+  const host = mount(() => <VoiceRecordButton disabled={false} />);
+  host.querySelector<HTMLButtonElement>('.voice-mic')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 200 }));
+  window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 200 }));
+  await flush();
+  return host;
+};
+
 beforeEach(() => {
+  setActiveChannel(originalChannel);
   setPrefs({ ...DEFAULT_PREFS, appearance: { ...DEFAULT_PREFS.appearance, language: 'en' } });
 });
 
-afterEach(() => {
+afterEach(async () => {
   dispose?.();
   dispose = undefined;
   document.body.innerHTML = '';
+  await cancelRecording();
+  resetChatState();
   vi.clearAllMocks();
 });
 
@@ -112,6 +129,7 @@ it('holding the mic and releasing it sends the recording', async () => {
     await vi.advanceTimersByTimeAsync(10);
     expect(api.voiceNoteStop).toHaveBeenCalledTimes(1);
     expect(api.uploadVoiceNote).toHaveBeenCalledTimes(1);
+    expect(api.sendTextMessage).toHaveBeenCalledWith('text-a', '', ['a1'], expect.any(String), undefined);
   } finally {
     await cancelRecording();
     vi.useRealTimers();
@@ -136,4 +154,112 @@ it('leaving the chat while the mic is held cancels the recording instead of send
     await cancelRecording();
     vi.useRealTimers();
   }
+});
+
+
+it('unmounting a tap-locked recording cancels it instead of sending later', async () => {
+  await lockRecording();
+  dispose?.();
+  dispose = undefined;
+  await flush();
+  expect(api.voiceNoteCancel).toHaveBeenCalledTimes(1);
+  await finishRecording();
+  expect(api.voiceNoteStop).not.toHaveBeenCalled();
+  expect(api.sendTextMessage).not.toHaveBeenCalled();
+});
+
+it('switching text channels cancels a locked recording without unmounting the composer', async () => {
+  const host = await lockRecording();
+  setActiveChannel(otherChannel);
+  await flush();
+  expect(api.voiceNoteCancel).toHaveBeenCalledTimes(1);
+  expect(host.querySelector('.voice-mic')).not.toBeNull();
+  await finishRecording();
+  expect(api.sendTextMessage).not.toHaveBeenCalled();
+});
+
+it('switching channels while stopping discards the result before uploading', async () => {
+  let resolveStop!: (value: VoiceNote) => void;
+  vi.mocked(api.voiceNoteStop).mockImplementationOnce(() => new Promise((resolve) => { resolveStop = resolve; }));
+  await lockRecording();
+  const sending = finishRecording();
+  await flush();
+  setActiveChannel(otherChannel);
+  resolveStop(note);
+  await sending;
+  expect(api.uploadVoiceNote).not.toHaveBeenCalled();
+  expect(api.sendTextMessage).not.toHaveBeenCalled();
+});
+
+it('switching channels during upload never sends the old note to the new channel', async () => {
+  let resolveUpload!: (value: AttachmentInfo) => void;
+  vi.mocked(api.uploadVoiceNote).mockImplementationOnce(() => new Promise((resolve) => { resolveUpload = resolve; }));
+  await lockRecording();
+  const sending = finishRecording();
+  await flush();
+  expect(api.uploadVoiceNote).toHaveBeenCalledTimes(1);
+  setActiveChannel(otherChannel);
+  resolveUpload(voice);
+  await sending;
+  expect(api.sendTextMessage).not.toHaveBeenCalled();
+});
+
+it('unmounting during upload prevents the completed upload from sending', async () => {
+  let resolveUpload!: (value: AttachmentInfo) => void;
+  vi.mocked(api.uploadVoiceNote).mockImplementationOnce(() => new Promise((resolve) => { resolveUpload = resolve; }));
+  await lockRecording();
+  const sending = finishRecording();
+  await flush();
+  dispose?.();
+  dispose = undefined;
+  resolveUpload(voice);
+  await sending;
+  expect(api.sendTextMessage).not.toHaveBeenCalled();
+});
+
+it.each(['unmount', 'channel switch'] as const)('cancels a pending native start after %s even after release locked it', async (action) => {
+  let resolveStart!: () => void;
+  vi.mocked(api.voiceNoteStart).mockImplementationOnce(() => new Promise((resolve) => { resolveStart = resolve; }));
+  await lockRecording();
+  if (action === 'unmount') {
+    dispose?.();
+    dispose = undefined;
+  } else setActiveChannel(otherChannel);
+  resolveStart();
+  await flush();
+  expect(api.voiceNoteCancel).toHaveBeenCalledTimes(1);
+  await finishRecording();
+  expect(api.voiceNoteStop).not.toHaveBeenCalled();
+  expect(api.uploadVoiceNote).not.toHaveBeenCalled();
+  expect(api.sendTextMessage).not.toHaveBeenCalled();
+});
+
+
+it('a locked recording can still be sent in its original channel', async () => {
+  const host = await lockRecording();
+  host.querySelector<HTMLButtonElement>('[aria-label="Send voice message"]')!.click();
+  await flush();
+  expect(api.voiceNoteCancel).not.toHaveBeenCalled();
+  expect(api.voiceNoteStop).toHaveBeenCalledTimes(1);
+  expect(api.sendTextMessage).toHaveBeenCalledWith('text-a', '', ['a1'], expect.any(String), undefined);
+});
+
+
+it('a cancelled native stop must finish before another recording can start', async () => {
+  let resolveStop!: (value: VoiceNote) => void;
+  vi.mocked(api.voiceNoteStop).mockImplementationOnce(() => new Promise((resolve) => { resolveStop = resolve; }));
+  await lockRecording();
+  const sending = finishRecording();
+  await flush();
+  await cancelRecording();
+  try {
+    await beginRecording('locked');
+    expect(api.voiceNoteStart).toHaveBeenCalledTimes(1);
+  } finally {
+    resolveStop(note);
+    await sending;
+  }
+  await beginRecording('locked');
+  expect(api.voiceNoteStart).toHaveBeenCalledTimes(2);
+  expect(api.uploadVoiceNote).not.toHaveBeenCalled();
 });
