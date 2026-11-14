@@ -69,6 +69,24 @@ export function discardDraft(channelId: string): void {
   persist(channelId, '');
 }
 
+/** Sign-out: every saved draft of every channel goes, in memory and in localStorage; a pending write is dropped. */
+export function clearAllDrafts(): void {
+  pending = null;
+  clearTimeout(timer);
+  timer = undefined;
+  cache.clear();
+  try {
+    const keys: string[] = [];
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (key?.startsWith(KEY_PREFIX)) keys.push(key);
+    }
+    keys.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    // Storage unavailable: nothing was saved there.
+  }
+}
+
 /** Forget what is held in memory, as after a reload. Only for tests. */
 export function resetDraftCache(): void {
   cache.clear();

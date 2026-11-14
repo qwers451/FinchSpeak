@@ -2,6 +2,7 @@ import { createSignal } from 'solid-js';
 import type { User } from '../types';
 import { api } from '../services/api';
 import { loadChannels, resetChatState } from './chatStore';
+import { clearAllDrafts } from './drafts';
 import { resetSessionState } from './sessionStore';
 import { setActiveVoiceChannel } from './voiceStore';
 import { setAppError } from './notificationStore';
@@ -276,6 +277,7 @@ export async function logoutUser() {
   resetSessionState();
   setActiveVoiceChannel(null);
   resetChatState();
+  clearAllDrafts();
   setPendingTofu(null);
   setPendingMismatch(null);
   setSessionEnded(null);

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { discardDraft, flushDraft, readDraft, resetDraftCache, saveDraftSoon } from './drafts';
+import { clearAllDrafts, discardDraft, flushDraft, readDraft, resetDraftCache, saveDraftSoon } from './drafts';
 
 beforeEach(() => {
   localStorage.clear();
@@ -53,6 +53,22 @@ it('discarding a channel draft cancels its pending write and leaves other channe
   expect(localStorage.getItem('finchspeak.draft.c1')).toBeNull();
   expect(readDraft('c1')).toBe('');
   expect(readDraft('c2')).toBe('kept');
+});
+
+it('clearing all drafts (sign-out) removes every draft key and nothing else, cancelling a pending write', () => {
+  saveDraftSoon('c1', 'a');
+  flushDraft();
+  saveDraftSoon('c2', 'b');
+  flushDraft();
+  saveDraftSoon('c3', 'pending');
+  localStorage.setItem('unrelated', 'kept');
+  clearAllDrafts();
+  flushDraft();
+  expect(localStorage.getItem('finchspeak.draft.c1')).toBeNull();
+  expect(localStorage.getItem('finchspeak.draft.c2')).toBeNull();
+  expect(localStorage.getItem('finchspeak.draft.c3')).toBeNull();
+  expect(localStorage.getItem('unrelated')).toBe('kept');
+  expect(readDraft('c1')).toBe('');
 });
 
 it('a storage that throws is ignored and the draft stays in memory', () => {

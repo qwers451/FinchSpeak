@@ -59,6 +59,7 @@ afterEach(() => {
   dispose?.();
   dispose = undefined;
   document.body.innerHTML = '';
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -288,7 +289,7 @@ it('the jump button appears only after scrolling more than a screen up, and hide
   expect(jumpButton(host)).toBeNull();
 });
 
-it('the jump button counts messages that arrive while scrolled away, and the count clears on jump', async () => {
+it('the jump button counts messages that arrive while scrolled away, and the count clears once the list reaches the bottom', async () => {
   setMessages([msg('m0', bob, 0)]);
   const host = mount();
   const list = host.querySelector<HTMLElement>('.message-list')!;
@@ -310,7 +311,10 @@ it('the jump button counts messages that arrive while scrolled away, and the cou
   jumpButton(host)!.click();
   await flush();
   expect(scrollTo).toHaveBeenCalledWith({ top: 5000, behavior: 'smooth' });
-  expect(jumpLabel()).toBe('Jump to latest');
+  expect(jumpLabel()).toBe('2 new'); // the count stays until the list actually reaches the bottom
+  scrollList(list, 4600);
+  await flush();
+  expect(jumpButton(host)).toBeNull();
 });
 
 it('the count also clears when the reader scrolls back to the bottom by hand', async () => {
@@ -513,9 +517,10 @@ it('each channel keeps its own draft: switching away and back restores it', asyn
 });
 
 it('a draft survives a reload and is stored under the channel id', async () => {
+  vi.useFakeTimers();
   const host = mount();
   type(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!, 'keep me');
-  await new Promise((resolve) => setTimeout(resolve, 320));
+  await vi.advanceTimersByTimeAsync(320);
   expect(localStorage.getItem('finchspeak.draft.c1')).toBe('keep me');
   dispose?.();
   dispose = undefined;
@@ -526,34 +531,37 @@ it('a draft survives a reload and is stored under the channel id', async () => {
 });
 
 it('sending clears the draft of the channel it was sent from and no other', async () => {
+  vi.useFakeTimers();
   vi.spyOn(api, 'sendTextMessage').mockResolvedValue();
   localStorage.setItem('finchspeak.draft.c2', 'later');
   const host = mount();
   const box = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
   type(box, 'now');
   press(box, 'Enter');
-  await new Promise((resolve) => setTimeout(resolve, 320));
+  await vi.advanceTimersByTimeAsync(320);
   expect(localStorage.getItem('finchspeak.draft.c1')).toBeNull();
   expect(localStorage.getItem('finchspeak.draft.c2')).toBe('later');
 });
 
 it('an emptied draft is removed from storage rather than kept', async () => {
+  vi.useFakeTimers();
   const host = mount();
   const box = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
   type(box, 'abc');
-  await new Promise((resolve) => setTimeout(resolve, 320));
+  await vi.advanceTimersByTimeAsync(320);
   expect(localStorage.getItem('finchspeak.draft.c1')).toBe('abc');
   type(box, '');
-  await new Promise((resolve) => setTimeout(resolve, 320));
+  await vi.advanceTimersByTimeAsync(320);
   expect(localStorage.getItem('finchspeak.draft.c1')).toBeNull();
 });
 
 it('a storage that refuses writes does not stop typing', async () => {
+  vi.useFakeTimers();
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
   const host = mount();
   const box = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
   type(box, 'still typing');
-  await new Promise((resolve) => setTimeout(resolve, 320));
+  await vi.advanceTimersByTimeAsync(320);
   expect(box.value).toBe('still typing');
 });
 
@@ -562,4 +570,68 @@ it('the jump button position follows the composer through a CSS variable with it
   await flush();
   const main = host.querySelector<HTMLElement>('main')!;
   expect(main.style.getPropertyValue('--composer-h')).toMatch(/^\d+(\.\d+)?px$/);
+});
+
+it('Up with the caret away from the start of the field does nothing', async () => {
+  setMessages([msg('a', me, 0)]);
+  const host = mount();
+  const box = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+  type(box, 'abc');
+  box.setSelectionRange(1, 1);
+  press(box, 'ArrowUp');
+  await flush();
+  expect(host.querySelector('.edit-box')).toBeNull();
+  expect(box.value).toBe('abc');
+});
+
+it('Up in an open mention list moves through the list and never opens an edit', async () => {
+  setMessages([msg('a', me, 0)]);
+  const host = mount();
+  const box = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+  type(box, 'ping @da');
+  await flush();
+  expect(host.querySelector('[role="listbox"]')).not.toBeNull();
+  press(box, 'ArrowUp');
+  await flush();
+  expect(host.querySelector('.edit-box')).toBeNull();
+  expect(host.querySelector('[role="listbox"]')).not.toBeNull();
+});
+
+it('Up during an IME composition does nothing, and Up with the key code 229 does nothing', async () => {
+  setMessages([msg('a', me, 0)]);
+  const host = mount();
+  const box = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+  press(box, 'ArrowUp', { isComposing: true });
+  await flush();
+  expect(host.querySelector('.edit-box')).toBeNull();
+  const composing = new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true });
+  Object.defineProperty(composing, 'keyCode', { value: 229 });
+  box.dispatchEvent(composing);
+  await flush();
+  expect(host.querySelector('.edit-box')).toBeNull();
+  press(box, 'ArrowUp'); // the control: a plain Up does open the edit
+  await flush();
+  expect(host.querySelector('.edit-box')).not.toBeNull();
+});
+
+it('after Up opens the editor, the edited message is scrolled into view', async () => {
+  const scroll = vi.fn();
+  Object.defineProperty(Element.prototype, 'scrollIntoView', { value: scroll, configurable: true });
+  setMessages([msg('a', me, 0), msg('b', bob, 60), msg('c', me, 120)]);
+  const host = mount();
+  press(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!, 'ArrowUp');
+  await flush();
+  expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
+  expect(scroll.mock.contexts).toContain(host.querySelector('[data-message-id="c"]'));
+});
+
+it('switching channels writes the draft being typed to the old channel key at once', async () => {
+  vi.useFakeTimers();
+  const other: Channel = { id: 'c2', short_id: 2, name: 'random', channel_type: 'text', position: 1, bitrate_kbps: 64 };
+  const host = mount();
+  type(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!, 'half');
+  setActiveChannel(other);
+  await vi.advanceTimersByTimeAsync(0); // no debounce wait: the write happens on the switch itself
+  expect(localStorage.getItem('finchspeak.draft.c1')).toBe('half');
+  expect(localStorage.getItem('finchspeak.draft.c2')).toBeNull();
 });

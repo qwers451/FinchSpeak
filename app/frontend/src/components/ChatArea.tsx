@@ -90,9 +90,9 @@ export function ChatArea() {
   const measure = () => { if (list) setAway(list.scrollHeight - list.scrollTop - list.clientHeight > list.clientHeight); };
   const toBottom = () => { if (list) list.scrollTop = list.scrollHeight; setUnseen(0); measure(); };
   /** The jump button: smooth, or instant when the reader asked for less motion. */
+  // The count clears when the list reaches the bottom (onScroll), not on click: it stays while the jump runs.
   const jumpToLatest = () => {
     if (!list) return;
-    setUnseen(0);
     list.scrollTo({ top: list.scrollHeight, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
   };
 
@@ -192,7 +192,6 @@ export function ChatArea() {
     const files = Array.from(event.dataTransfer?.files ?? []);
     if (files.length > 0) void attachFiles(files);
   };
-  // A drop outside the chat must not navigate the window to the file.
   // The jump button sits above the composer by the composer's real height (reply bar, attachments, long text).
   onMount(() => {
     const main = root;
@@ -206,6 +205,7 @@ export function ChatArea() {
     onCleanup(() => observer.disconnect());
   });
 
+  // A drop outside the chat must not navigate the window to the file.
   onMount(() => {
     const block = (event: DragEvent) => { if (hasFiles(event)) event.preventDefault(); };
     window.addEventListener('dragover', block);

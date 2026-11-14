@@ -108,7 +108,8 @@ export function Composer() {
       if (event.key === 'Escape') { event.preventDefault(); setDismissedAt(mention()!.start); return; }
     }
     // Up in an empty field, caret at the start, no modifier, no picker open: edit my last message here.
-    if (event.key === 'ArrowUp' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
+    // Not while an IME is composing text: its Up chooses a candidate, not a message to edit.
+    if (event.key === 'ArrowUp' && !event.isComposing && event.keyCode !== 229 && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
       && text() === '' && box?.selectionStart === 0 && box?.selectionEnd === 0 && !emoji() && list.length === 0) {
       const last = lastOwnMessage();
       if (last) {

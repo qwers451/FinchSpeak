@@ -65,7 +65,11 @@ export function MessageItem(props: Props) {
   createEffect(() => {
     if (editRequest() !== msg().id) return;
     setEditRequest(null);
-    if (mine() && stored()) startEdit();
+    if (mine() && stored()) {
+      startEdit();
+      // The edit box takes focus on render; bring the whole row into view as well.
+      queueMicrotask(() => row?.scrollIntoView({ block: 'nearest' }));
+    }
   });
 
   const Tools = () => (
