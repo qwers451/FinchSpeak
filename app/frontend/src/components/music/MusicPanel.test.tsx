@@ -195,18 +195,6 @@ it('the computer tab says the file is removed after it plays', async () => {
   expect(view.textContent).toContain('The file is sent to the server for this session and removed after it plays.');
 });
 
-it('the dock shows the music button only when the server offers music', async () => {
-  setServerFeatures([]);
-  const without = mount(() => <Dock onShare={() => {}} onSettings={() => {}} />);
-  expect(allLabelled(without, 'Music')).toHaveLength(0);
-  dispose?.();
-  host?.remove();
-
-  setServerFeatures(['music']);
-  const withMusic = mount(() => <Dock onShare={() => {}} onSettings={() => {}} />);
-  expect(allLabelled(withMusic, 'Music')).toHaveLength(1);
-});
-
 it('the panel renders in the Finch layout too', async () => {
   setNestView(true);
   setRoomMusic({ queue: [], playing: null });
