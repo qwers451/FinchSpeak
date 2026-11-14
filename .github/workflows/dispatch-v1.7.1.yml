@@ -1,0 +1,51 @@
+name: Dispatch FinchSpeak v1.7.1 release
+
+on:
+  push:
+    branches:
+      - release/publish-v1.7.1
+    paths:
+      - .github/workflows/dispatch-v1.7.1.yml
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: publish-v1.7.1
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify and create the release tag from the tested main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='870fbae0f3b30d9be1e030b163a8426896141d9d'
+          current="$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)"
+          if [ "$current" != "$expected" ]; then
+            echo "main moved: expected $expected, got $current. Not publishing." >&2
+            exit 1
+          fi
+          if existing="$(gh api "repos/$GH_REPO/git/ref/tags/v1.7.1" --jq .object.sha 2>/dev/null)"; then
+            test "$existing" = "$expected" || { echo "v1.7.1 points to unexpected SHA $existing" >&2; exit 1; }
+            echo "v1.7.1 already points at expected commit"
+          else
+            gh api "repos/$GH_REPO/git/refs" --method POST -f ref=refs/tags/v1.7.1 -f sha="$expected" >/dev/null
+            echo "Created v1.7.1 at $expected"
+          fi
+      - name: Dispatch the existing Windows release and Linux verification workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --repo "$GH_REPO" --ref v1.7.1
+          gh workflow run server-linux.yml --repo "$GH_REPO" --ref v1.7.1
+          echo "Release and Server Linux dispatched for v1.7.1"
