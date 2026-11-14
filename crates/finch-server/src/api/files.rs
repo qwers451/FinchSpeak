@@ -224,10 +224,7 @@ pub async fn upload_file_handler(
 
         // Images get a preview; anything that does not decode stays a plain file.
         let preview = if content_type.starts_with("image/") && received <= THUMBNAIL_MAX_BYTES {
-            match fs::read(&file_path).await {
-                Ok(bytes) => crate::chat::make_thumbnail_gated(bytes).await,
-                Err(_) => None,
-            }
+            crate::chat::make_thumbnail_from_file_gated(file_path.clone()).await
         } else {
             None
         };

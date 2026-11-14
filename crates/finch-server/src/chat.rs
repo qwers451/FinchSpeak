@@ -269,6 +269,20 @@ pub async fn make_thumbnail_gated(data: Vec<u8>) -> Option<(u32, u32, Vec<u8>)> 
     .flatten()
 }
 
+/// Like `make_thumbnail_gated`, but the image is read from `path` inside the gated job: a waiting
+/// upload holds no image in memory, only the one job that has the permit does.
+pub async fn make_thumbnail_from_file_gated(path: std::path::PathBuf) -> Option<(u32, u32, Vec<u8>)> {
+    let permit = THUMB_GATE.acquire().await.ok()?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let data = std::fs::read(path).ok()?;
+        make_thumbnail(&data)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,5 +368,28 @@ mod thumbnail_limit_tests {
         let mut png = std::io::Cursor::new(Vec::new());
         picture.write_to(&mut png, image::ImageFormat::Png).unwrap();
         assert!(make_thumbnail_gated(png.into_inner()).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn the_thumbnail_waits_for_its_turn_before_reading_the_file() {
+        let picture = image::RgbImage::from_pixel(100, 100, image::Rgb([1, 2, 3]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        picture.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pic.png");
+        std::fs::write(&path, png.into_inner()).unwrap();
+        // Another thumbnail holds the only permit: this one must wait without having read the file.
+        let held = THUMB_GATE.acquire().await.unwrap();
+        let waiting = tokio::spawn(make_thumbnail_from_file_gated(path.clone()));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        std::fs::remove_file(&path).unwrap();
+        drop(held);
+        assert!(waiting.await.unwrap().is_none(), "the file was read before the permit was taken");
+        // And a present file does produce a thumbnail.
+        let picture = image::RgbImage::from_pixel(10, 10, image::Rgb([1, 2, 3]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        picture.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        std::fs::write(&path, png.into_inner()).unwrap();
+        assert!(make_thumbnail_from_file_gated(path).await.is_some());
     }
 }
