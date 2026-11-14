@@ -3,9 +3,8 @@
 //! Validates incoming datagrams and uni-streams, checks room membership,
 //! rewrites `sender_peer_id` to prevent spoofing, and fans out media to subscribers.
 
-use std::collections::HashMap;
-use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
@@ -15,34 +14,46 @@ use crate::health::TRAFFIC;
 use crate::limits::MediaRateLimiter;
 use crate::session::SessionManager;
 
-/// A peer whose datagrams go to the wrong voice channel is logged at most once per this interval.
+/// A session whose datagrams go to the wrong voice channel is logged at most once per this interval.
 const WRONG_CHANNEL_LOG_INTERVAL: Duration = Duration::from_secs(10);
 
-/// Once this many peers are tracked, peers whose interval has passed are dropped from the table.
-const PRUNE_AT: usize = 1024;
-
-/// Rate-limits log lines that a single peer can produce for every datagram it sends.
-#[derive(Default)]
-pub struct LogThrottle {
-    last_logged: Mutex<HashMap<u32, Instant>>,
+/// Rate-limits a log line that one session can produce for every datagram it sends. It lives on the
+/// session (`ClientSession::wrong_channel_warn`), so it is dropped together with the session: there is
+/// no table of peers to prune.
+#[derive(Debug)]
+pub struct WarnThrottle {
+    origin: Instant,
+    /// Time of the last logged line in milliseconds after `origin`, plus one; 0 when nothing was logged.
+    last_logged_plus_one: AtomicU64,
 }
 
-impl LogThrottle {
-    /// `true` when this peer may log now (never logged, or the interval has passed). A `true`
-    /// answer starts the peer's interval.
-    pub fn allow(&self, peer_id: u32, now: Instant) -> bool {
-        let mut last_logged = self.last_logged.lock().unwrap_or_else(PoisonError::into_inner);
-        if last_logged
-            .get(&peer_id)
-            .is_some_and(|logged| now.saturating_duration_since(*logged) < WRONG_CHANNEL_LOG_INTERVAL)
-        {
-            return false;
+impl Default for WarnThrottle {
+    fn default() -> Self {
+        Self { origin: Instant::now(), last_logged_plus_one: AtomicU64::new(0) }
+    }
+}
+
+impl WarnThrottle {
+    /// `true` when a line may be logged now (none logged yet, or `interval` has passed since the last
+    /// one). A `true` answer starts the next interval. Lock-free: safe on the datagram path.
+    pub fn allow(&self, now: Instant, interval: Duration) -> bool {
+        let now_ms = u64::try_from(now.saturating_duration_since(self.origin).as_millis()).unwrap_or(u64::MAX);
+        let interval_ms = u64::try_from(interval.as_millis()).unwrap_or(u64::MAX);
+        let mut stored = self.last_logged_plus_one.load(Ordering::Relaxed);
+        loop {
+            if stored != 0 && now_ms < (stored - 1).saturating_add(interval_ms) {
+                return false;
+            }
+            match self.last_logged_plus_one.compare_exchange_weak(
+                stored,
+                now_ms.saturating_add(1),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return true,
+                Err(actual) => stored = actual,
+            }
         }
-        if last_logged.len() >= PRUNE_AT {
-            last_logged.retain(|_, logged| now.saturating_duration_since(*logged) < WRONG_CHANNEL_LOG_INTERVAL);
-        }
-        last_logged.insert(peer_id, now);
-        true
     }
 }
 
@@ -87,12 +98,11 @@ fn may_send(media_type: MediaType, sharing: bool, server_muted: bool) -> bool {
 #[derive(Clone)]
 pub struct SfuRouter {
     sessions: SessionManager,
-    wrong_channel_log: Arc<LogThrottle>,
 }
 
 impl SfuRouter {
     pub fn new(sessions: SessionManager) -> Self {
-        Self { sessions, wrong_channel_log: Arc::new(LogThrottle::default()) }
+        Self { sessions }
     }
 
     /// Route an incoming media datagram. Taken by value so the sender-id rewrite can reuse its buffer.
@@ -131,7 +141,12 @@ impl SfuRouter {
 
         // 1. Validate that the sender is in the room specified in the header
         if voice_channel != Some(header.channel_id) {
-            if self.wrong_channel_log.allow(auth_peer_id, Instant::now()) {
+            let may_log = self
+                .sessions
+                .sessions
+                .get(&auth_peer_id)
+                .is_some_and(|s| s.wrong_channel_warn.allow(Instant::now(), WRONG_CHANNEL_LOG_INTERVAL));
+            if may_log {
                 tracing::warn!(
                     "Peer {auth_peer_id} attempted to send to channel {} but is in {:?}",
                     header.channel_id,
@@ -264,26 +279,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wrong_channel_warning_is_logged_once_per_peer_per_interval() {
-        let throttle = LogThrottle::default();
-        let start = Instant::now();
-        assert!(throttle.allow(7, start), "the first drop is logged");
-        assert!(!throttle.allow(7, start + Duration::from_secs(1)), "a flood is not logged again");
-        assert!(!throttle.allow(7, start + Duration::from_secs(9)), "still inside the interval");
-        assert!(throttle.allow(8, start + Duration::from_secs(1)), "another peer is logged on its own");
-        assert!(throttle.allow(7, start + Duration::from_secs(10)), "logged again after the interval");
+    fn wrong_channel_warning_is_logged_once_per_interval() {
+        let throttle = WarnThrottle::default();
+        let start = throttle.origin;
+        let interval = WRONG_CHANNEL_LOG_INTERVAL;
+        assert!(throttle.allow(start, interval), "the first drop is logged");
+        assert!(!throttle.allow(start + Duration::from_secs(1), interval), "a flood is not logged again");
+        assert!(!throttle.allow(start + Duration::from_millis(9_999), interval), "still inside the interval");
+        assert!(throttle.allow(start + Duration::from_secs(10), interval), "logged again after the interval");
+        assert!(!throttle.allow(start + Duration::from_secs(11), interval), "and throttled again");
     }
 
     #[test]
-    fn throttle_table_stays_bounded_when_many_peers_flood_once() {
-        let throttle = LogThrottle::default();
-        let start = Instant::now();
-        for peer in 0..(PRUNE_AT as u32 * 3) {
-            assert!(throttle.allow(peer, start));
-        }
-        let later = start + WRONG_CHANNEL_LOG_INTERVAL;
-        assert!(throttle.allow(0, later));
-        let tracked = throttle.last_logged.lock().unwrap().len();
-        assert!(tracked <= PRUNE_AT + 1, "tracked peers: {tracked}");
+    fn each_session_has_its_own_throttle() {
+        let first = WarnThrottle::default();
+        let second = WarnThrottle::default();
+        let now = first.origin + Duration::from_secs(1);
+        assert!(first.allow(now, WRONG_CHANNEL_LOG_INTERVAL));
+        assert!(second.allow(now, WRONG_CHANNEL_LOG_INTERVAL), "another session is logged on its own");
     }
 }

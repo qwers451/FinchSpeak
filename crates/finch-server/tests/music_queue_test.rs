@@ -72,6 +72,7 @@ impl Room {
                 connection: local.clone(),
                 control_tx: tx,
                 media: sessions.media_budget(user_id),
+                wrong_channel_warn: Default::default(),
             });
         }
         Ok(Self {

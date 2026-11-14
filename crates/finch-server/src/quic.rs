@@ -295,6 +295,7 @@ pub async fn handle_connection(
         connection: conn.clone(),
         control_tx: control_tx.clone(),
         media: sessions.media_budget(user_id),
+        wrong_channel_warn: Default::default(),
     };
     sessions.register_session(session);
     initial_state.activities = sessions.activities();

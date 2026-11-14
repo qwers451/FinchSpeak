@@ -37,6 +37,8 @@ pub struct ClientSession {
     pub control_tx: Sender<ServerMessage>,
     /// Media this participant may send per second; checked for every datagram it sends (see `sfu.rs`).
     pub media: Arc<Mutex<MediaRateLimiter>>,
+    /// Throttles the wrong-channel warning for this session's datagrams (see `sfu.rs`).
+    pub wrong_channel_warn: Arc<crate::sfu::WarnThrottle>,
 }
 
 /// A voice room tracking active participants.
@@ -574,6 +576,7 @@ mod tests {
                 muted: false, deafened: false, sharing_screen: false, server_muted: false,
                 supports_voice_extensions: true, client_level, activity: None, last_activity_update: None,
                 connection: connection.clone(), control_tx, media: manager.media_budget(user_id),
+                wrong_channel_warn: Default::default(),
             });
             manager.join_voice(peer_id, room);
             receivers.push((client_level, control_rx));
@@ -623,6 +626,7 @@ mod tests {
                 current_voice_channel: None, muted: false, deafened: false, sharing_screen: false, server_muted: false,
                 supports_voice_extensions: false, client_level: 0, activity: None, last_activity_update: None,
                 connection: connection.clone(), control_tx, media: manager.media_budget(user_id),
+                wrong_channel_warn: Default::default(),
             });
         }
         (manager, user_id, server, client, remote)
