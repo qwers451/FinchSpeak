@@ -11,6 +11,7 @@ use axum::Json;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use std::sync::Arc;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
@@ -88,7 +89,7 @@ pub struct ArcSharedState {
     /// Every sign-in attempt from one address, whether or not it is right.
     pub login_ip_hits: std::sync::Arc<crate::limits::WindowLimiter>,
     /// Bounds how many Argon2 hashes or checks run at once (`[limits] auth_hash_concurrency`).
-    pub auth_hash_gate: std::sync::Arc<Semaphore>,
+    pub auth_hash_gate: Arc<Semaphore>,
     pub register_hits: std::sync::Arc<crate::limits::WindowLimiter>,
     pub avatar_hits: std::sync::Arc<crate::limits::WindowLimiter>,
 }
@@ -114,29 +115,36 @@ static VERIFY_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicU
 /// Runs one Argon2 job on the blocking pool, holding one of the `gate` permits while it runs, so the
 /// number of hashes in memory at once is bounded. Waiting for a permit is normal, not a refusal.
 /// A panicked or cancelled job is a 500, never a panic here.
-async fn run_gated<T: Send + 'static>(gate: &Semaphore, job: impl FnOnce() -> T + Send + 'static) -> Result<T, ServerError> {
-    let _permit = gate
-        .acquire()
+///
+/// The permit moves into the blocking job and is released only when the job ends. If the caller
+/// stops waiting (its request was dropped), the job keeps running and keeps its permit.
+async fn run_gated<T: Send + 'static>(gate: &Arc<Semaphore>, job: impl FnOnce() -> T + Send + 'static) -> Result<T, ServerError> {
+    let permit = gate
+        .clone()
+        .acquire_owned()
         .await
         .map_err(|_| ServerError::Internal("password gate is closed".to_string()))?;
-    tokio::task::spawn_blocking(job)
-        .await
-        .map_err(|e| ServerError::Internal(format!("password task did not finish: {e}")))
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        job()
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("password task did not finish: {e}")))
 }
 
 /// Hash a password using Argon2id. Runs on the blocking pool, within the gate.
-pub async fn hash_password(gate: &Semaphore, password: String) -> Result<String, ServerError> {
+pub async fn hash_password(gate: &Arc<Semaphore>, password: String) -> Result<String, ServerError> {
     run_gated(gate, move || hash_password_blocking(&password)).await?
 }
 
 /// Verify a password against an Argon2id hash. Runs on the blocking pool, within the gate.
-pub async fn verify_password(gate: &Semaphore, password: String, hash: String) -> Result<bool, ServerError> {
+pub async fn verify_password(gate: &Arc<Semaphore>, password: String, hash: String) -> Result<bool, ServerError> {
     run_gated(gate, move || verify_password_blocking(&password, &hash)).await
 }
 
 /// Check a password against the dummy hash, for a login that does not exist. The dummy hash is
 /// first made inside the blocking job, so no Argon2 work ever runs on an async worker.
-async fn verify_unknown_login(gate: &Semaphore, password: String) -> Result<(), ServerError> {
+async fn verify_unknown_login(gate: &Arc<Semaphore>, password: String) -> Result<(), ServerError> {
     run_gated(gate, move || -> Result<(), ServerError> {
         let hash = dummy_hash()?;
         verify_password_blocking(&password, hash);
@@ -832,7 +840,7 @@ mod login_tests {
 
     async fn state_with_alice() -> ArcSharedState {
         let pool = crate::db::init_db("sqlite::memory:").await.expect("database");
-        let gate = Semaphore::new(2);
+        let gate = Arc::new(Semaphore::new(2));
         let hash = hash_password(&gate, "password_123".to_string()).await.expect("hash");
         sqlx::query(
             "INSERT INTO users (id, username, display_name, password_hash, role, status, created_at) VALUES (?, 'alice', 'alice', ?, 'member', 'offline', 0)",
@@ -850,7 +858,7 @@ mod login_tests {
             register_hits: Default::default(),
             avatar_hits: Default::default(),
             login_ip_hits: Default::default(),
-            auth_hash_gate: std::sync::Arc::new(Semaphore::new(2)),
+            auth_hash_gate: Arc::new(Semaphore::new(2)),
         }
     }
 
@@ -899,15 +907,15 @@ mod login_tests {
 
     #[tokio::test]
     async fn a_panicking_hash_job_is_an_internal_error_not_a_panic() {
-        let gate = Semaphore::new(1);
+        let gate = Arc::new(Semaphore::new(1));
         let result = run_gated(&gate, || -> u8 { panic!("hash job failed") }).await;
         assert!(matches!(result, Err(ServerError::Internal(_))));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn one_permit_runs_hash_jobs_one_after_another() {
-        let gate = std::sync::Arc::new(Semaphore::new(1));
-        let spans = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let gate = Arc::new(Semaphore::new(1));
+        let spans = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut tasks = Vec::new();
         for _ in 0..2 {
             let gate = gate.clone();
@@ -928,5 +936,35 @@ mod login_tests {
         spans.sort_by_key(|span| span.0);
         assert_eq!(spans.len(), 2);
         assert!(spans[1].0 >= spans[0].1, "the second job started before the first finished");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_dropped_request_keeps_its_permit_until_its_hash_finishes() {
+        let gate = Arc::new(Semaphore::new(1));
+        let a_end = Arc::new(std::sync::Mutex::new(None::<Instant>));
+        let b_start = Arc::new(std::sync::Mutex::new(None::<Instant>));
+        let a = tokio::spawn({
+            let gate = gate.clone();
+            let a_end = a_end.clone();
+            async move {
+                run_gated(&gate, move || {
+                    std::thread::sleep(Duration::from_millis(300));
+                    *a_end.lock().expect("a_end") = Some(Instant::now());
+                })
+                .await
+            }
+        });
+        // Let job A reach the blocking pool, then drop the request that started it.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        a.abort();
+        let b = b_start.clone();
+        run_gated(&gate, move || {
+            *b.lock().expect("b_start") = Some(Instant::now());
+        })
+        .await
+        .expect("job B");
+        let a_done = a_end.lock().expect("a_end").expect("job A finished before B was allowed");
+        let b_began = b_start.lock().expect("b_start").expect("job B ran");
+        assert!(b_began >= a_done, "job B started while job A's hash was still running");
     }
 }
