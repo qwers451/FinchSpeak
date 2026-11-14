@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
 import { currentUser } from '../../stores/authStore';
-import { deleteMessage, discardFailed, editMessage, MAX_MESSAGE_CHARS, messages, retryMessage, toggleReaction } from '../../stores/chatStore';
+import { deleteMessage, discardFailed, editMessage, editRequest, MAX_MESSAGE_CHARS, messages, retryMessage, setEditRequest, toggleReaction } from '../../stores/chatStore';
 import { isMentioned } from '../../stores/activityStore';
 import { knownUsers } from '../../stores/sessionStore';
 import type { Message } from '../../types';
@@ -61,6 +61,12 @@ export function MessageItem(props: Props) {
     if (save && text.trim() && text.trim() !== msg().content) await editMessage(msg().id, text);
   };
   const copy = () => void navigator.clipboard?.writeText(msg().content);
+  // The composer's Up key asks for my last message: open it exactly as the Edit button does.
+  createEffect(() => {
+    if (editRequest() !== msg().id) return;
+    setEditRequest(null);
+    if (mine() && stored()) startEdit();
+  });
 
   const Tools = () => (
     <div class="hover-tools" role="toolbar" aria-label={t('Message actions')}>

@@ -99,7 +99,7 @@ export const ru: Readonly<Record<string, string>> = {
   'Join the flock': 'Присоединиться к сообществу', 'Welcome back': 'С возвращением', 'Create your account on this server.': 'Создайте аккаунт на этом сервере.', 'Sign in to continue to your server.': 'Войдите, чтобы подключиться к серверу.',
   'Stay signed in': 'Не выходить из аккаунта', 'Retry': 'Повторить', 'Already have an account?': 'Уже есть аккаунт?', 'New here?': 'Впервые здесь?', 'Sign in': 'Войти', 'Create an account': 'Создать аккаунт', 'Encrypted with TLS · certificate pinned on first use': 'Зашифровано по TLS · сертификат закрепляется при первом подключении',
   'Welcome to #{channel}!': 'Добро пожаловать в #{channel}!', 'This is the start of the conversation. Say hello — someone is always listening.': 'Это начало переписки. Поздоровайтесь — вас услышат.',
-  'New messages': 'Новые сообщения', 'Drop files to attach': 'Перетащите файлы для отправки', 'Up to 10 files, 10 MB each': 'До 10 файлов размером до 10 МБ каждый',
+  'New messages': 'Новые сообщения', 'Jump to latest': 'К последним', 'Drop files to attach': 'Перетащите файлы для отправки', 'Up to 10 files, 10 MB each': 'До 10 файлов размером до 10 МБ каждый',
   'Starting FinchSpeak…': 'Запуск FinchSpeak…', 'Online — {count}': 'В сети — {count}', 'Admins — {count}': 'Администраторы — {count}', 'Moderators — {count}': 'Модераторы — {count}', 'Offline — {count}': 'Не в сети — {count}', 'Save': 'Сохранить', 'Create': 'Создать',
   'Reconnecting… try {attempt}, next one in {seconds} s': 'Повторное подключение… попытка {attempt}, следующая через {seconds} с', 'Reconnecting…': 'Повторное подключение…', 'Could not reconnect': 'Не удалось восстановить соединение', 'Connection lost': 'Соединение потеряно', 'connection lost': 'Связь потеряна', 'Retry now': 'Повторить сейчас',
   'Messages': 'Сообщения', 'Loading older messages…': 'Загрузка старых сообщений…', 'select-channel': 'выбрать канал',
@@ -267,6 +267,7 @@ export const ru: Readonly<Record<string, string>> = {
 /** Russian plural forms, keyed by the English `other` form that `plural()` is called with. */
 export const ruPlurals: Readonly<Record<string, Partial<Record<Intl.LDMLPluralRule, string>> & { other: string }>> = {
   '{count} new messages': { one: '{count} новое сообщение', few: '{count} новых сообщения', many: '{count} новых сообщений', other: '{count} новых сообщения' },
+  '{count} new': { one: '{count} новое', few: '{count} новых', many: '{count} новых', other: '{count} новых' },
 };
 const pluralRules = { ru: new Intl.PluralRules('ru-RU'), en: new Intl.PluralRules('en-GB') };
 

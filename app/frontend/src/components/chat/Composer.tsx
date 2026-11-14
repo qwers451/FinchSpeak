@@ -1,7 +1,8 @@
-import { createMemo, createSignal, For, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from 'solid-js';
 import { notifyTyping } from '../../stores/activityStore';
 import { attachFiles, formatSize, pendingFiles, removePending, retryUpload, takePending } from '../../stores/attachmentStore';
-import { activeChannel, MAX_MESSAGE_CHARS, replyingTo, sendMessage, setReplyingTo } from '../../stores/chatStore';
+import { activeChannel, MAX_MESSAGE_CHARS, messages, replyingTo, sendMessage, setEditRequest, setReplyingTo } from '../../stores/chatStore';
+import { discardDraft, flushDraft, readDraft, saveDraftSoon } from '../../stores/drafts';
 import { connectionStatus, knownUsers, serverFeatures } from '../../stores/sessionStore';
 import { currentUser } from '../../stores/authStore';
 import { Avatar, Button, Icon } from '../../ui';
@@ -18,7 +19,7 @@ export function mentionAt(text: string, caret: number): { start: number; query: 
 }
 
 export function Composer() {
-  const [text, setText] = createSignal('');
+  const [text, setText] = createSignal(readDraft(activeChannel()?.id ?? ''));
   const [caret, setCaret] = createSignal(0);
   const [emoji, setEmoji] = createSignal(false);
   const [selected, setSelected] = createSignal(0);
@@ -46,10 +47,26 @@ export function Composer() {
       .slice(0, 6);
   });
 
+  // Every change of the field is a draft of the channel it was typed in.
+  const saveText = (value: string) => {
+    setText(value);
+    const channelId = activeChannel()?.id;
+    if (channelId) saveDraftSoon(channelId, value);
+  };
+
+  // Each text channel has its own draft. Switching writes the one being left and loads the one being entered.
+  createEffect(on(() => activeChannel()?.id ?? null, (channelId) => {
+    flushDraft();
+    setText(channelId ? readDraft(channelId) : '');
+    setCaret(0);
+  }, { defer: true }));
+  // Opening a voice room unmounts the chat: keep what was typed.
+  onCleanup(() => flushDraft());
+
   const syncCaret = () => setCaret(box?.selectionStart ?? text().length);
   const insertAt = (start: number, end: number, value: string) => {
     const next = text().slice(0, start) + value + text().slice(end);
-    setText(next);
+    saveText(next);
     queueMicrotask(() => {
       if (!box) return;
       box.focus();
@@ -66,10 +83,20 @@ export function Composer() {
 
   const submit = async () => {
     if (!canSend()) return;
+    const channelId = activeChannel()?.id ?? null;
     const body = text();
     setText('');
     setCaret(0);
+    // Only the draft of the channel this was sent from goes; another channel's draft stays.
+    if (channelId) discardDraft(channelId);
     await sendMessage(body.trim() || '📎', takePending());
+  };
+
+  /** My last stored message in this channel, the one Up in an empty composer edits. */
+  const lastOwnMessage = () => {
+    const me = currentUser()?.id;
+    const channelId = activeChannel()?.id;
+    return [...messages()].reverse().find((message) => message.author_id === me && message.channel_id === channelId && !message.state);
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -79,6 +106,16 @@ export function Composer() {
       if (event.key === 'ArrowUp') { event.preventDefault(); setSelected((selected() - 1 + list.length) % list.length); return; }
       if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); pickMention(list[selected()].username); return; }
       if (event.key === 'Escape') { event.preventDefault(); setDismissedAt(mention()!.start); return; }
+    }
+    // Up in an empty field, caret at the start, no modifier, no picker open: edit my last message here.
+    if (event.key === 'ArrowUp' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
+      && text() === '' && box?.selectionStart === 0 && box?.selectionEnd === 0 && !emoji() && list.length === 0) {
+      const last = lastOwnMessage();
+      if (last) {
+        event.preventDefault();
+        setEditRequest(last.id);
+      }
+      return;
     }
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
@@ -164,7 +201,7 @@ export function Composer() {
             aria-label={t('Message')}
             placeholder={offline() ? t('You are offline. Reconnecting…') : t('Message #{channel}', { channel: activeChannel()?.name ?? t('channel') })}
             onInput={(event) => {
-              setText(event.currentTarget.value);
+              saveText(event.currentTarget.value);
               syncCaret();
               setSelected(0);
               setDismissedAt(null);
