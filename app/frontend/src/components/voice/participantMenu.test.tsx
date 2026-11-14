@@ -50,6 +50,21 @@ it('opens shared volume and mute actions from tile, sidebar and member row with 
   expect(document.querySelector('[role="menu"]')).toBeTruthy();
 });
 
+it('the left sidebar row and the members row each have an actions button that opens the same menu as a right click', async () => {
+  const root = mount();
+  for (const selector of ['.vp', '.members .mem']) {
+    const row = root.querySelector(selector) as HTMLElement;
+    const more = row.querySelector<HTMLButtonElement>('button[aria-label^="Actions for "]');
+    expect(more, selector).toBeTruthy();
+    more!.click();
+    await flush();
+    const menu = document.querySelector('[role="menu"]')!;
+    expect(menu.textContent).toContain('Mute for me');
+    expect(menu.querySelector('[aria-label="Volume"]')).toBeTruthy();
+    closeContextMenu();
+  }
+});
+
 it('keeps the existing member fallback until a voice profile has arrived', async () => {
   setCurrentUser({ ...me, role: 'moderator' });
   setKnownUsers([me]);

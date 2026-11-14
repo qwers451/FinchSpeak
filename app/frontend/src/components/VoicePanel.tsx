@@ -20,6 +20,7 @@ import { SpatialStage } from './voice/SpatialStage';
 import { spatialEnabled } from '../stores/spatialStore';
 import { arrange, avatarSizeFor, gridColumns, gridRows } from './voice/voiceLayout';
 import { participantContextMenu, participantMenuKey } from './voice/participantMenu';
+import { RowActions } from './voice/ParticipantTile';
 import { tileOrder } from '../stores/tileOrderStore';
 import { t } from '../i18n';
 
@@ -115,6 +116,7 @@ export function VoicePanel() {
                     <Avatar name={participant.username} id={participant.user_id} size={24} speaking={speakingPeers().has(participant.peer_id)} levelPeerId={participant.peer_id} />
                     <span class="grow trunc">{participant.username}</span>
                     <Show when={participant.is_muted}><Icon name="mic-off" size="sm" class="tr" /></Show>
+                    <RowActions userId={participant.user_id} name={participant.username} participant={participant} />
                   </div>
                 )}
               </For>

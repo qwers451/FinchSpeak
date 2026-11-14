@@ -4,7 +4,7 @@ export type TranslationParams = Record<string, string | number>;
 
 /** Russian UI copy keyed by its English source. User and server supplied strings stay untouched. */
 export const ru: Readonly<Record<string, string>> = {
-  'Screen': 'Экран', 'In the room': 'В комнате', 'Open the player': 'Открыть плеер', 'Open the soundboard': 'Открыть саундборд',
+  'Screen': 'Экран', 'In the room': 'В комнате', 'Open the player': 'Открыть плеер', 'Open the room': 'Открыть комнату', 'Open the soundboard': 'Открыть саундборд',
   'Soundboard': 'Саундборд', 'Search sounds': 'Поиск звуков', 'No sounds yet': 'Звуков пока нет', 'Remove sound': 'Удалить звук',
   'Sound name': 'Название звука', 'Emoji (optional)': 'Эмодзи (необязательно)', 'Add a sound': 'Добавить звук', 'Up to 5 seconds': 'До 5 секунд',
   'Soundboard volume': 'Громкость саундборда', "Don't play the soundboard for me": 'Не слышать саундборд', 'Name the sound first': 'Сначала укажите название звука',
@@ -139,7 +139,7 @@ export const ru: Readonly<Record<string, string>> = {
   'Rename channel': 'Переименовать канал', 'New voice channel': 'Новый голосовой канал', 'New text channel': 'Новый текстовый канал', 'Channel name': 'Название канала', 'Quiet corner': 'Тихий уголок', 'general': 'общий',
   'Text channels': 'Текстовые каналы', 'Create text channel': 'Создать текстовый канал', 'Voice channels': 'Голосовые каналы', 'Create voice channel': 'Создать голосовой канал',
   'Voice connected': 'Голос подключён', 'Voice disconnected': 'Голос отключён', 'Unmute': 'Включить микрофон', 'Mute': 'Выключить микрофон', 'Undeafen': 'Включить звук', 'Deafen': 'Выключить звук',
-  'Profile and settings': 'Профиль и настройки', 'Administration': 'Администрирование', 'Move up': 'Переместить вверх', 'Move down': 'Переместить вниз', 'Rename': 'Переименовать', 'Delete': 'Удалить',
+  'Profile and settings': 'Профиль и настройки', 'Administration': 'Администрирование', 'Move up': 'Выше', 'Move down': 'Ниже', 'Rename': 'Переименовать', 'Delete': 'Удалить',
   'Move {channel} up': 'Переместить канал {channel} вверх', 'Move {channel} down': 'Переместить канал {channel} вниз', 'Rename {channel}': 'Переименовать канал {channel}', 'Delete {channel}': 'Удалить канал {channel}',
   'You were mentioned': 'Вас упомянули', 'Unread messages': 'Непрочитанные сообщения', 'Deafened': 'Звук выключен', 'Sharing screen': 'Показывает экран', 'LIVE': 'В ЭФИРЕ', 'You are sharing your screen': 'Вы демонстрируете экран', 'Disconnect from voice': 'Отключиться от голосовой комнаты', 'Disconnect': 'Отключиться',
   'Trust this server?': 'Доверять этому серверу?', "This server's certificate changed": 'Сертификат сервера изменился',
@@ -164,7 +164,7 @@ export const ru: Readonly<Record<string, string>> = {
   'Wait a moment before calling again': 'Подождите немного, прежде чем звать снова', 'This person is offline': 'Этот человек не в сети',
   'Silence for everyone': 'Заглушить для всех', 'Remove from the room': 'Убрать из комнаты',
   'You muted this person': 'Вы заглушили этого человека',
-  'Voice controls': 'Управление голосом', 'Voice settings': 'Настройки голоса', 'Leave the room': 'Покинуть комнату', 'Live': 'В эфире', 'is sharing a screen': 'демонстрирует экран', 'Watch': 'Смотреть', 'Watching': 'Просмотр', 'Silenced by a moderator': 'Модератор отключил микрофон', 'Good connection': 'Хорошее соединение', 'Fair connection': 'Среднее соединение', 'Poor connection': 'Плохое соединение', '(you)': '(вы)', 'Speaking': 'Говорит', 'Allow to speak': 'Разрешить говорить', 'Silence': 'Отключить микрофон', 'Volume of {name}': 'Громкость: {name}', 'talking': 'говорит', 'push to talk': 'нажмите, чтобы говорить',
+  'Voice controls': 'Управление голосом', 'Voice settings': 'Настройки голоса', 'Leave room': 'Выйти из комнаты', 'Live': 'В эфире', 'is sharing a screen': 'демонстрирует экран', 'Watch': 'Смотреть', 'Watching': 'Просмотр', 'Silenced by a moderator': 'Модератор отключил микрофон', 'Good connection': 'Хорошее соединение', 'Fair connection': 'Среднее соединение', 'Poor connection': 'Плохое соединение', '(you)': '(вы)', 'Speaking': 'Говорит', 'Allow to speak': 'Разрешить говорить', 'Silence': 'Отключить микрофон', 'Volume of {name}': 'Громкость: {name}', 'talking': 'говорит', 'push to talk': 'нажмите, чтобы говорить',
   'Minimize': 'Свернуть', 'Maximize': 'Развернуть', 'Restore': 'Восстановить', 'Dismiss': 'Закрыть уведомление',
   'That message is further up': 'Это сообщение находится выше', 'You were removed from the voice room': 'Вас отключили от голосовой комнаты', 'Full screen is not available': 'Полноэкранный режим недоступен', 'Picture-in-picture is not available': 'Режим «картинка в картинке» недоступен', 'Details copied': 'Сведения скопированы', 'Code copied': 'Код скопирован', 'Backup made': 'Резервная копия создана',
   '{name} is disconnected and cannot sign in for {duration}.': '{name} отключён и не сможет войти. Срок блокировки: {duration}.', '{name} is disconnected and cannot sign in until you lift the ban.': '{name} отключён и не сможет войти, пока вы не снимете блокировку.',
@@ -249,7 +249,7 @@ export const ru: Readonly<Record<string, string>> = {
   'Apply theme': 'Применить тему',
   'Not now': 'Не сейчас',
   'Switch to Finch mode': 'Перейти в режим Finch',
-  'Switch to classic mode': 'Перейти в классический режим',
+  'Switch to classic mode': 'Перейти в классический режим', 'Finch mode': 'Режим Finch', 'Classic view': 'Классический вид',
   'Empty nest': 'Пустое гнездо',
   'Interface': 'Интерфейс', 'Classic': 'Классический', 'Finch': 'Finch',
   'Finch turns the whole window into a tree: voice rooms are nests, text channels are birdhouses.': 'Finch превращает всё окно в дерево: голосовые комнаты — гнёзда, текстовые каналы — скворечники.',

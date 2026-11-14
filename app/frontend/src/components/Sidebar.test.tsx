@@ -6,6 +6,8 @@ import { setKnownUsers } from '../stores/sessionStore';
 import { setActiveVoiceChannel, setVoiceParticipants } from '../stores/voiceStore';
 import type { Channel, User } from '../types';
 import { nestView, setNestView } from '../stores/nestView';
+import { ContextMenuHost, closeContextMenu } from '../ui/ContextMenu';
+import { ru } from '../i18n';
 import { Sidebar } from './Sidebar';
 
 const nav = vi.hoisted(() => ({ selectChannel: vi.fn(async () => {}), joinVoice: vi.fn(async () => {}) }));
@@ -38,15 +40,69 @@ afterEach(() => {
   try { localStorage.removeItem('finchspeak.nestView'); } catch { /* ignore */ }
 });
 
-it('the feather button in the voice header switches to Finch mode', () => {
+it('the Finch mode switch sits in the brand row with a visible label, not in the voice header', () => {
   setChannels([voice]);
   const host = document.createElement('div');
   document.body.appendChild(host);
   dispose = render(() => <Sidebar />, host);
   expect(nestView()).toBe(false);
   expect(host.querySelectorAll('.channel-item').length).toBe(1);
-  (host.querySelector('.nest-toggle') as HTMLElement).click();
+  expect(host.querySelector('.nav .nest-toggle')).toBeNull();
+  const toggle = host.querySelector('.brand .nest-toggle') as HTMLElement;
+  expect(toggle.textContent).toContain('Finch mode');
+  toggle.click();
   expect(nestView()).toBe(true);
+});
+
+it('clicking the voice banner opens the active voice room without joining it again', async () => {
+  setChannels([voice]);
+  setActiveVoiceChannel(voice);
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  dispose = render(() => <Sidebar />, host);
+  (host.querySelector('.voice-banner .voice-connection') as HTMLElement).click();
+  await flush();
+  expect(nav.selectChannel).toHaveBeenCalledWith(voice);
+  expect(nav.joinVoice).not.toHaveBeenCalled();
+});
+
+it('the banner leave button is labelled Leave room and does not also open the room', async () => {
+  setChannels([voice]);
+  setActiveVoiceChannel(voice);
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  dispose = render(() => <Sidebar />, host);
+  const leave = host.querySelector('.voice-banner [aria-label="Leave room"]') as HTMLElement;
+  expect(leave).not.toBeNull();
+  leave.click();
+  await flush();
+  expect(nav.selectChannel).not.toHaveBeenCalled();
+});
+
+it('the profile panel has a single settings button, a gear, and no second sliders icon', () => {
+  setCurrentUser(member);
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  dispose = render(() => <Sidebar />, host);
+  expect(host.querySelectorAll('.upanel [aria-label="Profile and settings"]').length).toBe(1);
+  expect(host.querySelector('.upanel [aria-label="Profile and settings"] use.classic-glyph')?.getAttribute('href')).toBe('#i-gear');
+  expect(host.querySelector('.upanel use[href="#i-sliders"]')).toBeNull();
+});
+
+it('each channel has one actions button that opens Move up, Move down, Rename and Delete, with Delete as danger', async () => {
+  const host = mountAsAdmin();
+  expect(host.querySelectorAll('.ch [aria-label^="Actions for"]').length).toBe(2);
+  expect(host.querySelector('.ch [aria-label="Rename general"]')).toBeNull();
+  (host.querySelector('.ch [aria-label="Actions for general"]') as HTMLElement).click();
+  await flush();
+  const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  expect(items.map((item) => item.textContent?.trim())).toEqual(['Move up', 'Move down', 'Rename', 'Delete']);
+  expect(items[3].classList.contains('danger')).toBe(true);
+  expect(nav.selectChannel).not.toHaveBeenCalled();
+  expect(nav.joinVoice).not.toHaveBeenCalled();
+  closeContextMenu();
+  expect(ru['Move up']).toBe('Выше');
+  expect(ru['Move down']).toBe('Ниже');
 });
 
 it('updates a voice participant picture when knownUsers changes and falls back to the initial when removed', async () => {
@@ -87,7 +143,7 @@ function mountAsAdmin() {
   setChannels([text, voice]);
   const host = document.createElement('div');
   document.body.appendChild(host);
-  dispose = render(() => <Sidebar />, host);
+  dispose = render(() => <><ContextMenuHost /><Sidebar /></>, host);
   return host;
 }
 
@@ -95,16 +151,20 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 for (const key of ['Enter', ' ']) {
   for (const [label, name] of [['text', 'general'], ['voice', 'voice']] as const) {
-    it(`activates Rename on a ${label} channel with "${key === ' ' ? 'Space' : key}" without selecting or joining it`, async () => {
+    it(`opens the actions of a ${label} channel with "${key === ' ' ? 'Space' : key}" and renames from there, without selecting or joining it`, async () => {
       const host = mountAsAdmin();
-      const rename = host.querySelector(`button[aria-label="Rename ${name}"]`) as HTMLButtonElement;
-      expect(rename).toBeTruthy();
-      const event = press(rename, key);
+      const more = host.querySelector(`button[aria-label="Actions for ${name}"]`) as HTMLButtonElement;
+      expect(more).toBeTruthy();
+      const event = press(more, key);
       await flush();
       expect(event.defaultPrevented).toBe(false);
+      const rename = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent?.trim() === 'Rename')!;
+      rename.click();
+      await flush();
       expect(document.body.textContent).toContain('Rename channel');
       expect(nav.selectChannel).not.toHaveBeenCalled();
       expect(nav.joinVoice).not.toHaveBeenCalled();
+      closeContextMenu();
     });
   }
 }

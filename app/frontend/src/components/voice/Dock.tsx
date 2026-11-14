@@ -36,7 +36,7 @@ export function Dock(props: { onShare: () => void; onSettings: () => void }) {
           <Ctl label={t('Mini window')} icon="pip" pressed={overlayOpen()} onClick={() => void toggleOverlay()} />
         </Show>
         <Ctl label={t('Voice settings')} icon="sliders" onClick={props.onSettings} />
-        <Ctl label={t('Leave the room')} icon="hangup" class="leave" onClick={() => void leaveVoice()} />
+        <Ctl label={t('Leave room')} icon="hangup" class="leave" onClick={() => void leaveVoice()} />
       </div>
     </div>
   );

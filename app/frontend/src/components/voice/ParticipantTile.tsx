@@ -134,3 +134,11 @@ export function ParticipantTile(props: Props) {
 export function isMeParticipant(participant: VoiceParticipant, localPeerId: number | null) {
   return participant.peer_id === localPeerId || (localPeerId === null && participant.user_id === currentUser()?.id);
 }
+
+/** The "…" at the end of a person's row in a list: opens the same menu as a right click, shown on hover or focus. */
+export function RowActions(props: { userId: string; name: string; participant?: VoiceParticipant }) {
+  return (
+    <Button iconOnly size="sm" variant="ghost" icon="more" class="row-actions" label={t('Actions for {name}', { name: props.name })}
+      onClick={(event) => openParticipantMenu(event.currentTarget, props.userId, props.participant)} />
+  );
+}

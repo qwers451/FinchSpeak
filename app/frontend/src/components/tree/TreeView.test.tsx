@@ -98,13 +98,14 @@ it('an opened room shares the window with the tree, which can be folded or retur
   expect(host.querySelector('.tree-layout')!.classList.contains('folded')).toBe(false);
 });
 
-it('the perch shows the nest you are in and lets you fly out', async () => {
+it('the perch shows the nest you are in and lets you leave the room', async () => {
   mount();
   expect(host.querySelector('.tree-leave')).toBeNull();
   setActiveVoiceChannel(lounge);
   await Promise.resolve();
   expect(host.querySelector('.tree-voice')!.textContent).toContain('lounge');
   expect(host.querySelector('.nest.on')).not.toBeNull();
+  expect(host.querySelector('.tree-leave')!.getAttribute('aria-label')).toBe('Leave room');
   (host.querySelector('.tree-leave') as HTMLElement).click();
   expect(nav.leaveVoice).toHaveBeenCalled();
 });
@@ -115,8 +116,16 @@ it('only admins get the buttons that add a nest or a birdhouse, and everyone can
   setCurrentUser(user('me', 'admin'));
   expect(host.querySelector('.tree-add-voice')).not.toBeNull();
   expect(host.querySelector('.tree-add-text')).not.toBeNull();
-  (host.querySelector('.tree-bar .nest-toggle') as HTMLElement).click();
+  const classic = host.querySelector('.tree-bar .nest-toggle') as HTMLElement;
+  expect(classic.textContent).toContain('Classic view');
+  classic.click();
   expect(nestView()).toBe(false);
+});
+
+it('the profile footer has one settings button, the gear', () => {
+  mount();
+  expect(host.querySelectorAll('.tree-perch [aria-label="Profile and settings"]').length).toBe(1);
+  expect(host.querySelector('.tree-perch [aria-label="Profile and settings"] use.classic-glyph')?.getAttribute('href')).toBe('#i-gear');
 });
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));

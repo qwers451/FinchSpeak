@@ -1,6 +1,7 @@
 import { For, Index, Show } from 'solid-js';
 import { knownUsers, presence, statusTexts } from '../stores/sessionStore';
 import { participantContextMenu, participantMenuKey } from './voice/participantMenu';
+import { RowActions } from './voice/ParticipantTile';
 import { Avatar, Icon } from '../ui';
 import { gameOf } from '../stores/activityGameStore';
 import type { User, UserStatus } from '../types';
@@ -36,6 +37,7 @@ export function MembersPanel() {
           <span class="row g4 t3 fs12 trunc"><Icon name="gamepad" size="sm" />{t('Playing {game}', { game: gameOf(props.user.id)! })}</span>
         </Show>
       </div>
+      <RowActions userId={props.user.id} name={props.user.display_name || props.user.username} />
     </div>
   );
 

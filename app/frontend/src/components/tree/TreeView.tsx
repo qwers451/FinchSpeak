@@ -116,7 +116,7 @@ export function TreeView() {
           <Button iconOnly size="sm" variant="ghost" icon={folded() ? 'chev-r' : 'chev-d'} class="tree-fold" aria-expanded={!folded()} label={folded() ? t('Show the tree') : t('Hide the tree')} onClick={() => setFolded(!folded())} />
           <Button iconOnly size="sm" variant="ghost" icon="x" class="tree-close" label={t('Back to the tree')} onClick={() => { setActiveChannel(null); setFolded(false); }} />
         </Show>
-        <Button iconOnly size="sm" variant="ghost" icon="bars" class="nest-toggle" label={t('Switch to classic mode')} onClick={() => setNestView(false)} />
+        <Button size="sm" variant="ghost" icon="bars" class="nest-toggle" title={t('Switch to classic mode')} onClick={() => setNestView(false)}>{t('Classic view')}</Button>
       </header>
 
       <div class="tree-scene" ref={scene} aria-label={t('Tree of rooms')}>
@@ -175,9 +175,9 @@ export function TreeView() {
         <Button iconOnly size="sm" variant={isDeafened() ? 'danger' : 'ghost'} icon={isDeafened() ? 'phones-off' : 'phones'} label={isDeafened() ? t('Undeafen') : t('Deafen')} onClick={() => void toggleDeafen()} />
         <RoomTools compact />
         <Show when={activeVoiceChannel()}>
-          <Button iconOnly size="sm" variant="danger" icon="hangup" class="tree-leave" label={t('Fly out of the nest')} onClick={() => void leaveVoice()} />
+          <Button iconOnly size="sm" variant="danger" icon="hangup" class="tree-leave" label={t('Leave room')} title={t('Fly out of the nest')} onClick={() => void leaveVoice()} />
         </Show>
-        <Button iconOnly size="sm" variant="ghost" icon="sliders" label={t('Profile and settings')} onClick={() => setProfileOpen(true)} />
+        <Button iconOnly size="sm" variant="ghost" icon="gear" label={t('Profile and settings')} onClick={() => setProfileOpen(true)} />
         <Show when={isStaff()}>
           <Button iconOnly size="sm" variant="ghost" icon="shield" label={t('Administration')} class="ty" onClick={() => setAdminOpen(true)} />
         </Show>

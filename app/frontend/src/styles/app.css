@@ -247,6 +247,11 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 .vc .participant-actions { position:absolute; top:6px; right:6px; z-index:2; opacity:0; }
 .vc:hover .participant-actions,.vc:focus-within .participant-actions { opacity:1; }
 .vc .badges { top:42px; }
+/* "…" at the end of a person's row: hidden until the row is hovered or has keyboard focus, never removed from Tab order. */
+.row-actions { flex:none; opacity:0; transition:opacity var(--motion-small, .12s) var(--ease-out, ease-out); }
+.vp:hover .row-actions, .vp:focus-within .row-actions, .mem:hover .row-actions, .mem:focus-within .row-actions, .row-actions:focus-visible { opacity:1; }
+.voice-banner { cursor:pointer; }
+.brand .brand-finch { margin-left:auto; flex:none; }
 .drop-target { outline:2px solid var(--cyan); outline-offset:-2px; }
 .vp[draggable="true"] { cursor:grab; }
 .voice-people { border-radius:var(--r-sm); }
