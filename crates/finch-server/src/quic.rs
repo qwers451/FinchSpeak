@@ -170,6 +170,12 @@ async fn reject_and_flush(send_stream: &mut quinn::SendStream, err: &ServerMessa
     }
 }
 
+/// Close code for a connection that did not sign in before the deadline.
+pub const CLOSE_PREAUTH_TIMEOUT: u32 = 4001;
+/// Close code for a connection refused because its address or the server already holds the
+/// maximum number of unsigned connections.
+pub const CLOSE_PREAUTH_REFUSED: u32 = 4002;
+
 /// Handle a single authenticated QUIC connection.
 pub async fn handle_connection(
     conn: quinn::Connection,
@@ -178,34 +184,51 @@ pub async fn handle_connection(
     sfu: SfuRouter,
     jwt_secret: String,
 ) -> Result<()> {
-    // 1. Accept first bi-directional stream (Control Stream)
-    let (mut send_stream, mut recv_stream) = conn.accept_bi().await?;
-    let mut frame_buf = BytesMut::new();
-    let mut read_buf = vec![0u8; 4096];
-
-    // 2. Wait for Authenticate message
-    let (token, supports_voice_extensions, client_level) = loop {
-        let n = recv_stream
-            .read(&mut read_buf)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Stream closed before authentication"))?;
-
-        frame_buf.extend_from_slice(&read_buf[..n]);
-
-        match decode_message::<ClientMessage>(&mut frame_buf) {
-            Ok(ClientMessage::Authenticate { token, supports_voice_extensions, client_level }) => break (token, supports_voice_extensions, client_level),
-            Ok(_) => {
-                let err = ServerMessage::Error {
-                    code: 401,
-                    message: "First message must be Authenticate".to_string(),
-                };
-                reject_and_flush(&mut send_stream, &err).await;
-                return Err(anyhow::anyhow!("Unauthenticated first message"));
-            }
-            Err(finch_protocol::codec::CodecError::Incomplete { .. }) => continue,
-            Err(e) => return Err(e.into()),
-        }
+    // 0. Only a few unsigned connections per address and in total. The permit is returned at sign-in.
+    let preauth = sessions.preauth();
+    let Some(permit) = preauth.slots.try_acquire(conn.remote_address().ip()) else {
+        conn.close(CLOSE_PREAUTH_REFUSED.into(), b"too many connections before sign-in");
+        return Err(anyhow::anyhow!("Unsigned connection limit reached"));
     };
+
+    // 1. + 2. The Control Stream and its Authenticate message must arrive within the sign-in deadline.
+    let signing_in = async {
+        let (mut send_stream, mut recv_stream) = conn.accept_bi().await?;
+        let mut frame_buf = BytesMut::new();
+        let mut read_buf = vec![0u8; 4096];
+
+        let login = loop {
+            let n = recv_stream
+                .read(&mut read_buf)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("Stream closed before authentication"))?;
+
+            frame_buf.extend_from_slice(&read_buf[..n]);
+
+            match decode_message::<ClientMessage>(&mut frame_buf) {
+                Ok(ClientMessage::Authenticate { token, supports_voice_extensions, client_level }) => break (token, supports_voice_extensions, client_level),
+                Ok(_) => {
+                    let err = ServerMessage::Error {
+                        code: 401,
+                        message: "First message must be Authenticate".to_string(),
+                    };
+                    reject_and_flush(&mut send_stream, &err).await;
+                    return Err(anyhow::anyhow!("Unauthenticated first message"));
+                }
+                Err(finch_protocol::codec::CodecError::Incomplete { .. }) => continue,
+                Err(e) => return Err(e.into()),
+            }
+        };
+        Ok::<_, anyhow::Error>((send_stream, recv_stream, frame_buf, read_buf, login))
+    };
+    let (mut send_stream, mut recv_stream, mut frame_buf, mut read_buf, (token, supports_voice_extensions, client_level)) =
+        match tokio::time::timeout(preauth.timeout, signing_in).await {
+            Ok(result) => result?,
+            Err(_) => {
+                conn.close(CLOSE_PREAUTH_TIMEOUT.into(), b"sign-in timed out");
+                return Err(anyhow::anyhow!("Sign-in timed out"));
+            }
+        };
 
     // 3. Verify JWT
     let claims = match check_active_jwt(&token, &jwt_secret, &pool).await {
@@ -223,6 +246,9 @@ pub async fn handle_connection(
             return Err(anyhow::anyhow!("Invalid JWT token"));
         }
     };
+
+    // Signed in: this connection no longer counts against the unsigned limits.
+    drop(permit);
 
     let user_id = Uuid::parse_str(&claims.sub)?;
     let peer_id = sessions.allocate_peer_id();

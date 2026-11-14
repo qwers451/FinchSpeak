@@ -2,6 +2,8 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
@@ -176,6 +178,158 @@ impl MediaRateLimiter {
         self.bytes -= bytes;
         self.packets -= 1.0;
         true
+    }
+}
+
+/// Slots for connections that have not signed in yet: at most `per_ip` per client address and
+/// `total` overall. A permit is taken right after the handshake and returned when the connection
+/// signs in or closes, whichever comes first.
+#[derive(Clone)]
+pub struct PreAuthSlots {
+    inner: Arc<PreAuthInner>,
+}
+
+struct PreAuthInner {
+    per_ip: usize,
+    total: usize,
+    open: AtomicUsize,
+    per_addr: DashMap<IpAddr, usize>,
+}
+
+/// Limits every connection meets before it signs in: how long it may take, and the slot pool.
+#[derive(Clone)]
+pub struct PreAuth {
+    pub timeout: Duration,
+    pub slots: PreAuthSlots,
+}
+
+impl PreAuth {
+    pub fn from_limits(limits: &LimitsConfig) -> Self {
+        Self {
+            timeout: Duration::from_secs(limits.preauth_timeout_secs),
+            slots: PreAuthSlots::new(limits.preauth_per_ip, limits.preauth_total),
+        }
+    }
+}
+
+/// One unauthenticated slot. Dropping it frees the slot.
+pub struct PreAuthPermit {
+    inner: Arc<PreAuthInner>,
+    ip: IpAddr,
+}
+
+impl PreAuthSlots {
+    pub fn new(per_ip: usize, total: usize) -> Self {
+        Self {
+            inner: Arc::new(PreAuthInner {
+                per_ip,
+                total,
+                open: AtomicUsize::new(0),
+                per_addr: DashMap::new(),
+            }),
+        }
+    }
+
+    /// A slot for a connection from `ip`, or `None` when its address or the server is full.
+    /// IPv4-mapped IPv6 addresses count as their IPv4 address.
+    pub fn try_acquire(&self, ip: IpAddr) -> Option<PreAuthPermit> {
+        let ip = ip.to_canonical();
+        let inner = &self.inner;
+        // The total is reserved first, so a refusal here never leaves a per-address count behind.
+        if inner.open.fetch_add(1, Ordering::SeqCst) >= inner.total {
+            inner.open.fetch_sub(1, Ordering::SeqCst);
+            return None;
+        }
+        {
+            let mut count = inner.per_addr.entry(ip).or_insert(0);
+            if *count < inner.per_ip {
+                *count += 1;
+                return Some(PreAuthPermit { inner: self.inner.clone(), ip });
+            }
+        }
+        inner.open.fetch_sub(1, Ordering::SeqCst);
+        None
+    }
+
+    /// Slots currently held.
+    pub fn open(&self) -> usize {
+        self.inner.open.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for PreAuthPermit {
+    fn drop(&mut self) {
+        if let Some(mut count) = self.inner.per_addr.get_mut(&self.ip) {
+            *count = count.saturating_sub(1);
+        }
+        self.inner.per_addr.remove_if(&self.ip, |_, count| *count == 0);
+        self.inner.open.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod preauth_tests {
+    use super::*;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    fn v4(last: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(10, 0, 0, last))
+    }
+
+    #[test]
+    fn one_address_gets_per_ip_slots_and_no_more() {
+        let slots = PreAuthSlots::new(2, 10);
+        let first = slots.try_acquire(v4(1)).expect("first slot");
+        let _second = slots.try_acquire(v4(1)).expect("second slot");
+        assert!(slots.try_acquire(v4(1)).is_none(), "a third from the same address is refused");
+        assert!(slots.try_acquire(v4(2)).is_some(), "another address is unaffected");
+        drop(first);
+        assert!(slots.try_acquire(v4(1)).is_some(), "dropping a permit frees its slot");
+    }
+
+    #[test]
+    fn the_total_cap_applies_across_addresses() {
+        let slots = PreAuthSlots::new(8, 3);
+        let held: Vec<_> = (1..=3).map(|i| slots.try_acquire(v4(i)).expect("within the total")).collect();
+        assert!(slots.try_acquire(v4(4)).is_none(), "a fourth address is refused by the total cap");
+        assert_eq!(slots.open(), 3);
+        drop(held);
+        assert_eq!(slots.open(), 0);
+        assert!(slots.try_acquire(v4(4)).is_some(), "capacity returns when the permits drop");
+    }
+
+    #[test]
+    fn a_refusal_by_the_total_cap_takes_no_per_address_slot() {
+        let slots = PreAuthSlots::new(1, 1);
+        let held = slots.try_acquire(v4(1)).expect("first");
+        assert!(slots.try_acquire(v4(2)).is_none(), "the total is full");
+        drop(held);
+        assert!(slots.try_acquire(v4(2)).is_some(), "the refused attempt left no per-address slot behind");
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_counts_as_the_ipv4_address() {
+        let slots = PreAuthSlots::new(1, 10);
+        let _plain = slots.try_acquire(v4(7)).expect("plain IPv4");
+        let mapped = IpAddr::V6(Ipv4Addr::new(10, 0, 0, 7).to_ipv6_mapped());
+        assert!(slots.try_acquire(mapped).is_none(), "the mapped form is the same client");
+    }
+
+    #[test]
+    fn full_ipv6_addresses_are_counted_separately() {
+        let slots = PreAuthSlots::new(1, 10);
+        let a = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+        let b = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2));
+        let _held = slots.try_acquire(a).expect("first v6 address");
+        assert!(slots.try_acquire(b).is_some(), "a different IPv6 address is a different client");
+    }
+
+    #[test]
+    fn an_idle_address_leaves_no_entry_behind() {
+        let slots = PreAuthSlots::new(1, 10);
+        drop(slots.try_acquire(v4(9)).expect("one slot"));
+        assert!(slots.inner.per_addr.is_empty());
+        assert_eq!(slots.open(), 0);
     }
 }
 

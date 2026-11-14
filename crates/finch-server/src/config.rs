@@ -42,6 +42,12 @@ pub struct LimitsConfig {
     pub media_packets_per_sec: u64,
     /// Keyframe bytes one participant may send per second. The burst is one maximum keyframe.
     pub media_keyframe_bytes_per_sec: u64,
+    /// Seconds a new connection has to sign in (the Authenticate message) before it is closed.
+    pub preauth_timeout_secs: u64,
+    /// Connections per client address that have not signed in yet; more are closed at once.
+    pub preauth_per_ip: usize,
+    /// Connections in total that have not signed in yet; more are closed at once.
+    pub preauth_total: usize,
 }
 
 impl Default for LimitsConfig {
@@ -51,6 +57,9 @@ impl Default for LimitsConfig {
             media_burst_bytes: 262_144,
             media_packets_per_sec: 2000,
             media_keyframe_bytes_per_sec: 1_000_000,
+            preauth_timeout_secs: 10,
+            preauth_per_ip: 8,
+            preauth_total: 256,
         }
     }
 }
@@ -76,6 +85,18 @@ impl LimitsConfig {
         if self.media_keyframe_bytes_per_sec < 1 {
             tracing::warn!("[limits] media_keyframe_bytes_per_sec is 0; using 1");
             self.media_keyframe_bytes_per_sec = 1;
+        }
+        if self.preauth_timeout_secs < 1 {
+            tracing::warn!("[limits] preauth_timeout_secs is 0; using 1");
+            self.preauth_timeout_secs = 1;
+        }
+        if self.preauth_per_ip < 1 {
+            tracing::warn!("[limits] preauth_per_ip is 0; using 1");
+            self.preauth_per_ip = 1;
+        }
+        if self.preauth_total < 1 {
+            tracing::warn!("[limits] preauth_total is 0; using 1");
+            self.preauth_total = 1;
         }
         self
     }
@@ -494,12 +515,16 @@ mod tests {
             media_burst_bytes: 0,
             media_packets_per_sec: 0,
             media_keyframe_bytes_per_sec: 0,
+            preauth_timeout_secs: 0,
+            preauth_per_ip: 0,
+            preauth_total: 0,
         }
         .validated();
         assert_eq!(clamped.media_burst_bytes, MIN_MEDIA_BURST_BYTES);
         assert_eq!(clamped.media_packets_per_sec, 1);
         assert_eq!(clamped.media_keyframe_bytes_per_sec, 1);
         assert_eq!(clamped.media_bytes_per_sec, 1000, "other values are kept as configured");
+        assert_eq!((clamped.preauth_timeout_secs, clamped.preauth_per_ip, clamped.preauth_total), (1, 1, 1));
         assert_eq!(LimitsConfig::default().validated().media_burst_bytes, 262_144);
         assert_eq!(LimitsConfig::default().media_keyframe_bytes_per_sec, 1_000_000);
     }
@@ -517,6 +542,13 @@ mod tests {
         let partial: ServerConfig = toml::from_str("[limits]\nmedia_bytes_per_sec = 900000\n").unwrap();
         assert_eq!(partial.limits.media_bytes_per_sec, 900_000);
         assert_eq!(partial.limits.media_burst_bytes, 262_144);
+
+        assert_eq!(defaults.limits.preauth_timeout_secs, 10);
+        assert_eq!(defaults.limits.preauth_per_ip, 8);
+        assert_eq!(defaults.limits.preauth_total, 256);
+        let preauth: ServerConfig = toml::from_str("[limits]\npreauth_per_ip = 4\n").unwrap();
+        assert_eq!(preauth.limits.preauth_per_ip, 4);
+        assert_eq!(preauth.limits.preauth_total, 256);
     }
 
     fn temp_secret_file() -> std::path::PathBuf {

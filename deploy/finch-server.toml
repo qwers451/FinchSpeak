@@ -40,3 +40,9 @@ keep_files = 14
 # media_burst_bytes = 262144
 # media_packets_per_sec = 2000
 # media_keyframe_bytes_per_sec = 1000000
+# Sign-in gate: a new connection must sign in within preauth_timeout_secs seconds. One address may
+# hold preauth_per_ip connections that have not signed in yet, and the server preauth_total in all.
+# Defaults: 10 seconds, 8 per address, 256 in total.
+# preauth_timeout_secs = 10
+# preauth_per_ip = 8
+# preauth_total = 256

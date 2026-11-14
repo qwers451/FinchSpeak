@@ -82,6 +82,8 @@ pub struct SessionManager {
     media_config: Arc<std::sync::OnceLock<LimitsConfig>>,
     /// One media budget per user, shared by all of that user's sessions; dropped with the last session.
     media_budgets: Arc<DashMap<Uuid, Arc<Mutex<MediaRateLimiter>>>>,
+    /// Sign-in deadline and unauthenticated slots, set with the limits; unset means the defaults.
+    preauth: Arc<std::sync::OnceLock<crate::limits::PreAuth>>,
 }
 
 impl Default for SessionManager {
@@ -122,13 +124,23 @@ impl SessionManager {
             action_hits: Arc::new(crate::limits::WindowLimiter::default()),
             media_config: Arc::new(std::sync::OnceLock::new()),
             media_budgets: Arc::new(DashMap::new()),
+            preauth: Arc::new(std::sync::OnceLock::new()),
         }
     }
 
-    /// Set the per-participant media limits (before the listeners accept clients). Values that
-    /// would break the media path are clamped here, with a warning.
+    /// Set the media limits and the pre-sign-in limits (before the listeners accept clients).
+    /// Values that would break the media path or the sign-in gate are clamped here, with a warning.
     pub fn set_media_limits(&self, limits: LimitsConfig) {
-        self.media_config.set(limits.validated()).ok();
+        let limits = limits.validated();
+        self.preauth.set(crate::limits::PreAuth::from_limits(&limits)).ok();
+        self.media_config.set(limits).ok();
+    }
+
+    /// The sign-in deadline and unauthenticated slot pool shared by all connections.
+    pub fn preauth(&self) -> crate::limits::PreAuth {
+        self.preauth
+            .get_or_init(|| crate::limits::PreAuth::from_limits(&LimitsConfig::default()))
+            .clone()
     }
 
     /// The media budget of `user_id`: shared by all of the user's sessions, created with the first one.
