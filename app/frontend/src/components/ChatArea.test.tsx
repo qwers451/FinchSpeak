@@ -635,3 +635,16 @@ it('switching channels writes the draft being typed to the old channel key at on
   expect(localStorage.getItem('finchspeak.draft.c1')).toBe('half');
   expect(localStorage.getItem('finchspeak.draft.c2')).toBeNull();
 });
+
+it('two people who happen to use the same client id keep separate rows', async () => {
+  setMessages([
+    msg('s1', bob, 0, { client_msg_id: 'same' }),
+    msg('s2', me, 1, { client_msg_id: 'same' }),
+  ]);
+  const host = mount();
+  await flush();
+  const rows = host.querySelectorAll<HTMLElement>('.msg');
+  expect(rows).toHaveLength(2);
+  expect(rows[0].dataset.messageId).toBe('s1');
+  expect(rows[1].dataset.messageId).toBe('s2');
+});

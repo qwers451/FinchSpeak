@@ -20,10 +20,10 @@ const LOAD_OLDER_PX = 160;
 
 /**
  * A row's identity. A message we sent is listed as pending (`local-<client_msg_id>`) and then replaced by the
- * server's copy with its own id; keying by the client id keeps one row (one DOM node, one enter animation)
+ * server's copy with its own id; keying by author and client id (client ids are only unique per sender) keeps one row (one DOM node, one enter animation)
  * across that replacement.
  */
-const rowKey = (message: Message) => message.client_msg_id ?? message.id;
+const rowKey = (message: Message) => (message.client_msg_id ? `${message.author_id}:${message.client_msg_id}` : message.id);
 
 function Skeleton() {
   return (
