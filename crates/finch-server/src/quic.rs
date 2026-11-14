@@ -43,6 +43,10 @@ pub fn load_or_create_cert(
 
     if cert_path.exists() && key_path.exists() {
         let cert = std::fs::read(&cert_path).with_context(|| format!("Failed to read {cert_path:?}"))?;
+        // Keys written by older versions may be world-readable; restrict them before use.
+        if let Err(e) = crate::secret_file::tighten_permissions(&key_path) {
+            tracing::warn!("Could not restrict permissions of {key_path:?}: {e}");
+        }
         let key = std::fs::read(&key_path).with_context(|| format!("Failed to read {key_path:?}"))?;
         let key = rustls::pki_types::PrivateKeyDer::try_from(key)
             .map_err(|e| anyhow::anyhow!("failed to parse private key {key_path:?}: {e}"))?;
@@ -52,7 +56,8 @@ pub fn load_or_create_cert(
     let (cert, key) = generate_self_signed_cert()?;
     std::fs::create_dir_all(dir).with_context(|| format!("Failed to create {dir:?}"))?;
     std::fs::write(&cert_path, cert.as_ref()).with_context(|| format!("Failed to write {cert_path:?}"))?;
-    std::fs::write(&key_path, key.secret_der()).with_context(|| format!("Failed to write {key_path:?}"))?;
+    crate::secret_file::write_private(&key_path, key.secret_der())
+        .with_context(|| format!("Failed to write {key_path:?}"))?;
     tracing::info!("Generated a new TLS certificate in {dir:?}");
     Ok((cert, key))
 }
@@ -959,5 +964,24 @@ mod tests {
         let (cert_second, _) = load_or_create_cert(&dir).unwrap();
         assert_eq!(cert_first.as_ref(), cert_second.as_ref());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The private key is owner-only when created, and a key left world-readable by an
+    /// older version is restricted at the next start. Unix only: Windows has no mode bits.
+    #[cfg(unix)]
+    #[test]
+    fn private_key_is_owner_only_and_tightened_on_start() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("key.der");
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+
+        load_or_create_cert(dir.path()).unwrap();
+        assert_eq!(mode(&key_path), 0o600, "new key must be owner-only");
+
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        load_or_create_cert(dir.path()).unwrap();
+        assert_eq!(mode(&key_path), 0o600, "existing key must be tightened at startup");
     }
 }

@@ -19,4 +19,5 @@ pub mod permissions;
 pub mod quic;
 pub mod session;
 pub mod settings;
+pub mod secret_file;
 pub mod sfu;

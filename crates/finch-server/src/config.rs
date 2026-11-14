@@ -403,6 +403,9 @@ impl AuthConfig {
         }
 
         let path = Path::new(&self.jwt_secret_file);
+        if let Err(e) = crate::secret_file::tighten_permissions(path) {
+            tracing::warn!("Could not restrict permissions of {path:?}: {e}");
+        }
         if let Ok(stored) = fs::read_to_string(path) {
             let stored = stored.trim();
             if !stored.is_empty() {
@@ -417,7 +420,8 @@ impl AuthConfig {
             fs::create_dir_all(dir)
                 .with_context(|| format!("Failed to create directory for {:?}", path))?;
         }
-        fs::write(path, &secret).with_context(|| format!("Failed to write JWT secret to {:?}", path))?;
+        crate::secret_file::write_private(path, secret.as_bytes())
+            .with_context(|| format!("Failed to write JWT secret to {:?}", path))?;
         tracing::warn!("No JWT secret configured; generated a new one and stored it in {:?}", path);
         Ok(secret)
     }
@@ -571,6 +575,30 @@ mod tests {
         // Restart: the same generated secret is read back, so issued tokens stay valid.
         let second = auth.resolve_jwt_secret().unwrap();
         assert_eq!(first, second);
+    }
+
+    /// The generated JWT secret is owner-only, and a secret file left world-readable by an
+    /// older version is restricted at the next start. Unix only: Windows has no mode bits.
+    #[cfg(unix)]
+    #[test]
+    fn test_jwt_secret_file_is_owner_only_and_tightened_on_start() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("jwt_secret");
+        let auth = AuthConfig {
+            jwt_secret_file: path.to_string_lossy().to_string(),
+            ..AuthConfig::default()
+        };
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+
+        let first = auth.resolve_jwt_secret().unwrap();
+        assert_eq!(mode(&path), 0o600, "generated secret must be owner-only");
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        let second = auth.resolve_jwt_secret().unwrap();
+        assert_eq!(mode(&path), 0o600, "existing secret must be tightened at startup");
+        assert_eq!(first, second, "tightening must not change the secret");
     }
 
     #[test]
