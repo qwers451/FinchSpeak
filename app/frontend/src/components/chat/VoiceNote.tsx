@@ -225,6 +225,15 @@ export function VoiceRecordButton(props: { disabled: boolean }) {
     holding = false;
     void cancelRecording();
   };
+  // Leaving the chat (or the channel) mid-hold must not leave a recording that a later release sends
+  // somewhere else.
+  onCleanup(() => {
+    stopFollowing();
+    if (holding) {
+      holding = false;
+      void cancelRecording();
+    }
+  });
   const onDown = (event: PointerEvent) => {
     event.preventDefault();
     if (phase() === 'locked') {

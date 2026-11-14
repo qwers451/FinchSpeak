@@ -117,3 +117,23 @@ it('holding the mic and releasing it sends the recording', async () => {
     vi.useRealTimers();
   }
 });
+
+it('leaving the chat while the mic is held cancels the recording instead of sending it', async () => {
+  vi.useFakeTimers();
+  try {
+    const host = mount(() => <VoiceRecordButton disabled={false} />);
+    host.querySelector<HTMLButtonElement>('.voice-mic')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 200 }));
+    await vi.advanceTimersByTimeAsync(100);
+    dispose?.();
+    dispose = undefined;
+    await vi.advanceTimersByTimeAsync(10);
+    expect(api.voiceNoteCancel).toHaveBeenCalledTimes(1);
+    window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 200 }));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(api.voiceNoteStop).not.toHaveBeenCalled();
+    expect(api.uploadVoiceNote).not.toHaveBeenCalled();
+  } finally {
+    await cancelRecording();
+    vi.useRealTimers();
+  }
+});
