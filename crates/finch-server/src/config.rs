@@ -57,7 +57,7 @@ impl Default for LimitsConfig {
     fn default() -> Self {
         Self {
             media_bytes_per_sec: 1_500_000,
-            media_burst_bytes: 262_144,
+            media_burst_bytes: 1_048_576,
             media_packets_per_sec: 2000,
             media_keyframe_bytes_per_sec: 1_000_000,
             preauth_timeout_secs: 10,
@@ -584,7 +584,7 @@ mod tests {
         assert_eq!(clamped.media_keyframe_bytes_per_sec, 1);
         assert_eq!(clamped.media_bytes_per_sec, 1000, "other values are kept as configured");
         assert_eq!((clamped.preauth_timeout_secs, clamped.preauth_per_ip, clamped.preauth_total), (1, 1, 1));
-        assert_eq!(LimitsConfig::default().validated().media_burst_bytes, 262_144);
+        assert_eq!(LimitsConfig::default().validated().media_burst_bytes, 1_048_576);
         assert_eq!(LimitsConfig::default().media_keyframe_bytes_per_sec, 1_000_000);
     }
 
@@ -592,7 +592,7 @@ mod tests {
     fn limits_section_is_optional_and_overrides_single_keys() {
         let defaults = ServerConfig::default();
         assert_eq!(defaults.limits.media_bytes_per_sec, 1_500_000);
-        assert_eq!(defaults.limits.media_burst_bytes, 262_144);
+        assert_eq!(defaults.limits.media_burst_bytes, 1_048_576);
         assert_eq!(defaults.limits.media_packets_per_sec, 2000);
 
         let without_section: ServerConfig = toml::from_str("[server]\nquic_port = 4433\n").unwrap();
@@ -600,7 +600,7 @@ mod tests {
 
         let partial: ServerConfig = toml::from_str("[limits]\nmedia_bytes_per_sec = 900000\n").unwrap();
         assert_eq!(partial.limits.media_bytes_per_sec, 900_000);
-        assert_eq!(partial.limits.media_burst_bytes, 262_144);
+        assert_eq!(partial.limits.media_burst_bytes, 1_048_576);
 
         assert_eq!(defaults.limits.preauth_timeout_secs, 10);
         assert_eq!(defaults.limits.preauth_per_ip, 8);

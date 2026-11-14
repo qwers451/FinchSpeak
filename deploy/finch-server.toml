@@ -40,10 +40,10 @@ dir = "/app/data/logs"
 keep_files = 14
 
 # Media rate limits per participant: the SFU drops (and counts in the health panel) media above them.
-# Defaults: 12 Mbit/s with a 256 KB burst, and 2000 datagrams per second.
+# Defaults: 12 Mbit/s with a 1 MB burst, and 2000 datagrams per second.
 # [limits]
 # media_bytes_per_sec = 1500000
-# media_burst_bytes = 262144
+# media_burst_bytes = 1048576
 # media_packets_per_sec = 2000
 # media_keyframe_bytes_per_sec = 1000000
 # Sign-in gate: a new connection must sign in within preauth_timeout_secs seconds. One address may

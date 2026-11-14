@@ -412,7 +412,7 @@ mod tests {
     fn the_byte_burst_passes_once_then_refuses_without_charging_the_refusal() {
         let t0 = Instant::now();
         let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
-        assert!(bucket.allow(t0, 262_144), "a full burst is allowed");
+        assert!(bucket.allow(t0, 1_048_576), "a full burst is allowed");
         assert!(!bucket.allow(t0, 1), "nothing is left in the same instant");
         // 100 ms refills 150 000 bytes: one 100 000 byte packet fits, a second does not.
         let later = t0 + Duration::from_millis(100);
@@ -424,9 +424,9 @@ mod tests {
     fn refill_is_capped_at_the_burst() {
         let t0 = Instant::now();
         let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
-        assert!(bucket.allow(t0, 262_144));
+        assert!(bucket.allow(t0, 1_048_576));
         let idle = t0 + Duration::from_secs(60);
-        assert!(bucket.allow(idle, 262_144), "a minute of silence refills exactly one burst");
+        assert!(bucket.allow(idle, 1_048_576), "a minute of silence refills exactly one burst");
         assert!(!bucket.allow(idle, 1), "and not more than that");
     }
 
@@ -434,7 +434,7 @@ mod tests {
     fn keyframes_have_their_own_bucket_that_datagrams_do_not_touch() {
         let t0 = Instant::now();
         let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
-        assert!(bucket.allow(t0, 262_144), "a full datagram burst");
+        assert!(bucket.allow(t0, 1_048_576), "a full datagram burst");
         assert!(!bucket.allow(t0, 1), "datagrams are out");
         assert!(bucket.allow_keyframe(t0, 3_000_000), "a keyframe still has its own budget");
     }
@@ -479,7 +479,7 @@ mod tests {
         let t0 = Instant::now();
         let mut bucket = MediaRateLimiter::new(&LimitsConfig::default(), t0);
         let t1 = t0 + Duration::from_secs(1);
-        assert!(bucket.allow(t1, 262_144));
+        assert!(bucket.allow(t1, 1_048_576));
         assert!(!bucket.allow(t0, 1));
     }
 }

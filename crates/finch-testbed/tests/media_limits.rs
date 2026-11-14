@@ -19,7 +19,7 @@ static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 const FPS: u64 = 60;
 const LIMIT_BYTES_PER_SEC: f64 = 1_500_000.0;
-const LIMIT_BURST_BYTES: f64 = 262_144.0;
+const LIMIT_BURST_BYTES: f64 = 1_048_576.0;
 const LIMIT_KEYFRAME_BYTES_PER_SEC: f64 = 1_000_000.0;
 
 fn dropped() -> u64 {
