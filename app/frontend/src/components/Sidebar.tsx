@@ -169,6 +169,8 @@ export function Sidebar() {
       <div class="brand">
         <img src="/custom/assets/brand/finchspeak-tile-small.svg" alt="" />
         <span>FinchSpeak</span>
+      </div>
+      <div class="finch-switch">
         <Button size="sm" variant="ghost" icon="feather" class="nest-toggle brand-finch" title={t('Switch to Finch mode')} onClick={() => setNestView(true)}>{t('Finch mode')}</Button>
       </div>
 
@@ -241,7 +243,7 @@ export function Sidebar() {
                     <div class="vp" tabindex="0" draggable={canDrag(participant)}
                       onDragStart={(event) => dragStart(event, participant)} onDragEnd={() => { setDragged(null); setDropChannel(null); }} onContextMenu={(event) => participantContextMenu(event, participant.user_id, participant)} onKeyDown={(event) => participantMenuKey(event, participant.user_id, participant)}>
                       <Avatar name={participant.username} id={participant.user_id} size={24} src={knownUsers().find((user) => user.id === participant.user_id)?.avatar_url} speaking={speakingPeers().has(participant.peer_id) || (isMeParticipant(participant, localPeerId()) && !isMuted() && isLocalSpeaking())} levelPeerId={participant.peer_id} />
-                      <span class="grow trunc">{participant.username}</span><Show when={gameOf(participant.user_id)}><Icon name="gamepad" title={t('Playing {game}', { game: gameOf(participant.user_id)! })} /></Show>
+                      <span class="grow trunc" title={participant.username}>{participant.username}</span><Show when={gameOf(participant.user_id)}><Icon name="gamepad" title={t('Playing {game}', { game: gameOf(participant.user_id)! })} /></Show>
                       <Show when={!isMeParticipant(participant, localPeerId()) && isLocallyMuted(participant.user_id)}><Icon name="vol-off" title={t('You muted this person')} /></Show>
                       <Show when={participant.is_muted}><Icon name="mic-off" title={t('Muted')} class="tr" /></Show>
                       <Show when={participant.is_deafened}><Icon name="phones-off" title={t('Deafened')} class="tr" /></Show>

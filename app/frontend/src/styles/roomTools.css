@@ -25,3 +25,11 @@
   .room-now-actions { flex: none; }
   .room-now-actions .btn { flex: none; }
 }
+
+/* Compact (the Finch mode perch): the track title shrinks to an ellipsis, the buttons stay whole and never run into the profile. */
+.room-tools.compact { min-width:0; flex:0 1 auto; }
+.room-tools.compact .room-now { flex-direction:row; align-items:center; min-width:0; max-width:220px; }
+.room-tools.compact .room-now-title { flex:1 1 0; }
+.room-tools.compact .music-clock { display:none; }
+.room-tools.compact .room-now-actions { flex:none; }
+.room-tools.compact .room-now-actions .btn { flex:none; }

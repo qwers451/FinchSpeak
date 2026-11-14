@@ -30,7 +30,7 @@ export function MembersPanel() {
     <div class={`mem${statusOf(props.user) === 'offline' ? ' off' : ''}`} tabindex="0" onContextMenu={(event) => participantContextMenu(event, props.user.id)} onKeyDown={(event) => participantMenuKey(event, props.user.id)}>
       <Avatar name={props.user.display_name || props.user.username} id={props.user.id} size={32} src={props.user.avatar_url} status={statusClass(statusOf(props.user))} />
       <div class="col grow" title={statusTexts()[props.user.id]}>
-        <span class="trunc">{props.user.display_name || props.user.username}</span>
+        <span class="trunc" title={props.user.display_name || props.user.username}>{props.user.display_name || props.user.username}</span>
         <Show when={gameOf(props.user.id)} fallback={
           <Show when={statusTexts()[props.user.id]}><span class="t3 fs12 trunc">{statusTexts()[props.user.id]}</span></Show>
         }>

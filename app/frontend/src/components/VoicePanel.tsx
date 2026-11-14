@@ -54,7 +54,7 @@ export function VoicePanel() {
       <div class="room-column">
       <div class="mhead">
         <Icon name="vol" size="lg" class="t3" />
-        <h3 class="room-title">{activeVoiceChannel()?.name ?? t('Voice room')}</h3>
+        <h3 class="room-title" title={activeVoiceChannel()?.name}>{activeVoiceChannel()?.name ?? t('Voice room')}</h3>
         <span class="tag violet">{t('{count} in room', { count: voiceParticipants().length })}</span>
         <span class="grow" />
         <Show when={serverFeatures().includes('flock')}>

@@ -252,7 +252,9 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 .vp:hover .row-actions, .vp:focus-within .row-actions, .mem:hover .row-actions, .mem:focus-within .row-actions, .row-actions:focus-visible { opacity:1; }
 .voice-open { all:unset; display:flex; flex-direction:column; min-width:0; cursor:pointer; border-radius:6px; }
 .voice-open:focus-visible { outline:2px solid var(--yellow); outline-offset:2px; }
-.brand .brand-finch { margin-left:auto; flex:none; }
+/* The Finch mode switch has its own row: next to the name its Russian label ran past the panel edge. */
+.finch-switch { flex:none; display:flex; padding:0 12px 6px; }
+.finch-switch .brand-finch { flex:1 1 auto; min-width:0; justify-content:flex-start; }
 .drop-target { outline:2px solid var(--cyan); outline-offset:-2px; }
 .vp[draggable="true"] { cursor:grab; }
 .voice-people { border-radius:var(--r-sm); }

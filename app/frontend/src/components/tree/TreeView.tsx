@@ -167,7 +167,7 @@ export function TreeView() {
           {(channel) => (
             <span class="col grow tree-voice">
               <span class="row g6 b fs13 tree-voice-state"><Icon name="bars" size="sm" />{connectionStatus() === 'connected' ? t('Voice connected') : t('Voice disconnected')}</span>
-              <span class="t2 fs12 trunc">{t('In the nest: {channel}', { channel: channel().name })}{pingRtt() !== null ? ` · ${pingRtt()} ms` : ''}</span>
+              <span class="t2 fs12 trunc" title={t('In the nest: {channel}', { channel: channel().name })}>{t('In the nest: {channel}', { channel: channel().name })}{pingRtt() !== null ? ` · ${pingRtt()} ms` : ''}</span>
               <Show when={isSharing()}><span class="row g6 fs12 sharing-note"><Icon name="share" size="sm" />{t('You are sharing your screen')}</span></Show>
             </span>
           )}

@@ -220,7 +220,7 @@ export function ChatArea() {
         <h3 title={activeChannel()?.topic ?? undefined} style={{ 'font-size': '18px' }}>{activeChannel()?.name ?? t('select-channel')}</h3>
         <Show when={activeChannel()?.topic}>
           <span class="vsep topic-separator" style={{ height: '20px', 'align-self': 'center' }} />
-          <span class="t2 fs13 trunc grow channel-topic">{activeChannel()?.topic}</span>
+          <span class="t2 fs13 trunc grow channel-topic" title={activeChannel()?.topic ?? undefined}>{activeChannel()?.topic}</span>
         </Show>
         <Show when={!activeChannel()?.topic}><span class="grow" /></Show>
         <SearchBox />

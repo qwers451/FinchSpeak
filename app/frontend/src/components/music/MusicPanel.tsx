@@ -44,6 +44,10 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
     const user = knownUsers().find((known) => known.id === id);
     return user ? user.display_name || user.username : t('Someone');
   };
+  const queueLine = (item: MusicQueueEntry) => [item.track.artist, formatDuration(Math.floor(item.track.duration_ms / 1000)), t('Added by {name}', { name: nameOf(item.added_by) })].filter(Boolean).join(' · ');
+  const libraryLine = (item: MusicTrack) => [item.artist, formatDuration(Math.floor(item.duration_ms / 1000))].filter(Boolean).join(' · ');
+  const nowLine = (now: { entry: MusicQueueEntry }) => [now.entry.track.artist, t('Added by {name}', { name: nameOf(now.entry.added_by) })].filter(Boolean).join(' · ');
+  const uploadText = (upload: Upload) => (upload.status === 'uploading' ? t('Uploading {name}…', { name: upload.name }) : upload.status === 'done' ? `${upload.name} · ${t('Done')}` : `${upload.name}: ${upload.message}`);
   const canRemove = (item: MusicQueueEntry) => staff() || item.added_by === myId();
   const canDelete = (item: MusicTrack) => staff() || item.uploader_id === myId();
   const filtered = createMemo(() => {
@@ -111,9 +115,7 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
               <h4 class="music-heading">{t('Now playing')}</h4>
               <div class="col music-titles">
                 <span class="b trunc" title={now().entry.track.title}>{now().entry.track.title}</span>
-                <span class="t2 fs12 trunc">
-                  {[now().entry.track.artist, t('Added by {name}', { name: nameOf(now().entry.added_by) })].filter(Boolean).join(' · ')}
-                </span>
+                <span class="t2 fs12 trunc" title={nowLine(now())}>{nowLine(now())}</span>
               </div>
               <div class="music-progress">
                 <Slider
@@ -159,9 +161,7 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
                 <li class="music-row">
                   <div class="col grow">
                     <span class="trunc" title={item.track.title}>{item.track.title}</span>
-                    <span class="t3 fs12 trunc">
-                      {[item.track.artist, formatDuration(Math.floor(item.track.duration_ms / 1000)), t('Added by {name}', { name: nameOf(item.added_by) })].filter(Boolean).join(' · ')}
-                    </span>
+                    <span class="t3 fs12 trunc" title={queueLine(item)}>{queueLine(item)}</span>
                   </div>
                   <Show when={canRemove(item)}>
                     <Button iconOnly size="sm" variant="ghost" icon="x" label={t('Remove from queue')} onClick={() => void sendMusicCommand({ kind: 'remove', entry_id: item.entry_id })} />
@@ -196,7 +196,7 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
                     <li class="music-row">
                       <div class="col grow">
                         <span class="trunc" title={item.title}>{item.title}</span>
-                        <span class="t3 fs12 trunc">{[item.artist, formatDuration(Math.floor(item.duration_ms / 1000))].filter(Boolean).join(' · ')}</span>
+                        <span class="t3 fs12 trunc" title={libraryLine(item)}>{libraryLine(item)}</span>
                       </div>
                       <Button size="sm" variant="secondary" onClick={() => void sendMusicCommand({ kind: 'enqueue', track_id: item.id })}>{t('Add to queue')}</Button>
                       <Show when={canDelete(item)}>
@@ -223,11 +223,7 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
                 {(upload) => (
                   <li class={`music-upload ${upload.status}`}>
                     <Show when={upload.status === 'uploading'}><span class="music-spin" aria-hidden="true" /></Show>
-                    <span class="trunc">
-                      {upload.status === 'uploading' && t('Uploading {name}…', { name: upload.name })}
-                      {upload.status === 'done' && `${upload.name} · ${t('Done')}`}
-                      {upload.status === 'error' && `${upload.name}: ${upload.message}`}
-                    </span>
+                    <span class="trunc" title={uploadText(upload)}>{uploadText(upload)}</span>
                   </li>
                 )}
               </For>

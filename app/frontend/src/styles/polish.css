@@ -173,3 +173,7 @@
   .dock,[data-theme="custom"] .dock { padding:6px; }
   .ctl,[data-theme="custom"] .ctl { width:44px; height:42px; }
 }
+
+/* 1.7.1 visual audit: a tag is one line (the Russian LIVE tag wrapped in the channel row and pushed the title); a table head wraps instead of spilling. */
+.tag { white-space:nowrap; flex:none; }
+.members-table th { overflow-wrap:anywhere; }

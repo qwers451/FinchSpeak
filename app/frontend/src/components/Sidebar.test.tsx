@@ -41,7 +41,7 @@ afterEach(() => {
   try { localStorage.removeItem('finchspeak.nestView'); } catch { /* ignore */ }
 });
 
-it('the Finch mode switch sits in the brand row with a visible label, not in the voice header', () => {
+it('the Finch mode switch sits in its own row under the brand with a visible label, not in the voice header or beside the name', () => {
   setChannels([voice]);
   const host = document.createElement('div');
   document.body.appendChild(host);
@@ -49,7 +49,7 @@ it('the Finch mode switch sits in the brand row with a visible label, not in the
   expect(nestView()).toBe(false);
   expect(host.querySelectorAll('.channel-item').length).toBe(1);
   expect(host.querySelector('.nav .nest-toggle')).toBeNull();
-  const toggle = host.querySelector('.brand .nest-toggle') as HTMLElement;
+  const toggle = host.querySelector('.finch-switch .nest-toggle') as HTMLElement;
   expect(toggle.textContent).toContain('Finch mode');
   toggle.click();
   expect(nestView()).toBe(true);

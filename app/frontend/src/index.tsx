@@ -23,7 +23,10 @@ if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
 }
 
 // The mini window opens this same bundle with ?view=overlay: it gets only its own view, none of the app's stores.
-if (new URLSearchParams(window.location.search).get('view') === 'overlay') {
+if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('qa')) {
+  // The visual-audit entry: fixture screens on the dev server only; the branch is removed from the production build.
+  void import('./qa/qa').then(({ mountQa }) => mountQa(root!));
+} else if (new URLSearchParams(window.location.search).get('view') === 'overlay') {
   document.documentElement.dataset.view = 'overlay';
   void import('./components/overlay/OverlayView').then(({ OverlayWindow }) => render(() => <OverlayWindow />, root!));
 } else {

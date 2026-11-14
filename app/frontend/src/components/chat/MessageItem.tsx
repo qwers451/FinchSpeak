@@ -111,7 +111,7 @@ export function MessageItem(props: Props) {
             <button type="button" class={`reply-quote${quote().deleted ? ' gone' : ''}`} disabled={quote().deleted} onClick={() => props.onJump(quote().message_id)}>
               <Icon name="send" size="sm" class="flip" />
               <Show when={!quote().deleted} fallback={<span class="t3">{t('Original message deleted')}</span>}>
-                <strong>{quote().author_name}</strong><span class="trunc">{quote().snippet}</span>
+                <strong>{quote().author_name}</strong><span class="trunc" title={quote().snippet}>{quote().snippet}</span>
               </Show>
             </button>
           )}
@@ -148,7 +148,7 @@ export function MessageItem(props: Props) {
 
         <Show when={msg().state === 'failed'}>
           <div class="row g12" style={{ 'margin-top': '4px' }}>
-            <Show when={msg().failure}><span class="t3 fs12 trunc">{msg().failure}</span></Show>
+            <Show when={msg().failure}><span class="t3 fs12 trunc" title={msg().failure}>{msg().failure}</span></Show>
             <button type="button" class="link-btn ty" style={{ margin: 0 }} onClick={() => void retryMessage(msg().id)}>{t('Retry')}</button>
             <button type="button" class="link-btn t2" style={{ margin: 0 }} onClick={() => discardFailed(msg().id)}>{t('Delete')}</button>
           </div>

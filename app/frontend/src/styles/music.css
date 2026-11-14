@@ -65,3 +65,6 @@
   cursor: pointer;
 }
 .music-now-chip .trunc { min-width: 0; }
+
+/* The progress bubble would sit on the artist line above the slider, and the clock beside it already shows the position. */
+.music-progress .range-value { display:none; }
