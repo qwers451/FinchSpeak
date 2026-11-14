@@ -48,6 +48,9 @@ pub struct LimitsConfig {
     pub preauth_per_ip: usize,
     /// Connections in total that have not signed in yet; more are closed at once.
     pub preauth_total: usize,
+    /// Argon2 hashes or checks running at once. Each allocates about 19 MiB, so this bounds memory;
+    /// further sign-ins and password changes wait their turn.
+    pub auth_hash_concurrency: usize,
 }
 
 impl Default for LimitsConfig {
@@ -60,6 +63,7 @@ impl Default for LimitsConfig {
             preauth_timeout_secs: 10,
             preauth_per_ip: 8,
             preauth_total: 256,
+            auth_hash_concurrency: 2,
         }
     }
 }
@@ -97,6 +101,10 @@ impl LimitsConfig {
         if self.preauth_total < 1 {
             tracing::warn!("[limits] preauth_total is 0; using 1");
             self.preauth_total = 1;
+        }
+        if self.auth_hash_concurrency < 1 {
+            tracing::warn!("[limits] auth_hash_concurrency is 0; using 1");
+            self.auth_hash_concurrency = 1;
         }
         self
     }
@@ -522,8 +530,10 @@ mod tests {
             preauth_timeout_secs: 0,
             preauth_per_ip: 0,
             preauth_total: 0,
+            auth_hash_concurrency: 0,
         }
         .validated();
+        assert_eq!(clamped.auth_hash_concurrency, 1, "a zero concurrency would wait forever");
         assert_eq!(clamped.media_burst_bytes, MIN_MEDIA_BURST_BYTES);
         assert_eq!(clamped.media_packets_per_sec, 1);
         assert_eq!(clamped.media_keyframe_bytes_per_sec, 1);

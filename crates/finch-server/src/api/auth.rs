@@ -11,6 +11,7 @@ use axum::Json;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::config::ServerConfig;
@@ -86,6 +87,8 @@ pub struct ArcSharedState {
     pub login_guard: std::sync::Arc<crate::limits::LoginGuard>,
     /// Every sign-in attempt from one address, whether or not it is right.
     pub login_ip_hits: std::sync::Arc<crate::limits::WindowLimiter>,
+    /// Bounds how many Argon2 hashes or checks run at once (`[limits] auth_hash_concurrency`).
+    pub auth_hash_gate: std::sync::Arc<Semaphore>,
     pub register_hits: std::sync::Arc<crate::limits::WindowLimiter>,
     pub avatar_hits: std::sync::Arc<crate::limits::WindowLimiter>,
 }
@@ -99,7 +102,7 @@ impl FromRef<ArcSharedState> for ArcSharedState {
 /// Shortest password accepted when registering or choosing a new one (older, shorter ones still log in).
 pub const MIN_PASSWORD_LEN: usize = 8;
 
-/// Failed sign-ins allowed from one address per window, on top of the per login and address lock.
+/// Sign-in attempts (right or wrong) allowed from one address per window, on top of the per login and address lock.
 pub const LOGIN_IP_LIMIT: usize = 20;
 /// The window the per-address sign-in limit counts in.
 pub const LOGIN_IP_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
@@ -108,21 +111,50 @@ pub const LOGIN_IP_WINDOW: std::time::Duration = std::time::Duration::from_secs(
 #[cfg(test)]
 static VERIFY_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-/// Runs Argon2 work on the blocking pool. A panicked or cancelled job is a 500, never a panic here.
-async fn run_blocking<T: Send + 'static>(job: impl FnOnce() -> T + Send + 'static) -> Result<T, ServerError> {
+/// Runs one Argon2 job on the blocking pool, holding one of the `gate` permits while it runs, so the
+/// number of hashes in memory at once is bounded. Waiting for a permit is normal, not a refusal.
+/// A panicked or cancelled job is a 500, never a panic here.
+async fn run_gated<T: Send + 'static>(gate: &Semaphore, job: impl FnOnce() -> T + Send + 'static) -> Result<T, ServerError> {
+    let _permit = gate
+        .acquire()
+        .await
+        .map_err(|_| ServerError::Internal("password gate is closed".to_string()))?;
     tokio::task::spawn_blocking(job)
         .await
         .map_err(|e| ServerError::Internal(format!("password task did not finish: {e}")))
 }
 
-/// Hash a password using Argon2id. Runs on the blocking pool.
-pub async fn hash_password(password: String) -> Result<String, ServerError> {
-    run_blocking(move || hash_password_blocking(&password)).await?
+/// Hash a password using Argon2id. Runs on the blocking pool, within the gate.
+pub async fn hash_password(gate: &Semaphore, password: String) -> Result<String, ServerError> {
+    run_gated(gate, move || hash_password_blocking(&password)).await?
 }
 
-/// Verify a password against an Argon2id hash. Runs on the blocking pool.
-pub async fn verify_password(password: String, hash: String) -> Result<bool, ServerError> {
-    run_blocking(move || verify_password_blocking(&password, &hash)).await
+/// Verify a password against an Argon2id hash. Runs on the blocking pool, within the gate.
+pub async fn verify_password(gate: &Semaphore, password: String, hash: String) -> Result<bool, ServerError> {
+    run_gated(gate, move || verify_password_blocking(&password, &hash)).await
+}
+
+/// Check a password against the dummy hash, for a login that does not exist. The dummy hash is
+/// first made inside the blocking job, so no Argon2 work ever runs on an async worker.
+async fn verify_unknown_login(gate: &Semaphore, password: String) -> Result<(), ServerError> {
+    run_gated(gate, move || -> Result<(), ServerError> {
+        let hash = dummy_hash()?;
+        verify_password_blocking(&password, hash);
+        Ok(())
+    })
+    .await?
+}
+
+/// Makes the dummy hash in the background at startup, so the first unknown login is not slower.
+/// Without a runtime nothing is started; the hash is then made on first use, inside a blocking job.
+pub fn warm_dummy_hash() {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        drop(handle.spawn_blocking(|| {
+            if let Err(error) = dummy_hash() {
+                tracing::error!("could not prepare the dummy password hash: {error}");
+            }
+        }));
+    }
 }
 
 fn hash_password_blocking(password: &str) -> Result<String, ServerError> {
@@ -414,7 +446,7 @@ pub async fn register_handler(
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| username.clone());
 
-    let password_hash = hash_password(payload.password.clone()).await?;
+    let password_hash = hash_password(&state.auth_hash_gate, payload.password.clone()).await?;
     let user_id = Uuid::new_v4();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -555,12 +587,12 @@ async fn login_at(
         Some(r) => r,
         None => {
             // Same work as a real check, so an unknown login takes as long as a wrong password.
-            verify_password(payload.password.clone(), dummy_hash()?.to_string()).await?;
+            verify_unknown_login(&state.auth_hash_gate, payload.password.clone()).await?;
             return Err(wrong(state));
         }
     };
 
-    if !verify_password(payload.password.clone(), hash).await? {
+    if !verify_password(&state.auth_hash_gate, payload.password.clone(), hash).await? {
         return Err(wrong(state));
     }
     state.login_guard.success(&guard_key);
@@ -756,10 +788,10 @@ pub async fn change_password_handler(
         .bind(auth.user_id.to_string())
         .fetch_one(&state.pool)
         .await?;
-    if !verify_password(request.current_password.clone(), hash).await? {
+    if !verify_password(&state.auth_hash_gate, request.current_password.clone(), hash).await? {
         return Err(ServerError::Forbidden);
     }
-    let new_hash = hash_password(request.new_password.clone()).await?;
+    let new_hash = hash_password(&state.auth_hash_gate, request.new_password.clone()).await?;
     sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
         .bind(new_hash)
         .bind(auth.user_id.to_string())
@@ -800,7 +832,8 @@ mod login_tests {
 
     async fn state_with_alice() -> ArcSharedState {
         let pool = crate::db::init_db("sqlite::memory:").await.expect("database");
-        let hash = hash_password("password_123".to_string()).await.expect("hash");
+        let gate = Semaphore::new(2);
+        let hash = hash_password(&gate, "password_123".to_string()).await.expect("hash");
         sqlx::query(
             "INSERT INTO users (id, username, display_name, password_hash, role, status, created_at) VALUES (?, 'alice', 'alice', ?, 'member', 'offline', 0)",
         )
@@ -817,6 +850,7 @@ mod login_tests {
             register_hits: Default::default(),
             avatar_hits: Default::default(),
             login_ip_hits: Default::default(),
+            auth_hash_gate: std::sync::Arc::new(Semaphore::new(2)),
         }
     }
 
@@ -865,7 +899,34 @@ mod login_tests {
 
     #[tokio::test]
     async fn a_panicking_hash_job_is_an_internal_error_not_a_panic() {
-        let result = run_blocking(|| -> u8 { panic!("hash job failed") }).await;
+        let gate = Semaphore::new(1);
+        let result = run_gated(&gate, || -> u8 { panic!("hash job failed") }).await;
         assert!(matches!(result, Err(ServerError::Internal(_))));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn one_permit_runs_hash_jobs_one_after_another() {
+        let gate = std::sync::Arc::new(Semaphore::new(1));
+        let spans = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut tasks = Vec::new();
+        for _ in 0..2 {
+            let gate = gate.clone();
+            let spans = spans.clone();
+            tasks.push(tokio::spawn(async move {
+                run_gated(&gate, move || {
+                    let start = Instant::now();
+                    std::thread::sleep(Duration::from_millis(150));
+                    spans.lock().expect("spans").push((start, Instant::now()));
+                })
+                .await
+            }));
+        }
+        for task in tasks {
+            task.await.expect("task").expect("job");
+        }
+        let mut spans = spans.lock().expect("spans").clone();
+        spans.sort_by_key(|span| span.0);
+        assert_eq!(spans.len(), 2);
+        assert!(spans[1].0 >= spans[0].1, "the second job started before the first finished");
     }
 }

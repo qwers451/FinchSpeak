@@ -169,7 +169,7 @@ pub async fn reset_password_handler(
         return Err(ServerError::Forbidden);
     }
     let temporary = generate_temporary_password();
-    let hash = hash_password(temporary.clone()).await?;
+    let hash = hash_password(&state.auth_hash_gate, temporary.clone()).await?;
     sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?").bind(hash).bind(id.to_string()).execute(&state.pool).await?;
     disconnect_user(&state, id, b"password changed").await?;
     audit::record(&state.pool, &auth, "password_reset", Some(&name_of(&state, &id.to_string()).await), None).await;

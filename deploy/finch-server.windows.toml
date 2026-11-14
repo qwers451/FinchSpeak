@@ -38,3 +38,5 @@ keep_files = 14       # daily files kept
 # preauth_timeout_secs = 10
 # preauth_per_ip = 8
 # preauth_total = 256
+# Argon2 password hashes or checks running at once (each needs about 19 MiB). Sign-ins wait their turn; default 2, at least 1.
+# auth_hash_concurrency = 2
