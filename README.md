@@ -128,7 +128,12 @@ cargo test --workspace -- --test-threads=1
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Браузерный режим разработки (`npm run dev` в `app/frontend`, страница на `http://127.0.0.1:5173`) обращается к серверу из браузера, поэтому добавьте в `finch-server.toml` строку `[server] allowed_origins = ["http://127.0.0.1:5173"]`.
+Браузерный режим разработки (`npm run dev` в `app/frontend`, страница на `http://127.0.0.1:5173`) обращается к серверу из браузера, поэтому добавьте в `finch-server.toml` в секцию `[server]` строку:
+
+```toml
+[server]
+allowed_origins = ["http://127.0.0.1:5173"]
+```
 
 Иконки приложения генерируются из `design/` командой `node scripts/make-icons.mjs`. Исходный код — в [`app`](app) и [`crates`](crates).
 
