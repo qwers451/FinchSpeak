@@ -118,3 +118,41 @@ async fn uploads_per_minute_are_limited() -> anyhow::Result<()> {
     b.api.upload_file("bob.txt", b"hello".to_vec(), "text/plain").await?;
     Ok(())
 }
+
+/// A client that sends part of a body and vanishes leaves no `.part` file behind.
+#[tokio::test]
+async fn a_dropped_upload_leaves_no_part_file() -> anyhow::Result<()> {
+    use futures_util::StreamExt;
+    let uploads = tempfile::tempdir()?;
+    let dir = uploads.path().to_string_lossy().to_string();
+    let server = TestServer::start_with(move |c| {
+        c.storage.max_file_size_mb = 50;
+        c.storage.upload_dir = dir;
+    })
+    .await?;
+    let a = TestClient::register(&server, "alice").await?;
+    let token = a.api.token().map(str::to_string).unwrap_or_default();
+
+    let mut head = b"--XBOUND\r\nContent-Disposition: form-data; name=\"file\"; filename=\"cut.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n".to_vec();
+    head.extend(noise(1024 * 1024));
+    let body = reqwest::Body::wrap_stream(
+        futures_util::stream::iter([Ok::<_, std::io::Error>(bytes::Bytes::from(head))]).chain(futures_util::stream::pending()),
+    );
+    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()?;
+    let request = client
+        .post(format!("{}/api/files/upload", server.http_url))
+        .bearer_auth(token)
+        .header("content-type", "multipart/form-data; boundary=XBOUND")
+        .body(body)
+        .send();
+    // The request never finishes; dropping it closes the connection mid-body.
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), request).await;
+
+    for _ in 0..50 {
+        if stored_files(uploads.path()).is_empty() {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    anyhow::bail!("left behind: {:?}", stored_files(uploads.path()));
+}

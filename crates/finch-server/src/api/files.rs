@@ -96,6 +96,8 @@ pub async fn upload_file_handler(
     if let Err(wait) = state.sessions.allow_action(auth.user_id, "upload", storage.uploads_per_minute, std::time::Duration::from_secs(60)) {
         rejected = Some(ServerError::TooManyUploads(wait));
     }
+    // Not atomic with the INSERT below: uploads by one user running at the same moment can overshoot
+    // the quota a little (bounded by the upload rate limit and the per-file maximum).
     let used: u64 = sqlx::query_scalar::<_, i64>("SELECT COALESCE(SUM(size_bytes), 0) FROM attachments WHERE uploader_id = ?")
         .bind(auth.user_id.to_string())
         .fetch_one(&state.pool)
@@ -223,7 +225,7 @@ pub async fn upload_file_handler(
         // Images get a preview; anything that does not decode stays a plain file.
         let preview = if content_type.starts_with("image/") && received <= THUMBNAIL_MAX_BYTES {
             match fs::read(&file_path).await {
-                Ok(bytes) => tokio::task::spawn_blocking(move || crate::chat::make_thumbnail(&bytes)).await.ok().flatten(),
+                Ok(bytes) => crate::chat::make_thumbnail_gated(bytes).await,
                 Err(_) => None,
             }
         } else {
@@ -240,7 +242,7 @@ pub async fn upload_file_handler(
             None => (None, None, None),
         };
 
-        sqlx::query(
+        let inserted = sqlx::query(
             "INSERT INTO attachments (id, uploader_id, filename, size_bytes, content_type, storage_path, created_at, width, height, thumb_path, duration_ms, waveform)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
@@ -257,7 +259,13 @@ pub async fn upload_file_handler(
         .bind(duration_ms)
         .bind(waveform.clone())
         .execute(&state.pool)
-        .await?;
+        .await;
+        if let Err(error) = inserted {
+            if let Some(thumb) = &thumb_path {
+                let _ = fs::remove_file(thumb).await;
+            }
+            return Err(error.into());
+        }
         stored.keep();
 
         let info = AttachmentInfo {
@@ -499,5 +507,48 @@ mod hardening_tests {
         for bad in ["", "text", "text/html; charset=x", "a b/c", "text/html\r\nX: y", long.as_str(), "/x", "x/"] {
             assert_eq!(safe_content_type(bad), "application/octet-stream", "{bad:?}");
         }
+    }
+}
+
+/// Delete `*.part` files in `dir` not touched for an hour: leftovers of uploads cut off by a crash.
+pub fn sweep_stale_parts(dir: &std::path::Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("part") {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age >= std::time::Duration::from_secs(3600));
+        if stale && std::fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+#[cfg(test)]
+mod sweep_tests {
+    use super::*;
+
+    #[test]
+    fn only_old_part_files_are_swept() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("old.part");
+        let fresh = dir.path().join("fresh.part");
+        let real = dir.path().join("keep.bin");
+        for path in [&old, &fresh, &real] {
+            std::fs::write(path, b"x").unwrap();
+        }
+        let two_hours_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        std::fs::File::options().write(true).open(&old).unwrap().set_modified(two_hours_ago).unwrap();
+        std::fs::File::options().write(true).open(&real).unwrap().set_modified(two_hours_ago).unwrap();
+        assert_eq!(sweep_stale_parts(dir.path()), 1);
+        assert!(!old.exists() && fresh.exists() && real.exists());
     }
 }

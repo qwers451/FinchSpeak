@@ -11,7 +11,11 @@ pub const SNIPPET_CHARS: usize = 120;
 /// Longest side of a stored thumbnail.
 pub const THUMB_MAX_SIDE: u32 = 320;
 /// Images larger than this many pixels are kept as plain files (guards against decompression bombs).
-pub const MAX_IMAGE_PIXELS: u64 = 64_000_000;
+pub const MAX_IMAGE_PIXELS: u64 = 16_000_000;
+/// Memory the image decoder may allocate for one thumbnail.
+const THUMB_MAX_ALLOC: u64 = 96 * 1024 * 1024;
+/// One thumbnail is decoded at a time, so memory stays bounded in the small production container.
+static THUMB_GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
 /// The first `SNIPPET_CHARS` characters of a message, whitespace collapsed to single spaces.
 pub fn snippet(content: &str) -> String {
@@ -235,7 +239,13 @@ pub fn make_thumbnail(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
         return None;
     }
-    let image = image::load_from_memory_with_format(data, format).ok()?;
+    let mut decoder = decoder;
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(THUMB_MAX_ALLOC);
+    limits.max_image_width = Some(16_000);
+    limits.max_image_height = Some(16_000);
+    decoder.set_limits(limits).ok()?;
+    let image = image::DynamicImage::from_decoder(decoder).ok()?;
     let thumb = if width.max(height) > THUMB_MAX_SIDE { image.thumbnail(THUMB_MAX_SIDE, THUMB_MAX_SIDE) } else { image };
     let mut out = std::io::Cursor::new(Vec::new());
     // Photos stay JPEG, everything else PNG (keeps transparency).
@@ -245,6 +255,18 @@ pub fn make_thumbnail(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
         thumb.write_to(&mut out, ImageFormat::Png).ok()?;
     }
     Some((width, height, out.into_inner()))
+}
+
+/// `make_thumbnail` on a blocking thread, one at a time (the permit moves into the job).
+pub async fn make_thumbnail_gated(data: Vec<u8>) -> Option<(u32, u32, Vec<u8>)> {
+    let permit = THUMB_GATE.acquire().await.ok()?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        make_thumbnail(&data)
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 #[cfg(test)]
@@ -272,5 +294,65 @@ mod tests {
         let long = "ж".repeat(300);
         assert_eq!(snippet(&long).chars().count(), SNIPPET_CHARS);
         assert_eq!(snippet("a \n  b\t c"), "a b c");
+    }
+}
+
+#[cfg(test)]
+mod thumbnail_limit_tests {
+    use super::*;
+
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc = 0xFFFF_FFFFu32;
+        for &byte in bytes {
+            crc ^= u32::from(byte);
+            for _ in 0..8 {
+                crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            }
+        }
+        !crc
+    }
+
+    /// A few dozen bytes that declare a huge picture: only the header, no pixel data.
+    fn huge_png_header(width: u32, height: u32) -> Vec<u8> {
+        let mut ihdr = b"IHDR".to_vec();
+        ihdr.extend(width.to_be_bytes());
+        ihdr.extend(height.to_be_bytes());
+        ihdr.extend([8, 2, 0, 0, 0]);
+        let mut out = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
+        out.extend(&ihdr);
+        out.extend(crc32(&ihdr).to_be_bytes());
+        out
+    }
+
+    fn huge_jpeg_header(width: u16, height: u16) -> Vec<u8> {
+        let mut out = vec![0xFF, 0xD8, 0xFF, 0xC0, 0, 17, 8];
+        out.extend(height.to_be_bytes());
+        out.extend(width.to_be_bytes());
+        out.extend([3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+        out
+    }
+
+    #[test]
+    fn a_header_declaring_a_huge_picture_gets_no_thumbnail() {
+        assert!(make_thumbnail(&huge_png_header(8000, 8000)).is_none());
+        assert!(make_thumbnail(&huge_jpeg_header(8000, 8000)).is_none());
+    }
+
+    #[test]
+    fn an_ordinary_picture_still_gets_a_thumbnail() {
+        let picture = image::RgbImage::from_pixel(640, 480, image::Rgb([10, 120, 200]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        picture.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let (width, height, thumb) = make_thumbnail(png.get_ref()).expect("thumbnail");
+        assert_eq!((width, height), (640, 480));
+        assert!(!thumb.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_gated_thumbnail_matches_the_plain_one() {
+        let picture = image::RgbImage::from_pixel(100, 100, image::Rgb([1, 2, 3]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        picture.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        assert!(make_thumbnail_gated(png.into_inner()).await.is_some());
     }
 }

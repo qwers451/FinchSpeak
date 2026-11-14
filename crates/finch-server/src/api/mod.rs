@@ -27,6 +27,10 @@ use crate::session::SessionManager;
 /// Build the Axum router for the FinchSpeak REST API.
 pub fn create_router(pool: SqlitePool, mut config: ServerConfig, sessions: SessionManager) -> Router {
     config.storage = config.storage.validated();
+    let swept = files::sweep_stale_parts(std::path::Path::new(&config.storage.upload_dir));
+    if swept > 0 {
+        tracing::info!("Removed {swept} unfinished uploads");
+    }
     // axum caps request bodies at 2 MB by default; uploads follow the configured limit instead.
     let upload_limit = files::upload_body_limit(config.storage.max_file_size_mb);
     let music_upload_limit = config.music.max_track_mb.saturating_mul(crate::music::MIB).saturating_add(64 * 1024).min(usize::MAX as u64) as usize;
