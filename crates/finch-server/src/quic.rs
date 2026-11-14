@@ -536,16 +536,50 @@ fn refuse_call(sessions: &SessionManager, peer_id: u32, code: u16, message: impl
     sessions.send_control_to_peer(peer_id, &ServerMessage::Error { code, message: message.into() });
 }
 
-/// Joining, muting and starting a screen share each make the whole room react: ten per person per 10 seconds.
+/// Joining and starting a screen share make the whole room react: at most this many per person per window.
 const VOICE_CHANGE_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+const VOICE_CHANGE_MAX: usize = 20;
 
 /// Count one voice change of `kind`; replies with an error and returns `true` when it is over the limit.
 fn refuse_voice_change(sessions: &SessionManager, peer_id: u32, user_id: Uuid, kind: &str) -> bool {
-    match sessions.allow_action(user_id, kind, 10, VOICE_CHANGE_WINDOW) {
+    match sessions.allow_action(user_id, kind, VOICE_CHANGE_MAX, VOICE_CHANGE_WINDOW) {
         Ok(()) => false,
         Err(seconds) => {
             refuse_call(sessions, peer_id, 429, format!("Wait {seconds} s; too many voice changes"));
             true
+        }
+    }
+}
+
+/// Mute and deafen changes are always stored. Only their broadcast is limited: when the window is
+/// full, one trailing broadcast of the state as it is then is scheduled, so the room ends up with
+/// the final state and the sender is never refused.
+fn broadcast_voice_state(sessions: &SessionManager, peer_id: u32, user_id: Uuid, muted: bool, deafened: bool) {
+    const VOICE_STATE_BROADCASTS: usize = 10;
+    match sessions.allow_action(user_id, "voice_state", VOICE_STATE_BROADCASTS, VOICE_CHANGE_WINDOW) {
+        Ok(()) => {
+            let sessions = sessions.clone();
+            tokio::spawn(async move {
+                sessions.broadcast_all(ServerMessage::UserVoiceStateChanged { peer_id, muted, deafened }).await;
+            });
+        }
+        Err(wait_secs) => {
+            if !sessions.mark_voice_broadcast_pending(user_id) {
+                return;
+            }
+            let sessions = sessions.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
+                sessions.clear_voice_broadcast_pending(user_id);
+                let current = sessions
+                    .sessions
+                    .get(&peer_id)
+                    .filter(|session| session.current_voice_channel.is_some())
+                    .map(|session| (session.muted, session.deafened));
+                if let Some((muted, deafened)) = current {
+                    sessions.broadcast_all(ServerMessage::UserVoiceStateChanged { peer_id, muted, deafened }).await;
+                }
+            });
         }
     }
 }
@@ -793,7 +827,11 @@ async fn handle_client_message(
         }
 
         ClientMessage::JoinVoice { channel_id } => {
-            if refuse_voice_change(sessions, peer_id, user_id, "join_voice") {
+            // Re-joining the room the session is already in changes nothing, so it is not counted.
+            let already_in_room = sessions.channel_to_short.get(&channel_id).map(|s| *s).is_some_and(|short| {
+                sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel) == Some(short)
+            });
+            if !already_in_room && refuse_voice_change(sessions, peer_id, user_id, "join_voice") {
                 return;
             }
             if let Some(short_id) = sessions.channel_to_short.get(&channel_id).map(|s| *s) {
@@ -837,9 +875,6 @@ async fn handle_client_message(
         }
 
         ClientMessage::UpdateVoiceState { muted, deafened } => {
-            if refuse_voice_change(sessions, peer_id, user_id, "voice_state") {
-                return;
-            }
             let updated = if let Some(mut session) = sessions.sessions.get_mut(&peer_id) {
                 session.muted = muted;
                 session.deafened = deafened;
@@ -849,12 +884,7 @@ async fn handle_client_message(
             };
 
             if updated {
-                let event = ServerMessage::UserVoiceStateChanged {
-                    peer_id,
-                    muted,
-                    deafened,
-                };
-                sessions.broadcast_all(event).await;
+                broadcast_voice_state(sessions, peer_id, user_id, muted, deafened);
             }
         }
 
@@ -968,7 +998,7 @@ async fn handle_client_message(
             if !sessions.is_screen_viewer(peer_id, target_peer_id) || !sessions.allow_keyframe_request(peer_id, target_peer_id) {
                 return;
             }
-            let tx =sessions.sessions.get(&target_peer_id).map(|s| s.control_tx.clone());
+            let tx = sessions.sessions.get(&target_peer_id).map(|s| s.control_tx.clone());
             if let Some(tx) = tx {
                 let _ = tx.send(ServerMessage::KeyframeRequested).await;
             }

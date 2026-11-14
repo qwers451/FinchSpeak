@@ -1,5 +1,6 @@
 //! Control messages that make other people work are limited: keyframe requests (only from
-//! viewers, two per second per pair) and join / voice state / screen share (ten per ten seconds).
+//! viewers, two per second per pair) and join / screen share (twenty per ten seconds). Mute and
+//! deafen changes are never refused: their broadcast is coalesced into one trailing update.
 
 use std::time::{Duration, Instant};
 
@@ -105,50 +106,78 @@ async fn keyframe_retry_after_half_a_second_is_forwarded() -> anyhow::Result<()>
 }
 
 #[tokio::test]
-async fn join_voice_is_limited_to_ten_per_ten_seconds() -> anyhow::Result<()> {
+async fn join_voice_is_limited_to_twenty_per_ten_seconds() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
     let mut alice = TestClient::register(&server, "alice").await?;
-    let (channel_id, _) = alice.join_voice().await?; // the first of ten
+    alice.join_voice().await?; // the first of the twenty
 
-    for _ in 0..9 {
+    // Joins to rooms that do not exist are not re-joins, so each one counts; the server ignores them.
+    for _ in 0..19 {
+        alice.send(ClientMessage::JoinVoice { channel_id: uuid::Uuid::new_v4() }).await?;
+    }
+    alice.expect_no_control(Duration::from_millis(300), is_rate_limited).await?;
+    alice.send(ClientMessage::JoinVoice { channel_id: uuid::Uuid::new_v4() }).await?;
+    expect_rate_limited(&mut alice).await
+}
+
+/// Re-joining the room the session is already in is not counted, so a reconnect costs nothing.
+#[tokio::test]
+async fn rejoining_the_current_room_is_not_limited() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let mut alice = TestClient::register(&server, "alice").await?;
+    let (channel_id, _) = alice.join_voice().await?;
+
+    for _ in 0..30 {
         alice.send(ClientMessage::JoinVoice { channel_id }).await?;
     }
-    alice
-        .expect_no_control(Duration::from_millis(300), is_rate_limited)
-        .await?;
-    alice.send(ClientMessage::JoinVoice { channel_id }).await?;
-    expect_rate_limited(&mut alice).await
+    alice.expect_no_control(Duration::from_millis(500), is_rate_limited).await
 }
 
+/// A burst of mute toggles is never refused. The room ends with the final state, and the
+/// broadcasts stay within one window's worth plus one trailing update.
 #[tokio::test]
-async fn voice_state_updates_are_limited_to_ten_per_ten_seconds() -> anyhow::Result<()> {
+async fn voice_state_burst_ends_with_the_final_state_and_is_never_refused() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
     let mut alice = TestClient::register(&server, "alice").await?;
+    let mut bob = TestClient::register(&server, "bob").await?;
     alice.join_voice().await?;
+    bob.join_voice().await?;
+    let alice_peer = alice.session.session_peer_id;
 
-    for i in 0..10 {
+    for i in 0..15 {
         alice.send(ClientMessage::UpdateVoiceState { muted: i % 2 == 0, deafened: false }).await?;
     }
-    alice
-        .expect_no_control(Duration::from_millis(300), is_rate_limited)
-        .await?;
-    alice.send(ClientMessage::UpdateVoiceState { muted: true, deafened: false }).await?;
-    expect_rate_limited(&mut alice).await
+    // The final toggle (i = 14) leaves the microphone muted.
+    let deadline = Instant::now() + Duration::from_secs(12);
+    let mut broadcasts = Vec::new();
+    while Instant::now() < deadline {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match bob.next_event(left).await {
+            Ok(SessionEvent::Control(ServerMessage::UserVoiceStateChanged { peer_id, muted, deafened }))
+                if peer_id == alice_peer =>
+            {
+                broadcasts.push((muted, deafened));
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    assert!(broadcasts.len() <= 11, "expected at most 10 broadcasts plus one trailing, got {}", broadcasts.len());
+    assert_eq!(broadcasts.last().copied(), Some((true, false)), "the room must end with the final state");
+    alice.expect_no_control(Duration::from_millis(100), is_rate_limited).await
 }
 
 #[tokio::test]
-async fn screen_share_starts_are_limited_to_ten_per_ten_seconds() -> anyhow::Result<()> {
+async fn screen_share_starts_are_limited_to_twenty_per_ten_seconds() -> anyhow::Result<()> {
     let server = TestServer::start().await?;
     let mut alice = TestClient::register(&server, "alice").await?;
     alice.join_voice().await?;
     let start = || ClientMessage::StartScreenShare { codec: VideoCodec::H264, width: 1280, height: 720, fps: 30 };
 
-    for _ in 0..10 {
+    for _ in 0..20 {
         alice.send(start()).await?;
     }
-    alice
-        .expect_no_control(Duration::from_millis(300), is_rate_limited)
-        .await?;
+    alice.expect_no_control(Duration::from_millis(300), is_rate_limited).await?;
     alice.send(start()).await?;
     expect_rate_limited(&mut alice).await
 }

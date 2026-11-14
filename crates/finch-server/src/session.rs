@@ -80,6 +80,8 @@ pub struct SessionManager {
     action_hits: Arc<crate::limits::WindowLimiter>,
     /// Recent keyframe requests per (viewer peer, streamer peer), kept for the last second.
     keyframe_hits: Arc<DashMap<(u32, u32), VecDeque<std::time::Instant>>>,
+    /// Users whose mute/deafen broadcast is waiting for the window to free (one trailing broadcast each).
+    voice_broadcast_pending: Arc<DashMap<Uuid, ()>>,
     /// Per-participant media limits, set with the router; unset means the defaults.
     media_config: Arc<std::sync::OnceLock<LimitsConfig>>,
     /// One media budget per user, shared by all of that user's sessions; dropped with the last session.
@@ -125,6 +127,7 @@ impl SessionManager {
             message_hits: Arc::new(crate::limits::WindowLimiter::default()),
             action_hits: Arc::new(crate::limits::WindowLimiter::default()),
             keyframe_hits: Arc::new(DashMap::new()),
+            voice_broadcast_pending: Arc::new(DashMap::new()),
             media_config: Arc::new(std::sync::OnceLock::new()),
             media_budgets: Arc::new(DashMap::new()),
             preauth: Arc::new(std::sync::OnceLock::new()),
@@ -209,6 +212,16 @@ impl SessionManager {
     /// Forget the keyframe request counts that involve `peer_id` (it left the room or disconnected).
     pub fn forget_keyframe_pairs(&self, peer_id: u32) {
         self.keyframe_hits.retain(|(viewer, streamer), _| *viewer != peer_id && *streamer != peer_id);
+    }
+
+    /// Mark `user` as having a trailing voice-state broadcast scheduled. `false` when one already is.
+    pub fn mark_voice_broadcast_pending(&self, user: Uuid) -> bool {
+        self.voice_broadcast_pending.insert(user, ()).is_none()
+    }
+
+    /// The trailing voice-state broadcast of `user` has run (or is no longer needed).
+    pub fn clear_voice_broadcast_pending(&self, user: Uuid) {
+        self.voice_broadcast_pending.remove(&user);
     }
 
     /// Count a message of `user`; `Err(seconds)` when they are sending too fast.
@@ -467,6 +480,68 @@ fn deliver(targets: Vec<(u32, Sender<ServerMessage>, quinn::Connection)>, msg: &
             tracing::warn!("Control queue of peer {peer_id} is full; disconnecting the slow client");
             connection.close(0u32.into(), b"control queue overflow");
         }
+    }
+}
+
+#[cfg(test)]
+mod keyframe_pair_tests {
+    use super::*;
+
+    fn manager() -> SessionManager {
+        SessionManager::new()
+    }
+
+    /// A request time that is long past the one-second window.
+    fn stale() -> std::time::Instant {
+        std::time::Instant::now() - std::time::Duration::from_secs(5)
+    }
+
+    #[test]
+    fn forgetting_a_peer_drops_every_pair_it_is_in() {
+        let sessions = manager();
+        sessions.keyframe_hits.insert((1, 2), VecDeque::from([stale()]));
+        sessions.keyframe_hits.insert((3, 1), VecDeque::from([stale()]));
+        sessions.keyframe_hits.insert((4, 5), VecDeque::from([stale()]));
+
+        sessions.forget_keyframe_pairs(1);
+
+        assert_eq!(sessions.keyframe_hits.len(), 1);
+        assert!(sessions.keyframe_hits.contains_key(&(4, 5)));
+    }
+
+    #[test]
+    fn stale_pairs_are_swept_once_the_table_grows_past_256() {
+        let sessions = manager();
+        for i in 0..300u32 {
+            sessions.keyframe_hits.insert((i, 9_999), VecDeque::from([stale()]));
+        }
+
+        // A fresh request from a new pair takes the sweep path (table is over 256 entries).
+        assert!(sessions.allow_keyframe_request(1, 2));
+
+        assert_eq!(sessions.keyframe_hits.len(), 1, "only the fresh pair should be left");
+        assert!(sessions.keyframe_hits.contains_key(&(1, 2)));
+    }
+
+    #[test]
+    fn a_small_table_keeps_stale_pairs_until_it_grows() {
+        let sessions = manager();
+        sessions.keyframe_hits.insert((7, 8), VecDeque::from([stale()]));
+
+        assert!(sessions.allow_keyframe_request(1, 2));
+
+        assert!(sessions.keyframe_hits.contains_key(&(7, 8)));
+    }
+
+    #[test]
+    fn pending_voice_broadcast_is_marked_once_until_cleared() {
+        let sessions = manager();
+        let user = Uuid::new_v4();
+
+        assert!(sessions.mark_voice_broadcast_pending(user));
+        assert!(!sessions.mark_voice_broadcast_pending(user));
+        sessions.clear_voice_broadcast_pending(user);
+        assert!(sessions.mark_voice_broadcast_pending(user));
     }
 }
 
