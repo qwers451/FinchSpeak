@@ -13,6 +13,9 @@ const rule = (selector: string) => declarationsFor(all, selector).join(';');
 it('a tag never wraps its label to a second line (the LIVE tag in the Russian channel row did)', () => {
   expect(rule('.tag')).toMatch(/white-space:\s*nowrap/);
   expect(rule('.tag')).toMatch(/flex:\s*none|flex-shrink:\s*0/);
+  // a long tag is cut with an ellipsis, not allowed to push its row
+  expect(rule('.tag')).toMatch(/max-width:\s*100%/);
+  expect(rule('.tag')).toMatch(/text-overflow:\s*ellipsis/);
 });
 
 it('the admin table header wraps a long label instead of spilling out of its cell', () => {
@@ -24,15 +27,17 @@ it('the music progress slider shows no value bubble over the artist line (the cl
 });
 
 it('the Finch mode switch has its own row under the brand: beside the name its Russian label ran 23 px into the next column', () => {
-  expect(rule('.finch-switch')).toMatch(/display:s*flex/);
-  expect(rule('.finch-switch .brand-finch')).toMatch(/min-width:s*0/);
-  expect(all).not.toMatch(/.brands+.brand-finchs*{/);
+  const oldRule = /\.brand\s+\.brand-finch\s*\{/;
+  expect(rule('.finch-switch')).toMatch(/display:\s*flex/);
+  expect(rule('.finch-switch .brand-finch')).toMatch(/min-width:\s*0/);
+  expect(all).not.toMatch(oldRule);
+  expect('.brand .brand-finch { margin-left:auto; }').toMatch(oldRule); // the guard does catch the old rule
   expect(source('components/Sidebar.tsx')).toMatch(/<div class="finch-switch">/);
 });
 
 it('the perch of Finch mode wraps instead of overlapping, and its voice status can shrink', () => {
-  expect(rule('.tree-perch')).toMatch(/flex-wrap:s*wrap/);
-  expect(rule('.tree-perch .tree-voice')).toMatch(/min-width:s*0/);
+  expect(rule('.tree-perch')).toMatch(/flex-wrap:\s*wrap/);
+  expect(rule('.tree-perch .tree-voice')).toMatch(/min-width:\s*0/);
 });
 
 it('the compact room tools (Finch mode perch) truncate the track title and keep their buttons inside', () => {
