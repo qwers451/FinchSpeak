@@ -1,0 +1,146 @@
+name: Server Linux
+
+on:
+  pull_request:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: server-linux
+
+      - name: Read and validate the server version
+        run: |
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            test "$GITHUB_REF_NAME" = "v$version"
+          fi
+          echo "FINCH_SERVER_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Install server build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libssl-dev
+
+      - name: Verify Unix target and server dependency isolation
+        run: |
+          set -euo pipefail
+          rustc --print cfg | grep -Fx unix
+          cargo tree -p finch-server --locked --edges normal,build --prefix none --format '{p}' > "$RUNNER_TEMP/server-dependencies.txt"
+          cat "$RUNNER_TEMP/server-dependencies.txt"
+          if grep -E '^finch-(audio|screen|client-core) ' "$RUNNER_TEMP/server-dependencies.txt"; then
+            echo 'The server must not depend on client media crates.' >&2
+            exit 1
+          fi
+
+      - name: Check server and all test targets
+        run: cargo check -p finch-server --all-targets --locked
+
+      - name: Test server including Unix permissions
+        # Ubuntu compiles and runs cfg(unix) tests, unlike the Windows workspace job.
+        run: cargo test -p finch-server --all-targets --locked --no-fail-fast -- --test-threads=1
+
+      - name: Clippy server and all test targets
+        run: cargo clippy -p finch-server --all-targets --locked -- -D warnings
+
+      - name: Build Linux server binary
+        run: cargo build -p finch-server --release --locked
+
+      - name: Build local Linux server image
+        run: |
+          set -euo pipefail
+          context="$(mktemp -d)"
+          trap 'rm -rf "$context"' EXIT
+          # Match the existing deployment image without sending target/ or .git/ to Docker.
+          git archive HEAD Cargo.toml Cargo.lock crates app deploy/Dockerfile | tar -x -C "$context"
+          # Keep the shared deployment Dockerfile unchanged while enforcing its lockfile in CI.
+          grep -Fx 'RUN cargo build --release -p finch-server' "$context/deploy/Dockerfile"
+          sed -i 's/^RUN cargo build --release -p finch-server$/RUN cargo build --release --locked -p finch-server/' "$context/deploy/Dockerfile"
+          docker build --platform linux/amd64 -f "$context/deploy/Dockerfile" -t finchspeak-server:$FINCH_SERVER_VERSION "$context"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}} {{.Config.User}}' finchspeak-server:$FINCH_SERVER_VERSION)" = 'linux/amd64 finch:finch'
+
+      - name: Test HTTPS health and persistence under the VPS resource limit
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=finch-linux-qa
+          volume=finch-linux-qa-data
+          trap 'docker rm -f "$name" >/dev/null 2>&1 || true; docker volume rm "$volume" >/dev/null 2>&1 || true' EXIT
+          docker volume create "$volume" >/dev/null
+          start() {
+            docker run -d --name "$name" --memory 256m --cpus 1 \
+              --mount "type=volume,source=$volume,target=/app/data" \
+              --mount "type=bind,source=$GITHUB_WORKSPACE/deploy/finch-server.toml,target=/app/finch-server.toml,readonly" \
+              --publish 127.0.0.1:18443:8443 finchspeak-server:$FINCH_SERVER_VERSION
+            for attempt in {1..40}; do
+              if curl -kfsS --max-time 3 https://127.0.0.1:18443/health > "$RUNNER_TEMP/health.json" 2>/dev/null; then
+                python3 -c 'import json,sys,os; h=json.load(open(sys.argv[1])); assert h["status"]=="ok" and h["version"]==os.environ["FINCH_SERVER_VERSION"]; print(h)' "$RUNNER_TEMP/health.json"
+                return
+              fi
+              sleep 2
+            done
+            docker logs "$name"
+            return 1
+          }
+          start
+          cert="$(docker exec "$name" sha256sum /app/data/tls/cert.der)"
+          docker exec "$name" test -s /app/data/finchspeak.db
+          credentials='{"username":"linux_smoke","password":"Temporary-test-password-42"}'
+          curl -kfSs --max-time 10 -o /dev/null -H 'Content-Type: application/json' \
+            -d "$credentials" https://127.0.0.1:18443/api/auth/register
+          docker stop "$name" >/dev/null
+          docker rm "$name" >/dev/null
+          start
+          test "$(docker exec "$name" sha256sum /app/data/tls/cert.der)" = "$cert"
+          docker exec "$name" test -s /app/data/finchspeak.db
+          token="$(curl -kfSs --max-time 10 -H 'Content-Type: application/json' \
+            -d "$credentials" https://127.0.0.1:18443/api/auth/login | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+          curl -kfSs --max-time 10 -H "Authorization: Bearer $token" https://127.0.0.1:18443/api/music/tracks | python3 -c 'import json,sys; assert json.load(sys.stdin) == []; print("PASS music library endpoint")'
+          curl -kfSs --max-time 10 -H "Authorization: Bearer $token" https://127.0.0.1:18443/api/soundboard | python3 -c 'import json,sys; assert json.load(sys.stdin) == []; print("PASS soundboard endpoint")'
+          docker stats --no-stream "$name" --format 'CPU={{.CPUPerc}} memory={{.MemUsage}}'
+          echo "PASS Linux $FINCH_SERVER_VERSION health, SQLite persistence and TLS identity after recreation"
+
+      - name: Export the tested image with its checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cd dist
+          docker save finchspeak-server:$FINCH_SERVER_VERSION | gzip -1 > finchspeak-server-$FINCH_SERVER_VERSION-linux-amd64.tar.gz
+          sha256sum finchspeak-server-$FINCH_SERVER_VERSION-linux-amd64.tar.gz > SHA256SUMS.txt
+          git rev-parse HEAD > source-commit.txt
+          docker image inspect --format '{{.Id}}' finchspeak-server:$FINCH_SERVER_VERSION > image-id.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: finchspeak-server-${{ env.FINCH_SERVER_VERSION }}-linux-amd64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
