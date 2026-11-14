@@ -86,6 +86,13 @@ function bufferOf(soundId: string): Promise<AudioBuffer | null> {
   return loading;
 }
 
+/** Same perceptual curve as `volume_gain` in finch-audio: squared up to 100 %, linear to 200 %. */
+export function volumeGain(fraction: number): number {
+  if (!Number.isFinite(fraction)) return 0;
+  const p = Math.min(2, Math.max(0, fraction));
+  return p <= 1 ? p * p : p;
+}
+
 async function playCached(soundId: string, volume: number): Promise<void> {
   const buffer = await bufferOf(soundId);
   const context = audioContext();
@@ -94,7 +101,7 @@ async function playCached(soundId: string, volume: number): Promise<void> {
     const source = context.createBufferSource();
     const gain = context.createGain();
     source.buffer = buffer;
-    gain.gain.value = volume;
+    gain.gain.value = volumeGain(volume);
     source.connect(gain).connect(context.destination);
     source.start();
   } catch { /* the sound is skipped */ }

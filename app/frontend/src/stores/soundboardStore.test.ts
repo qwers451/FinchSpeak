@@ -3,7 +3,7 @@ import { api } from '../services/api';
 import type { SoundInfo, User } from '../types';
 import { setCurrentUser } from './authStore';
 import { toggleLocalMute } from './localMuteStore';
-import { boardSounds, canRemove, handleSoundPlayed, loadBoard, removeBoardSound, resetSoundboardForTests, setSoundboardHidden, soundboardHidden, uploadBoardSound } from './soundboardStore';
+import { boardSounds, canRemove, handleSoundPlayed, volumeGain, loadBoard, removeBoardSound, resetSoundboardForTests, setSoundboardHidden, soundboardHidden, uploadBoardSound } from './soundboardStore';
 import { setIsDeafened } from './voiceStore';
 import { DEFAULT_SOUNDBOARD_VOLUME, setVolume, volumeFor } from './volumeStore';
 
@@ -51,7 +51,7 @@ it('plays a played sound from the cache at my own soundboard volume', async () =
   await flush();
   expect(api.downloadBoardSound).toHaveBeenCalledTimes(1);
   expect(starts).toHaveLength(2);
-  expect(gains.at(-1)?.gain.value).toBe(0.8);
+  expect(gains.at(-1)?.gain.value).toBeCloseTo(0.64, 6);
 });
 
 it('the soundboard defaults to 0.8 and remembers my change', async () => {
@@ -61,6 +61,16 @@ it('the soundboard defaults to 0.8 and remembers my change', async () => {
   handleSoundPlayed({ sound_id: 'gong', user_id: 'bob' });
   await flush();
   expect(gains.at(-1)?.gain.value).toBe(1.5);
+});
+
+it("uses the perceptual curve: squared up to 100 %, linear to 200 %", () => {
+  expect(volumeGain(1)).toBe(1);
+  expect(volumeGain(0.5)).toBe(0.25);
+  expect(volumeGain(0)).toBe(0);
+  expect(volumeGain(1.5)).toBe(1.5);
+  expect(volumeGain(2)).toBe(2);
+  expect(volumeGain(3)).toBe(2);
+  expect(volumeGain(Number.NaN)).toBe(0);
 });
 
 it('does not play for a person I muted locally', async () => {
