@@ -4,7 +4,7 @@ import type { DeviceSession, SessionEvents, SessionSnapshot, User, UserStatus } 
 import { setPendingMismatch, setPendingTofu } from './tofuStore';
 import { receiveInviteLink, setPendingInvite } from './inviteLink';
 import { activeChannel, channels, handleChannelCreated, handleChannelDeleted, handleChannelUpdated, handleIncomingMessage, handleMessageRejected, selectChannel, setChannels } from './chatStore';
-import { activeVoiceChannel, allVoiceParticipants, handlePushToTalk, toggleMute, handleHotkey, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, joinVoice, lastJoinRequestedAt, leaveVoice, resetMicPreview, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
+import { activeVoiceChannel, allVoiceParticipants, handlePushToTalk, toggleMute, handleHotkey, handleMicLevel, handleMicTest, handleVoiceQuality, handleUserSpeaking, joinVoice, leaveVoice, resetMicPreview, undoRefusedJoin, setActiveVoiceChannel, setIsMuted, setIsDeafened, setIsLocalSpeaking, setPingRtt, setSpeakingPeers, setVoiceParticipants } from './voiceStore';
 import { setAppError } from './notificationStore';
 import { t } from '../i18n';
 import { classifyEnd, sessionEnded, setSessionEnded } from './sessionEnd';
@@ -80,16 +80,18 @@ export function resetSessionState() {
   setAppError(null);
 }
 
-/** A join or share can be refused when the server limits them. A refusal right after our own join or share
- * means that action did not stand, so the local joined/sharing state is undone (locally and on the server). */
-const ROLLBACK_WINDOW_MS = 3000;
+/** A refused share was started just now: the server never had it, so only our share is stopped. */
+const SHARE_REFUSAL_WINDOW_MS = 3000;
 
+/** The server limits joins and shares. Each refusal names its action, so each one undoes only its own local state. */
 function handleVoiceRefusal(error: { code: number; message: string }): boolean {
-  if (error.code !== 429 || !/^Wait \d+ s; too many voice changes/.test(error.message)) return false;
+  if (error.code !== 429) return false;
+  const join = /^Wait \d+ s; too many room joins/.test(error.message);
+  const share = /^Wait \d+ s; too many screen shares/.test(error.message);
+  if (!join && !share) return false;
   setAppError(describeError(`${error.code}: ${error.message}`));
-  const now = Date.now();
-  if (now - lastJoinRequestedAt() < ROLLBACK_WINDOW_MS) void leaveVoice();
-  if (now - lastShareStartedAt() < ROLLBACK_WINDOW_MS) void stopSharing();
+  if (join) undoRefusedJoin();
+  else if (Date.now() - lastShareStartedAt() < SHARE_REFUSAL_WINDOW_MS) void stopSharing();
   return true;
 }
 

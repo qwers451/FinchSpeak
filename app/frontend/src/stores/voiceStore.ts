@@ -339,11 +339,18 @@ export function handlePushToTalk(pressed: boolean) {
   feedback(pressed ? 'ptt-on' : 'ptt-off');
 }
 
-let joinRequestedAt = 0;
+/** The last join we sent: when, and the room we were in before it. */
+let joinRequest: { at: number; previous: Channel | null } = { at: 0, previous: null };
+const JOIN_REFUSAL_WINDOW_MS = 3000;
 
-/** When the last join was sent (ms since epoch). A refusal right after it means the join did not stand. */
-export function lastJoinRequestedAt(): number {
-  return joinRequestedAt;
+/**
+ * The server refused our join. It never moved us, so only the local view goes back to the room we
+ * were in before. Nothing is sent to the server, and a share in the room we stay in is not touched.
+ */
+export function undoRefusedJoin(now = Date.now()): void {
+  if (now - joinRequest.at >= JOIN_REFUSAL_WINDOW_MS) return;
+  setActiveVoiceChannel(joinRequest.previous);
+  joinRequest = { at: 0, previous: null };
 }
 
 export async function joinVoice(channel: Channel) {
@@ -351,7 +358,7 @@ export async function joinVoice(channel: Channel) {
   await restoreVoiceSettings();
   try {
     const previous = activeVoiceChannel();
-    joinRequestedAt = Date.now();
+    joinRequest = { at: Date.now(), previous };
     await api.joinVoiceChannel(channel.id, channel.short_id);
     // The backend ends our share (announced by screen-share-ended) and stops the one we watched;
     // only the watched share is cleared here.
