@@ -70,3 +70,8 @@ it('the music panel titles carry a title tooltip and the search uses the shared 
   expect(panel).toContain('<Field');
   expect(panel).not.toMatch(/class="field music-search"/);
 });
+
+it('the music row buttons hide their text with the other room-tool labels in compact mode and keep the icon', () => {
+  expect(declarationsFor(room, '.room-tools.compact .rt-label').join(';')).toMatch(/display:\s*none/);
+  expect(declarationsFor(room, '.room-now-actions .btn').join(';')).toMatch(/min-width:\s*0/);
+});

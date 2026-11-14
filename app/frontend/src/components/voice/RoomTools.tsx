@@ -24,10 +24,12 @@ export function RoomTools(props: { compact?: boolean }) {
                 <span class="t3 fs12 music-clock">{formatClock(musicPosition())}</span>
               </div>
               <div class="room-now-actions">
-                <Button size="sm" variant="secondary" onClick={() => void sendMusicCommand({ kind: now().paused ? 'resume' : 'pause' })}>
-                  {now().paused ? t('Resume') : t('Pause')}
+                <Button size="sm" variant="secondary" icon={now().paused ? 'resume' : 'pause'} aria-label={now().paused ? t('Resume') : t('Pause')} title={now().paused ? t('Resume') : t('Pause')} onClick={() => void sendMusicCommand({ kind: now().paused ? 'resume' : 'pause' })}>
+                  <span class="rt-label">{now().paused ? t('Resume') : t('Pause')}</span>
                 </Button>
-                <Button size="sm" variant="secondary" onClick={() => void sendMusicCommand({ kind: 'skip' })}>{t('Next')}</Button>
+                <Button size="sm" variant="secondary" icon="next" aria-label={t('Next')} title={t('Next')} onClick={() => void sendMusicCommand({ kind: 'skip' })}>
+                  <span class="rt-label">{t('Next')}</span>
+                </Button>
               </div>
             </div>
           )}

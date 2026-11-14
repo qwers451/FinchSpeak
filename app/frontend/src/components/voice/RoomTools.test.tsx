@@ -133,3 +133,20 @@ it('the Screen button is not pressed when nothing is shared', () => {
   mount(() => <RoomTools />);
   expect(button(t('Screen'))?.getAttribute('aria-pressed')).toBe('false');
 });
+
+it('the music row buttons carry an icon, a name and a tooltip, with the text in a label that compact mode hides', () => {
+  setActiveVoiceChannel(room);
+  setServerFeatures(['music']);
+  mount(() => <RoomTools compact />);
+  applyMusicState({ channel_id: 'room', state: playing(), server_ms: 0 });
+  const pause = button(t('Pause'))!;
+  const next = button(t('Next'))!;
+  for (const control of [pause, next]) {
+    expect(control.getAttribute('aria-label')).toBe(control.textContent?.trim());
+    expect(control.getAttribute('title')).toBe(control.getAttribute('aria-label'));
+    expect(control.querySelector('svg.ic')).not.toBeNull();
+    expect(control.querySelector('.rt-label')).not.toBeNull();
+  }
+  expect(pause.querySelector('use')?.getAttribute('href')).toContain('pause');
+  expect(next.querySelector('use')?.getAttribute('href')).toContain('next');
+});
