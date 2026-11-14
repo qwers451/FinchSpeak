@@ -1,5 +1,28 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { placePopover } from './popover';
+import { placePopover, scrollMovesAnchor } from './popover';
+
+it('moves an anchor only for its own container, its ancestors and the document', () => {
+  const chat = document.createElement('div');
+  const anchor = document.createElement('button');
+  const unrelated = document.createElement('div');
+  chat.append(anchor);
+  document.body.append(chat, unrelated);
+  expect(scrollMovesAnchor(chat, anchor)).toBe(true);
+  expect(scrollMovesAnchor(anchor, anchor)).toBe(true);
+  expect(scrollMovesAnchor(document.body, anchor)).toBe(true);
+  expect(scrollMovesAnchor(document, anchor)).toBe(true);
+  expect(scrollMovesAnchor(window, anchor)).toBe(true);
+  expect(scrollMovesAnchor(unrelated, anchor)).toBe(false);
+  expect(scrollMovesAnchor(anchor, chat)).toBe(false);
+});
+
+it('without an anchor element, only a document scroll moves the popover', () => {
+  const chat = document.createElement('div');
+  document.body.append(chat);
+  expect(scrollMovesAnchor(chat, null)).toBe(false);
+  expect(scrollMovesAnchor(document, null)).toBe(true);
+  expect(scrollMovesAnchor(window, null)).toBe(true);
+});
 
 afterEach(() => { document.body.innerHTML = ''; vi.restoreAllMocks(); });
 

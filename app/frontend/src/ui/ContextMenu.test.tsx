@@ -100,11 +100,23 @@ it('ignores scrolling outside its anchor, closes when the anchor scrolls, and st
   expect(document.querySelector('[role="menu"]')).toBeNull();
 });
 
-it('keeps a point-anchored menu open when a non-document container scrolls', async () => {
-  mountWithScrollers();
+it('closes a point-anchored menu when the region under its point scrolls, not when an unrelated container scrolls', async () => {
+  const { chat, list } = mountWithScrollers();
+  vi.spyOn(document, 'elementFromPoint').mockReturnValue(chat.querySelector('.anchor'));
   openContextMenu({ x: 20, y: 20 }, [{ kind: 'item', label: 'Mute', onSelect() {} }]);
   await flush();
-  document.querySelector('.list')!.dispatchEvent(new Event('scroll'));
+  list.dispatchEvent(new Event('scroll'));
+  expect(document.querySelector('[role="menu"]')).toBeTruthy();
+  chat.dispatchEvent(new Event('scroll'));
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+});
+
+it('a point-anchored menu with nothing under its point ignores container scrolls', async () => {
+  const { list } = mountWithScrollers();
+  vi.spyOn(document, 'elementFromPoint').mockReturnValue(null);
+  openContextMenu({ x: 20, y: 20 }, [{ kind: 'item', label: 'Mute', onSelect() {} }]);
+  await flush();
+  list.dispatchEvent(new Event('scroll'));
   expect(document.querySelector('[role="menu"]')).toBeTruthy();
 });
 

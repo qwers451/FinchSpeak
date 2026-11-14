@@ -14,11 +14,13 @@ export type MenuItem =
   | { kind: 'header'; label: string }
   | { kind: 'slider'; label: string; min: number; max: number; step: number; value: number; onChange: (value: number) => void; format: (value: number) => string; disabled?: boolean };
 
-type Request = { anchor: PopoverAnchor; items: MenuItem[]; previous: HTMLElement | null };
+/** `scrollAnchor` is the element the menu belongs to: the anchor itself, or for a point the element under it when the menu opened. */
+type Request = { anchor: PopoverAnchor; scrollAnchor: Element | null; items: MenuItem[]; previous: HTMLElement | null };
 const [request, setRequest] = createSignal<Request | null>(null);
 
 export function openContextMenu(anchor: PopoverAnchor, items: MenuItem[]): void {
-  setRequest({ anchor, items, previous: document.activeElement instanceof HTMLElement ? document.activeElement : null });
+  const scrollAnchor = anchor instanceof HTMLElement ? anchor : document.elementFromPoint?.(anchor.x, anchor.y) ?? null;
+  setRequest({ anchor, scrollAnchor, items, previous: document.activeElement instanceof HTMLElement ? document.activeElement : null });
 }
 
 export function closeContextMenu(restoreFocus = true) {
@@ -42,7 +44,13 @@ function MenuPanel(props: { items: MenuItem[]; anchor: PopoverAnchor; parent?: H
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
   const cancelClose = () => { clearTimeout(closeTimer); closeTimer = undefined; };
   /** The pointer left the submenu's trigger for a sibling: close only if it does not reach the submenu in time. */
-  const closeSoon = () => { cancelClose(); closeTimer = setTimeout(() => { closeTimer = undefined; setSubmenu(null); }, SUBMENU_CLOSE_DELAY); };
+  const closeSoon = () => {
+    cancelClose();
+    if (!submenu()) return;
+    closeTimer = setTimeout(() => { closeTimer = undefined; setSubmenu(null); }, SUBMENU_CLOSE_DELAY);
+  };
+  /** Closes the submenu at once (keyboard focus, back) and drops any pending close. */
+  const closeNow = () => { cancelClose(); setSubmenu(null); };
   onCleanup(cancelClose);
   const focusable = () => [...panel.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)')];
   onMount(() => {
@@ -85,7 +93,7 @@ function MenuPanel(props: { items: MenuItem[]; anchor: PopoverAnchor; parent?: H
         }
         return <button type="button" class="ctx-entry" classList={{ danger: item.danger }} tabindex="-1"
           role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={item.checked} disabled={item.disabled}
-          onPointerEnter={closeSoon} onFocus={() => setSubmenu(null)}
+          onPointerEnter={closeSoon} onFocus={closeNow}
           onClick={() => { closeContextMenu(); item.onSelect(); }}
           onKeyDown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.currentTarget.click(); }
@@ -95,7 +103,7 @@ function MenuPanel(props: { items: MenuItem[]; anchor: PopoverAnchor; parent?: H
         </button>;
       }}</For>
     </div>
-    <Show when={submenu()} keyed>{(child) => <MenuPanel items={child.item.items} anchor={child.button} parent={child.button} onBack={() => setSubmenu(null)} onEnter={cancelClose} />}</Show>
+    <Show when={submenu()} keyed>{(child) => <MenuPanel items={child.item.items} anchor={child.button} parent={child.button} onBack={closeNow} onEnter={cancelClose} />}</Show>
   </>;
 }
 
@@ -108,7 +116,7 @@ export function ContextMenuHost() {
     // Only a scroll of the anchor (or its ancestors, or the document) closes the menu; chat or list scrolling does not.
     const scrolled = (event: Event) => {
       const current = request();
-      if (current && !host?.contains(event.target as Node) && scrollMovesAnchor(event.target, current.anchor)) closeContextMenu(false);
+      if (current && !host?.contains(event.target as Node) && scrollMovesAnchor(event.target, current.scrollAnchor)) closeContextMenu(false);
     };
     const dismiss = () => closeContextMenu();
     document.addEventListener('mousedown', outside, true);

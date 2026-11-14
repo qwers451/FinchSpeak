@@ -1,14 +1,14 @@
 export type PopoverAnchor = { x: number; y: number } | HTMLElement;
 
 /**
- * A scroll moves an anchor only when it happens in the anchor or in one of its ancestors, or in the
+ * A scroll moves an anchor only when it happens in the anchor element or in one of its ancestors, or in the
  * document. Scrolling an unrelated list (chat, members) leaves the popover where it is.
- * A point anchor has no element to move with, so only a document scroll counts.
+ * `anchor` is the element the popover is attached to; for a point anchor it is the element under that point
+ * when the menu opened, or null when there was none (then only a document scroll counts).
  */
-export function scrollMovesAnchor(target: EventTarget | null, anchor: PopoverAnchor): boolean {
+export function scrollMovesAnchor(target: EventTarget | null, anchor: Element | null): boolean {
   if (!(target instanceof Element)) return true;
-  if (!(anchor instanceof HTMLElement)) return false;
-  return target.contains(anchor);
+  return !!anchor && target.contains(anchor);
 }
 
 /**
