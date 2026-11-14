@@ -138,7 +138,12 @@ export function isMeParticipant(participant: VoiceParticipant, localPeerId: numb
 /** The "…" at the end of a person's row in a list: opens the same menu as a right click, shown on hover or focus. */
 export function RowActions(props: { userId: string; name: string; participant?: VoiceParticipant }) {
   return (
+    // Its own control inside a row: a press or drag here must not act on the row (row click, row drag, row menu).
     <Button iconOnly size="sm" variant="ghost" icon="more" class="row-actions" label={t('Actions for {name}', { name: props.name })}
-      onClick={(event) => openParticipantMenu(event.currentTarget, props.userId, props.participant)} />
+      draggable={false}
+      // Native listeners (on:): Solid's delegated onClick runs at the document, after a row listener would already have seen the event.
+      on:pointerdown={(event) => event.stopPropagation()}
+      on:dragstart={(event) => { event.preventDefault(); event.stopPropagation(); }}
+      on:click={(event) => { event.stopPropagation(); openParticipantMenu(event.currentTarget, props.userId, props.participant); }} />
   );
 }

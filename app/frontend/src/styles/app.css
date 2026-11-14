@@ -60,7 +60,7 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 /* Sidebar details */
 .cat { justify-content: space-between; }
 .cat-toggle { all: unset; display: flex; align-items: center; gap: 6px; flex: 1; height: 28px; cursor: pointer; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
-.cat-toggle:focus-visible, .cat-add:focus-visible, .ch:focus-visible, .profile-open:focus-visible, .ch .acts button:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; border-radius: 6px; }
+.cat-toggle:focus-visible, .cat-add:focus-visible, .ch:focus-visible, .ch .acts button:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; border-radius: 6px; }
 .cat-add { all: unset; display: flex; align-items: center; cursor: pointer; color: var(--text-3); padding: 2px; border-radius: 6px; }
 .cat-add:hover { color: var(--text); background: var(--bg-hover); }
 .nav { overflow-y: auto; }
@@ -71,7 +71,7 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 .ch:focus-within { background: var(--bg-hover); }
 .ch .acts button { all: unset; display: flex; cursor: pointer; padding: 2px; border-radius: 4px; }
 .ch .acts button:hover { color: var(--text); background: var(--bg-card); }
-.profile-open { all: unset; display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; cursor: pointer; border-radius: 8px; }
+.profile-card { all: unset; display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; border-radius: 8px; }
 .app-layout { flex: 1; display: flex; min-height: 0; min-width: 0; }
 .vstrip .btn, .upanel .btn { flex: none; }
 .trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -250,14 +250,15 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 /* "…" at the end of a person's row: hidden until the row is hovered or has keyboard focus, never removed from Tab order. */
 .row-actions { flex:none; opacity:0; transition:opacity var(--motion-small, .12s) var(--ease-out, ease-out); }
 .vp:hover .row-actions, .vp:focus-within .row-actions, .mem:hover .row-actions, .mem:focus-within .row-actions, .row-actions:focus-visible { opacity:1; }
-.voice-banner { cursor:pointer; }
+.voice-open { all:unset; display:flex; flex-direction:column; min-width:0; cursor:pointer; border-radius:6px; }
+.voice-open:focus-visible { outline:2px solid var(--yellow); outline-offset:2px; }
 .brand .brand-finch { margin-left:auto; flex:none; }
 .drop-target { outline:2px solid var(--cyan); outline-offset:-2px; }
 .vp[draggable="true"] { cursor:grab; }
 .voice-people { border-radius:var(--r-sm); }
 .ch > .badge,.ch > .channel-live,.ch > .channel-count { margin-left:auto; }
 .ch > .channel-count.with-live { margin-left:0; }
-.profile-open .col { text-align:left; }
+.profile-card .col { text-align:left; }
 .viewer-volume { width:120px; }
 .ended-overlay { background:rgba(5,8,15,.9); }
 .source-placeholder { position:absolute; inset:0; border-radius:0; }

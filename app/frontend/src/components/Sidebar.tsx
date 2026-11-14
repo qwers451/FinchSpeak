@@ -259,15 +259,15 @@ export function Sidebar() {
 
       <Show when={activeVoiceChannel()}>
         {(channel) => (
-          // The strip itself opens the room (the leave button inside is excluded), so a click here is never a join.
-          <div class="vstrip voice-banner" title={t('Open the room')} onClick={(event) => { if ((event.target as Element).closest('.voice-leave')) return; void selectChannel(channel()); }}>
-            <div class="col grow">
-                <span class="row g6 b fs13 voice-connection">
+          // Two siblings: the text opens the room (a real button), the leave button sits beside it and never opens anything.
+          <div class="vstrip voice-banner">
+            <button type="button" class="voice-open col grow" aria-label={t('Open the room')} title={t('Open the room')} onClick={() => void selectChannel(channel())}>
+              <span class="row g6 b fs13 voice-connection">
                 <Icon name="bars" size="sm" />{connectionStatus() === 'connected' ? t('Voice connected') : t('Voice disconnected')}
               </span>
               <span class="t2 fs12 trunc">{channel().name}{pingRtt() !== null ? ` · ${pingRtt()} ms` : ''}</span>
               <Show when={isSharing()}><span class="row g6 fs12 tr"><Icon name="share" size="sm" />{t('You are sharing your screen')}</span></Show>
-            </div>
+            </button>
             <Button iconOnly size="sm" variant="danger" icon="hangup" class="voice-leave" label={t('Leave room')} title={t('Leave room')} onClick={() => void leaveVoice()} />
           </div>
         )}
@@ -276,13 +276,14 @@ export function Sidebar() {
       <RoomTools />
 
       <div class="upanel user-panel">
-        <button type="button" class="row g12 grow profile-open" aria-label={t('Open profile')} title={currentUser()?.display_name || currentUser()?.username} onClick={() => setProfileOpen(true)}>
+        {/* Not a control: the gear below is the one way into profile and settings. */}
+        <div class="row g12 grow profile-card">
           <Avatar name={currentUser()?.display_name || currentUser()?.username} id={currentUser()?.id} size={40} status={myStatus()} speaking={isLocalSpeaking()} src={currentUser()?.avatar_url} levelPeerId={localPeerId() ?? undefined} />
           <div class="col grow">
             <span class="b trunc fs13">{currentUser()?.display_name || currentUser()?.username}</span>
             <span class="t3 fs12 trunc">{(currentUser() && statusTexts()[currentUser()!.id]) || statusLabel()}</span>
           </div>
-        </button>
+        </div>
         <Button iconOnly size="sm" variant={isMuted() ? 'danger' : 'ghost'} icon={isMuted() ? 'mic-off' : 'mic'} label={isMuted() ? t('Unmute') : t('Mute')} title={isMuted() ? t('Unmute') : t('Mute')} onClick={() => void toggleMute()} />
         <Button iconOnly size="sm" variant={isDeafened() ? 'danger' : 'ghost'} icon={isDeafened() ? 'phones-off' : 'phones'} label={isDeafened() ? t('Undeafen') : t('Deafen')} title={isDeafened() ? t('Undeafen') : t('Deafen')} onClick={() => void toggleDeafen()} />
         <Button iconOnly size="sm" variant="ghost" icon="gear" label={t('Profile and settings')} title={t('Profile and settings')} onClick={() => setProfileOpen(true)} />

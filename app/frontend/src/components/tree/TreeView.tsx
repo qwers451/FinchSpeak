@@ -155,13 +155,14 @@ export function TreeView() {
       </Show>
 
       <footer class="tree-perch">
-        <button type="button" class="profile-open tree-me" aria-label={t('Open profile')} title={currentUser()?.display_name || currentUser()?.username} onClick={() => setProfileOpen(true)}>
+        {/* Not a control: the gear below is the one way into profile and settings. */}
+        <div class="profile-card tree-me" title={currentUser()?.display_name || currentUser()?.username}>
           <Avatar name={currentUser()?.display_name || currentUser()?.username} id={currentUser()?.id} size={40} status={myStatus()} speaking={isLocalSpeaking()} src={currentUser()?.avatar_url} />
           <span class="col tree-label">
             <span class="b trunc fs13">{currentUser()?.display_name || currentUser()?.username}</span>
             <span class="t3 fs12 trunc">{(currentUser() && statusTexts()[currentUser()!.id]) || statusLabel()}</span>
           </span>
-        </button>
+        </div>
         <Show when={activeVoiceChannel()} fallback={<span class="t3 fs12 grow trunc">{t('You are on the wire. Pick a nest to talk.')}</span>}>
           {(channel) => (
             <span class="col grow tree-voice">

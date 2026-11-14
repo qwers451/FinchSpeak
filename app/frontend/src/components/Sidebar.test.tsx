@@ -7,6 +7,7 @@ import { setActiveVoiceChannel, setVoiceParticipants } from '../stores/voiceStor
 import type { Channel, User } from '../types';
 import { nestView, setNestView } from '../stores/nestView';
 import { ContextMenuHost, closeContextMenu } from '../ui/ContextMenu';
+import { profileOpen, setProfileOpen } from '../stores/profileStore';
 import { ru } from '../i18n';
 import { Sidebar } from './Sidebar';
 
@@ -79,6 +80,23 @@ it('the banner leave button is labelled Leave room and does not also open the ro
   expect(nav.selectChannel).not.toHaveBeenCalled();
 });
 
+it('the banner text is a real button that Enter activates, and it comes before the leave button in Tab order', () => {
+  setChannels([voice]);
+  setActiveVoiceChannel(voice);
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  dispose = render(() => <Sidebar />, host);
+  const open = host.querySelector('.voice-banner .voice-open') as HTMLButtonElement;
+  const leave = host.querySelector('.voice-banner .voice-leave') as HTMLButtonElement;
+  expect(open.tagName).toBe('BUTTON');
+  expect(open.getAttribute('aria-label')).toBe('Open the room');
+  expect(open.tabIndex).toBeGreaterThanOrEqual(0);
+  expect(open.compareDocumentPosition(leave) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  press(open, 'Enter');
+  expect(nav.selectChannel).toHaveBeenCalledWith(voice);
+  expect(nav.joinVoice).not.toHaveBeenCalled();
+});
+
 it('the profile panel has a single settings button, a gear, and no second sliders icon', () => {
   setCurrentUser(member);
   const host = document.createElement('div');
@@ -87,6 +105,23 @@ it('the profile panel has a single settings button, a gear, and no second slider
   expect(host.querySelectorAll('.upanel [aria-label="Profile and settings"]').length).toBe(1);
   expect(host.querySelector('.upanel [aria-label="Profile and settings"] use.classic-glyph')?.getAttribute('href')).toBe('#i-gear');
   expect(host.querySelector('.upanel use[href="#i-sliders"]')).toBeNull();
+});
+
+it('exactly one control in the user panel opens profile and settings, and the avatar and name are not controls', () => {
+  setCurrentUser(member);
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  dispose = render(() => <Sidebar />, host);
+  const openers = [...host.querySelectorAll<HTMLElement>('.upanel button, .upanel [role="button"], .upanel [tabindex]')]
+    .filter((el) => /profile|settings/i.test(el.getAttribute('aria-label') ?? ''));
+  expect(openers.length).toBe(1);
+  const card = host.querySelector('.upanel .profile-card') as HTMLElement;
+  expect(card.tagName).toBe('DIV');
+  expect(card.querySelector('button, [tabindex]')).toBeNull();
+  setProfileOpen(false);
+  openers[0].click();
+  expect(profileOpen()).toBe(true);
+  setProfileOpen(false);
 });
 
 it('each channel has one actions button that opens Move up, Move down, Rename and Delete, with Delete as danger', async () => {

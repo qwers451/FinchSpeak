@@ -14,13 +14,12 @@ import { SharerPill } from './screen/SharerPill';
 import { EndedPanel, ViewerPanel } from './screen/ViewerPanel';
 import { Dock } from './voice/Dock';
 import { LiveCard } from './voice/LiveCard';
-import { isMeParticipant, ParticipantTile } from './voice/ParticipantTile';
+import { isMeParticipant, ParticipantTile, RowActions } from './voice/ParticipantTile';
 import { VoiceSettingsModal } from './voice/VoiceSettingsModal';
 import { SpatialStage } from './voice/SpatialStage';
 import { spatialEnabled } from '../stores/spatialStore';
 import { arrange, avatarSizeFor, gridColumns, gridRows } from './voice/voiceLayout';
 import { participantContextMenu, participantMenuKey } from './voice/participantMenu';
-import { RowActions } from './voice/ParticipantTile';
 import { tileOrder } from '../stores/tileOrderStore';
 import { t } from '../i18n';
 
