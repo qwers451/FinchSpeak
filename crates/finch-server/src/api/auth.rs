@@ -84,6 +84,8 @@ pub struct ArcSharedState {
     /// Live QUIC sessions, shared with the QUIC server.
     pub sessions: SessionManager,
     pub login_guard: std::sync::Arc<crate::limits::LoginGuard>,
+    /// Every sign-in attempt from one address, whether or not it is right.
+    pub login_ip_hits: std::sync::Arc<crate::limits::WindowLimiter>,
     pub register_hits: std::sync::Arc<crate::limits::WindowLimiter>,
     pub avatar_hits: std::sync::Arc<crate::limits::WindowLimiter>,
 }
@@ -97,8 +99,33 @@ impl FromRef<ArcSharedState> for ArcSharedState {
 /// Shortest password accepted when registering or choosing a new one (older, shorter ones still log in).
 pub const MIN_PASSWORD_LEN: usize = 8;
 
-/// Hash a password using Argon2id.
-pub fn hash_password(password: &str) -> Result<String, ServerError> {
+/// Failed sign-ins allowed from one address per window, on top of the per login and address lock.
+pub const LOGIN_IP_LIMIT: usize = 20;
+/// The window the per-address sign-in limit counts in.
+pub const LOGIN_IP_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Counts every sign-in call made by the test build, so tests can see that a hash check ran.
+#[cfg(test)]
+static VERIFY_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Runs Argon2 work on the blocking pool. A panicked or cancelled job is a 500, never a panic here.
+async fn run_blocking<T: Send + 'static>(job: impl FnOnce() -> T + Send + 'static) -> Result<T, ServerError> {
+    tokio::task::spawn_blocking(job)
+        .await
+        .map_err(|e| ServerError::Internal(format!("password task did not finish: {e}")))
+}
+
+/// Hash a password using Argon2id. Runs on the blocking pool.
+pub async fn hash_password(password: String) -> Result<String, ServerError> {
+    run_blocking(move || hash_password_blocking(&password)).await?
+}
+
+/// Verify a password against an Argon2id hash. Runs on the blocking pool.
+pub async fn verify_password(password: String, hash: String) -> Result<bool, ServerError> {
+    run_blocking(move || verify_password_blocking(&password, &hash)).await
+}
+
+fn hash_password_blocking(password: &str) -> Result<String, ServerError> {
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
     let hash = argon2
@@ -107,14 +134,25 @@ pub fn hash_password(password: &str) -> Result<String, ServerError> {
     Ok(hash.to_string())
 }
 
-/// Verify a password against an Argon2id hash.
-pub fn verify_password(password: &str, hash: &str) -> bool {
+fn verify_password_blocking(password: &str, hash: &str) -> bool {
+    #[cfg(test)]
+    VERIFY_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     if let Ok(parsed_hash) = PasswordHash::new(hash) {
         Argon2::default()
             .verify_password(password.as_bytes(), &parsed_hash)
             .is_ok()
     } else {
         false
+    }
+}
+
+/// A hash of a random-looking password, made with the same parameters as real ones. Unknown logins
+/// are checked against it so their response time does not reveal whether the account exists.
+fn dummy_hash() -> Result<&'static str, ServerError> {
+    static DUMMY: std::sync::OnceLock<Result<String, String>> = std::sync::OnceLock::new();
+    match DUMMY.get_or_init(|| hash_password_blocking("finchspeak-no-such-account").map_err(|e| e.to_string())) {
+        Ok(hash) => Ok(hash.as_str()),
+        Err(message) => Err(ServerError::Internal(message.clone())),
     }
 }
 
@@ -376,7 +414,7 @@ pub async fn register_handler(
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| username.clone());
 
-    let password_hash = hash_password(&payload.password)?;
+    let password_hash = hash_password(payload.password.clone()).await?;
     let user_id = Uuid::new_v4();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -466,6 +504,23 @@ pub async fn login_handler(
     peer: Option<axum::Extension<crate::limits::PeerAddr>>,
     Json(payload): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, ServerError> {
+    let peer = peer.map(|axum::Extension(crate::limits::PeerAddr(ip))| ip);
+    login_at(state, peer, payload, std::time::Instant::now()).await
+}
+
+/// The sign-in with its clock passed in, so tests can move time forward.
+async fn login_at(
+    state: ArcSharedState,
+    peer: Option<std::net::IpAddr>,
+    payload: LoginRequest,
+    now: std::time::Instant,
+) -> Result<impl IntoResponse, ServerError> {
+    let state = &state;
+    // Every attempt from one address counts, right or wrong, so a flood cannot try passwords for free.
+    // A shared address (NAT) gets a budget, not a ban: the window slides and the budget comes back.
+    if let Some(ip) = peer {
+        state.login_ip_hits.hit(&ip.to_string(), now, LOGIN_IP_LIMIT, LOGIN_IP_WINDOW).map_err(ServerError::TooManyRequests)?;
+    }
     // Bound input before allocating a persistent brute-force guard key. Registration
     // uses the same username limit; invalid names never represent existing accounts.
     if payload.username.len() > 128 {
@@ -476,11 +531,11 @@ pub async fn login_handler(
         return Err(ServerError::AuthFailed("Invalid username or password".to_string()));
     }
     // Wrong passwords are counted per login and address; too many lock that pair for a while.
-    let guard_key = match &peer {
-        Some(axum::Extension(crate::limits::PeerAddr(ip))) => format!("{username}|{ip}"),
+    let guard_key = match peer {
+        Some(ip) => format!("{username}|{ip}"),
         None => username.clone(),
     };
-    state.login_guard.check(&guard_key, std::time::Instant::now()).map_err(ServerError::TooManyRequests)?;
+    state.login_guard.check(&guard_key, now).map_err(ServerError::TooManyRequests)?;
 
     let row = sqlx::query_as::<_, (String, String, String, String, Option<i64>, Option<i64>)>(
         "SELECT id, password_hash, COALESCE(NULLIF(TRIM(display_name), ''), username), role, avatar_version, banned_at FROM users WHERE username = ?"
@@ -491,18 +546,22 @@ pub async fn login_handler(
 
     let wrong = |state: &ArcSharedState| -> ServerError {
         let lockout = std::time::Duration::from_secs(state.config.auth.login_lockout_secs);
-        match state.login_guard.failure(&guard_key, std::time::Instant::now(), state.config.auth.login_max_failures, lockout) {
+        match state.login_guard.failure(&guard_key, now, state.config.auth.login_max_failures, lockout) {
             Ok(()) => ServerError::AuthFailed("Invalid username or password".to_string()),
             Err(wait) => ServerError::TooManyRequests(wait),
         }
     };
     let (user_id_str, hash, display_name, role, avatar_version, banned_at) = match row {
         Some(r) => r,
-        None => return Err(wrong(&state)),
+        None => {
+            // Same work as a real check, so an unknown login takes as long as a wrong password.
+            verify_password(payload.password.clone(), dummy_hash()?.to_string()).await?;
+            return Err(wrong(state));
+        }
     };
 
-    if !verify_password(&payload.password, &hash) {
-        return Err(wrong(&state));
+    if !verify_password(payload.password.clone(), hash).await? {
+        return Err(wrong(state));
     }
     state.login_guard.success(&guard_key);
 
@@ -697,10 +756,10 @@ pub async fn change_password_handler(
         .bind(auth.user_id.to_string())
         .fetch_one(&state.pool)
         .await?;
-    if !verify_password(&request.current_password, &hash) {
+    if !verify_password(request.current_password.clone(), hash).await? {
         return Err(ServerError::Forbidden);
     }
-    let new_hash = hash_password(&request.new_password)?;
+    let new_hash = hash_password(request.new_password.clone()).await?;
     sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
         .bind(new_hash)
         .bind(auth.user_id.to_string())
@@ -722,4 +781,91 @@ pub async fn change_password_handler(
         connection.close(0u32.into(), b"password changed");
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod login_tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::{Duration, Instant};
+
+    const PEER: Option<IpAddr> = Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 7)));
+    const OTHER_PEER: Option<IpAddr> = Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 8)));
+
+    /// The hash-check counter is process-wide, so the tests that read it run one at a time.
+    fn serial() -> &'static tokio::sync::Mutex<()> {
+        static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+    }
+
+    async fn state_with_alice() -> ArcSharedState {
+        let pool = crate::db::init_db("sqlite::memory:").await.expect("database");
+        let hash = hash_password("password_123".to_string()).await.expect("hash");
+        sqlx::query(
+            "INSERT INTO users (id, username, display_name, password_hash, role, status, created_at) VALUES (?, 'alice', 'alice', ?, 'member', 'offline', 0)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(hash)
+        .execute(&pool)
+        .await
+        .expect("alice");
+        ArcSharedState {
+            pool,
+            config: ServerConfig::default(),
+            sessions: SessionManager::new(),
+            login_guard: Default::default(),
+            register_hits: Default::default(),
+            avatar_hits: Default::default(),
+            login_ip_hits: Default::default(),
+        }
+    }
+
+    fn attempt(username: &str, password: &str) -> LoginRequest {
+        LoginRequest { username: username.into(), password: password.into(), device_name: None }
+    }
+
+    fn refusal<T>(result: Result<T, ServerError>) -> ServerError {
+        match result {
+            Ok(_) => panic!("the sign-in was expected to be refused"),
+            Err(error) => error,
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_login_runs_a_hash_check_and_answers_like_a_wrong_password() {
+        let _serial = serial().lock().await;
+        let state = state_with_alice().await;
+        let before = VERIFY_CALLS.load(std::sync::atomic::Ordering::SeqCst);
+        let unknown = refusal(login_at(state.clone(), PEER, attempt("nobody", "wrong-password"), Instant::now()).await);
+        let after_unknown = VERIFY_CALLS.load(std::sync::atomic::Ordering::SeqCst);
+        let wrong = refusal(login_at(state.clone(), PEER, attempt("alice", "wrong-password"), Instant::now()).await);
+        assert_eq!(after_unknown - before, 1, "an unknown login must check one hash");
+        assert!(matches!(unknown, ServerError::AuthFailed(ref m) if m == "Invalid username or password"));
+        assert!(matches!(wrong, ServerError::AuthFailed(ref m) if m == "Invalid username or password"));
+    }
+
+    #[tokio::test]
+    async fn twenty_attempts_per_address_then_refused_until_ten_minutes_pass() {
+        let state = state_with_alice().await;
+        let t0 = Instant::now();
+        // Short names are refused before any password work, but every attempt still counts.
+        for _ in 0..LOGIN_IP_LIMIT {
+            assert!(matches!(refusal(login_at(state.clone(), PEER, attempt("ab", "x"), t0).await), ServerError::AuthFailed(_)));
+        }
+        let refused = refusal(login_at(state.clone(), PEER, attempt("ab", "x"), t0).await);
+        assert!(
+            matches!(refused, ServerError::TooManyRequests(wait) if (1..=601).contains(&wait)),
+            "the 21st attempt in ten minutes is refused with a wait"
+        );
+        let other = refusal(login_at(state.clone(), OTHER_PEER, attempt("ab", "x"), t0).await);
+        assert!(matches!(other, ServerError::AuthFailed(_)), "another address has its own budget");
+        let later = refusal(login_at(state.clone(), PEER, attempt("ab", "x"), t0 + Duration::from_secs(600)).await);
+        assert!(matches!(later, ServerError::AuthFailed(_)), "after ten minutes the address may try again");
+    }
+
+    #[tokio::test]
+    async fn a_panicking_hash_job_is_an_internal_error_not_a_panic() {
+        let result = run_blocking(|| -> u8 { panic!("hash job failed") }).await;
+        assert!(matches!(result, Err(ServerError::Internal(_))));
+    }
 }

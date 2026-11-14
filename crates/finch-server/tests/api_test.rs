@@ -668,3 +668,51 @@ async fn blank_display_name_falls_back_to_the_username() -> anyhow::Result<()> {
     assert_eq!(body["display_name"], "erik");
     Ok(())
 }
+
+/// Signs in `name` from `peer` and returns the status and the Retry-After header, if any.
+async fn sign_in_from(app: &axum::Router, peer: std::net::IpAddr, name: &str, password: &str) -> anyhow::Result<(StatusCode, Option<String>)> {
+    let peered = app.clone().layer(axum::Extension(finch_server::limits::PeerAddr(peer)));
+    let request = Request::builder().method("POST").uri("/api/auth/login")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "username": name, "password": password }).to_string()))?;
+    let response = peered.oneshot(request).await?;
+    let retry_after = response.headers().get(header::RETRY_AFTER).and_then(|v| v.to_str().ok()).map(str::to_string);
+    Ok((response.status(), retry_after))
+}
+
+#[tokio::test]
+async fn correct_password_passes_after_other_people_failed_from_the_same_address() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool, open_registration(), finch_server::session::SessionManager::new());
+    for name in ["alice", "bob", "carol", "dave", "erin", "frank"] {
+        let request = Request::builder().method("POST").uri("/api/auth/register")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({ "username": name, "password": "password_123" }).to_string()))?;
+        assert_eq!(app.clone().oneshot(request).await?.status(), StatusCode::CREATED);
+    }
+    let shared_address = "192.168.1.20".parse()?;
+    // Five other people, one wrong password each: none of their own locks applies, the address budget does.
+    for name in ["bob", "carol", "dave", "erin", "frank"] {
+        let (status, _) = sign_in_from(&app, shared_address, name, "wrong_password").await?;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    let (status, _) = sign_in_from(&app, shared_address, "alice", "password_123").await?;
+    assert_eq!(status, StatusCode::OK, "five other people's failures must not lock alice out");
+    Ok(())
+}
+
+#[tokio::test]
+async fn twenty_first_sign_in_from_one_address_is_429_with_retry_after() -> anyhow::Result<()> {
+    let pool = init_db("sqlite::memory:").await?;
+    let app = create_router(pool, open_registration(), finch_server::session::SessionManager::new());
+    let address = "192.168.1.30".parse()?;
+    for _ in 0..20 {
+        let (status, _) = sign_in_from(&app, address, "ab", "x").await?;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    let (status, retry_after) = sign_in_from(&app, address, "ab", "x").await?;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    let seconds: u64 = retry_after.ok_or_else(|| anyhow::anyhow!("Retry-After is missing"))?.parse()?;
+    assert!((1..=601).contains(&seconds), "got {seconds}");
+    Ok(())
+}

@@ -28,6 +28,10 @@ export function describeAuthError(raw: string): ErrorLook {
   if (lower.includes('banned')) {
     return { icon: 'ban', tone: 'red', title: 'This account has been banned from the server', hint: 'Contact the server admin if you think this is a mistake.', retry: false, localized: true };
   }
+  // Checked before the 401 test, so a wait such as "Try again in 401 seconds" is not read as a wrong password.
+  if (/Too many attempts\. Try again in \d+ seconds/.test(text)) {
+    return { icon: 'warn', tone: 'amber', title: describeError(text), retry: false, localized: false };
+  }
   if (lower.includes('invalid username or password') || lower.includes('401')) {
     return { icon: 'warn', tone: 'red', title: 'Invalid username or password', hint: 'Check them and try again. Passwords are case-sensitive.', retry: false, localized: true };
   }

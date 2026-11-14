@@ -19,6 +19,8 @@ it.each([
   ['Not authenticated', 'Вы не вошли в аккаунт'],
   ['429: Wait 4 s; too many room joins', 'Слишком часто входите в комнаты. Подождите 4 с'],
   ['429: Wait 4 s; too many screen shares', 'Слишком часто запускаете демонстрацию экрана. Подождите 4 с'],
+  ['Login failed: HTTP 429: Too many attempts. Try again in 42 seconds', 'Слишком много попыток входа. Повторите через 1 мин'],
+  ['Login failed: {"error":"Too many attempts. Try again in 600 seconds","status":429}', 'Слишком много попыток входа. Повторите через 10 мин'],
 ])('translates %s', (raw, expected) => {
   expect(describeError(raw)).toBe(expected);
 });

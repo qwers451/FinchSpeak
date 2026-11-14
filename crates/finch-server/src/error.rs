@@ -68,11 +68,19 @@ impl IntoResponse for ServerError {
             }
         };
 
+        let retry_after = match &self {
+            Self::TooManyRequests(wait) => Some(*wait),
+            _ => None,
+        };
         let body = Json(json!({
             "error": error_message,
             "status": status.as_u16(),
         }));
 
-        (status, body).into_response()
+        let mut response = (status, body).into_response();
+        if let Some(value) = retry_after.and_then(|wait| axum::http::HeaderValue::from_str(&wait.to_string()).ok()) {
+            response.headers_mut().insert(axum::http::header::RETRY_AFTER, value);
+        }
+        response
     }
 }

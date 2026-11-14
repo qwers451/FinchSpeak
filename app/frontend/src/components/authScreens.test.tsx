@@ -43,6 +43,14 @@ it('marks the bytes that differ', () => {
   expect(diffBytes('AA:BB:CC', 'AA:00:CC').map((b) => b.differs)).toEqual([false, true, false]);
 });
 
+it('shows a too-many-attempts refusal as a wait, not as a wrong password', () => {
+  // 401 seconds contains "401": the wait must still read as a rate limit.
+  const limited = describeAuthError('Error: Login failed: HTTP 429: Too many attempts. Try again in 401 seconds');
+  expect(limited.title).toBe('Too many sign-in attempts. Try again in 7 min');
+  expect(limited.tone).toBe('amber');
+  expect(describeAuthError('Error: Login failed: {"error":"Too many attempts. Try again in 60 seconds","status":429}').title).toBe('Too many sign-in attempts. Try again in 1 min');
+});
+
 it('describes errors in plain words', () => {
   expect(describeAuthError('Error: Login failed: invalid username or password').title).toBe('Invalid username or password');
   expect(describeAuthError('This account is banned').icon).toBe('ban');

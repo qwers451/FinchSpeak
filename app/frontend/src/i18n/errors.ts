@@ -9,6 +9,9 @@ const RULES: readonly Rule[] = [
   { pattern: /^Registered, but the QUIC connection failed/i, key: 'Registered, but the voice connection failed. Check that UDP port 4433 is open.' },
   // The reason may itself be a backend error ("HTTP 400: ..."), so it is translated too.
   { pattern: /^Registration failed: ([\s\S]*)/i, key: 'Registration failed: {reason}', params: (m) => ({ reason: describeError(m[1]) }) },
+  // Too many sign-in attempts: the server names the wait in seconds, shown here in whole minutes. The Tauri
+  // client prefixes "HTTP 429: "; the browser client sends the raw JSON body. Registration is not matched.
+  { pattern: /^(?:Login failed: )?(?:HTTP 429: )?(?:\{"error":")?Too many attempts\. Try again in (\d+) seconds/, key: 'Too many sign-in attempts. Try again in {minutes} min', params: (m) => ({ minutes: Math.max(1, Math.ceil(Number(m[1]) / 60)) }) },
   { pattern: /^Login failed: ([\s\S]*)/i, key: 'Sign-in failed: {reason}', params: (m) => ({ reason: describeError(m[1]) }) },
   { pattern: /is not trusted yet/i, key: 'Confirm the server certificate, then sign in.' },
   { pattern: /certificate of .* changed since you trusted it/i, key: 'The server certificate has changed. Do not sign in until the admin confirms the change.' },
