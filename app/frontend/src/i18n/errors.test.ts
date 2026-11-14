@@ -58,3 +58,12 @@ it.each([
 it('a lost QUIC connection reason is shown in Russian', () => {
   expect(describeError('connection lost')).toBe('Связь потеряна');
 });
+
+it.each([
+  ['HTTP 413: File exceeds maximum allowed size of 50 MB', 'HTTP 413: Файл слишком большой для этого сервера'],
+  ['{"error":"File exceeds maximum allowed size of 50 MB","status":413}', 'Файл слишком большой для этого сервера'],
+  ['HTTP 413: Storage quota exceeded: each user may keep up to 1024 MB of files', 'HTTP 413: Хранилище ваших файлов на сервере заполнено. Удалите часть файлов и попробуйте снова.'],
+  ['HTTP 429: Too many uploads. Try again in 42 seconds', 'HTTP 429: Слишком много загрузок. Повторите через 42 с'],
+])('upload refusals are in Russian: %s', (raw, expected) => {
+  expect(describeError(raw)).toBe(expected);
+});

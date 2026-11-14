@@ -285,6 +285,12 @@ pub struct StorageConfig {
     pub upload_dir: String,
     #[serde(default = "default_max_file_size_mb")]
     pub max_file_size_mb: usize,
+    /// Total size of the files one user may keep, in MB.
+    #[serde(default = "default_user_quota_mb")]
+    pub user_quota_mb: usize,
+    /// Uploads one user may start per minute.
+    #[serde(default = "default_uploads_per_minute")]
+    pub uploads_per_minute: usize,
 }
 
 impl Default for StorageConfig {
@@ -292,7 +298,32 @@ impl Default for StorageConfig {
         Self {
             upload_dir: default_upload_dir(),
             max_file_size_mb: default_max_file_size_mb(),
+            user_quota_mb: default_user_quota_mb(),
+            uploads_per_minute: default_uploads_per_minute(),
         }
+    }
+}
+
+fn default_user_quota_mb() -> usize {
+    1024
+}
+
+fn default_uploads_per_minute() -> usize {
+    30
+}
+
+impl StorageConfig {
+    /// Clamp values that would make uploads impossible (a quota or rate of 0), warning about each.
+    pub fn validated(mut self) -> Self {
+        if self.user_quota_mb < 1 {
+            tracing::warn!("[storage] user_quota_mb is 0; using 1");
+            self.user_quota_mb = 1;
+        }
+        if self.uploads_per_minute < 1 {
+            tracing::warn!("[storage] uploads_per_minute is 0; using 1");
+            self.uploads_per_minute = 1;
+        }
+        self
     }
 }
 
@@ -629,5 +660,20 @@ mod tests {
             ..AuthConfig::default()
         };
         assert_eq!(auth.resolve_jwt_secret().unwrap(), auth.jwt_secret);
+    }
+}
+
+#[cfg(test)]
+mod storage_limit_tests {
+    use super::*;
+
+    #[test]
+    fn storage_upload_limits_have_defaults_and_are_clamped() {
+        let defaults = ServerConfig::default().storage;
+        assert_eq!((defaults.user_quota_mb, defaults.uploads_per_minute), (1024, 30));
+        let partial: ServerConfig = toml::from_str("[storage]\nuser_quota_mb = 10\n").unwrap();
+        assert_eq!((partial.storage.user_quota_mb, partial.storage.uploads_per_minute), (10, 30));
+        let clamped = StorageConfig { user_quota_mb: 0, uploads_per_minute: 0, ..StorageConfig::default() }.validated();
+        assert_eq!((clamped.user_quota_mb, clamped.uploads_per_minute), (1, 1));
     }
 }

@@ -41,6 +41,9 @@ pub enum ServerError {
     #[error("Too many requests, retry in {0} s")]
     TooManyRequests(u64),
 
+    #[error("Too many uploads, retry in {0} s")]
+    TooManyUploads(u64),
+
     #[error("Internal server error: {0}")]
     Internal(String),
 }
@@ -58,6 +61,7 @@ impl IntoResponse for ServerError {
             Self::InviteRequired => (StatusCode::FORBIDDEN, "A valid invite code is required to register".to_string()),
             Self::FileUpload(msg) => (StatusCode::PAYLOAD_TOO_LARGE, msg.clone()),
             Self::TooManyRequests(wait) => (StatusCode::TOO_MANY_REQUESTS, format!("Too many attempts. Try again in {wait} seconds")),
+            Self::TooManyUploads(wait) => (StatusCode::TOO_MANY_REQUESTS, format!("Too many uploads. Try again in {wait} seconds")),
             Self::Database(err) => {
                 tracing::error!("Database query failed: {err}");
                 (StatusCode::INTERNAL_SERVER_ERROR, "Database error occurred".to_string())
@@ -69,7 +73,7 @@ impl IntoResponse for ServerError {
         };
 
         let retry_after = match &self {
-            Self::TooManyRequests(wait) => Some(*wait),
+            Self::TooManyRequests(wait) | Self::TooManyUploads(wait) => Some(*wait),
             _ => None,
         };
         let body = Json(json!({

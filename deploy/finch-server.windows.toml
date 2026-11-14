@@ -8,6 +8,9 @@ http_port = 8443      # TCP, HTTPS (login, history, files)
 
 [storage]
 max_file_size_mb = 50
+# Per-user upload limits: total size of one user's files, and uploads per minute (defaults: 1024 MB, 30).
+# user_quota_mb = 1024
+# uploads_per_minute = 30
 
 [auth]
 # "invite": people register with a code from an admin (the first account on an empty

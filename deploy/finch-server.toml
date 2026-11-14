@@ -11,6 +11,9 @@ url = "sqlite:///app/data/finchspeak.db?mode=rwc"
 [storage]
 upload_dir = "/app/data/uploads"
 max_file_size_mb = 50
+# Per-user upload limits: total size of one user's files, and uploads per minute (defaults: 1024 MB, 30).
+# user_quota_mb = 1024
+# uploads_per_minute = 30
 
 [auth]
 # Leave jwt_secret unset: a random secret is generated on first start and kept in

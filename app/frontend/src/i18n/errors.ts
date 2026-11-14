@@ -21,6 +21,10 @@ const RULES: readonly Rule[] = [
   { pattern: /^429: Wait (\d+) s; too many room joins/, key: 'Too many room joins. Wait {seconds} s', params: (m) => ({ seconds: m[1] }) },
   { pattern: /^429: Wait (\d+) s; too many screen shares/, key: 'Too many screen shares. Wait {seconds} s', params: (m) => ({ seconds: m[1] }) },
   { pattern: /^Not authenticated$/i, key: 'Not authenticated' },
+  // File attachments: size limit, per-user storage quota and upload rate (the browser client sends the raw JSON body).
+  { pattern: /^(?:\{"error":")?File exceeds maximum allowed size/, key: 'The file is too large for this server' },
+  { pattern: /^(?:\{"error":")?Storage quota exceeded/, key: 'Your file storage on this server is full. Delete some files and try again.' },
+  { pattern: /^(?:\{"error":")?Too many uploads\. Try again in (\d+) seconds/, key: 'Too many uploads. Try again in {seconds} s', params: (m) => ({ seconds: m[1] }) },
   // Room music errors from the server (and the client's own format probe).
   { pattern: /^Music file is too large/i, key: 'The music file is too large' },
   { pattern: /^Unsupported music format/i, key: 'This music format is not supported. Use MP3, OGG, FLAC or WAV.' },
