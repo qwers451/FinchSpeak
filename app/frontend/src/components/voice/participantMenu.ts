@@ -23,8 +23,8 @@ export function openParticipantMenu(anchor: PopoverAnchor, userId: string, parti
     { kind: 'item', label: t(isDeafened() ? 'Undeafen' : 'Deafen'), icon: 'phones', onSelect: () => void toggleDeafen() },
   ] : [
     { kind: 'header', label: name },
-    { kind: 'slider', label: t('Volume'), min: 0, max: 2, step: 0.05, value: volumeFor(userId),
-      disabled: isLocallyMuted(userId), format: (value) => `${Math.round(value * 100)}%`,
+    { kind: 'slider', label: t('Volume'), min: 0, max: 2, step: 0.05, get value() { return volumeFor(userId); },
+      get disabled() { return isLocallyMuted(userId); }, format: (value) => `${Math.round(value * 100)}%`,
       onChange: (value) => void setVolume(userId, voice()?.peer_id, value) },
     { kind: 'item', label: t('Mute for me'), icon: 'vol-off', checked: isLocallyMuted(userId),
       onSelect: () => void toggleLocalMute(userId, voice()?.peer_id) },

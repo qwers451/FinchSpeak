@@ -30,11 +30,10 @@ export function closeContextMenu(restoreFocus = true) {
 }
 
 function MenuSlider(props: { item: Extract<MenuItem, { kind: 'slider' }> }) {
-  const [value, setValue] = createSignal(props.item.value);
   return <label class="ctx-slider">
-    <span class="row between g8"><span>{props.item.label}</span><output>{props.item.format(value())}</output></span>
-    <Slider cool label={props.item.label} min={props.item.min} max={props.item.max} step={props.item.step} value={value()} disabled={props.item.disabled}
-      onChange={(next) => { setValue(next); props.item.onChange(next); }} />
+    <span class="row between g8"><span>{props.item.label}</span><output>{props.item.format(props.item.value)}</output></span>
+    <Slider cool label={props.item.label} min={props.item.min} max={props.item.max} step={props.item.step} value={props.item.value} disabled={props.item.disabled}
+      onChange={(next) => props.item.onChange(next)} />
   </label>;
 }
 

@@ -114,3 +114,24 @@ it('moderators can act on members, and stale permissions are checked again on se
   await flush();
   expect(document.querySelector('[role="menu"]')?.textContent).toContain('Remove from the room');
 });
+
+it('the menu slider and the tile slider always show the same stored volume', async () => {
+  vi.spyOn(api, 'setSpeakerVolume').mockResolvedValue();
+  const root = mount();
+  root.querySelector('.vc')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await flush();
+  const menuSlider = document.querySelector<HTMLInputElement>('[role="menu"] input[aria-label="Volume"]')!;
+  const tileSlider = root.querySelector<HTMLInputElement>('.vc input[aria-label^="Volume of"]')!;
+  // The tile moves while the menu is open: the menu follows.
+  tileSlider.value = '0.4';
+  tileSlider.dispatchEvent(new Event('input', { bubbles: true }));
+  await flush();
+  expect(menuSlider.value).toBe('0.4');
+  expect(document.querySelector('[role="menu"] output')!.textContent).toBe('40%');
+  // The menu moves: the tile follows.
+  menuSlider.value = '0.15';
+  menuSlider.dispatchEvent(new Event('input', { bubbles: true }));
+  await flush();
+  expect(tileSlider.value).toBe('0.15');
+  expect(document.querySelector('[role="menu"] output')!.textContent).toBe('15%');
+});

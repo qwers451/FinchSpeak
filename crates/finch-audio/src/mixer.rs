@@ -1,7 +1,7 @@
 //! Multi-speaker audio mixer with soft-knee limiting and local speech tracking.
 //!
 //! - Mixes up to N participants every 20 ms.
-//! - Per-speaker volume scaling (0.0 to 2.0).
+//! - Per-speaker volume scaling (0.0 to 2.0), on a perceptual curve (`volume_gain`).
 //! - Soft-knee limiter ([`crate::limiter::soft_limit`]) leaves normal levels untouched and only bends
 //!   peaks above 0.8 towards full scale, so several people talking at once do not clip harshly.
 //! - Tracks speaker activity locally (250 ms timeout or silence flag triggers UI speaking border events).
@@ -142,9 +142,10 @@ impl AudioMixer {
         self.pans.insert(peer_id, pan);
     }
 
-    /// Add or update a speaker's volume multiplier (0.0 to 2.0).
+    /// Add or update a speaker's volume. `volume` is the slider position as a fraction
+    /// (1.0 = 100 %, range 0.0 to 2.0); the gain actually applied follows [`volume_gain`].
     pub fn set_speaker_volume(&mut self, peer_id: u32, volume: f32) {
-        let clamped = volume.clamp(0.0, 2.0);
+        let clamped = volume_gain(volume * 100.0);
         // Remembered even if the speaker has not sent anything yet.
         self.preset_volumes.insert(peer_id, clamped);
         if let Some(speaker) = self.speakers.get_mut(&peer_id) {
@@ -373,10 +374,52 @@ impl AudioMixer {
     }
 }
 
+/// Perceptual gain for a participant volume given in percent (0 to 200).
+///
+/// Up to 100 % the gain is squared, so the slider lowers the sound evenly to the ear
+/// (50 % is a quarter of the amplitude); above 100 % it grows linearly up to 2.0.
+/// 0 % is silence; values outside 0..200 (and NaN) are clamped.
+pub fn volume_gain(percent: f32) -> f32 {
+    if percent.is_nan() {
+        return 0.0;
+    }
+    let p = percent.clamp(0.0, 200.0);
+    if p <= 100.0 {
+        let x = p / 100.0;
+        x * x
+    } else {
+        1.0 + (p - 100.0) / 100.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::opus::OpusVoiceEncoder;
+
+    #[test]
+    fn volume_gain_follows_the_perceptual_curve() {
+        assert_eq!(volume_gain(100.0), 1.0);
+        assert_eq!(volume_gain(50.0), 0.25);
+        assert_eq!(volume_gain(0.0), 0.0);
+        assert_eq!(volume_gain(150.0), 1.5);
+        assert_eq!(volume_gain(200.0), 2.0);
+        assert_eq!(volume_gain(-5.0), 0.0);
+        assert_eq!(volume_gain(500.0), 2.0);
+        let mut previous = -1.0;
+        for step in 0..=200 {
+            let gain = volume_gain(step as f32);
+            assert!(gain >= previous, "not monotonic at {step}");
+            previous = gain;
+        }
+    }
+
+    #[test]
+    fn the_slider_fraction_is_turned_into_the_curve_gain() {
+        let mut mixer = AudioMixer::new();
+        mixer.set_speaker_volume(7, 0.5);
+        assert_eq!(mixer.preset_volumes[&7], 0.25);
+    }
 
     #[test]
     fn voice_peak_uses_only_the_three_most_recent_frames_and_resets_on_read() {
