@@ -167,6 +167,38 @@ async fn voice_state_burst_ends_with_the_final_state_and_is_never_refused() -> a
     alice.expect_no_control(Duration::from_millis(100), is_rate_limited).await
 }
 
+/// Two toggles back to back are within the limit, so both are broadcast straight away, in order:
+/// the other side ends with the sender's final state.
+#[tokio::test]
+async fn two_quick_voice_state_changes_arrive_in_order() -> anyhow::Result<()> {
+    let server = TestServer::start().await?;
+    let mut alice = TestClient::register(&server, "alice").await?;
+    let mut bob = TestClient::register(&server, "bob").await?;
+    alice.join_voice().await?;
+    bob.join_voice().await?;
+    let alice_peer = alice.session.session_peer_id;
+
+    alice.send(ClientMessage::UpdateVoiceState { muted: true, deafened: false }).await?;
+    alice.send(ClientMessage::UpdateVoiceState { muted: false, deafened: true }).await?;
+
+    let deadline = Instant::now() + Duration::from_millis(800);
+    let mut last = None;
+    while Instant::now() < deadline {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match bob.next_event(left).await {
+            Ok(SessionEvent::Control(ServerMessage::UserVoiceStateChanged { peer_id, muted, deafened }))
+                if peer_id == alice_peer =>
+            {
+                last = Some((muted, deafened));
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    assert_eq!(last, Some((false, true)), "the other side must end with the sender's final state");
+    Ok(())
+}
+
 #[tokio::test]
 async fn screen_share_starts_are_limited_to_twenty_per_ten_seconds() -> anyhow::Result<()> {
     let server = TestServer::start().await?;

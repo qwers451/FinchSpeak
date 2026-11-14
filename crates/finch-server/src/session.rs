@@ -81,7 +81,7 @@ pub struct SessionManager {
     /// Recent keyframe requests per (viewer peer, streamer peer), kept for the last second.
     keyframe_hits: Arc<DashMap<(u32, u32), VecDeque<std::time::Instant>>>,
     /// Users whose mute/deafen broadcast is waiting for the window to free (one trailing broadcast each).
-    voice_broadcast_pending: Arc<DashMap<Uuid, ()>>,
+    voice_broadcast_pending: Arc<DashMap<u32, ()>>,
     /// Per-participant media limits, set with the router; unset means the defaults.
     media_config: Arc<std::sync::OnceLock<LimitsConfig>>,
     /// One media budget per user, shared by all of that user's sessions; dropped with the last session.
@@ -214,14 +214,14 @@ impl SessionManager {
         self.keyframe_hits.retain(|(viewer, streamer), _| *viewer != peer_id && *streamer != peer_id);
     }
 
-    /// Mark `user` as having a trailing voice-state broadcast scheduled. `false` when one already is.
-    pub fn mark_voice_broadcast_pending(&self, user: Uuid) -> bool {
-        self.voice_broadcast_pending.insert(user, ()).is_none()
+    /// Mark `peer` as having a trailing voice-state broadcast scheduled. `false` when one already is.
+    pub fn mark_voice_broadcast_pending(&self, peer: u32) -> bool {
+        self.voice_broadcast_pending.insert(peer, ()).is_none()
     }
 
-    /// The trailing voice-state broadcast of `user` has run (or is no longer needed).
-    pub fn clear_voice_broadcast_pending(&self, user: Uuid) {
-        self.voice_broadcast_pending.remove(&user);
+    /// The trailing voice-state broadcast of `peer` has run (or is no longer needed).
+    pub fn clear_voice_broadcast_pending(&self, peer: u32) {
+        self.voice_broadcast_pending.remove(&peer);
     }
 
     /// Count a message of `user`; `Err(seconds)` when they are sending too fast.
@@ -536,12 +536,21 @@ mod keyframe_pair_tests {
     #[test]
     fn pending_voice_broadcast_is_marked_once_until_cleared() {
         let sessions = manager();
-        let user = Uuid::new_v4();
+        let peer = 1001;
 
-        assert!(sessions.mark_voice_broadcast_pending(user));
-        assert!(!sessions.mark_voice_broadcast_pending(user));
-        sessions.clear_voice_broadcast_pending(user);
-        assert!(sessions.mark_voice_broadcast_pending(user));
+        assert!(sessions.mark_voice_broadcast_pending(peer));
+        assert!(!sessions.mark_voice_broadcast_pending(peer));
+        sessions.clear_voice_broadcast_pending(peer);
+        assert!(sessions.mark_voice_broadcast_pending(peer));
+    }
+
+    #[test]
+    fn pending_voice_broadcast_is_per_session_not_per_user() {
+        // Two sessions of one person: the old session's pending flag must not block the new one.
+        let sessions = manager();
+
+        assert!(sessions.mark_voice_broadcast_pending(1001));
+        assert!(sessions.mark_voice_broadcast_pending(1002));
     }
 }
 

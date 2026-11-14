@@ -541,11 +541,12 @@ const VOICE_CHANGE_WINDOW: std::time::Duration = std::time::Duration::from_secs(
 const VOICE_CHANGE_MAX: usize = 20;
 
 /// Count one voice change of `kind`; replies with an error and returns `true` when it is over the limit.
-fn refuse_voice_change(sessions: &SessionManager, peer_id: u32, user_id: Uuid, kind: &str) -> bool {
+/// `what` names the refused action in the message ("room joins", "screen shares"), so the client can tell them apart.
+fn refuse_voice_change(sessions: &SessionManager, peer_id: u32, user_id: Uuid, kind: &str, what: &str) -> bool {
     match sessions.allow_action(user_id, kind, VOICE_CHANGE_MAX, VOICE_CHANGE_WINDOW) {
         Ok(()) => false,
         Err(seconds) => {
-            refuse_call(sessions, peer_id, 429, format!("Wait {seconds} s; too many voice changes"));
+            refuse_call(sessions, peer_id, 429, format!("Wait {seconds} s; too many {what}"));
             true
         }
     }
@@ -554,23 +555,22 @@ fn refuse_voice_change(sessions: &SessionManager, peer_id: u32, user_id: Uuid, k
 /// Mute and deafen changes are always stored. Only their broadcast is limited: when the window is
 /// full, one trailing broadcast of the state as it is then is scheduled, so the room ends up with
 /// the final state and the sender is never refused.
-fn broadcast_voice_state(sessions: &SessionManager, peer_id: u32, user_id: Uuid, muted: bool, deafened: bool) {
+async fn broadcast_voice_state(sessions: &SessionManager, peer_id: u32, user_id: Uuid, muted: bool, deafened: bool) {
     const VOICE_STATE_BROADCASTS: usize = 10;
     match sessions.allow_action(user_id, "voice_state", VOICE_STATE_BROADCASTS, VOICE_CHANGE_WINDOW) {
+        // Sent inline, not in a task: two quick toggles must reach the room in the order they were sent.
         Ok(()) => {
-            let sessions = sessions.clone();
-            tokio::spawn(async move {
-                sessions.broadcast_all(ServerMessage::UserVoiceStateChanged { peer_id, muted, deafened }).await;
-            });
+            sessions.broadcast_all(ServerMessage::UserVoiceStateChanged { peer_id, muted, deafened }).await;
         }
         Err(wait_secs) => {
-            if !sessions.mark_voice_broadcast_pending(user_id) {
+            // Keyed by peer, not user: a new session of the same person must not inherit an old one's flag.
+            if !sessions.mark_voice_broadcast_pending(peer_id) {
                 return;
             }
             let sessions = sessions.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
-                sessions.clear_voice_broadcast_pending(user_id);
+                sessions.clear_voice_broadcast_pending(peer_id);
                 let current = sessions
                     .sessions
                     .get(&peer_id)
@@ -831,7 +831,7 @@ async fn handle_client_message(
             let already_in_room = sessions.channel_to_short.get(&channel_id).map(|s| *s).is_some_and(|short| {
                 sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel) == Some(short)
             });
-            if !already_in_room && refuse_voice_change(sessions, peer_id, user_id, "join_voice") {
+            if !already_in_room && refuse_voice_change(sessions, peer_id, user_id, "join_voice", "room joins") {
                 return;
             }
             if let Some(short_id) = sessions.channel_to_short.get(&channel_id).map(|s| *s) {
@@ -884,7 +884,7 @@ async fn handle_client_message(
             };
 
             if updated {
-                broadcast_voice_state(sessions, peer_id, user_id, muted, deafened);
+                broadcast_voice_state(sessions, peer_id, user_id, muted, deafened).await;
             }
         }
 
@@ -894,7 +894,7 @@ async fn handle_client_message(
             height,
             fps,
         } => {
-            if refuse_voice_change(sessions, peer_id, user_id, "screen_start") {
+            if refuse_voice_change(sessions, peer_id, user_id, "screen_start", "screen shares") {
                 return;
             }
             let short_id = sessions.sessions.get(&peer_id).and_then(|s| s.current_voice_channel);
