@@ -83,6 +83,27 @@ fn admit(budget: &Mutex<MediaRateLimiter>, bytes: usize) -> bool {
         .allow(Instant::now(), bytes)
 }
 
+/// Bound the whole send, including waiting for stream credit and acknowledgement. Dropping a
+/// Quinn writer implicitly finishes it, so an abandoned send must explicitly reset its buffers.
+async fn send_keyframe(connection: &quinn::Connection, header: &[u8; MEDIA_HEADER_SIZE], payload: Bytes) -> bool {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let Ok(Ok(mut stream)) = tokio::time::timeout_at(deadline, connection.open_uni()).await else { return false };
+    let result = tokio::time::timeout_at(deadline, async {
+        stream.write_all(header).await.ok()?;
+        // Bytes owns the read permit. Quinn retains its slices without copying the body, so the
+        // same global budget also covers queued and unacknowledged data for every recipient.
+        stream.write_chunk(payload).await.ok()?;
+        stream.finish().ok()?;
+        matches!(stream.stopped().await, Ok(None)).then_some(())
+    }).await;
+    if matches!(result, Ok(Some(()))) {
+        true
+    } else {
+        let _ = stream.reset(0u32.into());
+        false
+    }
+}
+
 /// Whether a sender in this state may send a datagram of `media_type`. Screen video needs a started
 /// share; screen sound needs one too, and a moderator's server mute silences it. Voice is governed
 /// by the mute check in `route_datagram`.
@@ -267,14 +288,7 @@ impl SfuRouter {
 
                     tokio::spawn(async move {
                         let len = (h_bytes.len() + p_bytes.len()) as u64;
-                        let sent = async {
-                            let mut send_stream = conn.open_uni().await.ok()?;
-                            send_stream.write_all(&h_bytes).await.ok()?;
-                            send_stream.write_all(&p_bytes).await.ok()?;
-                            send_stream.finish().ok()
-                        }
-                        .await
-                        .is_some();
+                        let sent = send_keyframe(&conn, &h_bytes, p_bytes).await;
                         if sent {
                             TRAFFIC.bytes_out.fetch_add(len, Ordering::Relaxed);
                         } else {
@@ -290,6 +304,42 @@ impl SfuRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_stalled_keyframe_viewer_is_reset_and_releases_the_body_budget() -> anyhow::Result<()> {
+        let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+        let payload = crate::quic::tests::test_keyframe_body(gate.clone(), vec![7; 4096]).await?;
+        let (_server, _client, sender, viewer) = crate::quic::tests::keyframe_connection_pair(64).await?;
+        let header = [0; MEDIA_HEADER_SIZE];
+        let sending_connection = sender.clone();
+        let sending = tokio::spawn(async move { send_keyframe(&sending_connection, &header, payload).await });
+        let mut receive = tokio::time::timeout(Duration::from_secs(3), viewer.accept_uni()).await??;
+        // The viewer stays connected and acknowledges packets, but does not consume the stream.
+        // Its tiny stream window makes the body writer block instead of buffering the full frame.
+        let sent = tokio::time::timeout(Duration::from_secs(12), sending).await??;
+        assert!(!sent, "a flow-control-blocked keyframe must expire");
+        assert_eq!(gate.available_permits(), 1, "reset must release the queued body, including Quinn's buffers");
+        let error = receive.read_to_end(8192).await.unwrap_err();
+        assert!(matches!(error, quinn::ReadToEndError::Read(quinn::ReadError::Reset(_))), "expired stream was not reset: {error}");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_keyframe_body_is_released_after_the_viewer_acknowledges_it() -> anyhow::Result<()> {
+        let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+        let payload = crate::quic::tests::test_keyframe_body(gate.clone(), vec![7; 4096]).await?;
+        let (_server, _client, sender, viewer) = crate::quic::tests::keyframe_connection_pair(64).await?;
+        let header = [0; MEDIA_HEADER_SIZE];
+        let sending_connection = sender.clone();
+        let sending = tokio::spawn(async move { send_keyframe(&sending_connection, &header, payload).await });
+        let mut receive = tokio::time::timeout(Duration::from_secs(3), viewer.accept_uni()).await??;
+        assert!(gate.clone().try_acquire_owned().is_err(), "the slow send must still own the read permit");
+        let received = receive.read_to_end(8192).await?;
+        assert_eq!(&received[MEDIA_HEADER_SIZE..], &[7; 4096]);
+        assert!(tokio::time::timeout(Duration::from_secs(3), sending).await??);
+        assert_eq!(gate.available_permits(), 1, "acknowledged data must release the shared body budget");
+        Ok(())
+    }
 
     #[test]
     fn wrong_channel_warning_is_logged_once_per_interval() {

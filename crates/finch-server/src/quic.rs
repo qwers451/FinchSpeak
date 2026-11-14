@@ -1,7 +1,7 @@
 //! QUIC listener, connection lifecycle, signaling stream, and media routing.
 
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
@@ -416,9 +416,10 @@ pub async fn handle_connection(
                     let _ = recv.stop(0u32.into());
                     return;
                 }
-                // Server-wide bound on key frame bodies in memory at once.
-                let Ok(_global) = KEYFRAME_GLOBAL_READERS.acquire().await else { return };
-                match tokio::time::timeout(KEYFRAME_READ_TIMEOUT, read_keyframe_body(&mut recv)).await {
+                // One budget follows a body through reading, queued forwarding and Quinn's
+                // retransmit buffers; no payload is read while waiting for it.
+                let Ok(global) = KEYFRAME_GLOBAL_READERS.clone().acquire_owned().await else { return };
+                match tokio::time::timeout(KEYFRAME_READ_TIMEOUT, read_keyframe_body(&mut recv, global)).await {
                     Ok(Some(payload)) => {
                         sfu.route_uni_keyframe(hdr.channel_id, peer_id, &hdr, payload).await;
                     }
@@ -509,9 +510,11 @@ const KEYFRAME_READERS: usize = 4;
 /// A key frame stream must complete within this time.
 const KEYFRAME_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Key frame bodies read at once across all connections (bounds memory to this x `MAX_KEYFRAME_BYTES`).
-const KEYFRAME_GLOBAL_LIMIT: usize = 8;
-static KEYFRAME_GLOBAL_READERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(KEYFRAME_GLOBAL_LIMIT);
+/// Distinct key frame bodies retained across reading and all recipients' sends. Four maximum
+/// frames use 40 MiB, leaving room for thumbnail decode, sign-in hashing and read assembly.
+const KEYFRAME_GLOBAL_LIMIT: usize = 4;
+static KEYFRAME_GLOBAL_READERS: LazyLock<Arc<tokio::sync::Semaphore>> =
+    LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(KEYFRAME_GLOBAL_LIMIT)));
 
 /// Read the media header that starts a key frame stream.
 async fn read_keyframe_header(recv: &mut quinn::RecvStream) -> Option<MediaHeader> {
@@ -520,9 +523,22 @@ async fn read_keyframe_header(recv: &mut quinn::RecvStream) -> Option<MediaHeade
     MediaHeader::from_slice(&hdr_bytes).ok()
 }
 
-/// Read the payload of a key frame stream, up to `MAX_KEYFRAME_BYTES`.
-async fn read_keyframe_body(recv: &mut quinn::RecvStream) -> Option<Bytes> {
-    recv.read_to_end(MAX_KEYFRAME_BYTES).await.ok().map(Bytes::from)
+/// The permit belongs to the allocation, including every forwarded or retransmitted Bytes slice.
+struct KeyframeBody {
+    bytes: Vec<u8>,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+}
+
+impl AsRef<[u8]> for KeyframeBody {
+    fn as_ref(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+/// Read at most `MAX_KEYFRAME_BYTES`; release the budget only after the last body reference drops.
+async fn read_keyframe_body(recv: &mut quinn::RecvStream, permit: tokio::sync::OwnedSemaphorePermit) -> Option<Bytes> {
+    let bytes = recv.read_to_end(MAX_KEYFRAME_BYTES).await.ok()?;
+    Some(Bytes::from_owner(KeyframeBody { bytes, _permit: permit }))
 }
 
 /// Maximum length of a chat message in characters.
@@ -1032,8 +1048,53 @@ async fn handle_client_message(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    pub(crate) async fn keyframe_connection_pair(stream_window: u32) -> Result<(quinn::Endpoint, quinn::Endpoint, quinn::Connection, quinn::Connection)> {
+        let (cert, key) = generate_self_signed_cert()?;
+        let server = quinn::Endpoint::server(make_server_config_with(cert.clone(), key)?, "127.0.0.1:0".parse()?)?;
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(cert)?;
+        let mut tls = rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth();
+        tls.alpn_protocols = vec![b"finchspeak/0.1".to_vec()];
+        let crypto = quinn::crypto::rustls::QuicClientConfig::try_from(tls)?;
+        let mut config = quinn::ClientConfig::new(Arc::new(crypto));
+        let mut transport = quinn::TransportConfig::default();
+        transport.stream_receive_window(stream_window.into());
+        config.transport_config(Arc::new(transport));
+        let mut client = quinn::Endpoint::client("127.0.0.1:0".parse()?)?;
+        client.set_default_client_config(config);
+        let connecting = client.connect(server.local_addr()?, "localhost")?;
+        let incoming = async { server.accept().await.context("test endpoint closed")?.await.context("test handshake failed") };
+        let (remote, local) = tokio::time::timeout(std::time::Duration::from_secs(3), async { tokio::join!(connecting, incoming) }).await?;
+        Ok((server, client, local?, remote?))
+    }
+
+    /// Exercise the production reader so forwarding tests inherit exactly its payload ownership.
+    pub(crate) async fn test_keyframe_body(gate: Arc<tokio::sync::Semaphore>, data: Vec<u8>) -> Result<Bytes> {
+        let (_server, _client, receiver, sender) = keyframe_connection_pair(8192).await?;
+        let mut stream = sender.open_uni().await?;
+        stream.write_all(&data).await?;
+        stream.finish()?;
+        let mut receive = receiver.accept_uni().await?;
+        read_keyframe_body(&mut receive, gate.acquire_owned().await?).await.context("test body was refused")
+    }
+
+    #[tokio::test]
+    async fn a_keyframe_read_permit_follows_every_body_clone() -> Result<()> {
+        let gate = Arc::new(tokio::sync::Semaphore::new(1));
+        let body = test_keyframe_body(gate.clone(), vec![7; 128]).await?;
+        assert!(gate.clone().try_acquire_owned().is_err(), "a buffered body must keep its read permit");
+        let viewer_one = body.clone();
+        let viewer_two = body.slice(64..);
+        drop(body);
+        drop(viewer_one);
+        assert!(gate.clone().try_acquire_owned().is_err(), "the last viewer's slice must retain the whole body budget");
+        drop(viewer_two);
+        assert_eq!(gate.available_permits(), 1);
+        Ok(())
+    }
 
     /// The certificate must survive restarts, otherwise every client's pinned
     /// fingerprint breaks on each server start (AUD-005).
