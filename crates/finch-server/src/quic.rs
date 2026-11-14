@@ -1,5 +1,6 @@
 //! QUIC listener, connection lifecycle, signaling stream, and media routing.
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -17,6 +18,7 @@ use finch_protocol::models::{
 };
 
 use crate::api::auth::check_active_jwt;
+use crate::health::TRAFFIC;
 use crate::session::{ClientSession, SessionManager};
 use crate::sfu::SfuRouter;
 
@@ -403,8 +405,21 @@ pub async fn handle_connection(
             let readers = readers.clone();
             tokio::spawn(async move {
                 let Ok(_permit) = readers.acquire_owned().await else { return };
-                match tokio::time::timeout(KEYFRAME_READ_TIMEOUT, read_keyframe(&mut recv)).await {
-                    Ok(Some((hdr, payload))) => {
+                // Header first: the body is only read for a sender that shares a screen somebody
+                // watches. Anything else is stopped before a byte of it is buffered.
+                let Ok(Some(hdr)) = tokio::time::timeout(KEYFRAME_READ_TIMEOUT, read_keyframe_header(&mut recv)).await else {
+                    tracing::debug!("Peer {peer_id}: malformed key frame header");
+                    return;
+                };
+                if !sfu.keyframe_wanted(hdr.channel_id, peer_id) {
+                    TRAFFIC.datagrams_dropped.fetch_add(1, Ordering::Relaxed);
+                    let _ = recv.stop(0u32.into());
+                    return;
+                }
+                // Server-wide bound on key frame bodies in memory at once.
+                let Ok(_global) = KEYFRAME_GLOBAL_READERS.acquire().await else { return };
+                match tokio::time::timeout(KEYFRAME_READ_TIMEOUT, read_keyframe_body(&mut recv)).await {
+                    Ok(Some(payload)) => {
                         sfu.route_uni_keyframe(hdr.channel_id, peer_id, &hdr, payload).await;
                     }
                     Ok(None) => tracing::debug!("Peer {peer_id}: malformed or oversized key frame stream"),
@@ -494,13 +509,20 @@ const KEYFRAME_READERS: usize = 4;
 /// A key frame stream must complete within this time.
 const KEYFRAME_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Read one key frame stream: media header, then the payload up to `MAX_KEYFRAME_BYTES`.
-async fn read_keyframe(recv: &mut quinn::RecvStream) -> Option<(MediaHeader, Bytes)> {
+/// Key frame bodies read at once across all connections (bounds memory to this x `MAX_KEYFRAME_BYTES`).
+const KEYFRAME_GLOBAL_LIMIT: usize = 8;
+static KEYFRAME_GLOBAL_READERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(KEYFRAME_GLOBAL_LIMIT);
+
+/// Read the media header that starts a key frame stream.
+async fn read_keyframe_header(recv: &mut quinn::RecvStream) -> Option<MediaHeader> {
     let mut hdr_bytes = [0u8; MEDIA_HEADER_SIZE];
     recv.read_exact(&mut hdr_bytes).await.ok()?;
-    let header = MediaHeader::from_slice(&hdr_bytes).ok()?;
-    let payload = recv.read_to_end(MAX_KEYFRAME_BYTES).await.ok()?;
-    Some((header, Bytes::from(payload)))
+    MediaHeader::from_slice(&hdr_bytes).ok()
+}
+
+/// Read the payload of a key frame stream, up to `MAX_KEYFRAME_BYTES`.
+async fn read_keyframe_body(recv: &mut quinn::RecvStream) -> Option<Bytes> {
+    recv.read_to_end(MAX_KEYFRAME_BYTES).await.ok().map(Bytes::from)
 }
 
 /// Maximum length of a chat message in characters.

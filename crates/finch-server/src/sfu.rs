@@ -210,6 +210,19 @@ impl SfuRouter {
         }
     }
 
+    /// Whether a key frame stream from `auth_peer_id` on `channel_id` is worth reading at all:
+    /// the sender has a started share and at least one viewer. Checked before the body is read.
+    pub fn keyframe_wanted(&self, channel_id: u32, auth_peer_id: u32) -> bool {
+        let sharing = self.sessions.sessions.get(&auth_peer_id).is_some_and(|s| s.sharing_screen);
+        if !sharing || !may_send(MediaType::VideoKey, sharing, false) {
+            return false;
+        }
+        self.sessions
+            .voice_rooms
+            .get(&channel_id)
+            .is_some_and(|room| room.screen_subscribers.get(&auth_peer_id).is_some_and(|viewers| !viewers.is_empty()))
+    }
+
     /// Forward an IDR keyframe received on a Uni-Stream to all subscribed viewers. The keyframe is
     /// charged to the sender's keyframe bucket, and only when somebody is watching: nothing sent,
     /// nothing charged. Datagram budgets are not touched.
