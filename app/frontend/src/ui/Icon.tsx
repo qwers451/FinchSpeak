@@ -24,6 +24,26 @@ const CUSTOM_NAMES: Partial<Record<IconName, string>> = {"full": "fullscreen", "
 
 type IconProps = { name: IconName; size?: 'sm' | 'md' | 'lg' | 'xl'; class?: string; style?: JSX.CSSProperties; title?: string };
 
+/** Room-tool glyphs drawn as images (public/assets/room-icons). They are painted with the text colour through a
+ *  CSS mask, so every theme recolours them exactly like the line icons. */
+export const ROOM_ICONS = ['music', 'soundboard', 'screen', 'play', 'pause', 'next', 'stop', 'queue', 'upload', 'library', 'volume', 'room'] as const;
+export type RoomIconName = (typeof ROOM_ICONS)[number];
+export const roomIconUrl = (name: RoomIconName) => `./assets/room-icons/${name}.png`;
+
+/** A room-tool glyph; same sizes, colour and accessibility rules as `Icon`. */
+export function RoomIcon(props: { name: RoomIconName; size?: 'sm' | 'md' | 'lg' | 'xl'; class?: string; title?: string }) {
+  const size = () => (props.size && props.size !== 'md' ? ` ${props.size}` : '');
+  return (
+    <span
+      class={`ic ic-mask${size()}${props.class ? ` ${props.class}` : ''}`}
+      style={{ '--ic-src': `url("${roomIconUrl(props.name)}")` }}
+      aria-hidden={props.title ? undefined : 'true'}
+      role={props.title ? 'img' : undefined}
+      aria-label={props.title}
+    />
+  );
+}
+
 /** 24 px grid, 2 px stroke, round caps. Decorative unless it has a `title`. */
 export function Icon(props: IconProps) {
   const size = () => (props.size && props.size !== 'md' ? ` ${props.size}` : '');

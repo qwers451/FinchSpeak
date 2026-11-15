@@ -7,7 +7,7 @@
 .music-head { height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line-soft); flex: none; }
 .music-head h3 { font-size: 16px; margin: 0; min-width: 0; }
 .music-body { flex: 1; min-width: 0; padding: 0; display: flex; flex-direction: column; gap: 18px; }
-.music-heading { margin: 0 0 8px; font-size: 12px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.music-heading { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 12px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
 
 .music-now { display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--bg-card); border: 1px solid var(--line-soft); border-radius: var(--r-lg); min-width: 0; }
 .music-titles { min-width: 0; gap: 2px; }
@@ -68,3 +68,7 @@
 
 /* The progress bubble would sit on the artist line above the slider, and the clock beside it already shows the position. */
 .music-progress .range-value { display:none; }
+
+/* Room-tool glyphs inside the player: tabs and the volume row line up with their labels. */
+.music-add .tab { gap: 6px; }
+.music-volume { align-items: center; }

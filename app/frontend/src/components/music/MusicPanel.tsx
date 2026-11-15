@@ -6,7 +6,7 @@ import { knownUsers } from '../../stores/sessionStore';
 import { musicPosition, musicState, musicVolume, sendMusicCommand, setMusicVolume } from '../../stores/musicStore';
 import { setAppError } from '../../stores/notificationStore';
 import type { MusicQueueEntry, MusicTrack } from '../../types';
-import { Button, ConfirmDialog, Field, FinchBird, Icon, Slider } from '../../ui';
+import { Button, ConfirmDialog, Field, FinchBird, Icon, Slider, RoomIcon } from '../../ui';
 import { formatDuration, t } from '../../i18n';
 
 /** Audio formats the server accepts (the picker filters on them; the server checks again). */
@@ -102,7 +102,7 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
     <section class="music-panel" aria-label={t('Music')}>
       <Show when={!props.modal}>
         <header class="music-head">
-          <Icon name="music" size="sm" class="t3" />
+          <RoomIcon name="music" size="sm" class="t3" />
           <h3 class="grow trunc">{t('Music')}</h3>
           <Button iconOnly size="sm" variant="ghost" icon="x" label={t('Close')} onClick={props.onClose} />
         </header>
@@ -112,7 +112,7 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
         <Show when={playing()}>
           {(now) => (
             <section class="music-now">
-              <h4 class="music-heading">{t('Now playing')}</h4>
+              <h4 class="music-heading"><RoomIcon name="music" size="sm" />{t('Now playing')}</h4>
               <div class="col music-titles">
                 <span class="b trunc" title={now().entry.track.title}>{now().entry.track.title}</span>
                 <span class="t2 fs12 trunc" title={nowLine(now())}>{nowLine(now())}</span>
@@ -131,16 +131,16 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
                 </span>
               </div>
               <div class="row g8 music-controls">
-                <Button size="sm" variant="secondary" onClick={() => void sendMusicCommand({ kind: now().paused ? 'resume' : 'pause' })}>
+                <Button size="sm" variant="secondary" roomIcon={now().paused ? 'play' : 'pause'} onClick={() => void sendMusicCommand({ kind: now().paused ? 'resume' : 'pause' })}>
                   {now().paused ? t('Resume') : t('Pause')}
                 </Button>
-                <Button size="sm" variant="secondary" onClick={() => void sendMusicCommand({ kind: 'skip' })}>{t('Next')}</Button>
+                <Button size="sm" variant="secondary" roomIcon="next" onClick={() => void sendMusicCommand({ kind: 'skip' })}>{t('Next')}</Button>
                 <Show when={staff()}>
-                  <Button size="sm" variant="danger-ghost" onClick={() => void sendMusicCommand({ kind: 'clear' })}>{t('Stop for everyone')}</Button>
+                  <Button size="sm" variant="danger-ghost" roomIcon="stop" onClick={() => void sendMusicCommand({ kind: 'clear' })}>{t('Stop for everyone')}</Button>
                 </Show>
               </div>
               <div class="row g8 music-volume">
-                <span class="t2 fs12">{t('My music volume')}</span>
+                <RoomIcon name="volume" size="sm" class="t3" title={t('My music volume')} /><span class="t2 fs12">{t('My music volume')}</span>
                 <Slider value={Math.round(musicVolume() * 100)} min={0} max={100} cool label={t('My music volume')} onChange={(value) => void setMusicVolume(value / 100)} />
               </div>
             </section>
@@ -148,7 +148,7 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
         </Show>
 
         <section class="music-queue-block">
-          <h4 class="music-heading">{t('Queue')}</h4>
+          <h4 class="music-heading"><RoomIcon name="queue" size="sm" />{t('Queue')}</h4>
           <Show when={!playing() && queue().length === 0}>
             <div class="music-empty">
               <FinchBird size={72} />
@@ -173,10 +173,10 @@ export function MusicPanel(props: { onClose: () => void; modal?: boolean }) {
         </section>
 
         <section class="music-add">
-          <h4 class="music-heading">{t('Add')}</h4>
+          <h4 class="music-heading"><RoomIcon name="upload" size="sm" />{t('Add')}</h4>
           <div class="tabs" role="tablist">
-            <button type="button" role="tab" class={tabClass('library')} aria-selected={tab() === 'library'} onClick={() => setTab('library')}><span class="trunc">{t('Library')}</span></button>
-            <button type="button" role="tab" class={tabClass('computer')} aria-selected={tab() === 'computer'} onClick={() => setTab('computer')}><span class="trunc">{t('From my computer')}</span></button>
+            <button type="button" role="tab" class={tabClass('library')} aria-selected={tab() === 'library'} onClick={() => setTab('library')}><RoomIcon name="library" size="sm" /><span class="trunc">{t('Library')}</span></button>
+            <button type="button" role="tab" class={tabClass('computer')} aria-selected={tab() === 'computer'} onClick={() => setTab('computer')}><RoomIcon name="upload" size="sm" /><span class="trunc">{t('From my computer')}</span></button>
           </div>
 
           <Show when={tab() === 'library'}>

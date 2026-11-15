@@ -36,7 +36,10 @@ afterEach(() => {
 
 it('lists the board when it opens and shows each sound with its emoji', () => {
   expect(api.soundboard).toHaveBeenCalled();
-  expect(tiles().map((tile) => tile.textContent?.trim())).toEqual(['📯Гудок', '♪Гонг']);
+  expect(tiles().map((tile) => tile.textContent?.trim())).toEqual(['📯Гудок', 'Гонг']);
+  // A sound without its own emoji shows the themed soundboard glyph, not a default emoji.
+  expect(tiles()[1].querySelector('.ic-mask')).not.toBeNull();
+  expect(tiles()[0].querySelector('.ic-mask')).toBeNull();
 });
 
 it('searches by name', async () => {
@@ -45,7 +48,7 @@ it('searches by name', async () => {
   search.value = 'гон';
   search.dispatchEvent(new Event('input', { bubbles: true }));
   await flush();
-  expect(tiles().map((tile) => tile.textContent?.trim())).toEqual(['♪Гонг']);
+  expect(tiles().map((tile) => tile.textContent?.trim())).toEqual(['Гонг']);
 });
 
 it('plays a sound when its tile is clicked', async () => {

@@ -61,42 +61,60 @@ afterEach(() => {
   try { localStorage.removeItem('finchspeak.nestView'); } catch { /* ignore */ }
 });
 
-it('draws voice rooms as nests, text channels as birdhouses and the rest of those online on the wire', () => {
+it('draws the tree as a side column: nests with their birds by name, birdhouses, and the wire with names and statuses', () => {
   mount();
   expect(host.querySelector('.sidebar')).toBeNull();
   expect(host.querySelector('.members')).toBeNull();
-  expect(host.querySelectorAll('.nest').length).toBe(2);
-  expect(host.querySelectorAll('.nest.lit').length).toBe(1);
-  expect(host.querySelector('.nest.lit')!.getAttribute('aria-label')).toBe('lounge, 1');
-  expect(host.querySelectorAll('.birdhouse').length).toBe(1);
-  // ann is in a nest and zed is offline: only me and bob sit on the wire.
-  expect(host.querySelectorAll('.tree-wire-bird').length).toBe(2);
+  expect(host.querySelector('.tree-side')).not.toBeNull();
+  expect(host.querySelectorAll('.nrow').length).toBe(2);
+  expect(host.querySelectorAll('.nrow.lit').length).toBe(1);
+  expect(host.querySelector('.nrow.lit')!.getAttribute('aria-label')).toBe('lounge: ann');
+  expect(host.querySelector('.nrow.lit .birds')!.textContent).toContain('ann');
+  expect(host.querySelector('.nrow:not(.lit) .nempty')!.textContent).toBe(t('empty'));
+  expect(host.querySelectorAll('.hrow').length).toBe(1);
+  // ann is in a nest and zed is offline: only me and bob sit on the wire, each with a name and a status line.
+  const wire = [...host.querySelectorAll('.wrow[role="listitem"]')];
+  expect(wire.map((row) => row.querySelector('.trunc')!.textContent)).toEqual(['bob', 'me']);
+  expect(wire[0].textContent).toContain(t('Idle'));
   expect(host.querySelector('.tree-offline')!.textContent).toContain('1');
+  // Nothing is open yet: the content invites a pick.
+  expect(host.querySelector('.tree-empty')).not.toBeNull();
 });
 
-it('a nest joins its room and a birdhouse opens its chat', () => {
+it('one click on a nest looks inside, a double click or the button flies in; a birdhouse opens its chat', async () => {
   setUnread({ general: { count: 3, mention: false } });
   mount();
-  expect(host.querySelector('.birdhouse .badge')!.textContent).toBe('3');
-  (host.querySelector('.nest.lit') as HTMLElement).click();
+  expect(host.querySelector('.hrow .badge')!.textContent).toBe('3');
+  const nest = host.querySelector('.nrow.lit') as HTMLElement;
+  nest.click();
   expect(nav.selectChannel).toHaveBeenCalledWith(lounge);
+  expect(nav.joinVoice).not.toHaveBeenCalled();
+  nest.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   expect(nav.joinVoice).toHaveBeenCalledWith(lounge);
-  (host.querySelector('.birdhouse') as HTMLElement).click();
+  nav.joinVoice.mockClear();
+  setActiveChannel(lounge);
+  await Promise.resolve();
+  const preview = host.querySelector('.nest-preview')!;
+  expect(preview.textContent).toContain(t('You are looking from outside: nobody hears you.'));
+  expect(preview.textContent).toContain('ann');
+  [...preview.querySelectorAll('button')].find((b) => b.textContent?.includes(t('Fly into the nest')))!.click();
+  expect(nav.joinVoice).toHaveBeenCalledWith(lounge);
+  (host.querySelector('.hrow') as HTMLElement).click();
   expect(nav.selectChannel).toHaveBeenCalledWith(general);
 });
 
-it('an opened room shares the window with the tree, which can be folded or returned to', async () => {
+it('an opened chat or my own room takes the whole content area next to the tree', async () => {
   mount();
-  expect(host.querySelector('.tree-content')).toBeNull();
   setActiveChannel(general);
   await Promise.resolve();
-  expect(host.querySelector('.tree-content .main.chat')).not.toBeNull();
-  expect(host.querySelector('.birdhouse.on')).not.toBeNull();
-  (host.querySelector('.tree-fold') as HTMLElement).click();
-  expect(host.querySelector('.tree-layout')!.classList.contains('folded')).toBe(true);
-  (host.querySelector('.tree-close') as HTMLElement).click();
-  expect(host.querySelector('.tree-content')).toBeNull();
-  expect(host.querySelector('.tree-layout')!.classList.contains('folded')).toBe(false);
+  expect(host.querySelector('.tree-main .main.chat')).not.toBeNull();
+  expect(host.querySelector('.hrow.on')).not.toBeNull();
+  expect(host.querySelector('.tree-side')).not.toBeNull();
+  setActiveVoiceChannel(lounge);
+  setActiveChannel(lounge);
+  await Promise.resolve();
+  expect(host.querySelector('.tree-main .main.voice-room')).not.toBeNull();
+  expect(host.querySelector('.nest-preview')).toBeNull();
 });
 
 it('the perch shows the nest you are in and lets you leave the room', async () => {
@@ -104,23 +122,22 @@ it('the perch shows the nest you are in and lets you leave the room', async () =
   expect(host.querySelector('.tree-leave')).toBeNull();
   setActiveVoiceChannel(lounge);
   await Promise.resolve();
-  expect(host.querySelector('.tree-voice')!.textContent).toContain('lounge');
-  expect(host.querySelector('.nest.on')).not.toBeNull();
+  expect(host.querySelector('.tree-voice-state')!.textContent).toContain('lounge');
+  expect(host.querySelector('.nrow.on')).not.toBeNull();
   expect(host.querySelector('.tree-leave')!.getAttribute('aria-label')).toBe('Leave room');
   (host.querySelector('.tree-leave') as HTMLElement).click();
   expect(nav.leaveVoice).toHaveBeenCalled();
 });
 
-it('only admins get the buttons that add a nest or a birdhouse, and everyone can go back to classic', () => {
+it('only admins get the buttons that add a nest or a birdhouse, and the mode is switched only in settings', () => {
   mount();
   expect(host.querySelector('.tree-add-voice')).toBeNull();
   setCurrentUser(user('me', 'admin'));
   expect(host.querySelector('.tree-add-voice')).not.toBeNull();
   expect(host.querySelector('.tree-add-text')).not.toBeNull();
-  const classic = host.querySelector('.tree-bar .nest-toggle') as HTMLElement;
-  expect(classic.textContent).toContain('Classic view');
-  classic.click();
-  expect(nestView()).toBe(false);
+  expect(host.querySelector('.nest-toggle')).toBeNull();
+  expect(host.textContent).not.toContain('Classic view');
+  expect(nestView()).toBe(true);
 });
 
 it('the profile footer has one settings button, the gear, and the avatar and name are not controls', () => {
@@ -148,7 +165,7 @@ const dragEvent = (element: Element, type: string, transfer: DataTransfer) => {
 
 it('right-clicking a bird in a nest opens the participant menu', async () => {
   mount();
-  host.querySelector('.nest-bird')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  host.querySelector('.birds li')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await flush();
   const menu = document.querySelector('[role="menu"]')!;
   expect(menu.textContent).toContain('ann');
@@ -158,7 +175,7 @@ it('right-clicking a bird in a nest opens the participant menu', async () => {
 it('right-clicking a bird on the wire opens the same menu without room actions', async () => {
   setCurrentUser(user('me', 'admin'));
   mount();
-  host.querySelector('.tree-wire-bird[title="bob"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  [...host.querySelectorAll('.wrow[role="listitem"]')].find((row) => row.textContent?.includes('bob'))!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await flush();
   const menu = document.querySelector('[role="menu"]')!;
   expect(menu.textContent).toContain('bob');
@@ -170,8 +187,8 @@ it('a moderator drags a participant into another nest, which moves them with the
   setCurrentUser(user('me', 'admin'));
   const move = vi.spyOn(api, 'moveVoice').mockResolvedValue();
   mount();
-  const bird = host.querySelector('.nest-bird') as HTMLElement;
-  const atticNest = host.querySelector('.nest[aria-label^="attic"]') as HTMLElement;
+  const bird = host.querySelector('.birds li') as HTMLElement;
+  const atticNest = host.querySelector('.nrow[aria-label^="attic"]') as HTMLElement;
   const transfer = new DataTransfer();
   dragEvent(bird, 'dragstart', transfer);
   expect(dragEvent(atticNest, 'dragover', transfer).defaultPrevented).toBe(true);
@@ -190,10 +207,10 @@ it('a_member_can_only_drag_themselves_between_nests', async () => {
   ]);
   const move = vi.spyOn(api, 'moveVoice').mockResolvedValue();
   mount();
-  const birdOf = (name: string) => host.querySelector(`.nest-bird[title="${name}"]`) as HTMLElement;
+  const birdOf = (name: string) => [...host.querySelectorAll<HTMLElement>('.birds li')].find((li) => li.querySelector('.trunc')?.textContent === name)!;
   expect(birdOf('ann').getAttribute('draggable')).toBe('false');
   expect(birdOf('me').getAttribute('draggable')).toBe('true');
-  const atticNest = host.querySelector('.nest[aria-label^="attic"]') as HTMLElement;
+  const atticNest = host.querySelector('.nrow[aria-label^="attic"]') as HTMLElement;
   const transfer = new DataTransfer();
   dragEvent(birdOf('me'), 'dragstart', transfer);
   dragEvent(atticNest, 'drop', transfer);
@@ -207,9 +224,9 @@ it('a muted-for-me participant shows vol-off and a participant in a game shows t
   mutes.muted.add('ann');
   setGameActivity({ user_id: 'ann', game: 'Enshrouded' });
   mount();
-  const bird = host.querySelector('.nest-bird') as HTMLElement;
-  expect(bird.querySelector('.nest-local-mute')!.getAttribute('aria-label')).toBe(t('You muted this person'));
-  expect(bird.querySelector('.nest-game')!.getAttribute('aria-label')).toBe(t('Playing {game}', { game: 'Enshrouded' }));
+  const bird = host.querySelector('.birds li') as HTMLElement;
+  expect(bird.querySelector('[aria-label="' + t('You muted this person') + '"]')!.getAttribute('aria-label')).toBe(t('You muted this person'));
+  expect(bird.querySelector('[aria-label^="' + t('Playing {game}', { game: 'Enshrouded' }) + '"]')!.getAttribute('aria-label')).toBe(t('Playing {game}', { game: 'Enshrouded' }));
   mutes.muted.clear();
   setGameActivity({ user_id: 'ann', game: null });
 });

@@ -3,7 +3,7 @@ import { activeVoiceChannel } from '../../stores/voiceStore';
 import { isSharing, stopSharing } from '../../stores/screenStore';
 import { musicAvailable, musicPanelOpen, musicPosition, musicState, sendMusicCommand, setMusicPanelOpen } from '../../stores/musicStore';
 import { setSoundboardOpen, soundboardAvailable } from '../../stores/soundboardStore';
-import { Button, Icon, Modal } from '../../ui';
+import { Button, Modal, RoomIcon } from '../../ui';
 import { MusicPanel, formatClock } from '../music/MusicPanel';
 import { SoundboardPanel } from './SoundboardPanel';
 import { SharePickerModal } from '../screen/SharePickerModal';
@@ -19,15 +19,15 @@ export function RoomTools(props: { compact?: boolean }) {
           {(now) => (
             <div class="room-now">
               <div class="room-now-title">
-                <Icon name="music" size="sm" class="t3" />
+                <RoomIcon name="music" size="sm" class="t3" />
                 <span class="trunc grow" title={now().entry.track.title}>{now().entry.track.title}</span>
                 <span class="t3 fs12 music-clock">{formatClock(musicPosition())}</span>
               </div>
               <div class="room-now-actions">
-                <Button size="sm" variant="secondary" icon={now().paused ? 'resume' : 'pause'} aria-label={now().paused ? t('Resume') : t('Pause')} title={now().paused ? t('Resume') : t('Pause')} onClick={() => void sendMusicCommand({ kind: now().paused ? 'resume' : 'pause' })}>
+                <Button size="sm" variant="secondary" roomIcon={now().paused ? 'play' : 'pause'} aria-label={now().paused ? t('Resume') : t('Pause')} title={now().paused ? t('Resume') : t('Pause')} onClick={() => void sendMusicCommand({ kind: now().paused ? 'resume' : 'pause' })}>
                   <span class="rt-label">{now().paused ? t('Resume') : t('Pause')}</span>
                 </Button>
-                <Button size="sm" variant="secondary" icon="next" aria-label={t('Next')} title={t('Next')} onClick={() => void sendMusicCommand({ kind: 'skip' })}>
+                <Button size="sm" variant="secondary" roomIcon="next" aria-label={t('Next')} title={t('Next')} onClick={() => void sendMusicCommand({ kind: 'skip' })}>
                   <span class="rt-label">{t('Next')}</span>
                 </Button>
               </div>
@@ -36,16 +36,16 @@ export function RoomTools(props: { compact?: boolean }) {
         </Show>
         <div class="room-tools-buttons">
           <Show when={musicAvailable()}>
-            <Button size="sm" variant="secondary" icon="music" aria-label={t('Music')} title={t('Open the player')} aria-pressed={musicPanelOpen()} onClick={() => setMusicPanelOpen(true)}>
+            <Button size="sm" variant="secondary" roomIcon="music" aria-label={t('Music')} title={t('Open the player')} aria-pressed={musicPanelOpen()} onClick={() => setMusicPanelOpen(true)}>
               <span class="rt-label">{t('Music')}</span>
             </Button>
           </Show>
           <Show when={soundboardAvailable()}>
-            <Button size="sm" variant="secondary" icon="smile" aria-label={t('Sounds')} title={t('Open the soundboard')} onClick={() => setSoundboardOpen(true)}>
+            <Button size="sm" variant="secondary" roomIcon="soundboard" aria-label={t('Sounds')} title={t('Open the soundboard')} onClick={() => setSoundboardOpen(true)}>
               <span class="rt-label">{t('Sounds')}</span>
             </Button>
           </Show>
-          <Button size="sm" variant="secondary" icon="share" class={isSharing() ? 'live' : ''} aria-label={t('Screen')} aria-pressed={isSharing()} title={t(isSharing() ? 'Stop sharing' : 'Share your screen')} onClick={() => (isSharing() ? void stopSharing() : setPicker(true))}>
+          <Button size="sm" variant="secondary" roomIcon="screen" class={isSharing() ? 'live' : ''} aria-label={t('Screen')} aria-pressed={isSharing()} title={t(isSharing() ? 'Stop sharing' : 'Share your screen')} onClick={() => (isSharing() ? void stopSharing() : setPicker(true))}>
             <span class="rt-label">{t('Screen')}</span>
           </Button>
         </div>

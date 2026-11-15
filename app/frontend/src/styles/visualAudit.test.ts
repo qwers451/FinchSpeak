@@ -26,18 +26,16 @@ it('the music progress slider shows no value bubble over the artist line (the cl
   expect(rule('.music-progress .range-value')).toMatch(/display:\s*none/);
 });
 
-it('the Finch mode switch has its own row under the brand: beside the name its Russian label ran 23 px into the next column', () => {
-  const oldRule = /\.brand\s+\.brand-finch\s*\{/;
-  expect(rule('.finch-switch')).toMatch(/display:\s*flex/);
-  expect(rule('.finch-switch .brand-finch')).toMatch(/min-width:\s*0/);
-  expect(all).not.toMatch(oldRule);
-  expect('.brand .brand-finch { margin-left:auto; }').toMatch(oldRule); // the guard does catch the old rule
-  expect(source('components/Sidebar.tsx')).toMatch(/<div class="finch-switch">/);
+it('Finch mode is switched only in the settings: no switch beside the brand or in the tree', () => {
+  expect(source('components/Sidebar.tsx')).not.toMatch(/finch-switch|setNestView/);
+  expect(source('components/tree/TreeView.tsx')).not.toMatch(/nest-toggle|setNestView/);
+  expect(source('components/settings/SettingsModal.tsx')).toMatch(/setNestView/);
 });
 
-it('the perch of Finch mode wraps instead of overlapping, and its voice status can shrink', () => {
-  expect(rule('.tree-perch')).toMatch(/flex-wrap:\s*wrap/);
-  expect(rule('.tree-perch .tree-voice')).toMatch(/min-width:\s*0/);
+it('the Finch mode perch stacks its parts in the narrow column, and its text can shrink', () => {
+  expect(rule('.tree-perch')).toMatch(/flex-direction:s*column/);
+  expect(rule('.tree-perch-controls')).toMatch(/flex-wrap:s*wrap/);
+  expect(rule('.tree-label')).toMatch(/min-width:s*0/);
 });
 
 it('the compact room tools (Finch mode perch) truncate the track title and keep their buttons inside', () => {
@@ -57,7 +55,7 @@ it('truncated names carry a title tooltip with the full text', () => {
 });
 
 it('the Finch mode perch shows the full nest name as a title when it is truncated', () => {
-  expect(source('components/tree/TreeView.tsx')).toContain(`<span class="t2 fs12 trunc" title={t('In the nest: {channel}'`);
+  expect(source('components/tree/TreeView.tsx')).toContain(`<span class="fs12 trunc tree-voice-state" title={t('In the nest: {channel}'`);
 });
 
 it('the music rows and upload lines carry the full text as a title', () => {
@@ -70,4 +68,16 @@ it('the music rows and upload lines carry the full text as a title', () => {
 it('the fixture screens of the audit are reachable only on the dev server (import.meta.env.DEV guards the import)', () => {
   expect(source('index.tsx')).toMatch(/import\.meta\.env\.DEV && new URLSearchParams\(window\.location\.search\)\.has\('qa'\)[\s\S]*import\('\.\/qa\/qa'\)/);
   expect(source('App.tsx')).not.toContain('qa/');
+});
+
+it('the right panel gives names the full width and lets a status or a game use two lines instead of a few letters', () => {
+  expect(rule('.members .mem .row-actions')).toMatch(/position:\s*absolute/);
+  expect(rule('.members .mem')).toMatch(/height:\s*auto/);
+  expect(rule('.members .mem .mem-status')).toMatch(/-webkit-line-clamp:\s*2/);
+  expect(source('components/MembersPanel.tsx')).toMatch(/class="t3 fs12 mem-status"/);
+});
+
+it('the room-tool glyphs are painted with the theme text colour through a mask', () => {
+  expect(rule('.ic-mask')).toMatch(/background-color:\s*currentColor/);
+  expect(rule('.ic-mask')).toMatch(/mask:\s*var\(--ic-src\)/);
 });

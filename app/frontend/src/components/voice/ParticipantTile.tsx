@@ -85,9 +85,20 @@ export function ParticipantTile(props: Props) {
     } catch { /* ignore a foreign or malformed drag */ }
   };
   const poor = () => !props.isMe && voiceQuality()[p().peer_id]?.quality === 'poor';
+  // A press on the volume slider or a button must move that control, not start dragging the tile: Chromium hands a
+  // press inside a draggable element to the drag, so the tile stops being draggable until the press ends.
+  const [pressOnControl, setPressOnControl] = createSignal(false);
+  const pressStart = (event: PointerEvent) => {
+    if ((event.target as HTMLElement | null)?.closest?.('input,button,select,textarea,.vol')) setPressOnControl(true);
+  };
+  const pressEnd = () => setPressOnControl(false);
+  window.addEventListener('pointerup', pressEnd);
+  window.addEventListener('pointercancel', pressEnd);
+  onCleanup(() => { window.removeEventListener('pointerup', pressEnd); window.removeEventListener('pointercancel', pressEnd); });
 
   return (
-    <div class={`vc${speaking() ? ' speaking' : ''}`} data-peer-id={p().peer_id} data-flip={p().user_id} tabindex="0" draggable={!props.isMe}
+    <div class={`vc${speaking() ? ' speaking' : ''}`} data-peer-id={p().peer_id} data-flip={p().user_id} tabindex="0" draggable={!props.isMe && !pressOnControl()}
+      onPointerDown={pressStart}
       classList={{ 'tile-drop-before': dropSide() === 'before', 'tile-drop-after': dropSide() === 'after', 'vc-enter': !!props.entering, 'vc-leave': !!props.leaving }}
       onDragStart={startDrag} onDragOver={dragOver} onDrop={drop}
       onDragLeave={() => setDropSide(null)} onDragEnd={() => { setDropSide(null); setDraggedTile(null); }}

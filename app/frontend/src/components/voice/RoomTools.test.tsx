@@ -144,9 +144,9 @@ it('the music row buttons carry an icon, a name and a tooltip, with the text in 
   for (const control of [pause, next]) {
     expect(control.getAttribute('aria-label')).toBe(control.textContent?.trim());
     expect(control.getAttribute('title')).toBe(control.getAttribute('aria-label'));
-    expect(control.querySelector('svg.ic')).not.toBeNull();
+    expect(control.querySelector('.ic')).not.toBeNull();
     expect(control.querySelector('.rt-label')).not.toBeNull();
   }
-  expect(pause.querySelector('use')?.getAttribute('href')).toContain('pause');
-  expect(next.querySelector('use')?.getAttribute('href')).toContain('next');
+  expect((pause.querySelector('.ic-mask') as HTMLElement).style.getPropertyValue('--ic-src')).toContain('room-icons/pause.png');
+  expect((next.querySelector('.ic-mask') as HTMLElement).style.getPropertyValue('--ic-src')).toContain('room-icons/next.png');
 });

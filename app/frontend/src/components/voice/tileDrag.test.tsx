@@ -34,3 +34,21 @@ it('drops before or after the target half while keeping self fixed and ignoring 
   drag(tile(2), 'drop', dt, 25);
   expect(tileOrder()).toEqual(['b', 'c']);
 });
+
+it('pressing the volume slider moves the slider, not the tile: the tile stops being draggable until the press ends', () => {
+  const users = ['me', 'b'].map((id) => ({ id, username: id, display_name: id, role: 'member' as const }));
+  setCurrentUser(users[0]); setKnownUsers(users); setLocalPeerId(1);
+  setActiveVoiceChannel({ id: 'room', name: 'Room', channel_type: 'voice', position: 0, short_id: 1, bitrate_kbps: 64 });
+  setVoiceParticipants(users.map((u, i) => ({ user_id: u.id, username: u.username, peer_id: i + 1, channel_id: 'room' })));
+  const root = document.createElement('div'); document.body.append(root); dispose = render(() => <VoicePanel />, root);
+  const tile = root.querySelector<HTMLElement>('[data-peer-id="2"]')!;
+  expect(tile.getAttribute('draggable')).toBe('true');
+  const slider = tile.querySelector<HTMLInputElement>('.vol input[type="range"]')!;
+  slider.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  expect(tile.getAttribute('draggable')).toBe('false');
+  window.dispatchEvent(new PointerEvent('pointerup'));
+  expect(tile.getAttribute('draggable')).toBe('true');
+  // A press on the tile itself still starts a drag.
+  tile.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  expect(tile.getAttribute('draggable')).toBe('true');
+});
