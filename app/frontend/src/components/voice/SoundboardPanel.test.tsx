@@ -76,3 +76,23 @@ it('says the board is empty when there are no sounds', async () => {
   await flush();
   expect(document.body.textContent).toContain(t('No sounds yet'));
 });
+
+it('picks the emoji of a new sound from the emoji picker and can remove it again', async () => {
+  const pick = document.querySelector<HTMLButtonElement>('.soundboard-emoji-pick');
+  if (!pick) throw new Error('no emoji button');
+  expect(pick.getAttribute('aria-label')).toBe(t('Choose an emoji'));
+  pick.click();
+  await flush();
+  const choice = document.querySelector<HTMLButtonElement>('.soundboard-emoji-popover .emoji-grid button');
+  if (!choice) throw new Error('the emoji picker did not open');
+  const char = choice.textContent!;
+  choice.click();
+  await flush();
+  expect(document.querySelector('.soundboard-emoji-popover')).toBeNull();
+  expect(pick.textContent).toContain(char);
+  expect(pick.getAttribute('aria-label')).toBe(t('Emoji: {emoji}', { emoji: char }));
+  document.querySelector<HTMLButtonElement>('.soundboard-emoji-clear')!.click();
+  await flush();
+  expect(pick.textContent).not.toContain(char);
+  expect(document.querySelector('.soundboard-emoji-clear')).toBeNull();
+});

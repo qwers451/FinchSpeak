@@ -7,6 +7,7 @@ import type { SoundInfo } from '../../types';
 import { Button, Icon, Modal, RoomIcon, Slider, Toggle } from '../../ui';
 import { rippleFromEvent } from '../../ui/motion';
 import { t } from '../../i18n';
+import { EmojiPicker } from '../chat/EmojiPicker';
 
 const NAME_MAX = 32;
 
@@ -15,6 +16,7 @@ export function SoundboardPanel() {
   const [query, setQuery] = createSignal('');
   const [name, setName] = createSignal('');
   const [emoji, setEmoji] = createSignal('');
+  const [picker, setPicker] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   let fileInput!: HTMLInputElement;
 
@@ -83,7 +85,19 @@ export function SoundboardPanel() {
         </div>
         <div class="soundboard-add">
           <input type="text" class="input" maxLength={NAME_MAX} placeholder={t('Sound name')} aria-label={t('Sound name')} value={name()} onInput={(event) => setName(event.currentTarget.value)} />
-          <input type="text" class="input" maxLength={8} placeholder={t('Emoji (optional)')} aria-label={t('Emoji (optional)')} value={emoji()} onInput={(event) => setEmoji(event.currentTarget.value)} />
+          <div class="soundboard-emoji-field">
+            <Button variant="secondary" class="soundboard-emoji-pick" aria-haspopup="dialog" aria-expanded={picker()} label={emoji() ? t('Emoji: {emoji}', { emoji: emoji() }) : t('Choose an emoji')} icon={emoji() ? undefined : 'smile'} onClick={() => setPicker(!picker())}>
+              <Show when={emoji()} fallback={<span class="t3 trunc">{t('Emoji')}</span>}><span class="soundboard-emoji">{emoji()}</span></Show>
+            </Button>
+            <Show when={emoji()}>
+              <Button iconOnly size="sm" variant="ghost" icon="x" class="soundboard-emoji-clear" label={t('Remove the emoji')} onClick={() => setEmoji('')} />
+            </Show>
+            <Show when={picker()}>
+              <div class="soundboard-emoji-popover">
+                <EmojiPicker showQuick={false} onClose={() => setPicker(false)} onPick={(char) => { setEmoji(char); setPicker(false); }} />
+              </div>
+            </Show>
+          </div>
           <Button variant="secondary" icon="plus" loading={busy()} disabled={busy()} onClick={() => fileInput.click()}>{t('Add a sound')}</Button>
           <input ref={fileInput} type="file" accept="audio/*" hidden onChange={(event) => void onFile(event.currentTarget.files?.[0])} />
           <span class="t3 fs12">{t('Up to 5 seconds')}</span>
