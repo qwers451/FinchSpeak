@@ -99,10 +99,13 @@ export function SoundboardPanel() {
             </Show>
           </div>
           <Button variant="secondary" icon="plus" loading={busy()} disabled={busy()} onClick={() => fileInput.click()}>{t('Add a sound')}</Button>
+          <span class="t3 fs12 soundboard-hint">{t('Up to 5 seconds')}</span>
           <input ref={fileInput} type="file" accept="audio/*" hidden onChange={(event) => void onFile(event.currentTarget.files?.[0])} />
-          <span class="t3 fs12">{t('Up to 5 seconds')}</span>
         </div>
-        <Slider value={Math.round(volumeFor(SOUNDBOARD_VOLUME_KEY) * 100)} min={0} max={200} cool label={t('Soundboard volume')} onChange={(value) => void setVolume(SOUNDBOARD_VOLUME_KEY, undefined, value / 100)} />
+        <div class="col g6 soundboard-volume">
+          <span class="fs13">{t('Soundboard volume')}</span>
+          <Slider value={Math.round(volumeFor(SOUNDBOARD_VOLUME_KEY) * 100)} min={0} max={200} cool label={t('Soundboard volume')} onChange={(value) => void setVolume(SOUNDBOARD_VOLUME_KEY, undefined, value / 100)} />
+        </div>
         <div class="row g8 between fs13">
           <span>{t("Don't play the soundboard for me")}</span>
           <Toggle checked={soundboardHidden()} label={t("Don't play the soundboard for me")} onChange={(next) => setSoundboardHidden(next)} />

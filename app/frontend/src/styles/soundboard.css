@@ -7,7 +7,8 @@
 .soundboard-play:hover, .soundboard-play:focus-visible { color: var(--yellow); }
 .soundboard-play .trunc { min-width: 0; }
 .soundboard-add { display: grid; grid-template-columns: minmax(0, 1fr) 132px; gap: 8px; align-items: center; }
-.soundboard-add .btn { grid-column: 1 / -1; }
+.soundboard-add > .btn { grid-column: 1 / -1; }
+.soundboard-hint { grid-column: 1 / -1; margin-top: -2px; }
 /* The emoji field is a 90px column: a long localized placeholder gets an ellipsis instead of a hard cut. */
 .soundboard-add .input { min-width: 0; text-overflow: ellipsis; }
 /* The emoji is picked from the same picker as the chat; it opens upwards over the sound grid. */

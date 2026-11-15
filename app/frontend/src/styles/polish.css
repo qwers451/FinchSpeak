@@ -78,10 +78,10 @@
 .tbl td:first-child .col { min-width:0; }
 .tbl td:first-child .trunc { max-width:200px; }
 .members-table { table-layout:fixed; }
-.members-table th:first-child { width:27%; }
-.members-table th:nth-child(2) { width:27%; }
-.members-table th:nth-child(3) { width:14%; }
-.members-table th:nth-child(4) { width:13%; }
+.members-table th:first-child { width:26%; }
+.members-table th:nth-child(2) { width:22%; }
+.members-table th:nth-child(3) { width:17%; }
+.members-table th:nth-child(4) { width:17%; }
 .members-table td { padding:12px 8px; }
 .members-table td:first-child .trunc { white-space:normal; }
 
@@ -176,4 +176,7 @@
 
 /* 1.7.1 visual audit: a tag is one line (the Russian LIVE tag wrapped in the channel row and pushed the title); a table head wraps instead of spilling. */
 .tag { white-space:nowrap; flex:none; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
-.members-table th { overflow-wrap:anywhere; }
+/* Head words wrap between words only: "Состояние" broke as "Состояни / е". */
+.members-table th { overflow-wrap:normal; word-break:normal; }
+/* A screen share in a voice channel row is a small icon tag, so the name keeps its width. */
+.vp .vp-live { padding:2px 4px; }
