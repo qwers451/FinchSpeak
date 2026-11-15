@@ -88,7 +88,9 @@ export function ChatArea() {
   const lastStored = () => [...messages()].reverse().find((message) => !message.state)?.id ?? null;
   const nearBottom = () => !list || list.scrollHeight - list.scrollTop - list.clientHeight < STICK_TO_BOTTOM_PX;
   const measure = () => { if (list) setAway(list.scrollHeight - list.scrollTop - list.clientHeight > list.clientHeight); };
-  const toBottom = () => { if (list) list.scrollTop = list.scrollHeight; setUnseen(0); measure(); };
+  // Pictures load after the text: if the reader was at the bottom, keep them there as the list grows.
+  let stuck = true;
+  const toBottom = () => { if (list) list.scrollTop = list.scrollHeight; stuck = true; setUnseen(0); measure(); };
   /** The jump button: smooth, or instant when the reader asked for less motion. */
   // The count clears when the list reaches the bottom (onScroll), not on click: it stays while the jump runs.
   const jumpToLatest = () => {
@@ -96,16 +98,24 @@ export function ChatArea() {
     list.scrollTo({ top: list.scrollHeight, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
   };
 
-  // Opening a channel: remember where the unread part starts, then count the channel as read.
-  createEffect(on(() => activeChannel()?.id, (channelId) => {
-    setDivider(channelId ? unread()[channelId]?.firstUnreadId ?? null : null);
-    setUnseen(0);
-    if (channelId) markRead(channelId, lastStored());
+  /** Where a channel opens: at the "New messages" divider when there is one, otherwise at the latest message. */
+  let openPending = false;
+  const positionOnOpen = () => {
+    openPending = false;
     queueMicrotask(() => {
       const target = list?.querySelector('.daysep.new');
       if (target) target.scrollIntoView({ block: 'center' });
       else toBottom();
     });
+  };
+  // Opening a channel: remember where the unread part starts, then count the channel as read.
+  createEffect(on(() => activeChannel()?.id, (channelId) => {
+    setDivider(channelId ? unread()[channelId]?.firstUnreadId ?? null : null);
+    setUnseen(0);
+    if (channelId) markRead(channelId, lastStored());
+    // The history usually arrives after the channel is shown: position once the first messages are there.
+    openPending = true;
+    if (messages().length > 0) positionOnOpen();
   }));
 
   // New messages: follow them when at the bottom (or when they are ours), otherwise say how many.
@@ -117,6 +127,7 @@ export function ChatArea() {
     if (!newest || !channel) { knownLast = null; return; }
     const isNew = knownLast !== null && rowKey(newest) !== knownLast && !loadingOlder();
     knownLast = rowKey(newest);
+    if (openPending) { positionOnOpen(); return; }
     measure();
     if (!isNew) return;
     const ours = newest.author_id === currentUser()?.id;
@@ -141,6 +152,7 @@ export function ChatArea() {
 
   const onScroll = () => {
     if (!list) return;
+    stuck = nearBottom();
     measure();
     if (list.scrollTop < LOAD_OLDER_PX && hasMoreHistory()) void loadOlder();
     if (nearBottom() && unseen() > 0) {
@@ -203,6 +215,12 @@ export function ChatArea() {
     const observer = new ResizeObserver(measureComposer);
     observer.observe(composer);
     onCleanup(() => observer.disconnect());
+  });
+
+  onMount(() => {
+    const onMediaLoad = () => { if (stuck) toBottom(); };
+    list?.addEventListener('load', onMediaLoad, true);
+    onCleanup(() => list?.removeEventListener('load', onMediaLoad, true));
   });
 
   // A drop outside the chat must not navigate the window to the file.

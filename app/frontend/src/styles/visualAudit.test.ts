@@ -18,8 +18,9 @@ it('a tag never wraps its label to a second line (the LIVE tag in the Russian ch
   expect(rule('.tag')).toMatch(/text-overflow:\s*ellipsis/);
 });
 
-it('the admin table header wraps a long label instead of spilling out of its cell', () => {
-  expect(rule('.members-table th')).toMatch(/overflow-wrap:\s*anywhere/);
+it('the admin table header wraps between words, never inside one (Состояни / е), and its columns fit the words', () => {
+  expect(rule('.members-table th')).toMatch(/overflow-wrap:\s*normal/);
+  expect(rule('.members-table th')).not.toMatch(/anywhere|break-all/);
 });
 
 it('the music progress slider shows no value bubble over the artist line (the clock already says the position)', () => {

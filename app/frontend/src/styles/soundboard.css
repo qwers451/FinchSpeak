@@ -6,7 +6,15 @@
 .soundboard-play { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 10px 8px; background: none; border: 0; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .soundboard-play:hover, .soundboard-play:focus-visible { color: var(--yellow); }
 .soundboard-play .trunc { min-width: 0; }
-.soundboard-add { display: grid; grid-template-columns: minmax(0, 1fr) 90px; gap: 8px; align-items: center; }
-.soundboard-add .btn { grid-column: 1 / -1; }
+.soundboard-add { display: grid; grid-template-columns: minmax(0, 1fr) 132px; gap: 8px; align-items: center; }
+.soundboard-add > .btn { grid-column: 1 / -1; }
+.soundboard-hint { grid-column: 1 / -1; margin-top: -2px; }
 /* The emoji field is a 90px column: a long localized placeholder gets an ellipsis instead of a hard cut. */
 .soundboard-add .input { min-width: 0; text-overflow: ellipsis; }
+/* The emoji is picked from the same picker as the chat; it opens upwards over the sound grid. */
+.soundboard-emoji-field { position: relative; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.soundboard-emoji-pick { flex: 1; min-width: 0; justify-content: center; }
+.soundboard-emoji-pick .soundboard-emoji { font-size: 18px; line-height: 1; }
+.soundboard-emoji-clear { flex: none; }
+.soundboard-emoji-popover { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 40; }
+.soundboard-emoji-popover .emoji-picker { transform-origin: bottom right; }

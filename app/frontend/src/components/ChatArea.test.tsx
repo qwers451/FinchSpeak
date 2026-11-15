@@ -648,3 +648,56 @@ it('two people who happen to use the same client id keep separate rows', async (
   expect(rows[0].dataset.messageId).toBe('s1');
   expect(rows[1].dataset.messageId).toBe('s2');
 });
+
+it('opens a channel at the latest message once its history arrives after the channel is shown', async () => {
+  const host = mount();
+  const list = host.querySelector<HTMLElement>('.message-list')!;
+  Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => 3000 });
+  Object.defineProperty(list, 'clientHeight', { configurable: true, get: () => 400 });
+  await flush();
+  list.scrollTop = 0;
+  setMessages([msg('a', bob, 0), msg('b', dave, 60), msg('c', bob, 120)]);
+  await flush();
+  expect(list.scrollTop).toBe(3000);
+  // Later history is not a second opening: a reader who scrolled up stays where they are.
+  list.scrollTop = 100;
+  handleIncomingMessage(msg('d', bob, 180));
+  await flush();
+  expect(list.scrollTop).toBe(100);
+});
+
+it('opens at the "New messages" divider when the history with unread messages arrives late', async () => {
+  setUnread({ c1: { count: 1, mention: false, firstUnreadId: 'c' } });
+  setActiveChannel(null);
+  const host = mount();
+  setActiveChannel(channel);
+  await flush();
+  const spy = Element.prototype.scrollIntoView as unknown as ReturnType<typeof vi.fn>;
+  spy.mockClear();
+  setMessages([msg('a', bob, 0), msg('b', dave, 60), msg('c', bob, 120)]);
+  await flush();
+  expect(host.querySelector('.daysep.new')).not.toBeNull();
+  expect(spy.mock.contexts[0]).toBe(host.querySelector('.daysep.new'));
+});
+
+it('a picture that loads late keeps a reader at the bottom there, but leaves a reader who scrolled up alone', async () => {
+  setMessages([msg('a', bob, 0)]);
+  const host = mount();
+  const list = host.querySelector<HTMLElement>('.message-list')!;
+  let height = 1000;
+  Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => height });
+  Object.defineProperty(list, 'clientHeight', { configurable: true, get: () => 200 });
+  await flush();
+  list.scrollTop = 800;
+  list.dispatchEvent(new Event('scroll'));
+  height = 1400;
+  const img = document.createElement('img');
+  list.appendChild(img);
+  img.dispatchEvent(new Event('load'));
+  expect(list.scrollTop).toBe(1400);
+  list.scrollTop = 100;
+  list.dispatchEvent(new Event('scroll'));
+  height = 1800;
+  img.dispatchEvent(new Event('load'));
+  expect(list.scrollTop).toBe(100);
+});

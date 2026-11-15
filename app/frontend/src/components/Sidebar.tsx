@@ -243,7 +243,7 @@ export function Sidebar() {
                       <Show when={!isMeParticipant(participant, localPeerId()) && isLocallyMuted(participant.user_id)}><Icon name="vol-off" title={t('You muted this person')} /></Show>
                       <Show when={participant.is_muted}><Icon name="mic-off" title={t('Muted')} class="tr" /></Show>
                       <Show when={participant.is_deafened}><Icon name="phones-off" title={t('Deafened')} class="tr" /></Show>
-                      <Show when={participant.is_sharing}><span class="tag live" title={t('Sharing screen')}><Icon name="share" size="sm" /> {t('LIVE')}</span></Show>
+                      <Show when={participant.is_sharing}><span class="tag live vp-live" role="img" title={t('Sharing screen')} aria-label={t('Sharing screen')}><Icon name="share" size="sm" /></span></Show>
                       <RowActions userId={participant.user_id} name={participant.username} participant={participant} />
                     </div>
                   )}

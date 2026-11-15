@@ -6,7 +6,7 @@ export type TranslationParams = Record<string, string | number>;
 export const ru: Readonly<Record<string, string>> = {
   'Screen': 'Экран', 'In the room': 'В комнате', 'Open the player': 'Открыть плеер', 'Open the room': 'Открыть комнату', 'Open the soundboard': 'Открыть саундборд',
   'Soundboard': 'Саундборд', 'Search sounds': 'Поиск звуков', 'No sounds yet': 'Звуков пока нет', 'Remove sound': 'Удалить звук',
-  'Sound name': 'Название звука', 'Emoji (optional)': 'Эмодзи (необязательно)', 'Add a sound': 'Добавить звук', 'Up to 5 seconds': 'До 5 секунд',
+  'Sound name': 'Название звука', 'Emoji (optional)': 'Эмодзи (необязательно)', 'Choose an emoji': 'Выбрать эмодзи', 'Emoji: {emoji}': 'Эмодзи: {emoji}', 'Remove the emoji': 'Убрать эмодзи', 'Add a sound': 'Добавить звук', 'Up to 5 seconds': 'До 5 секунд',
   'Soundboard volume': 'Громкость саундборда', "Don't play the soundboard for me": 'Не слышать саундборд', 'Name the sound first': 'Сначала укажите название звука',
   'The soundboard needs the desktop app': 'Саундборд работает в настольном приложении',
   'Playing {game}': 'Играет в {game}',
