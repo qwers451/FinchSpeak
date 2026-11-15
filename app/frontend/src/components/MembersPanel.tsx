@@ -32,9 +32,9 @@ export function MembersPanel() {
       <div class="col grow" title={statusTexts()[props.user.id]}>
         <span class="trunc" title={props.user.display_name || props.user.username}>{props.user.display_name || props.user.username}</span>
         <Show when={gameOf(props.user.id)} fallback={
-          <Show when={statusTexts()[props.user.id]}><span class="t3 fs12 trunc">{statusTexts()[props.user.id]}</span></Show>
+          <Show when={statusTexts()[props.user.id]}><span class="t3 fs12 mem-status">{statusTexts()[props.user.id]}</span></Show>
         }>
-          <span class="row g4 t3 fs12 trunc"><Icon name="gamepad" size="sm" />{t('Playing {game}', { game: gameOf(props.user.id)! })}</span>
+          <span class="t3 fs12 mem-status" title={t('Playing {game}', { game: gameOf(props.user.id)! })}><Icon name="gamepad" size="sm" style={{ 'vertical-align': '-3px', 'margin-right': '4px' }} />{t('Playing {game}', { game: gameOf(props.user.id)! })}</span>
         </Show>
       </div>
       <RowActions userId={props.user.id} name={props.user.display_name || props.user.username} />

@@ -4,7 +4,7 @@ import { boardSounds, canRemove, loadBoard, playBoardSound, removeBoardSound, se
 import { setAppError } from '../../stores/notificationStore';
 import { setVolume, SOUNDBOARD_VOLUME_KEY, volumeFor } from '../../stores/volumeStore';
 import type { SoundInfo } from '../../types';
-import { Button, Icon, Modal, Slider, Toggle } from '../../ui';
+import { Button, Icon, Modal, RoomIcon, Slider, Toggle } from '../../ui';
 import { rippleFromEvent } from '../../ui/motion';
 import { t } from '../../i18n';
 
@@ -71,7 +71,7 @@ export function SoundboardPanel() {
             {(sound) => (
               <div class="soundboard-tile">
                 <button type="button" class="soundboard-play" title={sound.name} onClick={(event) => { rippleFromEvent(event); void playBoardSound(sound.id); }}>
-                  <span aria-hidden="true">{sound.emoji ?? '♪'}</span>
+                  <Show when={sound.emoji?.trim()} fallback={<RoomIcon name="soundboard" size="sm" class="t3" />}><span aria-hidden="true" class="soundboard-emoji">{sound.emoji}</span></Show>
                   <span class="trunc">{sound.name}</span>
                 </button>
                 <Show when={canRemove(sound)}>

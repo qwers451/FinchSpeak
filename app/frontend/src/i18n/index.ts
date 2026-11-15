@@ -256,6 +256,7 @@ export const ru: Readonly<Record<string, string>> = {
   'Interface': 'Интерфейс', 'Classic': 'Классический', 'Finch': 'Finch',
   'Finch turns the whole window into a tree: voice rooms are nests, text channels are birdhouses.': 'Finch превращает всё окно в дерево: голосовые комнаты — гнёзда, текстовые каналы — скворечники.',
   'Nest': 'Гнездо', 'Birdhouse': 'Скворечник',
+  'Nests': 'Гнёзда', 'Birdhouses': 'Скворечники', 'No nests yet': 'Гнёзд пока нет', 'empty': 'пусто', 'One click looks inside, a double click flies in': 'Клик — заглянуть, двойной клик — влететь', 'Pick a nest or a birdhouse': 'Выберите гнездо или скворечник', 'On the wire. Pick a nest.': 'На проводе. Выберите гнездо', 'Fly into the nest': 'Влететь в гнездо', 'You are looking from outside: nobody hears you.': 'Вы смотрите со стороны, вас никто не слышит.', 'Nobody is in the nest yet. Fly in first: the others will see you in the tree.': 'В гнезде пока никого. Влетайте первым, остальные увидят вас в дереве.', 'speaking': 'говорит', 'sharing the screen': 'показывает экран', 'microphone off': 'микрофон выключен', 'listening': 'слушает',
   'Show the tree': 'Показать дерево', 'Hide the tree': 'Свернуть дерево', 'Back to the tree': 'Вернуться к дереву',
   'Tree of rooms': 'Дерево комнат', 'On the wire — {count}': 'На проводе — {count}',
   'You are on the wire. Pick a nest to talk.': 'Вы на проводе. Выберите гнездо, чтобы поговорить.',

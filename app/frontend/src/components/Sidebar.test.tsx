@@ -41,18 +41,15 @@ afterEach(() => {
   try { localStorage.removeItem('finchspeak.nestView'); } catch { /* ignore */ }
 });
 
-it('the Finch mode switch sits in its own row under the brand with a visible label, not in the voice header or beside the name', () => {
+it('the classic sidebar has no Finch mode switch: the mode is chosen in the settings', () => {
   setChannels([voice]);
   const host = document.createElement('div');
   document.body.appendChild(host);
   dispose = render(() => <Sidebar />, host);
-  expect(nestView()).toBe(false);
   expect(host.querySelectorAll('.channel-item').length).toBe(1);
-  expect(host.querySelector('.nav .nest-toggle')).toBeNull();
-  const toggle = host.querySelector('.finch-switch .nest-toggle') as HTMLElement;
-  expect(toggle.textContent).toContain('Finch mode');
-  toggle.click();
-  expect(nestView()).toBe(true);
+  expect(host.querySelector('.nest-toggle')).toBeNull();
+  expect(host.textContent).not.toContain('Finch mode');
+  expect(nestView()).toBe(false);
 });
 
 it('clicking the voice banner opens the active voice room without joining it again', async () => {

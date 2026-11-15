@@ -1,5 +1,5 @@
 import { Show, splitProps, type JSX } from 'solid-js';
-import { Icon, type IconName } from './Icon';
+import { Icon, RoomIcon, type IconName, type RoomIconName } from './Icon';
 
 type ButtonProps = Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, 'class'> & {
   variant?: 'primary' | 'secondary' | 'ghost' | 'violet' | 'danger' | 'danger-ghost';
@@ -7,6 +7,8 @@ type ButtonProps = Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, 'class'> & 
   /** Square icon button; then `label` is required for screen readers. */
   iconOnly?: boolean;
   icon?: IconName;
+  /** A room-tool image glyph instead of a line icon. */
+  roomIcon?: RoomIconName;
   loading?: boolean;
   block?: boolean;
   /** Accessible name for icon-only buttons. */
@@ -15,7 +17,7 @@ type ButtonProps = Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, 'class'> & 
 };
 
 export function Button(props: ButtonProps) {
-  const [own, rest] = splitProps(props, ['variant', 'size', 'iconOnly', 'icon', 'loading', 'block', 'label', 'class', 'children', 'disabled']);
+  const [own, rest] = splitProps(props, ['variant', 'size', 'iconOnly', 'icon', 'roomIcon', 'loading', 'block', 'label', 'class', 'children', 'disabled']);
   const classes = () =>
     ['btn', own.variant && own.variant !== 'ghost' ? own.variant : own.variant, own.size === 'sm' ? 'sm' : own.size === 'lg' ? 'lg' : '', own.iconOnly ? 'icon' : '', own.block ? 'block' : '', own.loading ? 'is-loading' : '', own.class]
       .filter(Boolean)
@@ -32,6 +34,7 @@ export function Button(props: ButtonProps) {
     >
       <span class="btn-content">
         <Show when={own.icon}><Icon name={own.icon!} size={own.size === 'sm' || own.iconOnly ? 'sm' : undefined} /></Show>
+        <Show when={own.roomIcon}><RoomIcon name={own.roomIcon!} size={own.size === 'sm' || own.iconOnly ? 'sm' : undefined} /></Show>
         {own.children}
       </span>
       <Show when={own.loading}><span class="btn-spinner" aria-hidden="true"><span class="spin" /></span></Show>

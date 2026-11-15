@@ -1,4 +1,4 @@
-export { Icon, IconSprite, type IconName } from './Icon';
+export { Icon, IconSprite, RoomIcon, ROOM_ICONS, roomIconUrl, type IconName, type RoomIconName } from './Icon';
 export { Avatar } from './Avatar';
 export { avatarColor, initialOf } from './avatarColor';
 export { Button } from './Button';

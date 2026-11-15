@@ -85,6 +85,7 @@ it('lets the health tiles and the voice note shrink with their container', () =>
   expect(declarationsFor(readStyle('voiceNote.css'), '.voice-note').join(';')).toMatch(/max-width:\s*min\(340px,\s*100%\)/);
 });
 
-it('keeps the nest name clear of the actions that appear over it on hover', () => {
-  expect(readStyle('nest.css')).toMatch(/\.nest:hover \.nest-top[^{]*\{\s*padding-right:\s*44px/);
+it('the nest and birdhouse actions sit at the end of the row instead of covering the name', () => {
+  expect(readStyle('nest.css')).toMatch(/\.nrow \.acts, \.hrow \.acts \{[^}]*margin-left:auto/);
+  expect(readStyle('nest.css')).toMatch(/\.nhead \.trunc \{ min-width:0; \}/);
 });

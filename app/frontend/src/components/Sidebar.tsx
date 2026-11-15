@@ -22,7 +22,6 @@ import { participantContextMenu, participantMenuKey } from './voice/participantM
 import { isMeParticipant, RowActions } from './voice/ParticipantTile';
 import { openContextMenu } from '../ui/ContextMenu';
 import { VOICE_USER_DRAG, canDrag, dropTarget, readVoiceDrag, type VoiceDrag } from './voice/voiceDrag';
-import { setNestView } from '../stores/nestView';
 import { RoomTools } from './voice/RoomTools';
 import { connectionStatus, localPeerId, knownUsers, myStatus as ownStatus, statusTexts } from '../stores/sessionStore';
 import { setAppError } from '../stores/notificationStore';
@@ -169,9 +168,6 @@ export function Sidebar() {
       <div class="brand">
         <img src="/custom/assets/brand/finchspeak-tile-small.svg" alt="" />
         <span>FinchSpeak</span>
-      </div>
-      <div class="finch-switch">
-        <Button size="sm" variant="ghost" icon="feather" class="nest-toggle brand-finch" title={t('Switch to Finch mode')} onClick={() => setNestView(true)}>{t('Finch mode')}</Button>
       </div>
 
       <nav class="nav">

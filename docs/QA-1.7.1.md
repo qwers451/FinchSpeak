@@ -128,3 +128,17 @@ Linux gate находится в `.github/workflows/server-linux.yml`: пров�
 - Linux CI остаётся обязательной автоматической проверкой перед выпуском; результат будет внесён после завершения.
 
 Заключительный локальный Rust gate после всех исправлений: cargo check --workspace --all-targets --locked; cargo test --workspace --locked --no-fail-fast -- --test-threads=1; cargo clippy --workspace --all-targets --locked -- -D warnings — все exit 0. 80 наборов, 803 тестов прошли, 0 ошибок. Три существующих ignored: два теста настоящего микрофона и тяжёлый стресс-тест на 50 участников; они не выдаются за выполненные.
+
+## 1.7.2: правки интерфейса
+
+Проверено в Vite с подставными данными (`?qa=`) и снимками headless Edge 1280×800 во всех четырёх темах:
+
+| Что | Как проверено | Результат |
+|---|---|---|
+| Режим Finch, вариант А «Дерево сбоку» (`docs/design/finch-nests.html`) | `?qa=nest` в темах claude, bullfinch, custom, user; Vitest `TreeView.test.tsx` (11 тестов) | дерево колонкой, гнёзда с именами, скворечники, провод с именами и статусами; клик — заглянуть, двойной клик или кнопка — влететь |
+| Кнопка режима Finch | Vitest `Sidebar.test.tsx`, `visualAudit.test.ts` | кнопки нет ни в левой панели, ни в дереве; переключение только в настройках |
+| Значки инструментов комнаты | `?qa=voice4`, `?qa=music`, `?qa=soundboard`; Vitest `RoomTools.test.tsx`, `SoundboardPanel.test.tsx` | 12 значков из `output/imagegen/finchspeak-ui-icons-monochrome.png` нарезаны в `public/assets/room-icons/`, окрашиваются цветом текста через `mask` |
+| Ползунок громкости на плитке | перетаскивание в браузере (100 % → 0 %); Vitest `tileDrag.test.tsx` | нажатие на ползунок снимает `draggable` с плитки до отпускания |
+| Статусы в правой панели | `?qa=voice4`; Vitest `visualAudit.test.ts` | кнопка «…» поверх строки, статус и игра — до двух строк |
+
+Не проверено: собранный клиент Tauri (масштаб 125 %, шрифты системы), двойной клик по гнезду на сенсорном экране.

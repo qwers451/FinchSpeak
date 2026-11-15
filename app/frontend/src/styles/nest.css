@@ -1,43 +1,103 @@
-/* Finch mode: the whole window is a tree. Voice rooms are nests on its branches, text channels are birdhouses,
-   everyone online but not in a room sits on the wire, and your own controls are on the perch at the bottom. */
-.tree-layout { --bark:color-mix(in srgb, var(--yellow) 22%, var(--line)); flex:1; display:flex; flex-direction:column; min-height:0; min-width:0; background:var(--bg-app); }
-.tree-bar { flex:none; display:flex; align-items:center; gap:8px; height:52px; padding:0 16px; border-bottom:1px solid var(--line-soft); }
+/* Finch mode, variant A ("the tree at the side"): the trunk runs down the left column, every voice room hangs on it
+   as a nest that lists its birds by name, text channels are birdhouses below, and the wire lists who is online but in
+   no room. The rest of the window is a full-size chat or room. Only theme variables are used, so every theme (and the
+   custom designs) colour the tree. */
+.tree-layout { --bark:color-mix(in srgb, var(--yellow) 22%, var(--line)); --leaf:var(--teal); flex:1; display:flex; min-height:0; min-width:0; background:var(--bg-app); }
+
+/* The side column. */
+.tree-side { width:292px; flex:none; display:flex; flex-direction:column; min-height:0; background:var(--bg-panel); border-right:1px solid var(--line-soft); }
+.tree-bar { flex:none; display:flex; align-items:center; gap:8px; height:52px; padding:0 12px 0 16px; border-bottom:1px solid var(--line-soft); }
 .tree-bar img { width:28px; height:auto; object-fit:contain; }
-.tree-title { font:800 16px var(--font-head); }
-.tree-bar .grow { flex:1; }
+.tree-title { font:800 16px var(--font-head); min-width:0; }
 .tree-bar .btn { flex:none; }
+.tree-scroll { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:4px 12px 12px; }
+.tree-sec { display:block; padding:14px 4px 6px; }
+.tree-sec-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.tree-sec-row .btn { margin-top:8px; }
 
-.tree-scene { flex:1 1 0; min-height:0; overflow-y:auto; display:flex; flex-direction:column; }
-.tree-layout.has-content .tree-scene { flex:0 1 auto; max-height:46%; }
-/* A short window (900x600 at Large text): the tree leaves the chat room for messages and the composer. */
-@media (max-height: 700px) { .tree-layout.has-content .tree-scene { max-height:30%; } }
-.tree-layout.folded .tree-scene { display:none; }
-.tree-content { flex:1 1 0; min-height:0; min-width:0; display:flex; border-top:1px solid var(--line-soft); }
+/* The trunk and its nests. */
+.tree-trunk { position:relative; padding-left:26px; display:flex; flex-direction:column; gap:6px; }
+.tree-trunk::before { content:''; position:absolute; left:6px; top:0; bottom:0; width:8px; border-radius:6px; background:var(--bark); }
+.nrow { position:relative; border-radius:12px; padding:8px 10px; cursor:pointer; border:1.5px solid transparent; color:var(--text-2); }
+.nrow::before { content:''; position:absolute; left:-14px; top:19px; width:14px; height:4px; background:var(--bark); border-radius:0 3px 3px 0; }
+.nrow::after { content:''; position:absolute; left:-10px; top:10px; width:11px; height:7px; border-radius:0 100% 0 100%; background:var(--leaf); }
+.nrow:hover { background:var(--bg-hover); }
+.nrow.sel { background:var(--bg-card); border-color:var(--line); }
+.nrow.on { border-color:var(--yellow); }
+.nrow.drop-target { box-shadow:0 0 0 2px var(--yellow); }
+.nrow:focus-visible { outline:2px solid var(--yellow); outline-offset:2px; }
+.nhead { position:relative; display:flex; align-items:center; gap:8px; min-height:24px; font-weight:700; }
+.nhead .trunc { min-width:0; }
+.nrow.lit .nhead { color:var(--text); }
+.nrow.on .nhead { color:var(--yellow); }
+.birds { list-style:none; margin:6px 0 0; padding:0 0 0 4px; display:flex; flex-direction:column; gap:5px; }
+.birds li { display:flex; align-items:center; gap:8px; min-width:0; font-size:13px; line-height:20px; color:var(--text-2); border-radius:6px; }
+.birds li.speak { color:var(--text); }
+.birds li .trunc { min-width:0; }
+.birds li .ic { width:14px; height:14px; color:var(--text-3); flex:none; }
+.birds li .ic.tr { color:var(--red-text); }
+.birds li[draggable="true"] { cursor:grab; }
+.birds li:focus-visible { outline:2px solid var(--yellow); outline-offset:1px; }
+.nempty { font-size:12px; color:var(--text-3); padding:2px 0 0 4px; }
 
-/* The wire: birds that are online but in no nest. */
-.tree-wire { flex:none; display:flex; align-items:flex-end; flex-wrap:wrap; gap:6px 10px; min-height:52px; margin:0 20px; padding:12px 4px 0; border-bottom:2px solid var(--line); }
-.tree-wire-label { align-self:center; margin-right:6px; }
-.tree-wire-bird { display:flex; margin-bottom:-3px; }
-.tree-offline { align-self:center; margin-left:auto; }
+/* Admin actions on a nest or a birdhouse: over the end of the row, only on hover or keyboard focus. */
+.nrow .acts, .hrow .acts { display:none; align-items:center; gap:2px; margin-left:auto; color:var(--text-2); }
+.nrow:hover .acts, .nrow:focus-within .acts, .hrow:hover .acts, .hrow:focus-within .acts { display:flex; }
+.nrow .acts button, .hrow .acts button { all:unset; display:flex; cursor:pointer; padding:2px; border-radius:4px; }
+.nrow .acts button:hover, .hrow .acts button:hover { color:var(--text); background:var(--bg-card); }
+.nrow .acts button:focus-visible, .hrow .acts button:focus-visible { outline:2px solid var(--yellow); outline-offset:1px; }
+.nrow .acts .ic, .hrow .acts .ic { width:16px; height:16px; }
 
-/* The trunk runs down the left side; every branch grows out of it. */
-.tree-crown { position:relative; flex:1 0 auto; display:flex; flex-direction:column; gap:6px; padding:18px 24px 20px 72px; }
-.tree-crown::before { content:''; position:absolute; left:28px; top:0; bottom:0; width:18px; border-radius:12px 12px 0 0; background:var(--bark); }
-.tree-branch { display:flex; flex-direction:column; min-width:0; }
-.tree-nests { display:flex; align-items:flex-end; gap:26px; min-height:24px; padding:0 30px 0 14px; }
-.tree-limb { position:relative; height:6px; margin-left:-28px; border-radius:0 6px 6px 0; background:var(--bark); }
-.tree-limb::before, .tree-limb::after { content:''; position:absolute; width:16px; height:9px; border-radius:0 100% 0 100%; background:var(--teal); }
-.tree-limb::before { right:14%; top:-9px; }
-.tree-limb::after { right:2px; top:-8px; transform:rotate(-24deg); }
-.tree-houses { display:flex; align-items:flex-start; gap:18px; min-height:14px; padding:0 20px 0 52px; }
+/* Birdhouses. */
+.hrow { display:flex; align-items:center; gap:10px; min-height:34px; padding:0 10px; border-radius:9px; color:var(--text-3); font-weight:600; cursor:pointer; }
+.hrow .trunc { min-width:0; }
+.hrow:hover { background:var(--bg-hover); color:var(--text); }
+.hrow.unread { color:var(--text); font-weight:700; }
+.hrow.on { background:var(--bg-card); color:var(--yellow); }
+.hrow:focus-visible { outline:2px solid var(--yellow); outline-offset:1px; }
+.hrow .badge { background:var(--yellow); }
+.hrow .badge.mention { background:var(--red); }
+.house-ic { width:18px; height:22px; flex:none; }
+.bh-roof { fill:var(--line); }
+.bh-box { fill:var(--bg-card); stroke:var(--line); stroke-width:2; }
+.bh-hole { fill:var(--bg-deep); }
+.hrow.on .bh-roof, .hrow.unread .bh-roof { fill:var(--yellow); }
 
-/* A nest. */
-.nest { position:relative; flex:none; width:150px; display:flex; flex-direction:column; min-width:0; cursor:pointer; color:var(--text-2); border-radius:var(--r-sm); }
-.nest-top { position:relative; display:flex; align-items:center; justify-content:center; gap:6px; min-width:0; height:20px; padding:0 2px; }
-.nest-top .trunc { min-width:0; font:600 13px/1.2 var(--font-ui); }
-.nest.lit { color:var(--text); }
-.nest.on .nest-top { color:var(--yellow); }
-.nest-art { position:relative; width:100%; aspect-ratio:120/62; margin-top:-4px; }
+/* The wire. */
+.tree-wire { display:flex; flex-direction:column; }
+.wrow { display:flex; align-items:center; gap:10px; min-height:36px; padding:3px 10px; font-size:13px; color:var(--text-2); border-radius:9px; }
+.wrow:hover { background:var(--bg-hover); }
+.wrow:focus-visible { outline:2px solid var(--yellow); outline-offset:1px; }
+.wrow-text { min-width:0; line-height:17px; }
+.tree-offline { min-height:28px; }
+
+/* The perch: you and your controls, at the bottom of the column. */
+.tree-perch { flex:none; display:flex; flex-direction:column; gap:8px; padding:10px 12px; background:var(--bg-deep); border-top:1px solid var(--line-soft); }
+.tree-me { display:flex; align-items:center; gap:10px; min-width:0; }
+.tree-label { min-width:0; line-height:17px; }
+.tree-voice-state { color:var(--teal); }
+.tree-perch-controls { display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+.tree-perch-controls .btn { flex:none; }
+
+/* The content: a full-size chat, room, or a look into a nest. */
+.tree-main { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
+.tree-main > * { flex:1; min-height:0; }
+.tree-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:24px; text-align:center; color:var(--text-3); }
+.tree-empty h3 { color:var(--text); }
+
+.nest-preview { display:flex; flex-direction:column; min-height:0; }
+.nest-preview .mhead { gap:10px; }
+.nest-preview-body { flex:1; min-height:0; overflow-y:auto; padding:16px 18px; display:flex; flex-direction:column; gap:14px; }
+.nest-preview-hero { display:flex; justify-content:center; padding:8px 0 4px; }
+.nest-tiles { display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:10px; }
+.nest-tile { display:flex; align-items:center; gap:10px; min-width:0; padding:10px 12px; border-radius:12px; background:var(--bg-panel); border:1px solid var(--line-soft); }
+.nest-tile.speak { border-color:var(--cyan); }
+.nest-tile .col { min-width:0; line-height:18px; }
+.nest-hint { margin:0; font-size:12px; line-height:16px; color:var(--text-3); text-align:center; }
+.nest-preview-foot { flex:none; display:flex; justify-content:center; gap:10px; padding:14px 18px; border-top:1px solid var(--line-soft); }
+
+/* The nest drawing (row icon and the big one in the preview). */
+.nest-art { position:relative; display:block; flex:none; aspect-ratio:120/62; }
 .nest-back, .nest-front { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
 .nest-back { z-index:0; }
 .nest-front { z-index:2; }
@@ -51,65 +111,20 @@
 .nest-rim { fill:none; stroke:var(--line); stroke-width:2; stroke-linecap:round; }
 .nest.lit .nest-rim { stroke:color-mix(in srgb, var(--yellow) 60%, var(--line)); }
 .nest.on .nest-rim { stroke:var(--yellow); stroke-width:2.5; }
-.nest:focus-visible, .birdhouse:focus-visible { outline:2px solid var(--yellow); outline-offset:2px; }
-.nest-birds { position:absolute; z-index:1; left:0; right:0; top:14%; display:flex; justify-content:center; align-items:center; }
-.nest-bird { position:relative; display:flex; flex:none; }
-.nest-bird + .nest-bird { margin-left:-5px; }
-.nest-badge { position:absolute; width:14px; height:14px; padding:1px; border-radius:50%; background:var(--bg-deep); }
-.nest-muted { right:-3px; top:-3px; color:var(--red-text); }
-.nest-local-mute { left:-3px; top:-3px; color:var(--text-2); }
-.nest-game { right:-3px; bottom:-3px; color:var(--teal); }
-.nest-bird:focus-visible { outline:2px solid var(--yellow); outline-offset:2px; border-radius:50%; }
-.nest-bird[draggable="true"] { cursor:grab; }
-/* The channel-style actions cover the top right of the nest while hovered: keep the name clear of them. */
-.nest:hover .nest-top, .nest:focus-within .nest-top { padding-right:44px; }
-.nest.drop-target { box-shadow:0 0 0 2px var(--yellow); }
-.nest-more { flex:none; align-self:flex-start; display:grid; place-items:center; min-width:20px; height:20px; margin-left:3px; padding:0 3px; border-radius:10px; background:var(--bg-card); color:var(--text-2); font:700 11px/1 var(--font-ui); }
-.nest-count { flex:none; font:500 11px/1 var(--font-ui); color:var(--text-3); }
+.nest-birds { position:absolute; z-index:1; left:0; right:0; top:12%; display:flex; justify-content:center; }
+.nest-bird { display:flex; }
+.nest-bird + .nest-bird { margin-left:-4px; }
+.nest-count { flex:none; font:600 12px/1 var(--font-ui); color:var(--text-3); }
 .nest-eq { flex:none; display:inline-flex; align-items:flex-end; gap:2px; height:12px; }
-.nest-eq i { display:block; width:3px; height:100%; border-radius:1px; background:var(--yellow); transform-origin:bottom; }
+.nest-eq i { display:block; width:3px; height:100%; border-radius:1px; background:var(--cyan); transform-origin:bottom; }
 
-/* A birdhouse. */
-.birdhouse { position:relative; flex:none; width:84px; display:flex; flex-direction:column; align-items:center; gap:2px; min-width:0; cursor:pointer; color:var(--text-2); border-radius:var(--r-sm); }
-.birdhouse-art { position:relative; width:48px; height:58px; }
-.birdhouse-art svg { display:block; width:100%; height:100%; overflow:visible; }
-.birdhouse-art .badge { position:absolute; right:-12px; top:10px; background:var(--yellow); }
-.birdhouse-art .badge.mention { background:var(--red); }
-.birdhouse-name { max-width:100%; font:600 12px/1.3 var(--font-ui); }
-.bh-string { fill:none; stroke:var(--bark); stroke-width:1.5; }
-.bh-roof { fill:color-mix(in srgb, var(--yellow) 40%, var(--bg-deep)); }
-.bh-box { fill:var(--bg-card); stroke:var(--line); stroke-width:1.5; }
-.bh-hole { fill:var(--bg-deep); }
-.bh-perch { fill:none; stroke:var(--text-3); stroke-width:1.5; stroke-linecap:round; }
-.birdhouse.unread { color:var(--text); }
-.birdhouse.on { color:var(--yellow); }
-.birdhouse.on .bh-roof { fill:var(--yellow); }
-.birdhouse.on .bh-box { stroke:var(--yellow); fill:color-mix(in srgb, var(--yellow) 22%, var(--bg-deep)); }
-
-/* Admin actions on a nest or a birdhouse: over the name, only on hover or keyboard focus. */
-.nest .acts, .birdhouse .acts { display:none; position:absolute; top:0; right:0; align-items:center; gap:2px; height:20px; padding:0 2px 0 4px; color:var(--text-2); background:var(--bg-panel); border-radius:var(--r-sm); z-index:3; }
-.birdhouse .acts { top:auto; bottom:-2px; left:50%; right:auto; transform:translateX(-50%); }
-.nest:hover .acts, .nest:focus-within .acts, .birdhouse:hover .acts, .birdhouse:focus-within .acts { display:flex; }
-.nest .acts button, .birdhouse .acts button { all:unset; display:flex; cursor:pointer; padding:2px; border-radius:4px; }
-.nest .acts button:hover, .birdhouse .acts button:hover { color:var(--text); background:var(--bg-card); }
-.nest .acts button:focus-visible, .birdhouse .acts button:focus-visible { outline:2px solid var(--yellow); outline-offset:1px; }
-.nest .acts .ic, .birdhouse .acts .ic { width:16px; height:16px; }
-
-/* The perch: you and your controls. */
-.tree-perch { flex:none; display:flex; align-items:center; gap:10px; min-height:60px; padding:8px 16px; background:var(--bg-deep); border-top:1px solid var(--line-soft); }
-.tree-perch .btn { flex:none; }
-.tree-me { flex:0 1 auto; max-width:240px; }
-.tree-voice-state { color:var(--teal); }
-
-@keyframes nest-eq { 0%, 100% { transform:scaleY(.3); } 50% { transform:scaleY(1); } }
+@keyframes nest-eq { 0%, 100% { transform:scaleY(.35); } 50% { transform:scaleY(1); } }
 @media (prefers-reduced-motion: no-preference) {
-  .nest, .birdhouse { transition:transform var(--motion-small) var(--ease-out); }
-  .nest:hover, .birdhouse:hover { transform:translateY(-2px); }
   .nest-eq i { animation:nest-eq 900ms ease-in-out infinite; }
   .nest-eq i:nth-child(2) { animation-delay:150ms; }
   .nest-eq i:nth-child(3) { animation-delay:300ms; }
 }
+[data-reduce-motion="true"] .nest-eq i { animation:none; }
 
-/* The perch wraps its controls onto a second line before anything can overlap. */
-.tree-perch { flex-wrap:wrap; row-gap:6px; }
-.tree-perch .tree-voice { flex:1 1 140px; min-width:0; }
+/* Narrow windows: the column gets slimmer before the content does. */
+@media (max-width: 940px) { .tree-side { width:248px; } }
