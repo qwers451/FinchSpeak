@@ -3,13 +3,23 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+    image: finchspeak-server:latest
     container_name: finch-server
     restart: unless-stopped
     ports:
+      # Change the left side if another program already uses these ports on the host;
+      # clients then connect to https://<host>:<new TCP port>.
       - "4433:4433/udp"
       - "8443:8443/tcp"
     volumes:
-      - ./data:/app/data
+      # A named volume keeps the database, certificate (its fingerprint), uploads, backups
+      # and logs across restarts and image updates, writable by the unprivileged server user.
+      - finch-data:/app/data
       - ./finch-server.toml:/app/finch-server.toml:ro
     environment:
-      - RUST_LOG=info,finch_server=debug
+      - RUST_LOG=info,finch_server=info
+    # The server needs about 50 MB; the limit keeps it from starving other programs.
+    mem_limit: 512m
+
+volumes:
+  finch-data:
