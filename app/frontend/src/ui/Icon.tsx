@@ -28,7 +28,9 @@ type IconProps = { name: IconName; size?: 'sm' | 'md' | 'lg' | 'xl'; class?: str
  *  CSS mask, so every theme recolours them exactly like the line icons. */
 export const ROOM_ICONS = ['music', 'soundboard', 'screen', 'play', 'pause', 'next', 'stop', 'queue', 'upload', 'library', 'volume', 'room'] as const;
 export type RoomIconName = (typeof ROOM_ICONS)[number];
-export const roomIconUrl = (name: RoomIconName) => `./assets/room-icons/${name}.png`;
+/** Absolute: inside a custom property a relative url() resolves against the stylesheet that reads it
+ *  (/assets/index-*.css in the build), which would point at /assets/assets/room-icons and draw nothing. */
+export const roomIconUrl = (name: RoomIconName) => new URL(`assets/room-icons/${name}.png`, document.baseURI).href;
 
 /** A room-tool glyph; same sizes, colour and accessibility rules as `Icon`. */
 export function RoomIcon(props: { name: RoomIconName; size?: 'sm' | 'md' | 'lg' | 'xl'; class?: string; title?: string }) {
