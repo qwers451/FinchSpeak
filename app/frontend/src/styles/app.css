@@ -253,7 +253,8 @@ input.range:disabled { opacity: .45; cursor: not-allowed; }
 /* Right panel: the hidden "…" button floats over the row instead of taking width from the name, and a custom status
    or a game may use two lines instead of being cut after a few letters. */
 .members .mem { position:relative; height:auto; min-height:44px; padding:5px 8px; }
-.members .mem .row-actions { position:absolute; right:4px; top:50%; transform:translateY(-50%); background:var(--bg-panel); box-shadow:-8px 0 8px var(--bg-panel); }
+/* Centred with auto margins, not transform: the hover and press lifts of .btn replace transform and would drop it. */
+.members .mem .row-actions { position:absolute; right:4px; inset-block:0; height:fit-content; margin-block:auto; background:var(--bg-panel); box-shadow:-8px 0 8px var(--bg-panel); }
 .members .mem .mem-status { white-space:normal; overflow:hidden; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-height:16px; overflow-wrap:anywhere; }
 .voice-open { all:unset; display:flex; flex-direction:column; min-width:0; cursor:pointer; border-radius:6px; }
 .voice-open:focus-visible { outline:2px solid var(--yellow); outline-offset:2px; }

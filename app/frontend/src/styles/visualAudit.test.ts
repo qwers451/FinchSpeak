@@ -81,3 +81,13 @@ it('the room-tool glyphs are painted with the theme text colour through a mask',
   expect(rule('.ic-mask')).toMatch(/background-color:\s*currentColor/);
   expect(rule('.ic-mask')).toMatch(/mask:\s*var\(--ic-src\)/);
 });
+
+it('centres the right-panel actions button without transform, so the hover lift of .btn cannot drop it', () => {
+  const css = rule('.members .mem .row-actions');
+  expect(css).not.toMatch(/transform/);
+  expect(css).toContain('margin-block:auto');
+});
+
+it('room icons use an absolute URL, because a relative url() in a custom property resolves against the stylesheet', () => {
+  expect(source('ui/Icon.tsx')).toContain('new URL(`assets/room-icons/${name}.png`, document.baseURI)');
+});
